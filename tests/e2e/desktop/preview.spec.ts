@@ -42,7 +42,18 @@ test('launches the secure MCEM operational workbench', async () => {
     expect(refreshBoxAfterHover!.height).toBeCloseTo(refreshBoxBeforeHover!.height, 4)
     await expect(window.getByText('Stage 2', { exact: true })).toBeVisible()
 
-    const accountDropdown = window.locator('.context-rail [role="combobox"]').nth(0)
+    const contextRail = window.locator('.context-rail')
+    const accountDropdown = contextRail.locator('[role="combobox"]').nth(0)
+    const opportunityDropdown = contextRail.locator('[role="combobox"]').nth(1)
+    const contextRailBox = await contextRail.boundingBox()
+    const accountBox = await accountDropdown.boundingBox()
+    const opportunityBox = await opportunityDropdown.boundingBox()
+    expect(contextRailBox).not.toBeNull()
+    expect(accountBox).not.toBeNull()
+    expect(opportunityBox).not.toBeNull()
+    expect(accountBox!.x + accountBox!.width).toBeLessThan(contextRailBox!.x + contextRailBox!.width)
+    expect(opportunityBox!.x + opportunityBox!.width).toBeLessThan(contextRailBox!.x + contextRailBox!.width)
+
     await expect(accountDropdown).toContainText('Contoso Energy')
     await accountDropdown.click()
     await expect(window.getByRole('option', { name: 'Fabrikam Retail' })).toBeVisible()
@@ -50,7 +61,6 @@ test('launches the secure MCEM operational workbench', async () => {
     await expect(accountDropdown).toContainText('Fabrikam Retail')
     await expect(window.getByRole('heading', { name: 'AI-assisted customer service' })).toBeVisible()
 
-    const opportunityDropdown = window.locator('.context-rail [role="combobox"]').nth(1)
     await expect(opportunityDropdown).toContainText('AI-assisted customer service')
     await opportunityDropdown.click()
     await expect(window.getByRole('option', { name: 'AI-assisted customer service' })).toBeVisible()

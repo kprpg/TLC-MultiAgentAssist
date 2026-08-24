@@ -65,7 +65,7 @@ button, input { letter-spacing: 0; }
 .context-rail, .actions-pane { min-height: 0; overflow: auto; background: var(--surface); }
 .context-rail { padding: 22px 18px; border-right: 1px solid var(--border); }
 .context-rail label { display: block; margin: 18px 0 7px; color: var(--muted-strong); font-size: 12px; font-weight: 650; }
-.context-rail [role="combobox"] { width: 100%; }
+.context-dropdown { display: flex; width: 100% !important; min-width: 0 !important; max-width: 100% !important; }
 .section-label, .eyebrow { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .08em; }
 .opportunity-facts { margin-top: 22px; border-top: 1px solid var(--border); }
 .opportunity-facts div { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border-soft); font-size: 12px; }

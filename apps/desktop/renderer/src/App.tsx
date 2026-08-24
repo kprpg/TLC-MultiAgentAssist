@@ -147,13 +147,13 @@ export function App() {
         <aside className="context-rail">
           <div className="section-label">WORKING CONTEXT</div>
           <label>Account</label>
-          <Dropdown inlinePopup value={account?.name ?? ''} selectedOptions={accountId ? [accountId] : []} onOptionSelect={(_, data) => {
+          <Dropdown className="context-dropdown" inlinePopup value={account?.name ?? ''} selectedOptions={accountId ? [accountId] : []} onOptionSelect={(_, data) => {
             if (data.optionValue) setAccountId(data.optionValue)
           }}>
             {accounts.map((item) => <Option key={item.id} value={item.id}>{item.name}</Option>)}
           </Dropdown>
           <label>Opportunity</label>
-          <Dropdown inlinePopup value={opportunity?.name ?? ''} selectedOptions={opportunityId ? [opportunityId] : []} onOptionSelect={(_, data) => {
+          <Dropdown className="context-dropdown" inlinePopup value={opportunity?.name ?? ''} selectedOptions={opportunityId ? [opportunityId] : []} onOptionSelect={(_, data) => {
             if (data.optionValue) setOpportunityId(data.optionValue)
           }}>
             {opportunities.map((item) => <Option key={item.id} value={item.id}>{item.name}</Option>)}
