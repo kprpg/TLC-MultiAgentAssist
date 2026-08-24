@@ -20,7 +20,7 @@ export const sourceHealthSchema = z.object({
 })
 
 export const authStatusSchema = z.object({
-  state: z.enum(['ready', 'cli-missing', 'login-required', 'tenant-mismatch', 'consent-required']),
+  state: z.enum(['ready', 'cli-missing', 'login-required', 'tenant-mismatch', 'consent-required', 'permission-missing']),
   displayName: z.string().min(1).optional(),
   tenantName: z.string().min(1).optional(),
   detail: z.string().min(1)

@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { AzureCliCredential } from "@azure/identity";
+import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
 var dataModeSchema = z.enum(["sample", "live"]);
 var sourceStateSchema = z.enum([
 	"sample",
@@ -30,7 +30,8 @@ var authStatusSchema = z.object({
 		"cli-missing",
 		"login-required",
 		"tenant-mismatch",
-		"consent-required"
+		"consent-required",
+		"permission-missing"
 	]),
 	displayName: z.string().min(1).optional(),
 	tenantName: z.string().min(1).optional(),
@@ -391,6 +392,42 @@ var FixtureMsxConnector = class {
 	}
 };
 //#endregion
+//#region packages/connectors/sharepoint/live.ts
+var graphBaseUrl = "https://graph.microsoft.com/v1.0";
+var mcemSitePath = "/teams/MCEM-Portal";
+var mcemHomePageName = "MCEM-Home-Page.aspx";
+var GraphMcemAccessProbe = class {
+	constructor(tokenProvider, request = fetch) {
+		this.tokenProvider = tokenProvider;
+		this.request = request;
+	}
+	async getCanonicalPageMetadata() {
+		const token = await this.tokenProvider.getAccessToken();
+		const site = await this.getJson(`${graphBaseUrl}/sites/microsoft.sharepoint.com:${mcemSitePath}`, token);
+		const page = (await this.getJson(`${graphBaseUrl}/sites/${encodeURIComponent(site.id)}/pages/microsoft.graph.sitePage?$select=id,name,title,webUrl,lastModifiedDateTime`, token)).value.find((candidate) => candidate.name.toLowerCase() === mcemHomePageName.toLowerCase());
+		if (!page) throw new Error(`Microsoft Graph could not find ${mcemHomePageName} in the MCEM Portal site.`);
+		return {
+			siteId: site.id,
+			pageId: page.id,
+			name: page.name,
+			title: page.title ?? page.name,
+			webUrl: page.webUrl,
+			...page.lastModifiedDateTime ? { lastModifiedDateTime: page.lastModifiedDateTime } : {}
+		};
+	}
+	async getJson(url, token) {
+		const response = await this.request(url, { headers: {
+			Accept: "application/json",
+			Authorization: `Bearer ${token}`
+		} });
+		if (!response.ok) {
+			const requestId = response.headers.get("request-id");
+			throw new Error(`Microsoft Graph MCEM metadata request failed (${response.status}${requestId ? `; request-id ${requestId}` : ""}).`);
+		}
+		return await response.json();
+	}
+};
+//#endregion
 //#region packages/connectors/sharepoint/index.ts
 var stageThreeGuidance = {
 	stage: 3,
@@ -548,7 +585,7 @@ var ThinSliceOrchestrator = class {
 //#endregion
 //#region apps/desktop/electron/main/azure-cli-token-provider.ts
 var msxScope = "https://microsoftsales.crm.dynamics.com/.default";
-var corpDomain = "@microsoft.com";
+var corpDomain$1 = "@microsoft.com";
 var refreshBufferMs = 300 * 1e3;
 var AzureCliMsxTokenProvider = class {
 	cachedToken;
@@ -595,9 +632,97 @@ function readMicrosoftCorpId(accessToken) {
 		claims["preferred_username"],
 		claims["upn"],
 		claims["unique_name"]
-	].find((claim) => typeof claim === "string" && claim.toLowerCase().endsWith(corpDomain));
+	].find((claim) => typeof claim === "string" && claim.toLowerCase().endsWith(corpDomain$1));
 	if (!corpId) throw new Error("The active Azure CLI token is not a Microsoft corporate identity. Sign in with your @microsoft.com CORP ID.");
 	return corpId;
+}
+//#endregion
+//#region apps/desktop/electron/main/graph-token-provider.ts
+var defaultClientId = "d4a694ba-9ed0-4467-9c06-f7dfe41ceb8c";
+var defaultTenantId = "72f988bf-86f1-41af-91ab-2d7cd011db47";
+var graphScope = "https://graph.microsoft.com/Sites.Read.All";
+var graphAudiences = new Set(["00000003-0000-0000-c000-000000000000", "https://graph.microsoft.com"]);
+var corpDomain = "@microsoft.com";
+var InteractiveGraphTokenProvider = class {
+	corpId;
+	constructor(credential = new InteractiveBrowserCredential({
+		clientId: process.env["TLC_ENTRA_CLIENT_ID"] ?? defaultClientId,
+		tenantId: process.env["TLC_ENTRA_TENANT_ID"] ?? defaultTenantId,
+		redirectUri: "http://localhost",
+		disableAutomaticAuthentication: true
+	})) {
+		this.credential = credential;
+	}
+	async connect() {
+		try {
+			await this.credential.authenticate(graphScope);
+			await this.getAccessToken();
+			return this.readyStatus();
+		} catch (cause) {
+			return mapGraphAuthError(cause);
+		}
+	}
+	async getAccessToken() {
+		const accessToken = await this.credential.getToken(graphScope);
+		if (!accessToken) throw new Error("Microsoft Entra ID did not return a Microsoft Graph access token.");
+		const claims = readGraphClaims(accessToken.token);
+		this.corpId = claims.corpId;
+		return accessToken.token;
+	}
+	async getAuthStatus() {
+		try {
+			await this.getAccessToken();
+			return this.readyStatus();
+		} catch (cause) {
+			return mapGraphAuthError(cause);
+		}
+	}
+	readyStatus() {
+		return {
+			state: "ready",
+			...this.corpId ? { displayName: this.corpId } : {},
+			detail: `TLC has delegated Microsoft Graph access as ${this.corpId ?? "a Microsoft corporate user"}.`
+		};
+	}
+};
+function readGraphClaims(accessToken) {
+	const payloadPart = accessToken.split(".")[1];
+	if (!payloadPart) throw new Error("Microsoft Entra ID returned an invalid Microsoft Graph access token.");
+	let claims;
+	try {
+		claims = JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8"));
+	} catch {
+		throw new Error("Microsoft Entra ID returned an unreadable Microsoft Graph access token.");
+	}
+	if (typeof claims["aud"] !== "string" || !graphAudiences.has(claims["aud"])) throw new Error("The access token audience is not Microsoft Graph.");
+	if (!(typeof claims["scp"] === "string" ? claims["scp"].split(" ") : []).includes("Sites.Read.All")) throw new Error("The Microsoft Graph token does not contain delegated Sites.Read.All access.");
+	const corpId = [
+		claims["preferred_username"],
+		claims["upn"],
+		claims["unique_name"]
+	].find((claim) => typeof claim === "string" && claim.toLowerCase().endsWith(corpDomain));
+	if (!corpId) throw new Error("The Microsoft Graph token is not for a Microsoft corporate identity.");
+	return { corpId };
+}
+function mapGraphAuthError(cause) {
+	const detail = graphAuthErrorDetail(cause);
+	const normalized = detail.toLowerCase();
+	const state = normalized.includes("token does not contain delegated sites.read.all") ? "permission-missing" : normalized.includes("aadsts65001") || normalized.includes("aadsts90094") || normalized.includes("aadsts900941") || normalized.includes("aadsts900981") || normalized.includes("consent_required") || normalized.includes("need admin approval") || normalized.includes("approval required") || normalized.includes("userconsentblocked") ? "consent-required" : normalized.includes("aadsts50020") || normalized.includes("tenant") || normalized.includes("corporate identity") ? "tenant-mismatch" : "login-required";
+	return {
+		state,
+		detail: state === "consent-required" ? `${detail} Sites.Read.All is user-consentable by definition. The Entra error code determines whether consent was incomplete or Microsoft CORP policy requires an admin-consent request or policy exception.` : detail
+	};
+}
+function graphAuthErrorDetail(cause) {
+	const message = cause instanceof Error ? cause.message : "Microsoft Graph authentication failed.";
+	if (!cause || typeof cause !== "object" || !("errorResponse" in cause)) return message;
+	const response = cause.errorResponse;
+	if (!response || typeof response !== "object") return message;
+	const diagnostics = [];
+	if ("errorCodes" in response && Array.isArray(response.errorCodes)) diagnostics.push(...response.errorCodes.filter((code) => typeof code === "number").map((code) => `AADSTS${code}`));
+	if ("correlationId" in response && typeof response.correlationId === "string") diagnostics.push(`correlation ${response.correlationId}`);
+	if ("traceId" in response && typeof response.traceId === "string") diagnostics.push(`trace ${response.traceId}`);
+	return diagnostics.length > 0 ? `${message} Diagnostic: ${diagnostics.join("; ")}.` : message;
 }
 //#endregion
 //#region apps/desktop/electron/main/index.ts
@@ -608,6 +733,8 @@ var developmentUrl = process.env["VITE_DEV_SERVER_URL"];
 var allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString();
 var dataMode = process.env["TLC_DATA_MODE"] === "sample" ? "sample" : "live";
 var tokenProvider = new AzureCliMsxTokenProvider();
+var graphTokenProvider = new InteractiveGraphTokenProvider();
+var mcemAccessProbe = new GraphMcemAccessProbe(graphTokenProvider);
 var orchestrator = new ThinSliceOrchestrator(dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider), new FixtureMcemGuidanceConnector());
 async function getDataStatus() {
 	if (dataMode === "sample") return {
@@ -622,6 +749,15 @@ async function getDataStatus() {
 		auth: await tokenProvider.getAuthStatus()
 	};
 }
+async function connectMcem() {
+	const authStatus = await graphTokenProvider.connect();
+	if (authStatus.state !== "ready") return authStatus;
+	const page = await mcemAccessProbe.getCanonicalPageMetadata();
+	return {
+		...authStatus,
+		detail: `TLC verified delegated access to ${page.name} (${page.pageId}).`
+	};
+}
 function assertTrustedSender(event) {
 	const senderUrl = event.senderFrame?.url;
 	if (!senderUrl || !senderUrl.startsWith(allowedRendererUrl)) throw new Error("Rejected IPC request from an untrusted renderer.");
@@ -634,6 +770,14 @@ function registerReadOnlyIpc() {
 	ipcMain.handle("tlc:list-accounts", (event) => {
 		assertTrustedSender(event);
 		return orchestrator.listAccounts();
+	});
+	ipcMain.handle("tlc:connect-mcem", (event) => {
+		assertTrustedSender(event);
+		if (dataMode === "sample") return {
+			state: "ready",
+			detail: "MCEM connection is not required in fixture mode."
+		};
+		return connectMcem();
 	});
 	ipcMain.handle("tlc:list-opportunities", (event, accountId) => {
 		assertTrustedSender(event);

@@ -1,5 +1,8 @@
 import type { McemGuidanceConnector, StageGuidance } from '../common/index.js'
 
+export { GraphMcemAccessProbe } from './live.js'
+export type { GraphTokenProvider, McemPageMetadata } from './live.js'
+
 const stageThreeGuidance: StageGuidance = {
   stage: 3,
   title: 'MCEM Stage 3: Solution Design',

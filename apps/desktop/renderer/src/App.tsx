@@ -24,7 +24,7 @@ import {
   WeatherSunny20Regular,
   Warning20Filled
 } from '@fluentui/react-icons'
-import { contractVersion, type Account, type DesktopDataStatus, type McemResponse, type Opportunity } from '../../../../packages/common/index.js'
+import { contractVersion, type Account, type AuthStatus, type DesktopDataStatus, type McemResponse, type Opportunity } from '../../../../packages/common/index.js'
 
 const prompt = 'How do we move this opportunity to the next MCEM stage?'
 const themeStorageKey = 'tlc-theme'
@@ -38,6 +38,8 @@ export function App() {
   const [opportunityId, setOpportunityId] = useState('')
   const [result, setResult] = useState<McemResponse | null>(null)
   const [dataStatus, setDataStatus] = useState<DesktopDataStatus | null>(null)
+  const [mcemAuth, setMcemAuth] = useState<AuthStatus | null>(null)
+  const [mcemConnecting, setMcemConnecting] = useState(false)
   const [status, setStatus] = useState<'loading' | 'ready' | 'running' | 'error'>('loading')
   const [error, setError] = useState('')
 
@@ -105,6 +107,18 @@ export function App() {
     }
   }
 
+  async function connectMcem() {
+    setMcemConnecting(true)
+    setError('')
+    try {
+      setMcemAuth(await window.tlc.connectMcem())
+    } catch (cause) {
+      handleError(cause)
+    } finally {
+      setMcemConnecting(false)
+    }
+  }
+
   const account = accounts.find((item) => item.id === accountId)
   const opportunity = opportunities.find((item) => item.id === opportunityId)
   const metCount = result?.criteria.filter((criterion) => criterion.status === 'met').length ?? 0
@@ -138,9 +152,23 @@ export function App() {
         <ShieldCheckmark20Regular />
         <span>{isLive
           ? authReady
-            ? `Live MSX is scoped to ${dataStatus.auth.displayName ?? 'the signed-in Microsoft corporate user'} and active deal-team membership. MCEM guidance remains a versioned fixture.`
+            ? mcemAuth?.state === 'ready'
+              ? mcemAuth.detail
+              : mcemAuth?.detail
+                ?? `Live MSX is scoped to ${dataStatus.auth.displayName ?? 'the signed-in Microsoft corporate user'}. MCEM guidance remains a versioned fixture until canonical content mapping is complete.`
             : dataStatus?.auth.detail ?? 'Run az login with your Microsoft CORP ID, then restart the app.'
           : 'This automated preview uses sanitized MSX fixtures. No live MSX calls are being made.'}</span>
+        {isLive && authReady && mcemAuth?.state !== 'ready' && (
+          <Button
+            appearance="primary"
+            size="small"
+            icon={mcemConnecting ? <Spinner size="tiny" /> : <DocumentSearch20Regular />}
+            disabled={mcemConnecting}
+            onClick={() => void connectMcem()}
+          >
+            Connect MCEM
+          </Button>
+        )}
       </div>
 
       <main className="workspace">

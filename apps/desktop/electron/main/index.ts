@@ -2,11 +2,12 @@ import { app, BrowserWindow, ipcMain, shell, type IpcMainInvokeEvent } from 'ele
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { z } from 'zod'
-import { mcemRequestSchema, type DesktopDataStatus } from '../../../../packages/common/index.js'
+import { mcemRequestSchema, type AuthStatus, type DesktopDataStatus } from '../../../../packages/common/index.js'
 import { FixtureMsxConnector, LiveMsxConnector } from '../../../../packages/connectors/msx/index.js'
-import { FixtureMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
+import { FixtureMcemGuidanceConnector, GraphMcemAccessProbe } from '../../../../packages/connectors/sharepoint/index.js'
 import { ThinSliceOrchestrator } from '../../../../packages/orchestrator/index.js'
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
+import { InteractiveGraphTokenProvider } from './graph-token-provider.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -16,6 +17,8 @@ const developmentUrl = process.env['VITE_DEV_SERVER_URL']
 const allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString()
 const dataMode = process.env['TLC_DATA_MODE'] === 'sample' ? 'sample' : 'live'
 const tokenProvider = new AzureCliMsxTokenProvider()
+const graphTokenProvider = new InteractiveGraphTokenProvider()
+const mcemAccessProbe = new GraphMcemAccessProbe(graphTokenProvider)
 const msxConnector = dataMode === 'sample'
   ? new FixtureMsxConnector()
   : new LiveMsxConnector(tokenProvider)
@@ -34,6 +37,17 @@ async function getDataStatus(): Promise<DesktopDataStatus> {
   return { mode: 'live', auth: await tokenProvider.getAuthStatus() }
 }
 
+async function connectMcem(): Promise<AuthStatus> {
+  const authStatus = await graphTokenProvider.connect()
+  if (authStatus.state !== 'ready') return authStatus
+
+  const page = await mcemAccessProbe.getCanonicalPageMetadata()
+  return {
+    ...authStatus,
+    detail: `TLC verified delegated access to ${page.name} (${page.pageId}).`
+  }
+}
+
 function assertTrustedSender(event: IpcMainInvokeEvent): void {
   const senderUrl = event.senderFrame?.url
   if (!senderUrl || !senderUrl.startsWith(allowedRendererUrl)) {
@@ -49,6 +63,13 @@ function registerReadOnlyIpc(): void {
   ipcMain.handle('tlc:list-accounts', (event) => {
     assertTrustedSender(event)
     return orchestrator.listAccounts()
+  })
+  ipcMain.handle('tlc:connect-mcem', (event) => {
+    assertTrustedSender(event)
+    if (dataMode === 'sample') {
+      return { state: 'ready', detail: 'MCEM connection is not required in fixture mode.' } satisfies AuthStatus
+    }
+    return connectMcem()
   })
   ipcMain.handle('tlc:list-opportunities', (event, accountId: unknown) => {
     assertTrustedSender(event)
