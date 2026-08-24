@@ -1,0 +1,11 @@
+{
+  "name": "@tlc/orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./index.ts" },
+  "dependencies": {
+    "@tlc/agent-mcem-coach": "0.1.0",
+    "@tlc/common": "0.1.0"
+  }
+}

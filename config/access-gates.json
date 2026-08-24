@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "mode": "sample",
+  "decisions": {
+    "electronMvpApproved": true,
+    "fourAgentMapApproved": true,
+    "readOnlyMvpApproved": true
+  },
+  "sources": {
+    "msx": { "status": "unverified", "requiredForLiveMode": true },
+    "sharepoint": { "status": "unverified", "requiredForLiveMode": true },
+    "seismic": { "status": "blocked", "requiredForLiveMode": false },
+    "linkedin": { "status": "blocked", "requiredForLiveMode": false }
+  },
+  "openItems": [
+    "Confirm product owner and October demonstration date.",
+    "Confirm MSX environment, tenant, token audience, entities, and read scopes.",
+    "Confirm canonical MCEM content path and content owner.",
+    "Confirm Seismic and LinkedIn API entitlements before enabling live connectors."
+  ]
+}

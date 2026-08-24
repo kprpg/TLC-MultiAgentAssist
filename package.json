@@ -1,0 +1,55 @@
+{
+  "name": "tlc-multi-agent-assist",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/common",
+    "packages/orchestrator",
+    "packages/agents/*",
+    "packages/connectors/*"
+  ],
+  "scripts": {
+    "check:structure": "node scripts/check-structure.mjs",
+    "preflight": "node scripts/preflight.mjs",
+    "typecheck": "tsc --build --pretty false",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "build": "npm run typecheck",
+    "desktop:build": "node node_modules/vite/bin/vite.js build --config apps/desktop/vite.main.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.preload.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.config.ts",
+    "desktop:start": "npm run desktop:build && node node_modules/electron/cli.js apps/desktop",
+    "desktop:dev": "concurrently -k \"node node_modules/vite/bin/vite.js --config apps/desktop/vite.config.ts\" \"wait-on tcp:5173 && node node_modules/vite/bin/vite.js build --watch --config apps/desktop/vite.main.config.ts\" \"wait-on tcp:5173 && node node_modules/vite/bin/vite.js build --watch --config apps/desktop/vite.preload.config.ts\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 node node_modules/electron/cli.js apps/desktop\"",
+    "phase0:check": "npm run check:structure && npm run preflight && npm run lint && npm run typecheck && npm run test"
+  },
+  "engines": {
+    "node": ">=22.12.0",
+    "npm": ">=10.0.0"
+  },
+  "dependencies": {
+    "@azure/identity": "^4.13.2",
+    "@fluentui/react-components": "9.74.6",
+    "@fluentui/react-icons": "2.0.337",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.62.1",
+    "@types/node": "^26.2.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "concurrently": "10.0.5",
+    "cross-env": "10.1.0",
+    "electron": "43.4.0",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0",
+    "vite": "8.0.10",
+    "vitest": "^4.1.6",
+    "wait-on": "9.1.0"
+  }
+}
