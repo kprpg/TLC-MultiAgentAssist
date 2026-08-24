@@ -27,7 +27,7 @@ export interface StageGuidance {
   title: string
   version: string
   effectiveDate: string
-  sourceUrl: string
+  sourceUrl?: string
   criteria: StageCriterion[]
   sourceHealth: SourceHealth
 }

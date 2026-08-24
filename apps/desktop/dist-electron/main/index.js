@@ -2,8 +2,10 @@ import { BrowserWindow, app, ipcMain, shell } from "electron";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
+import { stat } from "node:fs/promises";
+import { PDFParse } from "pdf-parse";
 import { randomUUID } from "node:crypto";
-import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
+import { AzureCliCredential } from "@azure/identity";
 var dataModeSchema = z.enum(["sample", "live"]);
 var sourceStateSchema = z.enum([
 	"sample",
@@ -392,101 +394,111 @@ var FixtureMsxConnector = class {
 	}
 };
 //#endregion
-//#region packages/connectors/sharepoint/live.ts
-var graphBaseUrl = "https://graph.microsoft.com/v1.0";
-var mcemSitePath = "/teams/MCEM-Portal";
-var mcemHomePageName = "MCEM-Home-Page.aspx";
-var GraphMcemAccessProbe = class {
-	constructor(tokenProvider, request = fetch) {
-		this.tokenProvider = tokenProvider;
-		this.request = request;
+//#region packages/connectors/sharepoint/local-pdf.ts
+var stageOneCriteria = [
+	{
+		id: "budget",
+		label: "Budget availability",
+		ownerRole: "Account Executive",
+		actionWhenMissing: "Validate available funding or the process and timing required to request it.",
+		rationale: "The MCEM Overview requires budget, outcomes, approval, and timing before an opportunity is qualified."
+	},
+	{
+		id: "customer-outcome",
+		label: "Customer outcomes",
+		ownerRole: "Account Executive",
+		actionWhenMissing: "Identify the expected outcomes, returns, KPIs, or capabilities and their priority for the customer.",
+		rationale: "Customer outcomes connect the opportunity to measurable business priorities."
+	},
+	{
+		id: "approval",
+		label: "Approval process",
+		ownerRole: "Account Executive",
+		actionWhenMissing: "Identify the stakeholders, decision makers, sponsor, and approval path.",
+		rationale: "Qualification requires a known approval process and sponsorship."
+	},
+	{
+		id: "timing",
+		label: "Decision and implementation timing",
+		ownerRole: "Account Executive",
+		actionWhenMissing: "Confirm funding, decision, purchase, and implementation timing plus any compelling event.",
+		rationale: "Qualification requires a credible timeline and reason to act."
 	}
-	async getCanonicalPageMetadata() {
-		const token = await this.tokenProvider.getAccessToken();
-		const site = await this.getJson(`${graphBaseUrl}/sites/microsoft.sharepoint.com:${mcemSitePath}`, token);
-		const page = (await this.getJson(`${graphBaseUrl}/sites/${encodeURIComponent(site.id)}/pages/microsoft.graph.sitePage?$select=id,name,title,webUrl,lastModifiedDateTime`, token)).value.find((candidate) => candidate.name.toLowerCase() === mcemHomePageName.toLowerCase());
-		if (!page) throw new Error(`Microsoft Graph could not find ${mcemHomePageName} in the MCEM Portal site.`);
-		return {
-			siteId: site.id,
-			pageId: page.id,
-			name: page.name,
-			title: page.title ?? page.name,
-			webUrl: page.webUrl,
-			...page.lastModifiedDateTime ? { lastModifiedDateTime: page.lastModifiedDateTime } : {}
-		};
+];
+var lifecycleCriteria = [
+	{
+		id: "customer-outcome",
+		label: "Measurable customer outcome",
+		ownerRole: "Specialist",
+		actionWhenMissing: "Agree the planned outcome, milestone, measurement, and customer review rhythm.",
+		rationale: "The MCEM Overview says teams should measure progress against planned outcomes and milestones."
+	},
+	{
+		id: "decision-team",
+		label: "Customer and v-team alignment",
+		ownerRole: "Account Executive",
+		actionWhenMissing: "Align the relevant customer stakeholders and Microsoft v-team roles around the opportunity.",
+		rationale: "Continuous customer planning coordinates execution across customer stakeholders, ATU, STU, CSU, partners, and executives."
+	},
+	{
+		id: "technical-validation",
+		label: "Outcome and exit-criteria evidence",
+		ownerRole: "Solution Engineer",
+		actionWhenMissing: "Define the evidence needed to demonstrate the current stage outcomes and exit criteria.",
+		rationale: "MCEM stage progression is driven by achieved outcomes and exit criteria, not completed activities."
+	},
+	{
+		id: "business-case",
+		label: "Business-priority alignment",
+		ownerRole: "Specialist",
+		actionWhenMissing: "Connect the opportunity to the customer priority, expected return, and available budget.",
+		rationale: "MCEM aligns customer needs, business outcomes, and solutions throughout the lifecycle."
+	},
+	{
+		id: "next-step",
+		label: "Governed next step",
+		ownerRole: "Account Executive",
+		actionWhenMissing: "Agree a dated next step that advances an outcome or exit criterion with named owners.",
+		rationale: "Customer planning requires coordinated execution and adjustment as needs and priorities evolve."
 	}
-	async getJson(url, token) {
-		const response = await this.request(url, { headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${token}`
-		} });
-		if (!response.ok) {
-			const requestId = response.headers.get("request-id");
-			throw new Error(`Microsoft Graph MCEM metadata request failed (${response.status}${requestId ? `; request-id ${requestId}` : ""}).`);
-		}
-		return await response.json();
+];
+var LocalPdfMcemGuidanceConnector = class {
+	sourcePromise;
+	constructor(pdfPath) {
+		this.pdfPath = pdfPath;
 	}
-};
-//#endregion
-//#region packages/connectors/sharepoint/index.ts
-var stageThreeGuidance = {
-	stage: 3,
-	title: "MCEM Stage 3: Solution Design",
-	version: "2026.07",
-	effectiveDate: "2026-07-01",
-	sourceUrl: "https://microsoft.sharepoint.com/sites/mcem/sample/stage-3",
-	criteria: [
-		{
-			id: "customer-outcome",
-			label: "Measurable customer outcome",
-			ownerRole: "Specialist",
-			actionWhenMissing: "Agree a baseline, target, and measurement owner with the customer.",
-			rationale: "A measurable outcome anchors value and later adoption tracking."
-		},
-		{
-			id: "decision-team",
-			label: "Decision team coverage",
-			ownerRole: "Account Executive",
-			actionWhenMissing: "Map the economic buyer, technical approver, procurement path, and customer sponsor.",
-			rationale: "Stage progression requires a credible decision path."
-		},
-		{
-			id: "technical-validation",
-			label: "Technical validation",
-			ownerRole: "Solution Engineer",
-			actionWhenMissing: "Define a customer-approved technical validation plan and acceptance criteria.",
-			rationale: "Solution confidence must be based on customer evidence."
-		},
-		{
-			id: "business-case",
-			label: "Supported business case",
-			ownerRole: "Specialist",
-			actionWhenMissing: "Build and validate a quantified value hypothesis with the customer.",
-			rationale: "A supported business case is needed before commitment."
-		},
-		{
-			id: "next-step",
-			label: "Mutually agreed next step",
-			ownerRole: "Account Executive",
-			actionWhenMissing: "Secure a dated customer next step with named attendees and purpose.",
-			rationale: "A mutual next step demonstrates active customer progression."
-		}
-	],
-	sourceHealth: {
-		source: "mcem",
-		state: "sample",
-		detail: "Versioned fixture derived for development; canonical SharePoint path remains unverified.",
-		checkedAt: "2026-08-24T00:00:00.000Z"
-	}
-};
-var FixtureMcemGuidanceConnector = class {
 	async getStageGuidance(stage) {
-		if (stage !== 3) return {
-			...stageThreeGuidance,
+		const source = await (this.sourcePromise ??= this.loadSource());
+		return {
 			stage,
-			title: `MCEM Stage ${stage} guidance (sample)`
+			title: `MCEM Stage ${stage} overview guidance`,
+			version: source.version,
+			effectiveDate: source.effectiveDate,
+			criteria: structuredClone(stage === 1 ? stageOneCriteria : lifecycleCriteria),
+			sourceHealth: {
+				source: "mcem",
+				state: "partial",
+				detail: "Local snapshot: docs/knowledge/MCEM Overview.pdf. No live SharePoint request was made; detailed stage guidance remains outside this overview.",
+				checkedAt: source.checkedAt
+			}
 		};
-		return structuredClone(stageThreeGuidance);
+	}
+	async loadSource() {
+		const file = await stat(this.pdfPath);
+		const parser = new PDFParse({ url: new URL(`file://${this.pdfPath.replaceAll("\\", "/")}`).toString() });
+		try {
+			const { text } = await parser.getText();
+			if (!text.includes("MCEM Overview") || !text.includes("Budget, Outcomes, Approval, and Timing")) throw new Error("The configured PDF does not contain the expected MCEM Overview content.");
+		} finally {
+			await parser.destroy();
+		}
+		const checkedAt = file.mtime.toISOString();
+		const effectiveDate = checkedAt.slice(0, 10);
+		return {
+			checkedAt,
+			effectiveDate,
+			version: `local-snapshot-${effectiveDate}`
+		};
 	}
 };
 //#endregion
@@ -552,7 +564,7 @@ function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
 			source: "mcem",
 			recordId: `stage-${guidance.stage}-${guidance.version}`,
 			title: guidance.title,
-			url: guidance.sourceUrl,
+			...guidance.sourceUrl ? { url: guidance.sourceUrl } : {},
 			retrievedAt: generatedAt,
 			modifiedAt: `${guidance.effectiveDate}T00:00:00.000Z`,
 			accessContext: "sample",
@@ -585,7 +597,7 @@ var ThinSliceOrchestrator = class {
 //#endregion
 //#region apps/desktop/electron/main/azure-cli-token-provider.ts
 var msxScope = "https://microsoftsales.crm.dynamics.com/.default";
-var corpDomain$1 = "@microsoft.com";
+var corpDomain = "@microsoft.com";
 var refreshBufferMs = 300 * 1e3;
 var AzureCliMsxTokenProvider = class {
 	cachedToken;
@@ -632,97 +644,9 @@ function readMicrosoftCorpId(accessToken) {
 		claims["preferred_username"],
 		claims["upn"],
 		claims["unique_name"]
-	].find((claim) => typeof claim === "string" && claim.toLowerCase().endsWith(corpDomain$1));
+	].find((claim) => typeof claim === "string" && claim.toLowerCase().endsWith(corpDomain));
 	if (!corpId) throw new Error("The active Azure CLI token is not a Microsoft corporate identity. Sign in with your @microsoft.com CORP ID.");
 	return corpId;
-}
-//#endregion
-//#region apps/desktop/electron/main/graph-token-provider.ts
-var defaultClientId = "d4a694ba-9ed0-4467-9c06-f7dfe41ceb8c";
-var defaultTenantId = "72f988bf-86f1-41af-91ab-2d7cd011db47";
-var graphScope = "https://graph.microsoft.com/Sites.Read.All";
-var graphAudiences = new Set(["00000003-0000-0000-c000-000000000000", "https://graph.microsoft.com"]);
-var corpDomain = "@microsoft.com";
-var InteractiveGraphTokenProvider = class {
-	corpId;
-	constructor(credential = new InteractiveBrowserCredential({
-		clientId: process.env["TLC_ENTRA_CLIENT_ID"] ?? defaultClientId,
-		tenantId: process.env["TLC_ENTRA_TENANT_ID"] ?? defaultTenantId,
-		redirectUri: "http://localhost",
-		disableAutomaticAuthentication: true
-	})) {
-		this.credential = credential;
-	}
-	async connect() {
-		try {
-			await this.credential.authenticate(graphScope);
-			await this.getAccessToken();
-			return this.readyStatus();
-		} catch (cause) {
-			return mapGraphAuthError(cause);
-		}
-	}
-	async getAccessToken() {
-		const accessToken = await this.credential.getToken(graphScope);
-		if (!accessToken) throw new Error("Microsoft Entra ID did not return a Microsoft Graph access token.");
-		const claims = readGraphClaims(accessToken.token);
-		this.corpId = claims.corpId;
-		return accessToken.token;
-	}
-	async getAuthStatus() {
-		try {
-			await this.getAccessToken();
-			return this.readyStatus();
-		} catch (cause) {
-			return mapGraphAuthError(cause);
-		}
-	}
-	readyStatus() {
-		return {
-			state: "ready",
-			...this.corpId ? { displayName: this.corpId } : {},
-			detail: `TLC has delegated Microsoft Graph access as ${this.corpId ?? "a Microsoft corporate user"}.`
-		};
-	}
-};
-function readGraphClaims(accessToken) {
-	const payloadPart = accessToken.split(".")[1];
-	if (!payloadPart) throw new Error("Microsoft Entra ID returned an invalid Microsoft Graph access token.");
-	let claims;
-	try {
-		claims = JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8"));
-	} catch {
-		throw new Error("Microsoft Entra ID returned an unreadable Microsoft Graph access token.");
-	}
-	if (typeof claims["aud"] !== "string" || !graphAudiences.has(claims["aud"])) throw new Error("The access token audience is not Microsoft Graph.");
-	if (!(typeof claims["scp"] === "string" ? claims["scp"].split(" ") : []).includes("Sites.Read.All")) throw new Error("The Microsoft Graph token does not contain delegated Sites.Read.All access.");
-	const corpId = [
-		claims["preferred_username"],
-		claims["upn"],
-		claims["unique_name"]
-	].find((claim) => typeof claim === "string" && claim.toLowerCase().endsWith(corpDomain));
-	if (!corpId) throw new Error("The Microsoft Graph token is not for a Microsoft corporate identity.");
-	return { corpId };
-}
-function mapGraphAuthError(cause) {
-	const detail = graphAuthErrorDetail(cause);
-	const normalized = detail.toLowerCase();
-	const state = normalized.includes("token does not contain delegated sites.read.all") ? "permission-missing" : normalized.includes("aadsts65001") || normalized.includes("aadsts90094") || normalized.includes("aadsts900941") || normalized.includes("aadsts900981") || normalized.includes("consent_required") || normalized.includes("need admin approval") || normalized.includes("approval required") || normalized.includes("userconsentblocked") ? "consent-required" : normalized.includes("aadsts50020") || normalized.includes("tenant") || normalized.includes("corporate identity") ? "tenant-mismatch" : "login-required";
-	return {
-		state,
-		detail: state === "consent-required" ? `${detail} Sites.Read.All is user-consentable by definition. The Entra error code determines whether consent was incomplete or Microsoft CORP policy requires an admin-consent request or policy exception.` : detail
-	};
-}
-function graphAuthErrorDetail(cause) {
-	const message = cause instanceof Error ? cause.message : "Microsoft Graph authentication failed.";
-	if (!cause || typeof cause !== "object" || !("errorResponse" in cause)) return message;
-	const response = cause.errorResponse;
-	if (!response || typeof response !== "object") return message;
-	const diagnostics = [];
-	if ("errorCodes" in response && Array.isArray(response.errorCodes)) diagnostics.push(...response.errorCodes.filter((code) => typeof code === "number").map((code) => `AADSTS${code}`));
-	if ("correlationId" in response && typeof response.correlationId === "string") diagnostics.push(`correlation ${response.correlationId}`);
-	if ("traceId" in response && typeof response.traceId === "string") diagnostics.push(`trace ${response.traceId}`);
-	return diagnostics.length > 0 ? `${message} Diagnostic: ${diagnostics.join("; ")}.` : message;
 }
 //#endregion
 //#region apps/desktop/electron/main/index.ts
@@ -733,9 +657,8 @@ var developmentUrl = process.env["VITE_DEV_SERVER_URL"];
 var allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString();
 var dataMode = process.env["TLC_DATA_MODE"] === "sample" ? "sample" : "live";
 var tokenProvider = new AzureCliMsxTokenProvider();
-var graphTokenProvider = new InteractiveGraphTokenProvider();
-var mcemAccessProbe = new GraphMcemAccessProbe(graphTokenProvider);
-var orchestrator = new ThinSliceOrchestrator(dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider), new FixtureMcemGuidanceConnector());
+var mcemConnector = new LocalPdfMcemGuidanceConnector(resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
+var orchestrator = new ThinSliceOrchestrator(dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider), mcemConnector);
 async function getDataStatus() {
 	if (dataMode === "sample") return {
 		mode: "sample",
@@ -750,12 +673,10 @@ async function getDataStatus() {
 	};
 }
 async function connectMcem() {
-	const authStatus = await graphTokenProvider.connect();
-	if (authStatus.state !== "ready") return authStatus;
-	const page = await mcemAccessProbe.getCanonicalPageMetadata();
+	await mcemConnector.getStageGuidance(1);
 	return {
-		...authStatus,
-		detail: `TLC verified delegated access to ${page.name} (${page.pageId}).`
+		state: "ready",
+		detail: "MCEM guidance is loaded from docs/knowledge/MCEM Overview.pdf. No live SharePoint request was made."
 	};
 }
 function assertTrustedSender(event) {
@@ -773,10 +694,6 @@ function registerReadOnlyIpc() {
 	});
 	ipcMain.handle("tlc:connect-mcem", (event) => {
 		assertTrustedSender(event);
-		if (dataMode === "sample") return {
-			state: "ready",
-			detail: "MCEM connection is not required in fixture mode."
-		};
 		return connectMcem();
 	});
 	ipcMain.handle("tlc:list-opportunities", (event, accountId) => {

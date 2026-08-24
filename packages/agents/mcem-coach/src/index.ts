@@ -82,7 +82,7 @@ export function evaluateMcemProgress(
         source: 'mcem',
         recordId: `stage-${guidance.stage}-${guidance.version}`,
         title: guidance.title,
-        url: guidance.sourceUrl,
+        ...(guidance.sourceUrl ? { url: guidance.sourceUrl } : {}),
         retrievedAt: generatedAt,
         modifiedAt: `${guidance.effectiveDate}T00:00:00.000Z`,
         accessContext: 'sample',
