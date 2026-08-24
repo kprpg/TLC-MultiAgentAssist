@@ -399,14 +399,14 @@ var stageOneCriteria = [
 	{
 		id: "budget",
 		label: "Budget availability",
-		ownerRole: "Account Executive",
+		ownerRole: "Specialist / SSP",
 		actionWhenMissing: "Validate available funding or the process and timing required to request it.",
 		rationale: "The MCEM Overview requires budget, outcomes, approval, and timing before an opportunity is qualified."
 	},
 	{
 		id: "customer-outcome",
 		label: "Customer outcomes",
-		ownerRole: "Account Executive",
+		ownerRole: "ATS",
 		actionWhenMissing: "Identify the expected outcomes, returns, KPIs, or capabilities and their priority for the customer.",
 		rationale: "Customer outcomes connect the opportunity to measurable business priorities."
 	},
@@ -420,7 +420,7 @@ var stageOneCriteria = [
 	{
 		id: "timing",
 		label: "Decision and implementation timing",
-		ownerRole: "Account Executive",
+		ownerRole: "Specialist / SSP",
 		actionWhenMissing: "Confirm funding, decision, purchase, and implementation timing plus any compelling event.",
 		rationale: "Qualification requires a credible timeline and reason to act."
 	}
@@ -429,7 +429,7 @@ var lifecycleCriteria = [
 	{
 		id: "customer-outcome",
 		label: "Measurable customer outcome",
-		ownerRole: "Specialist",
+		ownerRole: "ATS",
 		actionWhenMissing: "Agree the planned outcome, milestone, measurement, and customer review rhythm.",
 		rationale: "The MCEM Overview says teams should measure progress against planned outcomes and milestones."
 	},
@@ -443,21 +443,21 @@ var lifecycleCriteria = [
 	{
 		id: "technical-validation",
 		label: "Outcome and exit-criteria evidence",
-		ownerRole: "Solution Engineer",
+		ownerRole: "Solution Engineer (SE)",
 		actionWhenMissing: "Define the evidence needed to demonstrate the current stage outcomes and exit criteria.",
 		rationale: "MCEM stage progression is driven by achieved outcomes and exit criteria, not completed activities."
 	},
 	{
 		id: "business-case",
 		label: "Business-priority alignment",
-		ownerRole: "Specialist",
+		ownerRole: "Specialist / SSP",
 		actionWhenMissing: "Connect the opportunity to the customer priority, expected return, and available budget.",
 		rationale: "MCEM aligns customer needs, business outcomes, and solutions throughout the lifecycle."
 	},
 	{
 		id: "next-step",
 		label: "Governed next step",
-		ownerRole: "Account Executive",
+		ownerRole: "CSA / CSAM",
 		actionWhenMissing: "Agree a dated next step that advances an outcome or exit criterion with named owners.",
 		rationale: "Customer planning requires coordinated execution and adjustment as needs and priorities evolve."
 	}

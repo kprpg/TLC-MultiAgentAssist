@@ -26,7 +26,7 @@ describe('MCEM Coach thin slice', () => {
     expect(result.recordedStage).toBe(3)
     expect(result.evidenceBasedStage).toBe(2)
     expect(result.recommendations.map((recommendation) => recommendation.ownerRole)).toEqual(
-      expect.arrayContaining(['Specialist', 'Account Executive'])
+      expect.arrayContaining(['Specialist / SSP', 'Account Executive'])
     )
     expect(result.recommendations.every((recommendation) => recommendation.evidenceIds.length > 0)).toBe(true)
     expect(result.evidence.map((evidence) => evidence.source)).toEqual(['msx', 'mcem'])

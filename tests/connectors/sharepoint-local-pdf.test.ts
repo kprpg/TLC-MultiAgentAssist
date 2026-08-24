@@ -15,9 +15,27 @@ describe('LocalPdfMcemGuidanceConnector', () => {
       'approval',
       'timing'
     ])
+    expect(guidance.criteria.map((criterion) => criterion.ownerRole)).toEqual([
+      'Specialist / SSP',
+      'ATS',
+      'Account Executive',
+      'Specialist / SSP'
+    ])
     expect(guidance.sourceUrl).toBeUndefined()
     expect(guidance.sourceHealth.state).toBe('partial')
     expect(guidance.sourceHealth.detail).toContain('docs/knowledge/MCEM Overview.pdf')
     expect(guidance.sourceHealth.detail).toContain('No live SharePoint request was made')
+  })
+
+  it('assigns lifecycle actions across the account team', async () => {
+    const guidance = await new LocalPdfMcemGuidanceConnector(pdfPath).getStageGuidance(3)
+
+    expect(guidance.criteria.map((criterion) => criterion.ownerRole)).toEqual([
+      'ATS',
+      'Account Executive',
+      'Solution Engineer (SE)',
+      'Specialist / SSP',
+      'CSA / CSAM'
+    ])
   })
 })
