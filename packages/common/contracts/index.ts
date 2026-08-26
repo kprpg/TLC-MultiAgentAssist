@@ -95,6 +95,33 @@ export const mcemRequestSchema = z.object({
   prompt: z.string().min(3).max(1000)
 })
 
+export const agentCapabilitySchema = z.enum([
+  'account-pulse',
+  'mcem-coach',
+  'pursuit-executive',
+  'risk-solution-play'
+])
+
+export const agentTaskRequestSchema = z.object({
+  contractVersion: z.literal(contractVersion),
+  capability: agentCapabilitySchema,
+  accountId: z.string().min(1),
+  opportunityId: z.string().min(1),
+  prompt: z.string().min(3).max(1000)
+})
+
+export const agentTaskResponseSchema = z.object({
+  contractVersion: z.literal(contractVersion),
+  correlationId: z.string().uuid(),
+  capability: agentCapabilitySchema,
+  agentVersion: z.string().min(1),
+  generatedAt: z.string().datetime(),
+  mode: dataModeSchema,
+  state: z.enum(['complete', 'partial', 'unauthorized']),
+  content: z.string().min(1),
+  sourceHealth: z.array(sourceHealthSchema).min(1)
+})
+
 export const mcemResponseSchema = z.object({
   contractVersion: z.literal(contractVersion),
   correlationId: z.string().uuid(),
@@ -128,4 +155,7 @@ export type AuthStatus = z.infer<typeof authStatusSchema>
 export type DesktopDataStatus = z.infer<typeof desktopDataStatusSchema>
 export type McemRequest = z.infer<typeof mcemRequestSchema>
 export type McemResponse = z.infer<typeof mcemResponseSchema>
+export type AgentCapability = z.infer<typeof agentCapabilitySchema>
+export type AgentTaskRequest = z.infer<typeof agentTaskRequestSchema>
+export type AgentTaskResponse = z.infer<typeof agentTaskResponseSchema>
 export type Feedback = z.infer<typeof feedbackSchema>

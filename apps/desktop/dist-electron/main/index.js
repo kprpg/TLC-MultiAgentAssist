@@ -111,6 +111,34 @@ var mcemRequestSchema = z.object({
 	opportunityId: z.string().min(1),
 	prompt: z.string().min(3).max(1e3)
 });
+var agentCapabilitySchema = z.enum([
+	"account-pulse",
+	"mcem-coach",
+	"pursuit-executive",
+	"risk-solution-play"
+]);
+var agentTaskRequestSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	capability: agentCapabilitySchema,
+	accountId: z.string().min(1),
+	opportunityId: z.string().min(1),
+	prompt: z.string().min(3).max(1e3)
+});
+z.object({
+	contractVersion: z.literal("1.0"),
+	correlationId: z.string().uuid(),
+	capability: agentCapabilitySchema,
+	agentVersion: z.string().min(1),
+	generatedAt: z.string().datetime(),
+	mode: dataModeSchema,
+	state: z.enum([
+		"complete",
+		"partial",
+		"unauthorized"
+	]),
+	content: z.string().min(1),
+	sourceHealth: z.array(sourceHealthSchema).min(1)
+});
 var mcemResponseSchema = z.object({
 	contractVersion: z.literal("1.0"),
 	correlationId: z.string().uuid(),
@@ -160,11 +188,13 @@ var resourceScopesSchema = z.object({
 var authenticationSchema = z.discriminatedUnion("mode", [z.object({
 	mode: z.literal("azure-cli"),
 	expectedUserDomain: z.string().regex(/^@[a-z0-9.-]+$/),
+	foundryTenantId: z.string().uuid(),
 	scopes: resourceScopesSchema,
 	appRegistration: appRegistrationSchema.optional()
 }).strict(), z.object({
 	mode: z.literal("interactive-browser"),
 	expectedUserDomain: z.string().regex(/^@[a-z0-9.-]+$/),
+	foundryTenantId: z.string().uuid(),
 	scopes: resourceScopesSchema,
 	appRegistration: appRegistrationSchema
 }).strict()]);
@@ -566,7 +596,7 @@ var LocalPdfMcemGuidanceConnector = class {
 };
 //#endregion
 //#region packages/connectors/foundry/index.ts
-var FoundryMcemAgent = class {
+var FoundryPromptAgent = class {
 	openAIClient;
 	constructor(options) {
 		this.options = options;
@@ -577,18 +607,21 @@ var FoundryMcemAgent = class {
 		const abortController = new AbortController();
 		const timeout = setTimeout(() => abortController.abort(), this.options.requestTimeoutMs);
 		try {
-			if (!(await this.openAIClient.responses.create({ input: JSON.stringify(context) }, {
+			const response = await this.openAIClient.responses.create({ input: JSON.stringify(context) }, {
 				body: { agent_reference: {
 					name: this.options.agentName,
 					type: "agent_reference"
 				} },
 				signal: abortController.signal
-			})).output_text?.trim()) throw new Error(`Foundry agent ${this.options.agentName} returned no text output.`);
+			});
+			if (!response.output_text?.trim()) throw new Error(`Foundry agent ${this.options.agentName} returned no text output.`);
+			return response.output_text.trim();
 		} finally {
 			clearTimeout(timeout);
 		}
 	}
 };
+var FoundryMcemAgent = class extends FoundryPromptAgent {};
 var RecordingMcemAgent = class {
 	constructor(capturePath) {
 		this.capturePath = capturePath;
@@ -596,6 +629,15 @@ var RecordingMcemAgent = class {
 	async invoke(context) {
 		await mkdir(dirname(this.capturePath), { recursive: true });
 		await writeFile(this.capturePath, `${JSON.stringify(context, null, 2)}\n`, "utf8");
+		return "Recorded MCEM context for deterministic UI validation.";
+	}
+};
+var StaticPromptAgent = class {
+	constructor(content) {
+		this.content = content;
+	}
+	async invoke(_context) {
+		return this.content;
 	}
 };
 //#endregion
@@ -674,10 +716,11 @@ function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
 //#endregion
 //#region packages/orchestrator/index.ts
 var ThinSliceOrchestrator = class {
-	constructor(msx, mcem, mcemAgent) {
+	constructor(msx, mcem, mcemAgent, taskAgents = {}) {
 		this.msx = msx;
 		this.mcem = mcem;
 		this.mcemAgent = mcemAgent;
+		this.taskAgents = taskAgents;
 	}
 	listAccounts() {
 		return this.msx.listAccounts();
@@ -698,6 +741,39 @@ var ThinSliceOrchestrator = class {
 			localEvaluation
 		});
 		return localEvaluation;
+	}
+	async runAgentTask(input) {
+		const request = agentTaskRequestSchema.parse(input);
+		const configuredAgent = this.taskAgents[request.capability];
+		if (!configuredAgent) throw new Error(`The ${request.capability} agent is not configured.`);
+		const opportunityContext = await this.msx.getOpportunityContext(request.opportunityId);
+		if (opportunityContext.account.id !== request.accountId) throw new Error("The selected opportunity does not belong to the selected account.");
+		const guidance = await this.mcem.getStageGuidance(opportunityContext.opportunity.recordedStage);
+		const localEvaluation = evaluateMcemProgress(opportunityContext, guidance);
+		const content = await configuredAgent.agent.invoke({
+			request,
+			opportunityContext,
+			guidance,
+			localEvaluation
+		});
+		if (!content?.trim()) throw new Error(`The ${request.capability} agent returned no content.`);
+		const sourceHealth = [opportunityContext.sourceHealth, guidance.sourceHealth];
+		const isPartial = sourceHealth.some((source) => [
+			"partial",
+			"stale",
+			"unavailable"
+		].includes(source.state));
+		return {
+			contractVersion: "1.0",
+			correlationId: randomUUID(),
+			capability: request.capability,
+			agentVersion: configuredAgent.version,
+			generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+			mode: opportunityContext.sourceHealth.state === "sample" ? "sample" : "live",
+			state: isPartial ? "partial" : "complete",
+			content: content.trim(),
+			sourceHealth
+		};
 	}
 };
 //#endregion
@@ -760,6 +836,32 @@ function readMicrosoftCorpId(accessToken, expectedUserDomain = "@microsoft.com")
 	return corpId;
 }
 //#endregion
+//#region apps/desktop/electron/main/runtime-credentials.ts
+function createRuntimeCredentials(authentication) {
+	if (authentication.mode === "interactive-browser") {
+		const appRegistration = authentication.appRegistration;
+		return {
+			msx: new InteractiveBrowserCredential({
+				tenantId: appRegistration.tenantId,
+				clientId: appRegistration.clientId,
+				redirectUri: appRegistration.redirectUri
+			}),
+			foundry: new InteractiveBrowserCredential({
+				tenantId: authentication.foundryTenantId,
+				clientId: appRegistration.clientId,
+				redirectUri: appRegistration.redirectUri
+			})
+		};
+	}
+	return {
+		msx: new AzureCliCredential({ processTimeoutInMs: 3e4 }),
+		foundry: new AzureCliCredential({
+			tenantId: authentication.foundryTenantId,
+			processTimeoutInMs: 3e4
+		})
+	};
+}
+//#endregion
 //#region apps/desktop/electron/main/index.ts
 var desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 var rendererFile = resolve(desktopRoot, "dist/renderer/index.html");
@@ -769,13 +871,13 @@ var allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString(
 var dataMode = process.env["TLC_DATA_MODE"] === "sample" ? "sample" : "live";
 var runtimeEnvironment = dataMode === "live" ? await loadFoundryEnvironment(resolveFoundryEnvironmentPath()) : void 0;
 var authentication = runtimeEnvironment?.authentication;
-var credential = authentication?.mode === "interactive-browser" ? new InteractiveBrowserCredential({
-	tenantId: authentication.appRegistration.tenantId,
-	clientId: authentication.appRegistration.clientId,
-	redirectUri: authentication.appRegistration.redirectUri
-}) : new AzureCliCredential({ processTimeoutInMs: 3e4 });
+var fallbackCredential = new AzureCliCredential({ processTimeoutInMs: 3e4 });
+var credentials = authentication ? createRuntimeCredentials(authentication) : {
+	msx: fallbackCredential,
+	foundry: fallbackCredential
+};
 var tokenProvider = new AzureCliMsxTokenProvider({
-	credential,
+	credential: credentials.msx,
 	...authentication ? {
 		scope: authentication.scopes.msx[0],
 		expectedUserDomain: authentication.expectedUserDomain,
@@ -785,12 +887,44 @@ var tokenProvider = new AzureCliMsxTokenProvider({
 var mcemConnector = new LocalPdfMcemGuidanceConnector(resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
 var msxConnector = dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider);
 var smokeCapturePath = process.env["TLC_SMOKE_FOUNDRY_CAPTURE_PATH"]?.trim();
-var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, smokeCapturePath ? new RecordingMcemAgent(resolve(smokeCapturePath)) : runtimeEnvironment ? new FoundryMcemAgent({
+var mcemAgent = smokeCapturePath ? new RecordingMcemAgent(resolve(smokeCapturePath)) : runtimeEnvironment ? new FoundryMcemAgent({
 	projectEndpoint: runtimeEnvironment.foundry.projectEndpoint,
 	agentName: runtimeEnvironment.foundry.agents.mcemCoach.name,
 	requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
-	credential
-}) : void 0);
+	credential: credentials.foundry
+}) : void 0;
+var previewResponses = {
+	"account-pulse": "Summary\nFocus this week on the selected opportunity and validate its incomplete milestones.\n\nContext used\nSample account and opportunity context.\n\nObserved signals\nMSX sample evidence and local MCEM guidance.\n\nRecommended actions\nAccount Executive: confirm the next customer commitment.\n\nSources\nMSX sample; MCEM local snapshot.\n\nAssumptions and missing information\nExternal signals are unavailable in sample mode.\n\nFeedback prompt\nWas this focus actionable?",
+	"mcem-coach": "Use the deterministic MCEM diagnostic shown in the workbench.",
+	"pursuit-executive": "Summary\nPrepare the pursuit around the selected opportunity gaps.\n\nContext used\nSample account, opportunity, and MCEM context.\n\nObserved signals\nThe local evaluation identifies incomplete exit criteria.\n\nRecommended actions\nSpecialist / SSP: schedule validation and confirm owners.\n\nExecutive brief or 30/60 day pursuit plan\nDays 1-30: close evidence gaps. Days 31-60: validate value and executive alignment.\n\nSources\nMSX sample; MCEM local snapshot.\n\nAssumptions and missing information\nRecent customer activity is not available.\n\nFeedback prompt\nWas this plan useful?",
+	"risk-solution-play": "Summary\nThe selected opportunity has execution risk where exit-criteria evidence is incomplete.\n\nContext used\nSample account, opportunity, and MCEM context.\n\nObserved signals\nMissing or partial criterion evidence.\n\nRisks\nMedium: progression may be premature.\n\nRecommended actions\nAccount Executive: confirm the next customer step.\n\nSources\nMSX sample; MCEM local snapshot.\n\nAssumptions and missing information\nApproved content sources are unavailable in sample mode.\n\nFeedback prompt\nWas this risk review grounded?"
+};
+var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, mcemAgent, Object.fromEntries([
+	"account-pulse",
+	"mcem-coach",
+	"pursuit-executive",
+	"risk-solution-play"
+].map((capability) => {
+	if (!runtimeEnvironment) return [capability, {
+		version: "sample-v1",
+		agent: new StaticPromptAgent(previewResponses[capability])
+	}];
+	const binding = {
+		"account-pulse": runtimeEnvironment.foundry.agents.accountPulse,
+		"mcem-coach": runtimeEnvironment.foundry.agents.mcemCoach,
+		"pursuit-executive": runtimeEnvironment.foundry.agents.pursuitExecutive,
+		"risk-solution-play": runtimeEnvironment.foundry.agents.riskSolutionPlay
+	}[capability];
+	return [capability, {
+		version: "active",
+		agent: new FoundryPromptAgent({
+			projectEndpoint: runtimeEnvironment.foundry.projectEndpoint,
+			agentName: binding.name,
+			requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
+			credential: credentials.foundry
+		})
+	}];
+})));
 async function getDataStatus() {
 	if (dataMode === "sample") return {
 		mode: "sample",
@@ -835,6 +969,10 @@ function registerReadOnlyIpc() {
 	ipcMain.handle("tlc:run-mcem-coach", (event, request) => {
 		assertTrustedSender(event);
 		return orchestrator.runMcemCoach(mcemRequestSchema.parse(request));
+	});
+	ipcMain.handle("tlc:run-agent-task", (event, request) => {
+		assertTrustedSender(event);
+		return orchestrator.runAgentTask(agentTaskRequestSchema.parse(request));
 	});
 	ipcMain.handle("tlc:open-evidence", async (event, rawUrl) => {
 		assertTrustedSender(event);

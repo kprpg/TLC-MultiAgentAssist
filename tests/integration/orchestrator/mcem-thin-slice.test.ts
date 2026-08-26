@@ -1,13 +1,15 @@
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { evaluateMcemProgress } from '../../../packages/agents/mcem-coach/index.js'
-import { contractVersion, mcemResponseSchema } from '../../../packages/common/index.js'
+import { agentTaskResponseSchema, contractVersion, mcemResponseSchema, type AgentCapability } from '../../../packages/common/index.js'
 import { FixtureMsxConnector } from '../../../packages/connectors/msx/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
 import {
   ThinSliceOrchestrator,
+  type AgentTaskContext,
   type McemAgent,
-  type McemAgentContext
+  type McemAgentContext,
+  type TaskAgentRegistry
 } from '../../../packages/orchestrator/index.js'
 
 const mcemConnector = () => new LocalPdfMcemGuidanceConnector(resolve('docs/knowledge/MCEM Overview.pdf'))
@@ -111,5 +113,58 @@ describe('MCEM Coach thin slice', () => {
 
     expect(mcemResponseSchema.safeParse(result).success).toBe(true)
     expect(result.evidence[0]?.excerpt).toBe('No criterion-level observations were available from MSX for this opportunity.')
+  })
+
+  it.each([
+    'account-pulse',
+    'mcem-coach',
+    'pursuit-executive',
+    'risk-solution-play'
+  ] satisfies AgentCapability[])('routes %s through a versioned agent task response', async (capability) => {
+    const invocations: AgentTaskContext[] = []
+    const taskAgents: TaskAgentRegistry = {
+      [capability]: {
+        version: 'test-v2',
+        agent: {
+          invoke: async (context: AgentTaskContext) => {
+            invocations.push(context)
+            return `Grounded synthesis from ${capability}`
+          }
+        }
+      }
+    }
+    const orchestrator = new ThinSliceOrchestrator(
+      new FixtureMsxConnector(),
+      mcemConnector(),
+      undefined,
+      taskAgents
+    )
+
+    const result = await orchestrator.runAgentTask({
+      contractVersion,
+      capability,
+      accountId: 'account-contoso',
+      opportunityId: 'opp-grid-modernization',
+      prompt: 'Analyze the selected opportunity.'
+    })
+
+    expect(agentTaskResponseSchema.safeParse(result).success).toBe(true)
+    expect(result).toMatchObject({
+      capability,
+      agentVersion: 'test-v2',
+      mode: 'sample',
+      state: 'partial',
+      content: `Grounded synthesis from ${capability}`,
+      sourceHealth: [
+        expect.objectContaining({ source: 'msx', state: 'sample' }),
+        expect.objectContaining({ source: 'mcem', state: 'partial' })
+      ]
+    })
+    expect(invocations[0]).toMatchObject({
+      request: { capability },
+      opportunityContext: { opportunity: { id: 'opp-grid-modernization' } },
+      guidance: { stage: 3 },
+      localEvaluation: { evidenceBasedStage: 2 }
+    })
   })
 })

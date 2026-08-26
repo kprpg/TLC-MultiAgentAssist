@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "agent": "tlc-mcem-coach",
+  "scenarios": [
+    {
+      "id": "recorded-stage-divergence",
+      "prompt": "How do we move this opportunity to the next MCEM stage?",
+      "expected": ["Separates recorded and supported stage", "Evaluates exit criteria", "Returns owner-specific actions"]
+    },
+    {
+      "id": "missing-stage-and-stakeholders",
+      "prompt": "Coach an opportunity with no recorded stage or stakeholder map.",
+      "expected": ["Does not infer a stage", "Lists missing evidence", "Preserves deterministic evaluation"]
+    },
+    {
+      "id": "pursuit-handoff",
+      "prompt": "Prepare MCEM gaps for a pursuit plan.",
+      "expected": ["Prioritizes supported gaps", "Produces a structured handoff", "Does not call another agent"]
+    }
+  ]
+}

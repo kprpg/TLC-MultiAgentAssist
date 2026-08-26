@@ -2,24 +2,24 @@ import { AIProjectClient } from '@azure/ai-projects'
 import type { TokenCredential } from '@azure/core-auth'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import type { McemAgent, McemAgentContext } from '../../orchestrator/index.js'
+import type { AgentInvoker, McemAgentContext } from '../../orchestrator/index.js'
 
-export interface FoundryMcemAgentOptions {
+export interface FoundryPromptAgentOptions {
   projectEndpoint: string
   agentName: string
   requestTimeoutMs: number
   credential: TokenCredential
 }
 
-export class FoundryMcemAgent implements McemAgent {
+export class FoundryPromptAgent<TContext> implements AgentInvoker<TContext> {
   private readonly openAIClient
 
-  constructor(private readonly options: FoundryMcemAgentOptions) {
+  constructor(private readonly options: FoundryPromptAgentOptions) {
     const project = new AIProjectClient(options.projectEndpoint, options.credential)
     this.openAIClient = project.getOpenAIClient()
   }
 
-  async invoke(context: McemAgentContext): Promise<void> {
+  async invoke(context: TContext): Promise<string> {
     const abortController = new AbortController()
     const timeout = setTimeout(() => abortController.abort(), this.options.requestTimeoutMs)
 
@@ -39,17 +39,29 @@ export class FoundryMcemAgent implements McemAgent {
       if (!response.output_text?.trim()) {
         throw new Error(`Foundry agent ${this.options.agentName} returned no text output.`)
       }
+      return response.output_text.trim()
     } finally {
       clearTimeout(timeout)
     }
   }
 }
 
-export class RecordingMcemAgent implements McemAgent {
+export class FoundryMcemAgent extends FoundryPromptAgent<McemAgentContext> {}
+
+export class RecordingMcemAgent implements AgentInvoker<McemAgentContext> {
   constructor(private readonly capturePath: string) {}
 
-  async invoke(context: McemAgentContext): Promise<void> {
+  async invoke(context: McemAgentContext): Promise<string> {
     await mkdir(dirname(this.capturePath), { recursive: true })
     await writeFile(this.capturePath, `${JSON.stringify(context, null, 2)}\n`, 'utf8')
+    return 'Recorded MCEM context for deterministic UI validation.'
+  }
+}
+
+export class StaticPromptAgent<TContext> implements AgentInvoker<TContext> {
+  constructor(private readonly content: string) {}
+
+  async invoke(_context: TContext): Promise<string> {
+    return this.content
   }
 }

@@ -25,6 +25,24 @@ test('launches the secure MCEM operational workbench', async () => {
     await expect(window.getByText('NEXT BEST ACTIONS')).toBeVisible()
     await expect(window.getByText('Stage 2', { exact: true })).toBeVisible()
 
+    const agentTasks = [
+      { tab: 'Account Pulse', content: 'Focus this week on the selected opportunity' },
+      { tab: 'MCEM Coach', content: 'Use the deterministic MCEM diagnostic' },
+      { tab: 'Pursuit & Executive', content: 'Prepare the pursuit around the selected opportunity gaps' },
+      { tab: 'Risk & Solution Play', content: 'The selected opportunity has execution risk' }
+    ]
+    await window.getByRole('tab', { name: 'Foundry Agent', exact: true }).click()
+    await expect(window.getByRole('button', { name: 'Run Account Pulse' })).toBeInViewport()
+    for (const task of agentTasks) {
+      await window.getByRole('tab', { name: task.tab }).click()
+      await window.getByRole('button', { name: `Run ${task.tab}` }).click()
+      await expect(window.getByText(task.content, { exact: false })).toBeVisible()
+      await expect(window.getByText('Agent sample-v1 · MSX + MCEM', { exact: true })).toBeVisible()
+      await expect(window.locator('.agent-synthesis')).toBeInViewport()
+    }
+
+    await window.getByRole('tab', { name: 'Diagnostic', exact: true }).click()
+
     await expect.poll(async () => {
       const capture = JSON.parse(await readFile(capturePath, 'utf8')) as {
         request: { accountId: string; opportunityId: string }
@@ -49,6 +67,7 @@ test('launches the secure MCEM operational workbench', async () => {
       hasEvidence: true
     })
 
+    await window.evaluate(() => globalThis.scrollTo(0, 0))
     const startingTheme = await window.locator('html').getAttribute('data-theme')
     const nextTheme = startingTheme === 'dark' ? 'light' : 'dark'
     const themeButton = window.getByRole('button', { name: `Use ${nextTheme} mode` })

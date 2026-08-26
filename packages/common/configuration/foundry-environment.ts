@@ -18,12 +18,14 @@ const authenticationSchema = z.discriminatedUnion('mode', [
   z.object({
     mode: z.literal('azure-cli'),
     expectedUserDomain: z.string().regex(/^@[a-z0-9.-]+$/),
+    foundryTenantId: z.string().uuid(),
     scopes: resourceScopesSchema,
     appRegistration: appRegistrationSchema.optional()
   }).strict(),
   z.object({
     mode: z.literal('interactive-browser'),
     expectedUserDomain: z.string().regex(/^@[a-z0-9.-]+$/),
+    foundryTenantId: z.string().uuid(),
     scopes: resourceScopesSchema,
     appRegistration: appRegistrationSchema
   }).strict()

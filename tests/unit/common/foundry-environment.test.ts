@@ -17,6 +17,7 @@ const validEnvironment = {
   authentication: {
     mode: 'interactive-browser',
     expectedUserDomain: '@microsoft.com',
+    foundryTenantId: '33333333-3333-4333-8333-333333333333',
     appRegistration: {
       tenantId: '11111111-1111-4111-8111-111111111111',
       clientId: '22222222-2222-4222-8222-222222222222',
@@ -49,7 +50,10 @@ describe('Foundry environment configuration', () => {
     const filePath = fileURLToPath(new URL('../../../config/foundry.environment.example.json', import.meta.url))
 
     await expect(loadFoundryEnvironment(filePath)).resolves.toMatchObject({
-      authentication: { mode: 'azure-cli' },
+      authentication: {
+        mode: 'azure-cli',
+        foundryTenantId: '33333333-3333-4333-8333-333333333333'
+      },
       foundry: {
         agents: {
           mcemCoach: { type: 'prompt', protocol: 'responses' },
@@ -74,6 +78,14 @@ describe('Foundry environment configuration', () => {
     const invalidEnvironment = structuredClone(validEnvironment) as Record<string, unknown>
     const authentication = invalidEnvironment['authentication'] as Record<string, unknown>
     delete authentication['appRegistration']
+
+    expect(foundryEnvironmentSchema.safeParse(invalidEnvironment).success).toBe(false)
+  })
+
+  it('requires the Foundry resource tenant for data-plane authentication', () => {
+    const invalidEnvironment = structuredClone(validEnvironment) as Record<string, unknown>
+    const authentication = invalidEnvironment['authentication'] as Record<string, unknown>
+    delete authentication['foundryTenantId']
 
     expect(foundryEnvironmentSchema.safeParse(invalidEnvironment).success).toBe(false)
   })

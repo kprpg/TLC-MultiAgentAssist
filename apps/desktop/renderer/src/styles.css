@@ -82,6 +82,7 @@ button, input { letter-spacing: 0; }
 .analysis-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
 .analysis-header h1 { margin: 6px 0 5px; font-size: 24px; line-height: 1.2; letter-spacing: 0; }
 .analysis-header p { margin: 0; color: var(--muted); font-size: 13px; }
+.workbench-view-tabs { width: 100%; margin-top: 20px; border-bottom: 1px solid var(--border); }
 .loading-state { display: grid; min-height: 360px; place-items: center; }
 .stage-comparison { display: grid; grid-template-columns: 132px 24px 132px 1fr; gap: 14px; align-items: center; margin-top: 26px; padding: 17px 19px; background: var(--surface); border: 1px solid var(--border); border-left: 4px solid #e5ad00; }
 .stage-comparison > div:not(.stage-summary) { display: flex; flex-direction: column; }
@@ -105,6 +106,17 @@ button, input { letter-spacing: 0; }
 .evidence-strip > div { display: flex; flex: 1; flex-direction: column; }
 .evidence-strip strong { font-size: 11px; }
 .evidence-strip span { color: var(--muted); font-size: 10px; }
+.agent-workbench { min-height: 0; padding-top: 24px; }
+.agent-workbench-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+.agent-workbench-heading h2 { margin: 4px 0 0; font-size: 16px; }
+.agent-workbench [role="tablist"] { width: 100%; overflow-x: auto; border-bottom: 1px solid var(--border); }
+.agent-task-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; margin-top: 14px; }
+.agent-task-input textarea { min-height: 64px; }
+.agent-synthesis { margin-top: 14px; border: 1px solid var(--border); background: var(--surface); }
+.agent-synthesis-meta { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 14px; border-bottom: 1px solid var(--border-soft); }
+.agent-synthesis-meta strong { font-size: 12px; }
+.agent-synthesis-meta span { color: var(--muted); font-size: 10px; }
+.agent-synthesis-content { max-height: calc(100vh - 420px); min-height: 120px; overflow: auto; padding: 15px; color: var(--muted-strong); font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
 
 .actions-pane { padding: 24px 20px; border-left: 1px solid var(--border); }
 .actions-heading { display: flex; align-items: center; justify-content: space-between; }

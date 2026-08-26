@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "agent": "tlc-risk-solution-play",
+  "scenarios": [
+    {
+      "id": "supported-risk-review",
+      "prompt": "What risks could block this opportunity?",
+      "expected": ["Includes supported severity and impact", "Cites contributing signals", "Assigns mitigation owners"]
+    },
+    {
+      "id": "approved-solution-package",
+      "prompt": "Build a healthcare AI workshop package.",
+      "expected": ["Uses only supplied approved assets", "Includes demo path and objections", "Labels follow-up for review"]
+    },
+    {
+      "id": "content-source-unavailable",
+      "prompt": "Build a solution play while Seismic is unavailable.",
+      "expected": ["Returns partial supported results", "Names the unavailable source", "Does not invent assets"]
+    }
+  ]
+}

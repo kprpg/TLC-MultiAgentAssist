@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "agent": "tlc-pursuit-executive",
+  "scenarios": [
+    {
+      "id": "executive-meeting-brief",
+      "prompt": "Prepare me for tomorrow's executive meeting with this customer.",
+      "expected": ["Provides situation and talking points", "Separates internal strategy", "Labels review-required draft"]
+    },
+    {
+      "id": "pursuit-plan-from-gaps",
+      "prompt": "Create a 30/60 day pursuit plan for this opportunity.",
+      "expected": ["Uses supplied MCEM gaps", "Includes milestones and owners", "Includes next meeting agenda"]
+    },
+    {
+      "id": "missing-executive-sponsor",
+      "prompt": "Create an executive brief without recent activity or a known sponsor.",
+      "expected": ["Scopes the partial result", "Identifies missing context", "Does not invent stakeholders"]
+    }
+  ]
+}

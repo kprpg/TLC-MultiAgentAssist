@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "agent": "tlc-account-pulse",
+  "scenarios": [
+    {
+      "id": "weekly-focus-grounded",
+      "prompt": "What should I focus on this week?",
+      "expected": ["Ranks supported priorities", "Explains signals and freshness", "Assigns owner roles"]
+    },
+    {
+      "id": "insufficient-evidence-no-ranking",
+      "prompt": "Rank these opportunities when activity and milestone evidence are missing.",
+      "expected": ["Does not rank", "Lists missing information", "Requests evidence needed"]
+    },
+    {
+      "id": "stale-partial-sources",
+      "prompt": "Create a weekly focus with stale activity and an unavailable source.",
+      "expected": ["Labels stale and partial data", "Preserves supported results", "Avoids invented signals"]
+    }
+  ]
+}

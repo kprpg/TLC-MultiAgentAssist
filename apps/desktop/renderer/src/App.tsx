@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Badge,
   Button,
@@ -8,6 +8,9 @@ import {
   Option,
   ProgressBar,
   Spinner,
+  Tab,
+  TabList,
+  Textarea,
   webDarkTheme,
   webLightTheme
 } from '@fluentui/react-components'
@@ -24,12 +27,19 @@ import {
   WeatherSunny20Regular,
   Warning20Filled
 } from '@fluentui/react-icons'
-import { contractVersion, type Account, type DesktopDataStatus, type McemResponse, type Opportunity } from '../../../../packages/common/index.js'
+import { contractVersion, type Account, type AgentCapability, type AgentTaskResponse, type DesktopDataStatus, type McemResponse, type Opportunity } from '../../../../packages/common/index.js'
 import { getDataModeLabel } from './data-mode-label.js'
 
 const prompt = 'How do we move this opportunity to the next MCEM stage?'
+const agentTasks: Record<AgentCapability, { label: string; prompt: string }> = {
+  'account-pulse': { label: 'Account Pulse', prompt: 'What should the account team focus on this week?' },
+  'mcem-coach': { label: 'MCEM Coach', prompt: 'How do we move this opportunity to the next MCEM stage?' },
+  'pursuit-executive': { label: 'Pursuit & Executive', prompt: 'Create an executive-ready pursuit plan for this opportunity.' },
+  'risk-solution-play': { label: 'Risk & Solution Play', prompt: 'Identify grounded risks and relevant solution-play actions.' }
+}
 const themeStorageKey = 'tlc-theme'
 type ThemeMode = 'light' | 'dark'
+type WorkbenchView = 'diagnostic' | 'foundry-agent'
 
 export function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialTheme)
@@ -38,9 +48,16 @@ export function App() {
   const [accountId, setAccountId] = useState('')
   const [opportunityId, setOpportunityId] = useState('')
   const [result, setResult] = useState<McemResponse | null>(null)
+  const [workbenchView, setWorkbenchView] = useState<WorkbenchView>('diagnostic')
+  const [capability, setCapability] = useState<AgentCapability>('account-pulse')
+  const [taskPrompt, setTaskPrompt] = useState(agentTasks['account-pulse'].prompt)
+  const [agentResult, setAgentResult] = useState<AgentTaskResponse | null>(null)
+  const [agentStatus, setAgentStatus] = useState<'ready' | 'running' | 'error'>('ready')
+  const [agentError, setAgentError] = useState('')
   const [dataStatus, setDataStatus] = useState<DesktopDataStatus | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'running' | 'error'>('loading')
   const [error, setError] = useState('')
+  const analysisPaneRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     document.documentElement.dataset['theme'] = themeMode
@@ -67,6 +84,7 @@ export function App() {
     }
     let active = true
     setResult(null)
+    setAgentResult(null)
     setOpportunities([])
     setOpportunityId('')
     void window.tlc.listOpportunities(accountId).then((items) => {
@@ -104,6 +122,31 @@ export function App() {
     } catch (cause) {
       handleError(cause)
     }
+  }
+
+  async function runAgentTask() {
+    if (!accountId || !opportunityId) return
+    setAgentStatus('running')
+    setAgentError('')
+    try {
+      const response = await window.tlc.runAgentTask({
+        contractVersion,
+        capability,
+        accountId,
+        opportunityId,
+        prompt: taskPrompt
+      })
+      setAgentResult(response)
+      setAgentStatus('ready')
+    } catch (cause) {
+      setAgentError(cause instanceof Error ? cause.message : 'The agent task could not be completed.')
+      setAgentStatus('error')
+    }
+  }
+
+  function selectWorkbenchView(nextView: WorkbenchView) {
+    setWorkbenchView(nextView)
+    analysisPaneRef.current?.scrollTo({ top: 0 })
   }
 
   const account = accounts.find((item) => item.id === accountId)
@@ -181,14 +224,14 @@ export function App() {
           </div>
         </aside>
 
-        <section className="analysis-pane">
+        <section className="analysis-pane" ref={analysisPaneRef}>
           <div className="analysis-header">
             <div>
-              <div className="eyebrow">MCEM OPPORTUNITY DIAGNOSTIC</div>
+              <div className="eyebrow">{workbenchView === 'diagnostic' ? 'MCEM OPPORTUNITY DIAGNOSTIC' : 'FOUNDRY AGENT TASK'}</div>
               <h1>{opportunity?.name ?? 'Select an opportunity'}</h1>
-              <p>{prompt}</p>
+              <p>{workbenchView === 'diagnostic' ? prompt : 'Ask a specialized account-team agent using grounded MSX and MCEM context.'}</p>
             </div>
-            <Button
+            {workbenchView === 'diagnostic' && <Button
               className="icon-control refresh-analysis"
               icon={<ArrowSync20Regular />}
               appearance="subtle"
@@ -196,13 +239,20 @@ export function App() {
               title="Refresh analysis"
               onClick={() => void runCoach()}
               disabled={status === 'running'}
-            />
+            />}
           </div>
+
+          {result && <TabList className="workbench-view-tabs" aria-label="Workbench view" selectedValue={workbenchView} onTabSelect={(_, data) => {
+            selectWorkbenchView(data.value as WorkbenchView)
+          }}>
+            <Tab value="diagnostic">Diagnostic</Tab>
+            <Tab value="foundry-agent">Foundry Agent</Tab>
+          </TabList>}
 
           {status === 'error' && <MessageBar intent="error">{error}</MessageBar>}
           {(status === 'loading' || status === 'running') && <div className="loading-state"><Spinner label="Evaluating opportunity evidence" /></div>}
 
-          {result && status !== 'loading' && <>
+          {result && status !== 'loading' && workbenchView === 'diagnostic' && <div className="diagnostic-view">
             <div className="stage-comparison">
               <div><span>Recorded in MSX</span><strong>Stage {result.recordedStage}</strong><small>Solution Design</small></div>
               <ChevronRight20Regular />
@@ -232,7 +282,42 @@ export function App() {
                 if (evidence.url) void window.tlc.openEvidence(evidence.url)
               }}>{evidence.source.toUpperCase()}</Button>)}
             </div>
-          </>}
+          </div>}
+
+          {result && status !== 'loading' && workbenchView === 'foundry-agent' &&
+            <section className="agent-workbench" aria-labelledby="agent-workbench-title">
+              <div className="agent-workbench-heading">
+                <div><div className="eyebrow">FOUNDRY AGENT TASK</div><h2 id="agent-workbench-title">Ask the account team</h2></div>
+                {agentResult && <Badge appearance="tint" color={agentResult.state === 'complete' ? 'success' : 'warning'}>{agentResult.state}</Badge>}
+              </div>
+              <TabList selectedValue={capability} onTabSelect={(_, data) => {
+                const nextCapability = data.value as AgentCapability
+                setCapability(nextCapability)
+                setTaskPrompt(agentTasks[nextCapability].prompt)
+                setAgentResult(null)
+                setAgentError('')
+              }}>
+                {(Object.entries(agentTasks) as [AgentCapability, { label: string; prompt: string }][]).map(([value, task]) => (
+                  <Tab key={value} value={value}>{task.label}</Tab>
+                ))}
+              </TabList>
+              <div className="agent-task-input">
+                <Textarea aria-label="Agent task" resize="vertical" value={taskPrompt} onChange={(_, data) => setTaskPrompt(data.value)} />
+                <Button appearance="primary" onClick={() => void runAgentTask()} disabled={agentStatus === 'running' || taskPrompt.trim().length < 3}>
+                  {agentStatus === 'running' ? 'Analyzing...' : `Run ${agentTasks[capability].label}`}
+                </Button>
+              </div>
+              {agentStatus === 'error' && <MessageBar intent="error">{agentError}</MessageBar>}
+              {agentStatus === 'running' && <Spinner label={`Running ${agentTasks[capability].label}`} />}
+              {agentResult && agentStatus !== 'running' && <article className="agent-synthesis">
+                <div className="agent-synthesis-meta">
+                  <strong>{agentTasks[agentResult.capability].label}</strong>
+                  <span>Agent {agentResult.agentVersion} · {agentResult.sourceHealth.map((source) => source.source.toUpperCase()).join(' + ')}</span>
+                </div>
+                <div className="agent-synthesis-content">{agentResult.content}</div>
+              </article>}
+            </section>
+          }
         </section>
 
         <aside className="actions-pane">
