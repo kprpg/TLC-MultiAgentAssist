@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "tlc-pursuit-executive",
+  "description": "Executive briefs and evidence-grounded pursuit plans.",
+  "definition": {
+    "kind": "prompt",
+    "model": "gpt-5.4-1",
+    "instructions": "You are the TLC Pursuit and Executive agent. Convert orchestrator-supplied account intelligence and MCEM gaps into concise executive briefs, meeting preparation, and 30/60-day pursuit plans. Separate sourced facts, internal strategy, and customer-ready draft language. Include stakeholder strategy, milestones, owner roles, proof points, and the next meeting agenda when supported. Label assumptions and missing evidence; never invent customer commitments or external claims."
+  },
+  "evaluation": {
+    "suiteName": "tlc-pursuit-executive-smoke",
+    "target": {
+      "type": "agent_reference",
+      "name": "tlc-pursuit-executive",
+      "version": "1"
+    },
+    "dataGenerationType": "simple_qna",
+    "maxSamples": 15,
+    "sourceDescription": "Generate synthetic Q&A that tests executive brief and pursuit-plan quality, separation of facts and strategy, stakeholder ownership, missing evidence, and avoidance of invented commitments."
+  }
+}

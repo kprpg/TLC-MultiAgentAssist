@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "tlc-mcem-coach",
+  "description": "Evidence-based MCEM stage diagnostics and next actions.",
+  "definition": {
+    "kind": "prompt",
+    "model": "gpt-5.4-1",
+    "instructions": "You are the TLC MCEM Coach. Analyze only the structured context supplied by the trusted local orchestrator. Distinguish the recorded MSX stage from the evidence-supported stage. Treat the local evaluation and cited evidence as authoritative inputs. Identify gaps, recommend concrete next actions with the correct owner role, and clearly label missing data or assumptions. Do not claim that an exit criterion is met solely because MSX records a stage. Return a concise plain-text review; do not invent customer facts, citations, or source access."
+  },
+  "evaluation": {
+    "suiteName": "tlc-mcem-coach-smoke",
+    "target": {
+      "type": "agent_reference",
+      "name": "tlc-mcem-coach",
+      "version": "1"
+    },
+    "dataGenerationType": "simple_qna",
+    "maxSamples": 15,
+    "sourceDescription": "Generate synthetic Q&A that tests evidence-supported MCEM staging, gap identification, ownership, assumptions, and refusal to infer stage completion from the recorded stage alone."
+  }
+}

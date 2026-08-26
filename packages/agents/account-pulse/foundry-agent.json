@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "tlc-account-pulse",
+  "description": "Explainable account and opportunity prioritization.",
+  "definition": {
+    "kind": "prompt",
+    "model": "gpt-5.4-1",
+    "instructions": "You are the TLC Account Pulse agent. Prioritize accounts, opportunities, milestones, and actions using only the structured evidence supplied by the trusted local orchestrator. Explain every ranking with cited signals, timestamps, and data-quality limits. Do not rank when evidence is below a defensible threshold. Separate observed facts from assumptions and never invent customer activity. Return concise weekly focus and top-risk guidance."
+  },
+  "evaluation": {
+    "suiteName": "tlc-account-pulse-smoke",
+    "target": {
+      "type": "agent_reference",
+      "name": "tlc-account-pulse",
+      "version": "1"
+    },
+    "dataGenerationType": "simple_qna",
+    "maxSamples": 15,
+    "sourceDescription": "Generate synthetic Q&A that tests explainable prioritization, evidence citations, timestamps, data-quality limits, and refusal to rank when evidence is insufficient."
+  }
+}

@@ -3,8 +3,9 @@ import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identit
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { PDFParse } from "pdf-parse";
+import { AIProjectClient } from "@azure/ai-projects";
 import { randomUUID } from "node:crypto";
 var dataModeSchema = z.enum(["sample", "live"]);
 var sourceStateSchema = z.enum([
@@ -564,6 +565,40 @@ var LocalPdfMcemGuidanceConnector = class {
 	}
 };
 //#endregion
+//#region packages/connectors/foundry/index.ts
+var FoundryMcemAgent = class {
+	openAIClient;
+	constructor(options) {
+		this.options = options;
+		const project = new AIProjectClient(options.projectEndpoint, options.credential);
+		this.openAIClient = project.getOpenAIClient();
+	}
+	async invoke(context) {
+		const abortController = new AbortController();
+		const timeout = setTimeout(() => abortController.abort(), this.options.requestTimeoutMs);
+		try {
+			if (!(await this.openAIClient.responses.create({ input: JSON.stringify(context) }, {
+				body: { agent_reference: {
+					name: this.options.agentName,
+					type: "agent_reference"
+				} },
+				signal: abortController.signal
+			})).output_text?.trim()) throw new Error(`Foundry agent ${this.options.agentName} returned no text output.`);
+		} finally {
+			clearTimeout(timeout);
+		}
+	}
+};
+var RecordingMcemAgent = class {
+	constructor(capturePath) {
+		this.capturePath = capturePath;
+	}
+	async invoke(context) {
+		await mkdir(dirname(this.capturePath), { recursive: true });
+		await writeFile(this.capturePath, `${JSON.stringify(context, null, 2)}\n`, "utf8");
+	}
+};
+//#endregion
 //#region packages/agents/mcem-coach/src/index.ts
 var mcemCoachVersion = "0.1.0";
 function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
@@ -639,9 +674,10 @@ function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
 //#endregion
 //#region packages/orchestrator/index.ts
 var ThinSliceOrchestrator = class {
-	constructor(msx, mcem) {
+	constructor(msx, mcem, mcemAgent) {
 		this.msx = msx;
 		this.mcem = mcem;
+		this.mcemAgent = mcemAgent;
 	}
 	listAccounts() {
 		return this.msx.listAccounts();
@@ -653,7 +689,15 @@ var ThinSliceOrchestrator = class {
 		const request = mcemRequestSchema.parse(input);
 		const context = await this.msx.getOpportunityContext(request.opportunityId);
 		if (context.account.id !== request.accountId) throw new Error("The selected opportunity does not belong to the selected account.");
-		return evaluateMcemProgress(context, await this.mcem.getStageGuidance(context.opportunity.recordedStage));
+		const guidance = await this.mcem.getStageGuidance(context.opportunity.recordedStage);
+		const localEvaluation = evaluateMcemProgress(context, guidance);
+		await this.mcemAgent?.invoke({
+			request,
+			opportunityContext: context,
+			guidance,
+			localEvaluation
+		});
+		return localEvaluation;
 	}
 };
 //#endregion
@@ -723,13 +767,15 @@ var preloadFile = resolve(desktopRoot, "dist-electron/preload/index.cjs");
 var developmentUrl = process.env["VITE_DEV_SERVER_URL"];
 var allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString();
 var dataMode = process.env["TLC_DATA_MODE"] === "sample" ? "sample" : "live";
-var authentication = (dataMode === "live" ? await loadFoundryEnvironment(resolveFoundryEnvironmentPath()) : void 0)?.authentication;
+var runtimeEnvironment = dataMode === "live" ? await loadFoundryEnvironment(resolveFoundryEnvironmentPath()) : void 0;
+var authentication = runtimeEnvironment?.authentication;
+var credential = authentication?.mode === "interactive-browser" ? new InteractiveBrowserCredential({
+	tenantId: authentication.appRegistration.tenantId,
+	clientId: authentication.appRegistration.clientId,
+	redirectUri: authentication.appRegistration.redirectUri
+}) : new AzureCliCredential({ processTimeoutInMs: 3e4 });
 var tokenProvider = new AzureCliMsxTokenProvider({
-	credential: authentication?.mode === "interactive-browser" ? new InteractiveBrowserCredential({
-		tenantId: authentication.appRegistration.tenantId,
-		clientId: authentication.appRegistration.clientId,
-		redirectUri: authentication.appRegistration.redirectUri
-	}) : new AzureCliCredential({ processTimeoutInMs: 3e4 }),
+	credential,
 	...authentication ? {
 		scope: authentication.scopes.msx[0],
 		expectedUserDomain: authentication.expectedUserDomain,
@@ -737,7 +783,14 @@ var tokenProvider = new AzureCliMsxTokenProvider({
 	} : {}
 });
 var mcemConnector = new LocalPdfMcemGuidanceConnector(resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
-var orchestrator = new ThinSliceOrchestrator(dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider), mcemConnector);
+var msxConnector = dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider);
+var smokeCapturePath = process.env["TLC_SMOKE_FOUNDRY_CAPTURE_PATH"]?.trim();
+var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, smokeCapturePath ? new RecordingMcemAgent(resolve(smokeCapturePath)) : runtimeEnvironment ? new FoundryMcemAgent({
+	projectEndpoint: runtimeEnvironment.foundry.projectEndpoint,
+	agentName: runtimeEnvironment.foundry.agents.mcemCoach.name,
+	requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
+	credential
+}) : void 0);
 async function getDataStatus() {
 	if (dataMode === "sample") return {
 		mode: "sample",

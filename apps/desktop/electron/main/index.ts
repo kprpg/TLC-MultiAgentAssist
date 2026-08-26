@@ -10,6 +10,7 @@ import {
 } from '../../../../packages/common/configuration/foundry-environment.js'
 import { FixtureMsxConnector, LiveMsxConnector } from '../../../../packages/connectors/msx/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
+import { FoundryMcemAgent, RecordingMcemAgent } from '../../../../packages/connectors/foundry/index.js'
 import { ThinSliceOrchestrator } from '../../../../packages/orchestrator/index.js'
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
 
@@ -45,9 +46,21 @@ const mcemConnector = new LocalPdfMcemGuidanceConnector(resolve(desktopRoot, '..
 const msxConnector = dataMode === 'sample'
   ? new FixtureMsxConnector()
   : new LiveMsxConnector(tokenProvider)
+const smokeCapturePath = process.env['TLC_SMOKE_FOUNDRY_CAPTURE_PATH']?.trim()
+const mcemAgent = smokeCapturePath
+  ? new RecordingMcemAgent(resolve(smokeCapturePath))
+  : runtimeEnvironment
+    ? new FoundryMcemAgent({
+        projectEndpoint: runtimeEnvironment.foundry.projectEndpoint,
+        agentName: runtimeEnvironment.foundry.agents.mcemCoach.name,
+        requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
+        credential
+      })
+    : undefined
 const orchestrator = new ThinSliceOrchestrator(
   msxConnector,
-  mcemConnector
+  mcemConnector,
+  mcemAgent
 )
 
 async function getDataStatus(): Promise<DesktopDataStatus> {

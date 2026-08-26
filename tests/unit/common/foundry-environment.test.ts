@@ -32,10 +32,10 @@ const validEnvironment = {
     projectEndpoint: 'https://example.services.ai.azure.com/api/projects/tlc',
     requestTimeoutMs: 60_000,
     agents: {
-      mcemCoach: { name: 'tlc-mcem-coach', type: 'hosted', protocol: 'responses' },
-      riskSolutionPlay: { name: 'tlc-risk-solution-play', type: 'hosted', protocol: 'responses' },
-      pursuitExecutive: { name: 'tlc-pursuit-executive', type: 'hosted', protocol: 'responses' },
-      accountPulse: { name: 'tlc-account-pulse', type: 'hosted', protocol: 'responses' }
+      mcemCoach: { name: 'tlc-mcem-coach', type: 'prompt', protocol: 'responses' },
+      riskSolutionPlay: { name: 'tlc-risk-solution-play', type: 'prompt', protocol: 'responses' },
+      pursuitExecutive: { name: 'tlc-pursuit-executive', type: 'prompt', protocol: 'responses' },
+      accountPulse: { name: 'tlc-account-pulse', type: 'prompt', protocol: 'responses' }
     }
   }
 } as const
@@ -49,7 +49,15 @@ describe('Foundry environment configuration', () => {
     const filePath = fileURLToPath(new URL('../../../config/foundry.environment.example.json', import.meta.url))
 
     await expect(loadFoundryEnvironment(filePath)).resolves.toMatchObject({
-      authentication: { mode: 'azure-cli' }
+      authentication: { mode: 'azure-cli' },
+      foundry: {
+        agents: {
+          mcemCoach: { type: 'prompt', protocol: 'responses' },
+          riskSolutionPlay: { type: 'prompt', protocol: 'responses' },
+          pursuitExecutive: { type: 'prompt', protocol: 'responses' },
+          accountPulse: { type: 'prompt', protocol: 'responses' }
+        }
+      }
     })
   })
 

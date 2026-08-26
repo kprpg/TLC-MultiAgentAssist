@@ -4,11 +4,62 @@ import { evaluateMcemProgress } from '../../../packages/agents/mcem-coach/index.
 import { contractVersion, mcemResponseSchema } from '../../../packages/common/index.js'
 import { FixtureMsxConnector } from '../../../packages/connectors/msx/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
-import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
+import {
+  ThinSliceOrchestrator,
+  type McemAgent,
+  type McemAgentContext
+} from '../../../packages/orchestrator/index.js'
 
 const mcemConnector = () => new LocalPdfMcemGuidanceConnector(resolve('docs/knowledge/MCEM Overview.pdf'))
 
 describe('MCEM Coach thin slice', () => {
+  it('sends the selected account, opportunity, evidence, and guidance to the MCEM agent boundary', async () => {
+    const invocations: McemAgentContext[] = []
+    const agent: McemAgent = {
+      invoke: async (context) => {
+        invocations.push(context)
+      }
+    }
+    const orchestrator = new ThinSliceOrchestrator(
+      new FixtureMsxConnector(),
+      mcemConnector(),
+      agent
+    )
+
+    await orchestrator.runMcemCoach({
+      contractVersion,
+      accountId: 'account-contoso',
+      opportunityId: 'opp-grid-modernization',
+      prompt: 'How do we move this opportunity to the next MCEM stage?'
+    })
+
+    expect(invocations).toHaveLength(1)
+    expect(invocations[0]).toMatchObject({
+      request: {
+        accountId: 'account-contoso',
+        opportunityId: 'opp-grid-modernization'
+      },
+      opportunityContext: {
+        account: { id: 'account-contoso', name: 'Contoso Energy' },
+        opportunity: { id: 'opp-grid-modernization', recordedStage: 3 }
+      },
+      guidance: {
+        stage: 3,
+        criteria: expect.arrayContaining([
+          expect.objectContaining({ id: 'customer-outcome' })
+        ])
+      },
+      localEvaluation: {
+        recordedStage: 3,
+        evidenceBasedStage: 2,
+        evidence: expect.arrayContaining([
+          expect.objectContaining({ source: 'msx' }),
+          expect.objectContaining({ source: 'mcem' })
+        ])
+      }
+    })
+  })
+
   it('returns evidence-based divergence, owner actions, citations, and sample states', async () => {
     const orchestrator = new ThinSliceOrchestrator(
       new FixtureMsxConnector(),

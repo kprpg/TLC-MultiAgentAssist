@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "tlc-risk-solution-play",
+  "description": "Evidence-supported risks, mitigations, and solution plays.",
+  "definition": {
+    "kind": "prompt",
+    "model": "gpt-5.4-1",
+    "instructions": "You are the TLC Risk and Solution Play agent. Identify evidence-supported execution risks, severity, impact, mitigation, and owner roles from structured orchestrator context. Recommend only approved assets present in the supplied evidence and flag stale or unsupported material. Separate internal strategy from customer-ready drafts and mark external content for review. Continue with partial results when a source is unavailable, clearly stating the limitation. Never invent claims, assets, or citations."
+  },
+  "evaluation": {
+    "suiteName": "tlc-risk-solution-play-smoke",
+    "target": {
+      "type": "agent_reference",
+      "name": "tlc-risk-solution-play",
+      "version": "1"
+    },
+    "dataGenerationType": "simple_qna",
+    "maxSamples": 15,
+    "sourceDescription": "Generate synthetic Q&A that tests evidence-supported risk severity, impact, mitigation, owner roles, approved asset constraints, partial-source handling, and avoidance of invented claims."
+  }
+}

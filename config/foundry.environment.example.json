@@ -27,22 +27,22 @@
     "agents": {
       "mcemCoach": {
         "name": "tlc-mcem-coach",
-        "type": "hosted",
+        "type": "prompt",
         "protocol": "responses"
       },
       "riskSolutionPlay": {
         "name": "tlc-risk-solution-play",
-        "type": "hosted",
+        "type": "prompt",
         "protocol": "responses"
       },
       "pursuitExecutive": {
         "name": "tlc-pursuit-executive",
-        "type": "hosted",
+        "type": "prompt",
         "protocol": "responses"
       },
       "accountPulse": {
         "name": "tlc-account-pulse",
-        "type": "hosted",
+        "type": "prompt",
         "protocol": "responses"
       }
     }
