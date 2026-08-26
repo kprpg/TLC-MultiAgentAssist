@@ -6,5 +6,6 @@ test-results/
 .env
 .env.*
 !.env.example
+config/foundry.environment.json
 out/
 release/

@@ -2,8 +2,6 @@ import { AzureCliCredential } from '@azure/identity'
 import type { AuthStatus } from '../../../../packages/common/index.js'
 import type { MsxAccessTokenProvider } from '../../../../packages/connectors/msx/index.js'
 
-const msxScope = 'https://microsoftsales.crm.dynamics.com/.default'
-const corpDomain = '@microsoft.com'
 const refreshBufferMs = 5 * 60 * 1000
 
 interface AccessToken {
@@ -15,23 +13,37 @@ interface TokenCredential {
   getToken(scope: string): Promise<AccessToken | null>
 }
 
+interface AzureCliMsxTokenProviderOptions {
+  credential?: TokenCredential
+  scope?: string
+  expectedUserDomain?: string
+  authenticationLabel?: string
+}
+
 export class AzureCliMsxTokenProvider implements MsxAccessTokenProvider {
   private cachedToken: AccessToken | undefined
   private corpId: string | undefined
+  private readonly credential: TokenCredential
+  private readonly scope: string
+  private readonly expectedUserDomain: string
+  private readonly authenticationLabel: string
 
-  constructor(
-    private readonly credential: TokenCredential = new AzureCliCredential({ processTimeoutInMs: 30_000 })
-  ) {}
+  constructor(options: AzureCliMsxTokenProviderOptions = {}) {
+    this.credential = options.credential ?? new AzureCliCredential({ processTimeoutInMs: 30_000 })
+    this.scope = options.scope ?? 'https://microsoftsales.crm.dynamics.com/.default'
+    this.expectedUserDomain = options.expectedUserDomain ?? '@microsoft.com'
+    this.authenticationLabel = options.authenticationLabel ?? 'Azure CLI'
+  }
 
   async getAccessToken(): Promise<string> {
     if (this.cachedToken && this.cachedToken.expiresOnTimestamp > Date.now() + refreshBufferMs) {
       return this.cachedToken.token
     }
 
-    const accessToken = await this.credential.getToken(msxScope)
-    if (!accessToken) throw new Error('Azure CLI did not return an MSX access token.')
+    const accessToken = await this.credential.getToken(this.scope)
+    if (!accessToken) throw new Error(`${this.authenticationLabel} did not return an MSX access token.`)
 
-    this.corpId = readMicrosoftCorpId(accessToken.token)
+    this.corpId = readMicrosoftCorpId(accessToken.token, this.expectedUserDomain)
     this.cachedToken = accessToken
     return accessToken.token
   }
@@ -42,7 +54,7 @@ export class AzureCliMsxTokenProvider implements MsxAccessTokenProvider {
       return {
         state: 'ready',
         ...(this.corpId ? { displayName: this.corpId } : {}),
-        detail: `Azure CLI is signed in as ${this.corpId ?? 'a Microsoft corporate user'}.`
+        detail: `${this.authenticationLabel} is signed in as ${this.corpId ?? 'an authorized user'}.`
       }
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : 'Azure CLI authentication failed.'
@@ -51,7 +63,7 @@ export class AzureCliMsxTokenProvider implements MsxAccessTokenProvider {
         ? 'cli-missing'
         : normalized.includes('aadsts65001') || normalized.includes('consent')
           ? 'consent-required'
-          : normalized.includes('aadsts50020') || normalized.includes('tenant') || normalized.includes('corporate identity')
+          : normalized.includes('aadsts50020') || normalized.includes('tenant') || normalized.includes('authorized identity')
             ? 'tenant-mismatch'
             : 'login-required'
       return { state, detail }
@@ -59,7 +71,7 @@ export class AzureCliMsxTokenProvider implements MsxAccessTokenProvider {
   }
 }
 
-export function readMicrosoftCorpId(accessToken: string): string {
+export function readMicrosoftCorpId(accessToken: string, expectedUserDomain = '@microsoft.com'): string {
   const payloadPart = accessToken.split('.')[1]
   if (!payloadPart) throw new Error('Azure CLI returned an invalid MSX access token.')
 
@@ -71,9 +83,9 @@ export function readMicrosoftCorpId(accessToken: string): string {
   }
 
   const corpId = [claims['preferred_username'], claims['upn'], claims['unique_name']]
-    .find((claim): claim is string => typeof claim === 'string' && claim.toLowerCase().endsWith(corpDomain))
+    .find((claim): claim is string => typeof claim === 'string' && claim.toLowerCase().endsWith(expectedUserDomain))
   if (!corpId) {
-    throw new Error('The active Azure CLI token is not a Microsoft corporate identity. Sign in with your @microsoft.com CORP ID.')
+    throw new Error(`The active token is not an authorized identity. Sign in with an ${expectedUserDomain} account.`)
   }
   return corpId
 }

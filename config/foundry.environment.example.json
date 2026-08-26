@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "environment": "developer",
+  "authentication": {
+    "mode": "interactive-browser",
+    "expectedUserDomain": "@microsoft.com",
+    "appRegistration": {
+      "tenantId": "11111111-1111-4111-8111-111111111111",
+      "clientId": "22222222-2222-4222-8222-222222222222",
+      "redirectUri": "http://localhost"
+    },
+    "scopes": {
+      "foundry": [
+        "https://ai.azure.com/.default"
+      ],
+      "msx": [
+        "https://microsoftsales.crm.dynamics.com/.default"
+      ],
+      "graph": [
+        "https://graph.microsoft.com/.default"
+      ]
+    }
+  },
+  "foundry": {
+    "projectEndpoint": "https://YOUR-FOUNDRY-ACCOUNT.services.ai.azure.com/api/projects/YOUR-PROJECT",
+    "requestTimeoutMs": 60000,
+    "agents": {
+      "mcemCoach": {
+        "name": "tlc-mcem-coach",
+        "type": "hosted",
+        "protocol": "responses"
+      },
+      "riskSolutionPlay": {
+        "name": "tlc-risk-solution-play",
+        "type": "hosted",
+        "protocol": "responses"
+      },
+      "pursuitExecutive": {
+        "name": "tlc-pursuit-executive",
+        "type": "hosted",
+        "protocol": "responses"
+      },
+      "accountPulse": {
+        "name": "tlc-account-pulse",
+        "type": "hosted",
+        "protocol": "responses"
+      }
+    }
+  }
+}

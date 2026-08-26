@@ -1,8 +1,13 @@
 import { app, BrowserWindow, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
+import { AzureCliCredential, InteractiveBrowserCredential } from '@azure/identity'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { z } from 'zod'
 import { mcemRequestSchema, type AuthStatus, type DesktopDataStatus } from '../../../../packages/common/index.js'
+import {
+  loadFoundryEnvironment,
+  resolveFoundryEnvironmentPath
+} from '../../../../packages/common/configuration/foundry-environment.js'
 import { FixtureMsxConnector, LiveMsxConnector } from '../../../../packages/connectors/msx/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
 import { ThinSliceOrchestrator } from '../../../../packages/orchestrator/index.js'
@@ -15,7 +20,27 @@ const preloadFile = resolve(desktopRoot, 'dist-electron/preload/index.cjs')
 const developmentUrl = process.env['VITE_DEV_SERVER_URL']
 const allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString()
 const dataMode = process.env['TLC_DATA_MODE'] === 'sample' ? 'sample' : 'live'
-const tokenProvider = new AzureCliMsxTokenProvider()
+const runtimeEnvironment = dataMode === 'live'
+  ? await loadFoundryEnvironment(resolveFoundryEnvironmentPath())
+  : undefined
+const authentication = runtimeEnvironment?.authentication
+const credential = authentication?.mode === 'interactive-browser'
+  ? new InteractiveBrowserCredential({
+      tenantId: authentication.appRegistration.tenantId,
+      clientId: authentication.appRegistration.clientId,
+      redirectUri: authentication.appRegistration.redirectUri
+    })
+  : new AzureCliCredential({ processTimeoutInMs: 30_000 })
+const tokenProvider = new AzureCliMsxTokenProvider({
+  credential,
+  ...(authentication
+    ? {
+        scope: authentication.scopes.msx[0],
+        expectedUserDomain: authentication.expectedUserDomain,
+        authenticationLabel: authentication.mode === 'interactive-browser' ? 'Interactive sign-in' : 'Azure CLI'
+      }
+    : {})
+})
 const mcemConnector = new LocalPdfMcemGuidanceConnector(resolve(desktopRoot, '../../docs/knowledge/MCEM Overview.pdf'))
 const msxConnector = dataMode === 'sample'
   ? new FixtureMsxConnector()

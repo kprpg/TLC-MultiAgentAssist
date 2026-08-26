@@ -1,11 +1,11 @@
 import { BrowserWindow, app, ipcMain, shell } from "electron";
+import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { PDFParse } from "pdf-parse";
 import { randomUUID } from "node:crypto";
-import { AzureCliCredential } from "@azure/identity";
 var dataModeSchema = z.enum(["sample", "live"]);
 var sourceStateSchema = z.enum([
 	"sample",
@@ -144,6 +144,68 @@ z.object({
 	]),
 	comment: z.string().max(500).optional()
 });
+//#endregion
+//#region packages/common/configuration/foundry-environment.ts
+var appRegistrationSchema = z.object({
+	tenantId: z.string().uuid(),
+	clientId: z.string().uuid(),
+	redirectUri: z.string().url()
+}).strict();
+var resourceScopesSchema = z.object({
+	foundry: z.array(z.string().min(1)).min(1),
+	msx: z.array(z.string().min(1)).min(1),
+	graph: z.array(z.string().min(1)).min(1)
+}).strict();
+var authenticationSchema = z.discriminatedUnion("mode", [z.object({
+	mode: z.literal("azure-cli"),
+	expectedUserDomain: z.string().regex(/^@[a-z0-9.-]+$/),
+	scopes: resourceScopesSchema,
+	appRegistration: appRegistrationSchema.optional()
+}).strict(), z.object({
+	mode: z.literal("interactive-browser"),
+	expectedUserDomain: z.string().regex(/^@[a-z0-9.-]+$/),
+	scopes: resourceScopesSchema,
+	appRegistration: appRegistrationSchema
+}).strict()]);
+var foundryAgentSchema = z.object({
+	name: z.string().min(1),
+	type: z.enum(["prompt", "hosted"]),
+	protocol: z.enum(["responses", "invocations"])
+}).strict();
+var foundryEnvironmentSchema = z.object({
+	schemaVersion: z.literal(1),
+	environment: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+	authentication: authenticationSchema,
+	foundry: z.object({
+		projectEndpoint: z.string().url(),
+		requestTimeoutMs: z.number().int().min(1e3).max(3e5),
+		agents: z.object({
+			mcemCoach: foundryAgentSchema,
+			riskSolutionPlay: foundryAgentSchema,
+			pursuitExecutive: foundryAgentSchema,
+			accountPulse: foundryAgentSchema
+		}).strict()
+	}).strict()
+}).strict();
+function resolveFoundryEnvironmentPath(environment = process.env, workingDirectory = process.cwd()) {
+	const configuredPath = environment["TLC_FOUNDRY_ENV_FILE"]?.trim();
+	return resolve(workingDirectory, configuredPath || "config/foundry.environment.json");
+}
+async function loadFoundryEnvironment(filePath) {
+	let content;
+	try {
+		content = await readFile(filePath, "utf8");
+	} catch (cause) {
+		throw new Error(`Unable to read Foundry environment file: ${filePath}`, { cause });
+	}
+	let candidate;
+	try {
+		candidate = JSON.parse(content);
+	} catch (cause) {
+		throw new Error(`Foundry environment file is not valid JSON: ${filePath}`, { cause });
+	}
+	return foundryEnvironmentSchema.parse(candidate);
+}
 //#endregion
 //#region packages/connectors/msx/live.ts
 var defaultBaseUrl = "https://microsoftsales.crm.dynamics.com/api/data/v9.2/";
@@ -596,20 +658,25 @@ var ThinSliceOrchestrator = class {
 };
 //#endregion
 //#region apps/desktop/electron/main/azure-cli-token-provider.ts
-var msxScope = "https://microsoftsales.crm.dynamics.com/.default";
-var corpDomain = "@microsoft.com";
 var refreshBufferMs = 300 * 1e3;
 var AzureCliMsxTokenProvider = class {
 	cachedToken;
 	corpId;
-	constructor(credential = new AzureCliCredential({ processTimeoutInMs: 3e4 })) {
-		this.credential = credential;
+	credential;
+	scope;
+	expectedUserDomain;
+	authenticationLabel;
+	constructor(options = {}) {
+		this.credential = options.credential ?? new AzureCliCredential({ processTimeoutInMs: 3e4 });
+		this.scope = options.scope ?? "https://microsoftsales.crm.dynamics.com/.default";
+		this.expectedUserDomain = options.expectedUserDomain ?? "@microsoft.com";
+		this.authenticationLabel = options.authenticationLabel ?? "Azure CLI";
 	}
 	async getAccessToken() {
 		if (this.cachedToken && this.cachedToken.expiresOnTimestamp > Date.now() + refreshBufferMs) return this.cachedToken.token;
-		const accessToken = await this.credential.getToken(msxScope);
-		if (!accessToken) throw new Error("Azure CLI did not return an MSX access token.");
-		this.corpId = readMicrosoftCorpId(accessToken.token);
+		const accessToken = await this.credential.getToken(this.scope);
+		if (!accessToken) throw new Error(`${this.authenticationLabel} did not return an MSX access token.`);
+		this.corpId = readMicrosoftCorpId(accessToken.token, this.expectedUserDomain);
 		this.cachedToken = accessToken;
 		return accessToken.token;
 	}
@@ -619,19 +686,19 @@ var AzureCliMsxTokenProvider = class {
 			return {
 				state: "ready",
 				...this.corpId ? { displayName: this.corpId } : {},
-				detail: `Azure CLI is signed in as ${this.corpId ?? "a Microsoft corporate user"}.`
+				detail: `${this.authenticationLabel} is signed in as ${this.corpId ?? "an authorized user"}.`
 			};
 		} catch (cause) {
 			const detail = cause instanceof Error ? cause.message : "Azure CLI authentication failed.";
 			const normalized = detail.toLowerCase();
 			return {
-				state: normalized.includes("could not be found") || normalized.includes("not recognized") ? "cli-missing" : normalized.includes("aadsts65001") || normalized.includes("consent") ? "consent-required" : normalized.includes("aadsts50020") || normalized.includes("tenant") || normalized.includes("corporate identity") ? "tenant-mismatch" : "login-required",
+				state: normalized.includes("could not be found") || normalized.includes("not recognized") ? "cli-missing" : normalized.includes("aadsts65001") || normalized.includes("consent") ? "consent-required" : normalized.includes("aadsts50020") || normalized.includes("tenant") || normalized.includes("authorized identity") ? "tenant-mismatch" : "login-required",
 				detail
 			};
 		}
 	}
 };
-function readMicrosoftCorpId(accessToken) {
+function readMicrosoftCorpId(accessToken, expectedUserDomain = "@microsoft.com") {
 	const payloadPart = accessToken.split(".")[1];
 	if (!payloadPart) throw new Error("Azure CLI returned an invalid MSX access token.");
 	let claims;
@@ -644,8 +711,8 @@ function readMicrosoftCorpId(accessToken) {
 		claims["preferred_username"],
 		claims["upn"],
 		claims["unique_name"]
-	].find((claim) => typeof claim === "string" && claim.toLowerCase().endsWith(corpDomain));
-	if (!corpId) throw new Error("The active Azure CLI token is not a Microsoft corporate identity. Sign in with your @microsoft.com CORP ID.");
+	].find((claim) => typeof claim === "string" && claim.toLowerCase().endsWith(expectedUserDomain));
+	if (!corpId) throw new Error(`The active token is not an authorized identity. Sign in with an ${expectedUserDomain} account.`);
 	return corpId;
 }
 //#endregion
@@ -656,7 +723,19 @@ var preloadFile = resolve(desktopRoot, "dist-electron/preload/index.cjs");
 var developmentUrl = process.env["VITE_DEV_SERVER_URL"];
 var allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString();
 var dataMode = process.env["TLC_DATA_MODE"] === "sample" ? "sample" : "live";
-var tokenProvider = new AzureCliMsxTokenProvider();
+var authentication = (dataMode === "live" ? await loadFoundryEnvironment(resolveFoundryEnvironmentPath()) : void 0)?.authentication;
+var tokenProvider = new AzureCliMsxTokenProvider({
+	credential: authentication?.mode === "interactive-browser" ? new InteractiveBrowserCredential({
+		tenantId: authentication.appRegistration.tenantId,
+		clientId: authentication.appRegistration.clientId,
+		redirectUri: authentication.appRegistration.redirectUri
+	}) : new AzureCliCredential({ processTimeoutInMs: 3e4 }),
+	...authentication ? {
+		scope: authentication.scopes.msx[0],
+		expectedUserDomain: authentication.expectedUserDomain,
+		authenticationLabel: authentication.mode === "interactive-browser" ? "Interactive sign-in" : "Azure CLI"
+	} : {}
+});
 var mcemConnector = new LocalPdfMcemGuidanceConnector(resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
 var orchestrator = new ThinSliceOrchestrator(dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider), mcemConnector);
 async function getDataStatus() {

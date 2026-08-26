@@ -7,7 +7,7 @@ describe('AzureCliMsxTokenProvider', () => {
     const credential = {
       getToken: vi.fn().mockResolvedValue({ token, expiresOnTimestamp: Date.now() + 60 * 60 * 1000 })
     }
-    const provider = new AzureCliMsxTokenProvider(credential)
+    const provider = new AzureCliMsxTokenProvider({ credential })
 
     await expect(provider.getAccessToken()).resolves.toBe(token)
     await expect(provider.getAuthStatus()).resolves.toMatchObject({
@@ -21,10 +21,12 @@ describe('AzureCliMsxTokenProvider', () => {
   it('rejects a token that is not for a Microsoft corporate identity', async () => {
     const token = createToken({ preferred_username: 'personal@example.com' })
     const provider = new AzureCliMsxTokenProvider({
-      getToken: vi.fn().mockResolvedValue({ token, expiresOnTimestamp: Date.now() + 60 * 60 * 1000 })
+      credential: {
+        getToken: vi.fn().mockResolvedValue({ token, expiresOnTimestamp: Date.now() + 60 * 60 * 1000 })
+      }
     })
 
-    await expect(provider.getAccessToken()).rejects.toThrow('@microsoft.com CORP ID')
+    await expect(provider.getAccessToken()).rejects.toThrow('Sign in with an @microsoft.com account')
     await expect(provider.getAuthStatus()).resolves.toMatchObject({ state: 'tenant-mismatch' })
   })
 })
