@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   foundryEnvironmentSchema,
@@ -44,6 +45,14 @@ afterEach(async () => {
 })
 
 describe('Foundry environment configuration', () => {
+  it('keeps the checked-in sample valid and safe for Azure CLI startup', async () => {
+    const filePath = fileURLToPath(new URL('../../../config/foundry.environment.example.json', import.meta.url))
+
+    await expect(loadFoundryEnvironment(filePath)).resolves.toMatchObject({
+      authentication: { mode: 'azure-cli' }
+    })
+  })
+
   it('loads developer-specific Foundry and app registration settings', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'tlc-foundry-'))
     temporaryDirectories.push(directory)

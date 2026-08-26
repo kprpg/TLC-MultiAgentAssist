@@ -25,6 +25,7 @@ import {
   Warning20Filled
 } from '@fluentui/react-icons'
 import { contractVersion, type Account, type DesktopDataStatus, type McemResponse, type Opportunity } from '../../../../packages/common/index.js'
+import { getDataModeLabel } from './data-mode-label.js'
 
 const prompt = 'How do we move this opportunity to the next MCEM stage?'
 const themeStorageKey = 'tlc-theme'
@@ -110,6 +111,7 @@ export function App() {
   const metCount = result?.criteria.filter((criterion) => criterion.status === 'met').length ?? 0
   const progress = result ? metCount / result.criteria.length : 0
   const isLive = dataStatus?.mode === 'live'
+  const isStarting = dataStatus === null
   const authReady = dataStatus?.auth.state === 'ready'
 
   return (
@@ -130,13 +132,17 @@ export function App() {
           title={`Use ${themeMode === 'dark' ? 'light' : 'dark'} mode`}
           onClick={() => setThemeMode((current) => current === 'dark' ? 'light' : 'dark')}
         />
-        <Badge appearance="filled" color={isLive && authReady ? 'success' : 'warning'}>{isLive ? 'LIVE MSX' : 'SAMPLE DATA'}</Badge>
+        <Badge appearance="filled" color={isLive && authReady ? 'success' : 'warning'}>
+          {getDataModeLabel(dataStatus)}
+        </Badge>
         <div className="identity"><Person20Regular /><span>{dataStatus?.auth.displayName ?? (authReady ? 'Azure CLI connected' : 'Azure CLI sign-in required')}</span></div>
       </header>
 
       <div className={`sample-notice ${isLive && authReady ? 'live-notice' : ''}`}>
         <ShieldCheckmark20Regular />
-        <span>{isLive
+        <span>{isStarting
+          ? 'Connecting to the configured data source...'
+          : isLive
           ? authReady
             ? `Live MSX is scoped to ${dataStatus.auth.displayName ?? 'the signed-in Microsoft corporate user'}. MCEM guidance is loaded from the local MCEM Overview PDF snapshot; no SharePoint request is made.`
             : dataStatus?.auth.detail ?? 'Run az login with your Microsoft CORP ID, then restart the app.'

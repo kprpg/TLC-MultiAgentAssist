@@ -62,13 +62,15 @@ Each developer can therefore use a different Foundry project and app registratio
 
 ## Launch the app
 
-The example uses `"mode": "interactive-browser"`; the app opens the system browser when it first needs an MSX token.
+The example uses `"mode": "azure-cli"`, preserving the existing local development sign-in flow.
 
-To use the existing Azure CLI flow instead, set `authentication.mode` to `azure-cli`, then sign in with your own corporate identity:
+Sign in with your own corporate identity:
 
 ```powershell
 az login
 ```
+
+To use the app registration directly instead, set `authentication.mode` to `interactive-browser`. Replace the example tenant ID and client ID first; placeholder IDs will not authenticate.
 
 The app validates the token identity against `authentication.expectedUserDomain` and displays the discovered identity in the toolbar.
 
