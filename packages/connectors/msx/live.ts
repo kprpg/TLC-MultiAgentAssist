@@ -1,4 +1,4 @@
-import type { Account, Opportunity } from '../../common/index.js'
+import { measurePerformance, type Account, type Opportunity, type PerformanceReporter } from '../../common/index.js'
 import type { MsxConnector, OpportunityContext } from '../common/index.js'
 
 const defaultBaseUrl = 'https://microsoftsales.crm.dynamics.com/api/data/v9.2/'
@@ -55,7 +55,8 @@ export class LiveMsxConnector implements MsxConnector {
   constructor(
     private readonly tokenProvider: MsxAccessTokenProvider,
     private readonly fetchImplementation: typeof fetch = fetch,
-    baseUrl = defaultBaseUrl
+    baseUrl = defaultBaseUrl,
+    private readonly performanceReporter?: PerformanceReporter
   ) {
     this.baseUrl = new URL(baseUrl)
   }
@@ -107,30 +108,31 @@ export class LiveMsxConnector implements MsxConnector {
   }
 
   private async loadPortfolio(): Promise<{ accounts: Account[]; opportunities: Opportunity[] }> {
-    const identity = await this.requestJson<WhoAmIResponse>('WhoAmI')
-    const dealTeamRows = await this.requestAll<DealTeamRow>('msp_dealteams', {
+    const identity = await measurePerformance('msx.identity', this.performanceReporter, () =>
+      this.requestJson<WhoAmIResponse>('WhoAmI'))
+    const dealTeamRows = await measurePerformance('msx.deal-team', this.performanceReporter, () => this.requestAll<DealTeamRow>('msp_dealteams', {
       '$select': '_msp_parentopportunityid_value',
       '$filter': `statecode eq 0 and _msp_dealteamuserid_value eq ${identity.UserId}`
-    })
+    }))
     const opportunityIds = unique(
       dealTeamRows.map((row) => row._msp_parentopportunityid_value).filter(isPresent)
     )
-    const opportunityRows = await this.requestByIds<OpportunityRow>(
+    const opportunityRows = await measurePerformance('msx.opportunities', this.performanceReporter, () => this.requestByIds<OpportunityRow>(
       'opportunities',
       'opportunityid',
       opportunityIds,
       'opportunityid,_parentaccountid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate'
-    )
+    ))
     const activeOpportunities = opportunityRows.filter((row) => row._parentaccountid_value)
     const accountIds = unique(
       activeOpportunities.map((row) => row._parentaccountid_value).filter(isPresent)
     )
-    const accountRows = await this.requestByIds<AccountRow>(
+    const accountRows = await measurePerformance('msx.accounts', this.performanceReporter, () => this.requestByIds<AccountRow>(
       'accounts',
       'accountid',
       accountIds,
       'accountid,name'
-    )
+    ))
     const accounts = accountRows
       .map((row) => ({ id: row.accountid, name: row.name, segment: 'Live MSX' }))
       .sort((left, right) => left.name.localeCompare(right.name))

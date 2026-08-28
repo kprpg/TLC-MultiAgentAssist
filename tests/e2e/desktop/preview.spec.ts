@@ -1,17 +1,14 @@
 import { expect, test, _electron as electron } from '@playwright/test'
 import type { WebContents } from 'electron'
-import { mkdir, readFile, rm } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 test('launches the secure MCEM operational workbench', async () => {
-  const capturePath = resolve('test-results', 'electron-preview', 'foundry-context.json')
-  await rm(capturePath, { force: true })
   const app = await electron.launch({
     args: [resolve('apps/desktop')],
     env: {
       ...process.env,
-      TLC_DATA_MODE: 'sample',
-      TLC_SMOKE_FOUNDRY_CAPTURE_PATH: capturePath
+      TLC_DATA_MODE: 'sample'
     }
   })
 
@@ -42,30 +39,6 @@ test('launches the secure MCEM operational workbench', async () => {
     }
 
     await window.getByRole('tab', { name: 'Diagnostic', exact: true }).click()
-
-    await expect.poll(async () => {
-      const capture = JSON.parse(await readFile(capturePath, 'utf8')) as {
-        request: { accountId: string; opportunityId: string }
-        opportunityContext: { account: { name: string }; opportunity: { name: string } }
-        guidance: { criteria: unknown[] }
-        localEvaluation: { evidence: unknown[] }
-      }
-      return {
-        accountId: capture.request.accountId,
-        opportunityId: capture.request.opportunityId,
-        accountName: capture.opportunityContext.account.name,
-        opportunityName: capture.opportunityContext.opportunity.name,
-        hasGuidance: capture.guidance.criteria.length > 0,
-        hasEvidence: capture.localEvaluation.evidence.length > 0
-      }
-    }).toEqual({
-      accountId: 'account-contoso',
-      opportunityId: 'opp-grid-modernization',
-      accountName: 'Contoso Energy',
-      opportunityName: 'Grid operations modernization',
-      hasGuidance: true,
-      hasEvidence: true
-    })
 
     await window.evaluate(() => globalThis.scrollTo(0, 0))
     const startingTheme = await window.locator('html').getAttribute('data-theme')

@@ -11,7 +11,7 @@ const { responsesCreate, getOpenAIClient, AIProjectClient } = vi.hoisted(() => {
 
 vi.mock('@azure/ai-projects', () => ({ AIProjectClient }))
 
-import { FoundryPromptAgent } from '../../packages/connectors/foundry/index.js'
+import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../packages/connectors/foundry/index.js'
 
 describe('FoundryPromptAgent', () => {
   beforeEach(() => {
@@ -43,5 +43,23 @@ describe('FoundryPromptAgent', () => {
         signal: expect.any(AbortSignal)
       })
     )
+  })
+
+  it('allows all workflow agents to reuse one authenticated OpenAI client', () => {
+    const credential = { getToken: vi.fn() }
+    const openAIClient = createFoundryOpenAIClient('https://example.services.ai.azure.com/api/projects/tlc', credential)
+
+    for (const agentName of ['account-pulse', 'mcem-coach', 'pursuit-executive', 'risk-solution-play']) {
+      new FoundryPromptAgent({
+        projectEndpoint: 'https://example.services.ai.azure.com/api/projects/tlc',
+        agentName,
+        requestTimeoutMs: 60_000,
+        credential,
+        openAIClient
+      })
+    }
+
+    expect(AIProjectClient).toHaveBeenCalledTimes(1)
+    expect(getOpenAIClient).toHaveBeenCalledTimes(1)
   })
 })

@@ -9,14 +9,23 @@ export interface FoundryPromptAgentOptions {
   agentName: string
   requestTimeoutMs: number
   credential: TokenCredential
+  openAIClient?: FoundryOpenAIClient
+}
+
+export type FoundryOpenAIClient = ReturnType<AIProjectClient['getOpenAIClient']>
+
+export function createFoundryOpenAIClient(
+  projectEndpoint: string,
+  credential: TokenCredential
+): FoundryOpenAIClient {
+  return new AIProjectClient(projectEndpoint, credential).getOpenAIClient()
 }
 
 export class FoundryPromptAgent<TContext> implements AgentInvoker<TContext> {
   private readonly openAIClient
 
   constructor(private readonly options: FoundryPromptAgentOptions) {
-    const project = new AIProjectClient(options.projectEndpoint, options.credential)
-    this.openAIClient = project.getOpenAIClient()
+    this.openAIClient = options.openAIClient ?? createFoundryOpenAIClient(options.projectEndpoint, options.credential)
   }
 
   async invoke(context: TContext): Promise<string> {

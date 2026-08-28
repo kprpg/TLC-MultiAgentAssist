@@ -3,7 +3,7 @@ import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identit
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { PDFParse } from "pdf-parse";
 import { AIProjectClient } from "@azure/ai-projects";
 import { randomUUID } from "node:crypto";
@@ -174,6 +174,28 @@ z.object({
 	comment: z.string().max(500).optional()
 });
 //#endregion
+//#region packages/common/telemetry/performance.ts
+async function measurePerformance(operation, reporter, action) {
+	const startedAt = globalThis.performance.now();
+	try {
+		const result = await action();
+		report(reporter, operation, startedAt, "success");
+		return result;
+	} catch (error) {
+		report(reporter, operation, startedAt, "failure");
+		throw error;
+	}
+}
+function report(reporter, operation, startedAt, outcome) {
+	try {
+		reporter?.({
+			operation,
+			durationMs: Math.round((globalThis.performance.now() - startedAt) * 10) / 10,
+			outcome
+		});
+	} catch {}
+}
+//#endregion
 //#region packages/common/configuration/foundry-environment.ts
 var appRegistrationSchema = z.object({
 	tenantId: z.string().uuid(),
@@ -251,9 +273,10 @@ var MsxRequestError = class extends Error {
 var LiveMsxConnector = class {
 	baseUrl;
 	portfolioPromise;
-	constructor(tokenProvider, fetchImplementation = fetch, baseUrl = defaultBaseUrl) {
+	constructor(tokenProvider, fetchImplementation = fetch, baseUrl = defaultBaseUrl, performanceReporter) {
 		this.tokenProvider = tokenProvider;
 		this.fetchImplementation = fetchImplementation;
+		this.performanceReporter = performanceReporter;
 		this.baseUrl = new URL(baseUrl);
 	}
 	async listAccounts() {
@@ -295,14 +318,14 @@ var LiveMsxConnector = class {
 		return this.portfolioPromise;
 	}
 	async loadPortfolio() {
-		const identity = await this.requestJson("WhoAmI");
-		const opportunityIds = unique((await this.requestAll("msp_dealteams", {
+		const identity = await measurePerformance("msx.identity", this.performanceReporter, () => this.requestJson("WhoAmI"));
+		const opportunityIds = unique((await measurePerformance("msx.deal-team", this.performanceReporter, () => this.requestAll("msp_dealteams", {
 			"$select": "_msp_parentopportunityid_value",
 			"$filter": `statecode eq 0 and _msp_dealteamuserid_value eq ${identity.UserId}`
-		})).map((row) => row._msp_parentopportunityid_value).filter(isPresent));
-		const activeOpportunities = (await this.requestByIds("opportunities", "opportunityid", opportunityIds, "opportunityid,_parentaccountid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate")).filter((row) => row._parentaccountid_value);
+		}))).map((row) => row._msp_parentopportunityid_value).filter(isPresent));
+		const activeOpportunities = (await measurePerformance("msx.opportunities", this.performanceReporter, () => this.requestByIds("opportunities", "opportunityid", opportunityIds, "opportunityid,_parentaccountid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate"))).filter((row) => row._parentaccountid_value);
 		const accountIds = unique(activeOpportunities.map((row) => row._parentaccountid_value).filter(isPresent));
-		const accounts = (await this.requestByIds("accounts", "accountid", accountIds, "accountid,name")).map((row) => ({
+		const accounts = (await measurePerformance("msx.accounts", this.performanceReporter, () => this.requestByIds("accounts", "accountid", accountIds, "accountid,name"))).map((row) => ({
 			id: row.accountid,
 			name: row.name,
 			segment: "Live MSX"
@@ -596,12 +619,14 @@ var LocalPdfMcemGuidanceConnector = class {
 };
 //#endregion
 //#region packages/connectors/foundry/index.ts
+function createFoundryOpenAIClient(projectEndpoint, credential) {
+	return new AIProjectClient(projectEndpoint, credential).getOpenAIClient();
+}
 var FoundryPromptAgent = class {
 	openAIClient;
 	constructor(options) {
 		this.options = options;
-		const project = new AIProjectClient(options.projectEndpoint, options.credential);
-		this.openAIClient = project.getOpenAIClient();
+		this.openAIClient = options.openAIClient ?? createFoundryOpenAIClient(options.projectEndpoint, options.credential);
 	}
 	async invoke(context) {
 		const abortController = new AbortController();
@@ -619,17 +644,6 @@ var FoundryPromptAgent = class {
 		} finally {
 			clearTimeout(timeout);
 		}
-	}
-};
-var FoundryMcemAgent = class extends FoundryPromptAgent {};
-var RecordingMcemAgent = class {
-	constructor(capturePath) {
-		this.capturePath = capturePath;
-	}
-	async invoke(context) {
-		await mkdir(dirname(this.capturePath), { recursive: true });
-		await writeFile(this.capturePath, `${JSON.stringify(context, null, 2)}\n`, "utf8");
-		return "Recorded MCEM context for deterministic UI validation.";
 	}
 };
 var StaticPromptAgent = class {
@@ -716,11 +730,11 @@ function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
 //#endregion
 //#region packages/orchestrator/index.ts
 var ThinSliceOrchestrator = class {
-	constructor(msx, mcem, mcemAgent, taskAgents = {}) {
+	constructor(msx, mcem, taskAgents = {}, performanceReporter) {
 		this.msx = msx;
 		this.mcem = mcem;
-		this.mcemAgent = mcemAgent;
 		this.taskAgents = taskAgents;
+		this.performanceReporter = performanceReporter;
 	}
 	listAccounts() {
 		return this.msx.listAccounts();
@@ -732,30 +746,22 @@ var ThinSliceOrchestrator = class {
 		const request = mcemRequestSchema.parse(input);
 		const context = await this.msx.getOpportunityContext(request.opportunityId);
 		if (context.account.id !== request.accountId) throw new Error("The selected opportunity does not belong to the selected account.");
-		const guidance = await this.mcem.getStageGuidance(context.opportunity.recordedStage);
-		const localEvaluation = evaluateMcemProgress(context, guidance);
-		await this.mcemAgent?.invoke({
-			request,
-			opportunityContext: context,
-			guidance,
-			localEvaluation
-		});
-		return localEvaluation;
+		return evaluateMcemProgress(context, await this.mcem.getStageGuidance(context.opportunity.recordedStage));
 	}
 	async runAgentTask(input) {
 		const request = agentTaskRequestSchema.parse(input);
 		const configuredAgent = this.taskAgents[request.capability];
 		if (!configuredAgent) throw new Error(`The ${request.capability} agent is not configured.`);
-		const opportunityContext = await this.msx.getOpportunityContext(request.opportunityId);
+		const opportunityContext = await measurePerformance("agent.context.msx", this.performanceReporter, () => this.msx.getOpportunityContext(request.opportunityId));
 		if (opportunityContext.account.id !== request.accountId) throw new Error("The selected opportunity does not belong to the selected account.");
-		const guidance = await this.mcem.getStageGuidance(opportunityContext.opportunity.recordedStage);
+		const guidance = await measurePerformance("agent.context.mcem", this.performanceReporter, () => this.mcem.getStageGuidance(opportunityContext.opportunity.recordedStage));
 		const localEvaluation = evaluateMcemProgress(opportunityContext, guidance);
-		const content = await configuredAgent.agent.invoke({
+		const content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke({
 			request,
 			opportunityContext,
 			guidance,
 			localEvaluation
-		});
+		}));
 		if (!content?.trim()) throw new Error(`The ${request.capability} agent returned no content.`);
 		const sourceHealth = [opportunityContext.sourceHealth, guidance.sourceHealth];
 		const isPartial = sourceHealth.some((source) => [
@@ -884,22 +890,19 @@ var tokenProvider = new AzureCliMsxTokenProvider({
 		authenticationLabel: authentication.mode === "interactive-browser" ? "Interactive sign-in" : "Azure CLI"
 	} : {}
 });
+var reportPerformance = (event) => {
+	console.info(`[performance] ${JSON.stringify(event)}`);
+};
 var mcemConnector = new LocalPdfMcemGuidanceConnector(resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
-var msxConnector = dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider);
-var smokeCapturePath = process.env["TLC_SMOKE_FOUNDRY_CAPTURE_PATH"]?.trim();
-var mcemAgent = smokeCapturePath ? new RecordingMcemAgent(resolve(smokeCapturePath)) : runtimeEnvironment ? new FoundryMcemAgent({
-	projectEndpoint: runtimeEnvironment.foundry.projectEndpoint,
-	agentName: runtimeEnvironment.foundry.agents.mcemCoach.name,
-	requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
-	credential: credentials.foundry
-}) : void 0;
+var msxConnector = dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider, fetch, void 0, reportPerformance);
+var foundryOpenAIClient = runtimeEnvironment ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry) : void 0;
 var previewResponses = {
 	"account-pulse": "Summary\nFocus this week on the selected opportunity and validate its incomplete milestones.\n\nContext used\nSample account and opportunity context.\n\nObserved signals\nMSX sample evidence and local MCEM guidance.\n\nRecommended actions\nAccount Executive: confirm the next customer commitment.\n\nSources\nMSX sample; MCEM local snapshot.\n\nAssumptions and missing information\nExternal signals are unavailable in sample mode.\n\nFeedback prompt\nWas this focus actionable?",
 	"mcem-coach": "Use the deterministic MCEM diagnostic shown in the workbench.",
 	"pursuit-executive": "Summary\nPrepare the pursuit around the selected opportunity gaps.\n\nContext used\nSample account, opportunity, and MCEM context.\n\nObserved signals\nThe local evaluation identifies incomplete exit criteria.\n\nRecommended actions\nSpecialist / SSP: schedule validation and confirm owners.\n\nExecutive brief or 30/60 day pursuit plan\nDays 1-30: close evidence gaps. Days 31-60: validate value and executive alignment.\n\nSources\nMSX sample; MCEM local snapshot.\n\nAssumptions and missing information\nRecent customer activity is not available.\n\nFeedback prompt\nWas this plan useful?",
 	"risk-solution-play": "Summary\nThe selected opportunity has execution risk where exit-criteria evidence is incomplete.\n\nContext used\nSample account, opportunity, and MCEM context.\n\nObserved signals\nMissing or partial criterion evidence.\n\nRisks\nMedium: progression may be premature.\n\nRecommended actions\nAccount Executive: confirm the next customer step.\n\nSources\nMSX sample; MCEM local snapshot.\n\nAssumptions and missing information\nApproved content sources are unavailable in sample mode.\n\nFeedback prompt\nWas this risk review grounded?"
 };
-var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, mcemAgent, Object.fromEntries([
+var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object.fromEntries([
 	"account-pulse",
 	"mcem-coach",
 	"pursuit-executive",
@@ -921,10 +924,11 @@ var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, mcemAg
 			projectEndpoint: runtimeEnvironment.foundry.projectEndpoint,
 			agentName: binding.name,
 			requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
-			credential: credentials.foundry
+			credential: credentials.foundry,
+			openAIClient: foundryOpenAIClient
 		})
 	}];
-})));
+})), reportPerformance);
 async function getDataStatus() {
 	if (dataMode === "sample") return {
 		mode: "sample",

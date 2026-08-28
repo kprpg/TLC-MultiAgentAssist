@@ -3,14 +3,14 @@ import { AzureCliCredential } from '@azure/identity'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { z } from 'zod'
-import { agentTaskRequestSchema, mcemRequestSchema, type AgentCapability, type AuthStatus, type DesktopDataStatus } from '../../../../packages/common/index.js'
+import { agentTaskRequestSchema, mcemRequestSchema, type AgentCapability, type AuthStatus, type DesktopDataStatus, type PerformanceReporter } from '../../../../packages/common/index.js'
 import {
   loadFoundryEnvironment,
   resolveFoundryEnvironmentPath
 } from '../../../../packages/common/configuration/foundry-environment.js'
 import { FixtureMsxConnector, LiveMsxConnector } from '../../../../packages/connectors/msx/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
-import { FoundryMcemAgent, FoundryPromptAgent, RecordingMcemAgent, StaticPromptAgent } from '../../../../packages/connectors/foundry/index.js'
+import { createFoundryOpenAIClient, FoundryPromptAgent, StaticPromptAgent } from '../../../../packages/connectors/foundry/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
 import { createRuntimeCredentials } from './runtime-credentials.js'
@@ -40,21 +40,16 @@ const tokenProvider = new AzureCliMsxTokenProvider({
       }
     : {})
 })
+const reportPerformance: PerformanceReporter = (event) => {
+  console.info(`[performance] ${JSON.stringify(event)}`)
+}
 const mcemConnector = new LocalPdfMcemGuidanceConnector(resolve(desktopRoot, '../../docs/knowledge/MCEM Overview.pdf'))
 const msxConnector = dataMode === 'sample'
   ? new FixtureMsxConnector()
-  : new LiveMsxConnector(tokenProvider)
-const smokeCapturePath = process.env['TLC_SMOKE_FOUNDRY_CAPTURE_PATH']?.trim()
-const mcemAgent = smokeCapturePath
-  ? new RecordingMcemAgent(resolve(smokeCapturePath))
-  : runtimeEnvironment
-    ? new FoundryMcemAgent({
-        projectEndpoint: runtimeEnvironment.foundry.projectEndpoint,
-        agentName: runtimeEnvironment.foundry.agents.mcemCoach.name,
-        requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
-        credential: credentials.foundry
-      })
-    : undefined
+  : new LiveMsxConnector(tokenProvider, fetch, undefined, reportPerformance)
+const foundryOpenAIClient = runtimeEnvironment
+  ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry)
+  : undefined
 const previewResponses: Record<AgentCapability, string> = {
   'account-pulse': 'Summary\nFocus this week on the selected opportunity and validate its incomplete milestones.\n\nContext used\nSample account and opportunity context.\n\nObserved signals\nMSX sample evidence and local MCEM guidance.\n\nRecommended actions\nAccount Executive: confirm the next customer commitment.\n\nSources\nMSX sample; MCEM local snapshot.\n\nAssumptions and missing information\nExternal signals are unavailable in sample mode.\n\nFeedback prompt\nWas this focus actionable?',
   'mcem-coach': 'Use the deterministic MCEM diagnostic shown in the workbench.',
@@ -78,7 +73,8 @@ const taskAgents: TaskAgentRegistry = Object.fromEntries(
         projectEndpoint: runtimeEnvironment.foundry.projectEndpoint,
         agentName: binding.name,
         requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
-        credential: credentials.foundry
+        credential: credentials.foundry,
+        openAIClient: foundryOpenAIClient
       })
     }]
   })
@@ -86,8 +82,8 @@ const taskAgents: TaskAgentRegistry = Object.fromEntries(
 const orchestrator = new ThinSliceOrchestrator(
   msxConnector,
   mcemConnector,
-  mcemAgent,
-  taskAgents
+  taskAgents,
+  reportPerformance
 )
 
 async function getDataStatus(): Promise<DesktopDataStatus> {

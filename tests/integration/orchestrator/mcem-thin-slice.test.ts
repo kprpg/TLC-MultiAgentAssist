@@ -1,5 +1,5 @@
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { evaluateMcemProgress } from '../../../packages/agents/mcem-coach/index.js'
 import { agentTaskResponseSchema, contractVersion, mcemResponseSchema, type AgentCapability } from '../../../packages/common/index.js'
 import { FixtureMsxConnector } from '../../../packages/connectors/msx/index.js'
@@ -7,59 +7,29 @@ import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/shar
 import {
   ThinSliceOrchestrator,
   type AgentTaskContext,
-  type McemAgent,
-  type McemAgentContext,
   type TaskAgentRegistry
 } from '../../../packages/orchestrator/index.js'
 
 const mcemConnector = () => new LocalPdfMcemGuidanceConnector(resolve('docs/knowledge/MCEM Overview.pdf'))
 
 describe('MCEM Coach thin slice', () => {
-  it('sends the selected account, opportunity, evidence, and guidance to the MCEM agent boundary', async () => {
-    const invocations: McemAgentContext[] = []
-    const agent: McemAgent = {
-      invoke: async (context) => {
-        invocations.push(context)
-      }
-    }
+  it('builds the automatic diagnostic locally without invoking a task agent', async () => {
+    const invoke = vi.fn()
     const orchestrator = new ThinSliceOrchestrator(
       new FixtureMsxConnector(),
       mcemConnector(),
-      agent
+      { 'mcem-coach': { version: 'test-v1', agent: { invoke } } }
     )
 
-    await orchestrator.runMcemCoach({
+    const result = await orchestrator.runMcemCoach({
       contractVersion,
       accountId: 'account-contoso',
       opportunityId: 'opp-grid-modernization',
       prompt: 'How do we move this opportunity to the next MCEM stage?'
     })
 
-    expect(invocations).toHaveLength(1)
-    expect(invocations[0]).toMatchObject({
-      request: {
-        accountId: 'account-contoso',
-        opportunityId: 'opp-grid-modernization'
-      },
-      opportunityContext: {
-        account: { id: 'account-contoso', name: 'Contoso Energy' },
-        opportunity: { id: 'opp-grid-modernization', recordedStage: 3 }
-      },
-      guidance: {
-        stage: 3,
-        criteria: expect.arrayContaining([
-          expect.objectContaining({ id: 'customer-outcome' })
-        ])
-      },
-      localEvaluation: {
-        recordedStage: 3,
-        evidenceBasedStage: 2,
-        evidence: expect.arrayContaining([
-          expect.objectContaining({ source: 'msx' }),
-          expect.objectContaining({ source: 'mcem' })
-        ])
-      }
-    })
+    expect(invoke).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ recordedStage: 3, evidenceBasedStage: 2 })
   })
 
   it('returns evidence-based divergence, owner actions, citations, and sample states', async () => {
@@ -136,7 +106,6 @@ describe('MCEM Coach thin slice', () => {
     const orchestrator = new ThinSliceOrchestrator(
       new FixtureMsxConnector(),
       mcemConnector(),
-      undefined,
       taskAgents
     )
 

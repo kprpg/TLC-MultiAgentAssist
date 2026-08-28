@@ -9,7 +9,9 @@ import {
   type AgentTaskResponse,
   type McemRequest,
   type McemResponse,
-  type Opportunity
+  type Opportunity,
+  measurePerformance,
+  type PerformanceReporter
 } from '../common/index.js'
 import { evaluateMcemProgress } from '../agents/mcem-coach/index.js'
 import type {
@@ -50,8 +52,8 @@ export class ThinSliceOrchestrator {
   constructor(
     private readonly msx: MsxConnector,
     private readonly mcem: McemGuidanceConnector,
-    private readonly mcemAgent?: McemAgent,
-    private readonly taskAgents: TaskAgentRegistry = {}
+    private readonly taskAgents: TaskAgentRegistry = {},
+    private readonly performanceReporter?: PerformanceReporter
   ) {}
 
   listAccounts(): Promise<Account[]> {
@@ -70,12 +72,6 @@ export class ThinSliceOrchestrator {
     }
     const guidance = await this.mcem.getStageGuidance(context.opportunity.recordedStage)
     const localEvaluation = evaluateMcemProgress(context, guidance)
-    await this.mcemAgent?.invoke({
-      request,
-      opportunityContext: context,
-      guidance,
-      localEvaluation
-    })
     return localEvaluation
   }
 
@@ -86,18 +82,20 @@ export class ThinSliceOrchestrator {
       throw new Error(`The ${request.capability} agent is not configured.`)
     }
 
-    const opportunityContext = await this.msx.getOpportunityContext(request.opportunityId)
+    const opportunityContext = await measurePerformance('agent.context.msx', this.performanceReporter, () =>
+      this.msx.getOpportunityContext(request.opportunityId))
     if (opportunityContext.account.id !== request.accountId) {
       throw new Error('The selected opportunity does not belong to the selected account.')
     }
-    const guidance = await this.mcem.getStageGuidance(opportunityContext.opportunity.recordedStage)
+    const guidance = await measurePerformance('agent.context.mcem', this.performanceReporter, () =>
+      this.mcem.getStageGuidance(opportunityContext.opportunity.recordedStage))
     const localEvaluation = evaluateMcemProgress(opportunityContext, guidance)
-    const content = await configuredAgent.agent.invoke({
+    const content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke({
       request,
       opportunityContext,
       guidance,
       localEvaluation
-    })
+    }))
     if (!content?.trim()) {
       throw new Error(`The ${request.capability} agent returned no content.`)
     }
