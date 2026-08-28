@@ -55,7 +55,7 @@ export function evaluateMcemProgress(
     capability: 'mcem-coach',
     agentVersion: mcemCoachVersion,
     generatedAt,
-    mode: 'sample',
+    mode: context.sourceHealth.state === 'live' ? 'live' : 'sample',
     state: 'complete',
     summary: evidenceBasedStage === context.opportunity.recordedStage
       ? `The available evidence supports recorded Stage ${context.opportunity.recordedStage}.`
@@ -73,7 +73,7 @@ export function evaluateMcemProgress(
         title: context.opportunity.name,
         url: `https://msx.microsoft.com/opportunity/${context.opportunity.id}`,
         retrievedAt: context.retrievedAt,
-        accessContext: 'sample',
+        accessContext: context.sourceHealth.state === 'live' ? 'delegated-user' : 'sample',
         quality: 'observed',
         excerpt: observationExcerpt
       },

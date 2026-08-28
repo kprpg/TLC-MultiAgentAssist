@@ -36,12 +36,13 @@ No prompt text, response content, customer names, identifiers, access tokens, or
 
 ### MSX phases
 
-| Operation           | Measurement                |
-| ------------------- | -------------------------- |
-| `msx.identity`      | MSX `WhoAmI` request       |
-| `msx.deal-team`     | Active deal-team retrieval |
-| `msx.opportunities` | Opportunity retrieval      |
-| `msx.accounts`      | Parent-account retrieval   |
+| Operation                  | Measurement                             |
+| -------------------------- | --------------------------------------- |
+| `msx.identity`             | MSX `WhoAmI` request                    |
+| `msx.deal-team`            | Active deal-team retrieval              |
+| `msx.opportunities`        | Opportunity retrieval                   |
+| `msx.accounts`             | Parent-account retrieval                |
+| `msx.opportunity-evidence` | Selected opportunity milestone evidence |
 
 ### Agent phases
 
@@ -77,3 +78,5 @@ Use the same identity, network, MSX portfolio, Foundry project, and agent prompt
 6. Compare against a baseline collected under the same conditions.
 
 Do not use the packaged smoke duration as a substitute for these phase metrics.
+
+Selected-opportunity evidence is loaded lazily and cached by opportunity ID. It therefore does not add a milestone request to initial portfolio hydration.

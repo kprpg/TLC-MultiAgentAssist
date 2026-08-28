@@ -21,6 +21,8 @@ test('launches the secure MCEM operational workbench', async () => {
     await expect(window.getByText('Evidence supports', { exact: true })).toBeVisible()
     await expect(window.getByText('NEXT BEST ACTIONS')).toBeVisible()
     await expect(window.getByText('Stage 2', { exact: true })).toBeVisible()
+    await expect(window.locator('.action-card')).toHaveCount(4)
+    await expect(window.locator('.actions-intro')).toContainText('Stage 3 ready')
 
     const agentTasks = [
       { tab: 'Account Pulse', content: 'Focus this week on the selected opportunity' },
@@ -29,9 +31,12 @@ test('launches the secure MCEM operational workbench', async () => {
       { tab: 'Risk & Solution Play', content: 'The selected opportunity has execution risk' }
     ]
     await window.getByRole('tab', { name: 'Foundry Agent', exact: true }).click()
+    await expect(window.getByText('ACCOUNT PULSE AGENT', { exact: true })).toBeVisible()
+    await expect(window.getByText('FOUNDRY AGENT TASK', { exact: true })).toHaveCount(0)
     await expect(window.getByRole('button', { name: 'Run Account Pulse' })).toBeInViewport()
     for (const task of agentTasks) {
       await window.getByRole('tab', { name: task.tab }).click()
+      await expect(window.getByText(`${task.tab.toUpperCase()} AGENT`, { exact: true })).toBeVisible()
       await window.getByRole('button', { name: `Run ${task.tab}` }).click()
       await expect(window.getByText(task.content, { exact: false })).toBeVisible()
       await expect(window.getByText('Agent sample-v1 · MSX + MCEM', { exact: true })).toBeVisible()
@@ -82,6 +87,8 @@ test('launches the secure MCEM operational workbench', async () => {
     await window.getByRole('option', { name: 'Fabrikam Retail' }).click()
     await expect(accountDropdown).toContainText('Fabrikam Retail')
     await expect(window.getByRole('heading', { name: 'AI-assisted customer service' })).toBeVisible()
+    await expect(window.locator('.action-card')).toHaveCount(3)
+    await expect(window.locator('.actions-intro')).toContainText('Stage 2 ready')
 
     await expect(opportunityDropdown).toContainText('AI-assisted customer service')
     await opportunityDropdown.click()

@@ -58,6 +58,7 @@ export function App() {
   const [status, setStatus] = useState<'loading' | 'ready' | 'running' | 'error'>('loading')
   const [error, setError] = useState('')
   const analysisPaneRef = useRef<HTMLElement>(null)
+  const coachRequestIdRef = useRef(0)
 
   useEffect(() => {
     document.documentElement.dataset['theme'] = themeMode
@@ -98,6 +99,8 @@ export function App() {
   }, [accountId])
 
   useEffect(() => {
+    setResult(null)
+    setAgentResult(null)
     if (opportunityId) void runCoach(opportunityId)
   }, [opportunityId])
 
@@ -108,6 +111,7 @@ export function App() {
 
   async function runCoach(selectedOpportunityId = opportunityId) {
     if (!accountId || !selectedOpportunityId) return
+    const requestId = ++coachRequestIdRef.current
     setStatus('running')
     setError('')
     try {
@@ -117,9 +121,11 @@ export function App() {
         opportunityId: selectedOpportunityId,
         prompt
       })
+      if (requestId !== coachRequestIdRef.current) return
       setResult(response)
       setStatus('ready')
     } catch (cause) {
+      if (requestId !== coachRequestIdRef.current) return
       handleError(cause)
     }
   }
@@ -227,7 +233,7 @@ export function App() {
         <section className="analysis-pane" ref={analysisPaneRef}>
           <div className="analysis-header">
             <div>
-              <div className="eyebrow">{workbenchView === 'diagnostic' ? 'MCEM OPPORTUNITY DIAGNOSTIC' : 'FOUNDRY AGENT TASK'}</div>
+              <div className="eyebrow">{workbenchView === 'diagnostic' ? 'MCEM OPPORTUNITY DIAGNOSTIC' : `${agentTasks[capability].label.toUpperCase()} AGENT`}</div>
               <h1>{opportunity?.name ?? 'Select an opportunity'}</h1>
               <p>{workbenchView === 'diagnostic' ? prompt : 'Ask a specialized account-team agent using grounded MSX and MCEM context.'}</p>
             </div>
@@ -287,7 +293,7 @@ export function App() {
           {result && status !== 'loading' && workbenchView === 'foundry-agent' &&
             <section className="agent-workbench" aria-labelledby="agent-workbench-title">
               <div className="agent-workbench-heading">
-                <div><div className="eyebrow">FOUNDRY AGENT TASK</div><h2 id="agent-workbench-title">Ask the account team</h2></div>
+                <h2 id="agent-workbench-title">Ask the account team</h2>
                 {agentResult && <Badge appearance="tint" color={agentResult.state === 'complete' ? 'success' : 'warning'}>{agentResult.state}</Badge>}
               </div>
               <TabList selectedValue={capability} onTabSelect={(_, data) => {
@@ -322,7 +328,7 @@ export function App() {
 
         <aside className="actions-pane">
           <div className="actions-heading"><span className="section-label">NEXT BEST ACTIONS</span><Badge appearance="filled">{result?.recommendations.length ?? 0}</Badge></div>
-          <p className="actions-intro">Resolve these gaps before treating the opportunity as Stage 3 ready.</p>
+          <p className="actions-intro">Resolve these gaps before treating the selected opportunity as Stage {result?.recordedStage ?? '—'} ready.</p>
           <div className="action-list">
             {result?.recommendations.map((recommendation, index) => <article className="action-card" key={recommendation.id}>
               <div className="action-order">{index + 1}</div>

@@ -273,6 +273,7 @@ var MsxRequestError = class extends Error {
 var LiveMsxConnector = class {
 	baseUrl;
 	portfolioPromise;
+	observationPromises = /* @__PURE__ */ new Map();
 	constructor(tokenProvider, fetchImplementation = fetch, baseUrl = defaultBaseUrl, performanceReporter) {
 		this.tokenProvider = tokenProvider;
 		this.fetchImplementation = fetchImplementation;
@@ -294,21 +295,40 @@ var LiveMsxConnector = class {
 		const account = portfolio.accounts.find((candidate) => candidate.id === opportunity.accountId);
 		if (!account) throw new Error("MSX returned an opportunity without an accessible parent account.");
 		const retrievedAt = (/* @__PURE__ */ new Date()).toISOString();
+		const observations = await this.getOpportunityObservations(opportunity);
 		return {
 			account: structuredClone(account),
 			opportunity: structuredClone(opportunity),
-			observations: [],
+			observations: structuredClone(observations),
 			retrievedAt,
 			sourceHealth: {
 				source: "msx",
 				state: "live",
-				detail: "Live MSX data scoped to active opportunities where the signed-in user is on the deal team.",
+				detail: "Live MSX opportunity and engagement-milestone evidence scoped to the signed-in user’s active deal-team portfolio.",
 				checkedAt: retrievedAt
 			}
 		};
 	}
 	refresh() {
 		this.portfolioPromise = void 0;
+		this.observationPromises.clear();
+	}
+	getOpportunityObservations(opportunity) {
+		let observations = this.observationPromises.get(opportunity.id);
+		if (!observations) {
+			observations = measurePerformance("msx.opportunity-evidence", this.performanceReporter, async () => {
+				return mapOpportunityObservations(opportunity, await this.requestAll("msp_engagementmilestones", {
+					"$select": "msp_engagementmilestoneid,msp_name,_ownerid_value,msp_milestonedate,msp_milestonestatus,msp_commitmentrecommendation,msp_monthlyuse",
+					"$filter": `statecode eq 0 and _msp_opportunityid_value eq ${opportunity.id}`,
+					"$orderby": "msp_milestonedate asc"
+				}));
+			}).catch((error) => {
+				this.observationPromises.delete(opportunity.id);
+				throw error;
+			});
+			this.observationPromises.set(opportunity.id, observations);
+		}
+		return observations;
 	}
 	getPortfolio() {
 		this.portfolioPromise ??= this.loadPortfolio().catch((error) => {
@@ -397,6 +417,64 @@ function unique(values) {
 }
 function isPresent(value) {
 	return Boolean(value);
+}
+function mapOpportunityObservations(opportunity, milestones) {
+	const observations = [];
+	const value = new Intl.NumberFormat("en-US", {
+		style: "currency",
+		currency: opportunity.currency,
+		maximumFractionDigits: 0
+	}).format(opportunity.value);
+	const datedMilestone = milestones.find((milestone) => milestone.msp_milestonedate);
+	if (opportunity.recordedStage === 1) {
+		if (opportunity.value > 0) observations.push({
+			criterionId: "budget",
+			status: "partial",
+			detail: `MSX records ${value} of opportunity value, but this does not confirm available customer funding.`
+		});
+		if (datedMilestone) observations.push({
+			criterionId: "timing",
+			status: "partial",
+			detail: `MSX milestone “${datedMilestone.msp_name ?? "Unnamed milestone"}” is dated ${datedMilestone.msp_milestonedate.slice(0, 10)}, but the complete decision and implementation timeline is not recorded.`
+		});
+		if (milestones.some((milestone) => milestone.msp_commitmentrecommendation === 861980003)) observations.push({
+			criterionId: "approval",
+			status: "partial",
+			detail: "MSX contains a committed milestone recommendation, but that internal signal does not establish the customer approval path."
+		});
+		return observations;
+	}
+	if (opportunity.value > 0 || milestones.some((milestone) => (milestone.msp_monthlyuse ?? 0) !== 0)) observations.push({
+		criterionId: "business-case",
+		status: "partial",
+		detail: `MSX records a financial signal (${value} opportunity value), but expected return, customer priority, and budget validation remain incomplete.`
+	});
+	if (milestones.length > 0) observations.push({
+		criterionId: "customer-outcome",
+		status: "partial",
+		detail: `MSX contains ${milestones.length} engagement milestone${milestones.length === 1 ? "" : "s"}; confirm that each is tied to a measurable customer outcome and review rhythm.`
+	});
+	const completedValidation = milestones.find((milestone) => milestone.msp_milestonestatus === 861980003 && /architecture|demo|pilot|poc|technical|validation|workshop/i.test(milestone.msp_name ?? ""));
+	if (completedValidation) observations.push({
+		criterionId: "technical-validation",
+		status: "met",
+		detail: `Completed MSX milestone “${completedValidation.msp_name ?? "Technical validation"}” provides recorded validation evidence.`
+	});
+	const activeMilestone = milestones.find((milestone) => ![
+		861980003,
+		861980004,
+		861980007
+	].includes(milestone.msp_milestonestatus ?? -1));
+	if (activeMilestone) {
+		const hasDate = Boolean(activeMilestone.msp_milestonedate);
+		const hasOwner = Boolean(activeMilestone._ownerid_value);
+		observations.push({
+			criterionId: "next-step",
+			status: hasDate && hasOwner ? "met" : "partial",
+			detail: hasDate && hasOwner ? `MSX milestone “${activeMilestone.msp_name ?? "Unnamed milestone"}” has a named owner and date ${activeMilestone.msp_milestonedate.slice(0, 10)}.` : `MSX milestone “${activeMilestone.msp_name ?? "Unnamed milestone"}” is active but is missing ${hasDate ? "a named owner" : hasOwner ? "a date" : "a date and named owner"}.`
+		});
+	}
+	return observations;
 }
 //#endregion
 //#region packages/connectors/msx/index.ts
@@ -694,7 +772,7 @@ function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
 		capability: "mcem-coach",
 		agentVersion: mcemCoachVersion,
 		generatedAt,
-		mode: "sample",
+		mode: context.sourceHealth.state === "live" ? "live" : "sample",
 		state: "complete",
 		summary: evidenceBasedStage === context.opportunity.recordedStage ? `The available evidence supports recorded Stage ${context.opportunity.recordedStage}.` : `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the available evidence supports Stage ${evidenceBasedStage}.`,
 		recordedStage: context.opportunity.recordedStage,
@@ -709,7 +787,7 @@ function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
 			title: context.opportunity.name,
 			url: `https://msx.microsoft.com/opportunity/${context.opportunity.id}`,
 			retrievedAt: context.retrievedAt,
-			accessContext: "sample",
+			accessContext: context.sourceHealth.state === "live" ? "delegated-user" : "sample",
 			quality: "observed",
 			excerpt: observationExcerpt
 		}, {
