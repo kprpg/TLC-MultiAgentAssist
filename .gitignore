@@ -9,3 +9,4 @@ test-results/
 config/foundry.environment.json
 out/
 release/
+docs/runbooks/Account-Pulse.md
