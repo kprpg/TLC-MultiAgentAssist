@@ -1,5 +1,13 @@
 # Run the Desktop App
 
+## Install a release
+
+Open the repository's [latest release page](https://github.com/kprpg/TLC-MultiAgentAssist/releases/latest) and download either the Windows x64 installer (`.exe`) or portable archive (`.zip`).
+
+On first launch, the packaged app creates `%APPDATA%\TLC MultiAgent Assist\foundry.environment.json` from the bundled template and opens it for editing. Configure the fields described below, save the file, and restart the app. Upgrades preserve this per-user file.
+
+The release is currently unsigned, so Windows may display a SmartScreen warning. Verify that the download came from this repository's GitHub Releases page before running it.
+
 ## Prerequisites
 
 - Windows 10 or later
@@ -112,6 +120,16 @@ Generated files are written under:
 
 - `apps/desktop/dist-electron`
 - `apps/desktop/dist/renderer`
+
+## Package a Windows release
+
+Build the Windows x64 installer and portable ZIP:
+
+```powershell
+npm run desktop:package
+```
+
+Artifacts are written under `release/`. To publish them, update the version in `apps/desktop/package.json`, commit the change, and push a matching version tag such as `v0.1.0`. The `.github/workflows/release.yml` workflow validates, packages, and creates the GitHub Release automatically.
 
 ## Validate the desktop experience
 

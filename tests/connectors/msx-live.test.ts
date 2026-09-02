@@ -24,7 +24,13 @@ describe('LiveMsxConnector', () => {
       if (url.pathname.endsWith('/opportunities')) {
         expect(url.searchParams.get('$filter')).toContain('statecode eq 0')
         return json({ value: [
-          { opportunityid: 'opp-1', _parentaccountid_value: 'account-b', name: 'Second opportunity' },
+          {
+            opportunityid: 'opp-1',
+            _parentaccountid_value: 'account-b',
+            name: 'Second opportunity',
+            estimatedvalue: 0,
+            msp_consumptionconsumedrecurring: 275000
+          },
           { opportunityid: 'opp-2', _parentaccountid_value: 'account-a', name: 'First opportunity', msp_activesalesstage: 2, estimatedvalue: 1500000 }
         ] })
       }
@@ -54,6 +60,9 @@ describe('LiveMsxConnector', () => {
       { id: 'account-b', name: 'Beta', segment: 'Live MSX' }
     ])
     await expect(connector.listOpportunities('account-a')).resolves.toHaveLength(1)
+    await expect(connector.listOpportunities('account-b')).resolves.toEqual([
+      expect.objectContaining({ id: 'opp-1', value: 275000 })
+    ])
     const firstContext = await connector.getOpportunityContext('opp-2')
     const secondContext = await connector.getOpportunityContext('opp-2')
     expect(firstContext.observations).toEqual(expect.arrayContaining([

@@ -2,6 +2,57 @@
   "name": "@tlc/desktop",
   "version": "0.1.0",
   "private": true,
+  "description": "Desktop account-team intelligence powered by MSX and Microsoft Foundry agents.",
+  "author": "TLC MultiAgent Assist contributors",
   "type": "module",
-  "main": "dist-electron/main/index.js"
+  "main": "dist-electron/main/index.js",
+  "dependencies": {
+    "@azure/ai-projects": "^2.5.0",
+    "@azure/identity": "^4.13.2",
+    "pdf-parse": "^2.4.5",
+    "zod": "4.4.3"
+  },
+  "build": {
+    "appId": "com.tlc.multiagentassist",
+    "productName": "TLC MultiAgent Assist",
+    "asar": true,
+    "directories": {
+      "output": "../../release"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "dist/renderer/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../../config/foundry.environment.example.json",
+        "to": "config/foundry.environment.example.json"
+      },
+      {
+        "from": "../../docs/knowledge/MCEM Overview.pdf",
+        "to": "docs/knowledge/MCEM Overview.pdf"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "TLC-MultiAgent-Assist-${version}-Windows-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
 }

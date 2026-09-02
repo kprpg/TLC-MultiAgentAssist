@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
 import { AzureCliCredential } from '@azure/identity'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -6,13 +6,14 @@ import { z } from 'zod'
 import { agentTaskRequestSchema, mcemRequestSchema, type AgentCapability, type AuthStatus, type DesktopDataStatus, type PerformanceReporter } from '../../../../packages/common/index.js'
 import {
   loadFoundryEnvironment,
-  resolveFoundryEnvironmentPath
+  type FoundryEnvironment
 } from '../../../../packages/common/configuration/foundry-environment.js'
 import { FixtureMsxConnector, LiveMsxConnector } from '../../../../packages/connectors/msx/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent, StaticPromptAgent } from '../../../../packages/connectors/foundry/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
+import { prepareFoundryEnvironmentFile } from './packaged-configuration.js'
 import { createRuntimeCredentials } from './runtime-credentials.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
@@ -22,9 +23,36 @@ const preloadFile = resolve(desktopRoot, 'dist-electron/preload/index.cjs')
 const developmentUrl = process.env['VITE_DEV_SERVER_URL']
 const allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString()
 const dataMode = process.env['TLC_DATA_MODE'] === 'sample' ? 'sample' : 'live'
-const runtimeEnvironment = dataMode === 'live'
-  ? await loadFoundryEnvironment(resolveFoundryEnvironmentPath())
+await app.whenReady()
+
+const preparedEnvironment = dataMode === 'live'
+  ? await prepareFoundryEnvironmentFile({
+      isPackaged: app.isPackaged,
+      userDataPath: app.getPath('userData'),
+      templatePath: resolve(process.resourcesPath, 'config/foundry.environment.example.json')
+    })
   : undefined
+let runtimeEnvironment: FoundryEnvironment | undefined
+let startupBlocked = false
+
+if (preparedEnvironment?.created) {
+  startupBlocked = true
+  await openConfigurationAndExit(
+    preparedEnvironment.filePath,
+    'Your configuration file has been created. Set the Foundry project, agent names, tenant, client ID, and authentication mode, then reopen the application.'
+  )
+} else if (preparedEnvironment) {
+  try {
+    runtimeEnvironment = await loadFoundryEnvironment(preparedEnvironment.filePath)
+  } catch (error) {
+    startupBlocked = true
+    await openConfigurationAndExit(
+      preparedEnvironment.filePath,
+      `The configuration could not be loaded. Correct it, then reopen the application.\n\n${error instanceof Error ? error.message : String(error)}`
+    )
+  }
+}
+
 const authentication = runtimeEnvironment?.authentication
 const fallbackCredential = new AzureCliCredential({ processTimeoutInMs: 30_000 })
 const credentials = authentication
@@ -43,7 +71,10 @@ const tokenProvider = new AzureCliMsxTokenProvider({
 const reportPerformance: PerformanceReporter = (event) => {
   console.info(`[performance] ${JSON.stringify(event)}`)
 }
-const mcemConnector = new LocalPdfMcemGuidanceConnector(resolve(desktopRoot, '../../docs/knowledge/MCEM Overview.pdf'))
+const mcemGuidancePath = app.isPackaged
+  ? resolve(process.resourcesPath, 'docs/knowledge/MCEM Overview.pdf')
+  : resolve(desktopRoot, '../../docs/knowledge/MCEM Overview.pdf')
+const mcemConnector = new LocalPdfMcemGuidanceConnector(mcemGuidancePath)
 const msxConnector = dataMode === 'sample'
   ? new FixtureMsxConnector()
   : new LiveMsxConnector(tokenProvider, fetch, undefined, reportPerformance)
@@ -85,6 +116,24 @@ const orchestrator = new ThinSliceOrchestrator(
   taskAgents,
   reportPerformance
 )
+
+async function openConfigurationAndExit(filePath: string, detail: string): Promise<void> {
+  const result = await dialog.showMessageBox({
+    type: 'info',
+    title: 'TLC MultiAgent Assist setup',
+    message: 'Configure your environment before starting TLC MultiAgent Assist.',
+    detail: `${detail}\n\nConfiguration file:\n${filePath}`,
+    buttons: ['Open configuration', 'Exit'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  })
+  if (result.response === 0) {
+    const openError = await shell.openPath(filePath)
+    if (openError) shell.showItemInFolder(filePath)
+  }
+  app.quit()
+}
 
 async function getDataStatus(): Promise<DesktopDataStatus> {
   if (dataMode === 'sample') {
@@ -179,10 +228,10 @@ async function createWindow(): Promise<void> {
   }
 }
 
-app.whenReady().then(() => {
+if (!startupBlocked) {
   registerReadOnlyIpc()
   void createWindow()
-})
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
