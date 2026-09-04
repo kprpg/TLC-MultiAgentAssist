@@ -49,6 +49,7 @@ button, input { letter-spacing: 0; }
 .app-provider { min-height: 100vh; color: var(--text); background: var(--canvas); }
 
 .app-frame { min-height: 100vh; display: grid; grid-template-rows: 56px 42px 1fr; }
+.app-frame.source-notice-dismissed { grid-template-rows: 56px 1fr; }
 .topbar { display: flex; align-items: center; gap: 12px; padding: 0; color: white; background: var(--topbar); border-bottom: 1px solid var(--topbar-border); }
 .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; background: #c8f135; color: #17223a; font: 800 13px/1 "Segoe UI Variable", sans-serif; }
 .brand-copy { display: flex; flex-direction: column; line-height: 1.2; }
@@ -61,9 +62,10 @@ button, input { letter-spacing: 0; }
 .edge-pane-toggle:first-child { border-right: 1px solid #43506a; }
 .edge-pane-toggle:last-child { border-left: 1px solid #43506a; }
 .identity { display: flex; align-items: center; gap: 7px; padding-left: 14px; border-left: 1px solid #43506a; font-size: 12px; color: #d6deea; }
-.sample-notice { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 16px; background: var(--notice); color: var(--notice-text); border-bottom: 1px solid var(--notice-border); font-size: 12px; font-weight: 600; }
+.sample-notice { position: relative; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 52px 0 16px; background: var(--notice); color: var(--notice-text); border-bottom: 1px solid var(--notice-border); font-size: 12px; font-weight: 600; }
 .sample-notice > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sample-notice > button { flex: 0 0 auto; }
+.source-notice-dismiss { position: absolute; top: 5px; right: 8px; color: inherit !important; }
 .live-notice { background: var(--success-surface); color: var(--success-text); border-bottom-color: var(--border); }
 
 .workspace { min-height: 0; display: grid; grid-template-columns: 270px minmax(510px, 1fr) 390px; }

@@ -21,9 +21,18 @@ test('launches the secure MCEM operational workbench', async () => {
     await window.evaluate(() => {
       localStorage.removeItem('tlc-left-pane-collapsed')
       localStorage.removeItem('tlc-right-pane-collapsed')
+      localStorage.removeItem('tlc-source-notice-dismissed')
     })
     await window.reload()
     await expect(window.getByText('SAMPLE DATA')).toBeVisible()
+    const sourceNotice = window.locator('.sample-notice')
+    const workspaceTopWithNotice = (await window.locator('.workspace').boundingBox())!.y
+    await expect(sourceNotice).toBeVisible()
+    await window.getByRole('button', { name: 'Dismiss data source notice' }).click()
+    await expect(sourceNotice).toHaveCount(0)
+    expect((await window.locator('.workspace').boundingBox())!.y).toBeLessThan(workspaceTopWithNotice)
+    await window.reload()
+    await expect(sourceNotice).toHaveCount(0)
     await expect(window.getByText('Evidence supports', { exact: true })).toBeVisible()
     await expect(window.getByText('NEXT BEST ACTIONS')).toBeVisible()
     await expect(window.getByText('Stage 2', { exact: true })).toBeVisible()

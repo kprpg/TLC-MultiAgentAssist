@@ -30,6 +30,7 @@ import {
   CheckmarkCircle20Filled,
   ChevronRight20Regular,
   DataUsage20Regular,
+  Dismiss20Regular,
   DocumentSearch20Regular,
   Mail20Regular,
   Open20Regular,
@@ -86,6 +87,7 @@ const agentTasks: Record<AgentCapability, { label: string; prompts: readonly str
 const themeStorageKey = 'tlc-theme'
 const leftPaneStorageKey = 'tlc-left-pane-collapsed'
 const rightPaneStorageKey = 'tlc-right-pane-collapsed'
+const sourceNoticeDismissedStorageKey = 'tlc-source-notice-dismissed'
 type ThemeMode = 'light' | 'dark'
 type WorkbenchView = 'diagnostic' | 'foundry-agent'
 
@@ -93,6 +95,7 @@ export function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialTheme)
   const [leftPaneCollapsed, setLeftPaneCollapsed] = useState(() => getInitialPaneState(leftPaneStorageKey))
   const [rightPaneCollapsed, setRightPaneCollapsed] = useState(() => getInitialPaneState(rightPaneStorageKey))
+  const [sourceNoticeDismissed, setSourceNoticeDismissed] = useState(() => localStorage.getItem(sourceNoticeDismissedStorageKey) === 'true')
   const [accounts, setAccounts] = useState<Account[]>([])
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [accountId, setAccountId] = useState('')
@@ -127,6 +130,10 @@ export function App() {
   useEffect(() => {
     localStorage.setItem(rightPaneStorageKey, String(rightPaneCollapsed))
   }, [rightPaneCollapsed])
+
+  useEffect(() => {
+    localStorage.setItem(sourceNoticeDismissedStorageKey, String(sourceNoticeDismissed))
+  }, [sourceNoticeDismissed])
 
   useEffect(() => {
     void Promise.all([window.tlc.getDataStatus(), window.tlc.listAccounts()]).then(([nextDataStatus, items]) => {
@@ -282,7 +289,7 @@ export function App() {
 
   return (
     <FluentProvider className="app-provider" theme={themeMode === 'dark' ? webDarkTheme : webLightTheme}>
-      <div className="app-frame">
+      <div className={`app-frame${sourceNoticeDismissed ? ' source-notice-dismissed' : ''}`}>
       <header className="topbar">
         <Button
           appearance="subtle"
@@ -324,7 +331,7 @@ export function App() {
         />
       </header>
 
-      <div className={`sample-notice ${isLive && authReady ? 'live-notice' : ''}`}>
+      {!sourceNoticeDismissed && <div className={`sample-notice ${isLive && authReady ? 'live-notice' : ''}`}>
         <ShieldCheckmark20Regular />
         <span>{isStarting
           ? 'Connecting to the configured data source...'
@@ -333,7 +340,15 @@ export function App() {
             ? `Live MSX is scoped to ${dataStatus.auth.displayName ?? 'the signed-in Microsoft corporate user'}. MCEM guidance is loaded from the local MCEM Overview PDF snapshot; no SharePoint request is made.`
             : dataStatus?.auth.detail ?? 'Run az login with your Microsoft CORP ID, then restart the app.'
           : 'This automated preview uses sanitized MSX fixtures and the local MCEM Overview PDF snapshot. No live MSX or SharePoint calls are made.'}</span>
-      </div>
+        <Button
+          appearance="subtle"
+          className="icon-control source-notice-dismiss"
+          icon={<Dismiss20Regular />}
+          aria-label="Dismiss data source notice"
+          title="Dismiss data source notice"
+          onClick={() => setSourceNoticeDismissed(true)}
+        />
+      </div>}
 
       <main className={`workspace${leftPaneCollapsed ? ' left-pane-collapsed' : ''}${rightPaneCollapsed ? ' right-pane-collapsed' : ''}`}>
         {!leftPaneCollapsed && <aside className="context-rail" id="working-context-pane">
