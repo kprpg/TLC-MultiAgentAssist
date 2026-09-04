@@ -980,7 +980,6 @@ var preloadFile = resolve(desktopRoot, "dist-electron/preload/index.cjs");
 var developmentUrl = process.env["VITE_DEV_SERVER_URL"];
 var allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString();
 var dataMode = process.env["TLC_DATA_MODE"] === "sample" ? "sample" : "live";
-await app.whenReady();
 var preparedEnvironment = dataMode === "live" ? await prepareFoundryEnvironmentFile({
 	isPackaged: app.isPackaged,
 	userDataPath: app.getPath("userData"),
@@ -1018,7 +1017,7 @@ var mcemConnector = new LocalPdfMcemGuidanceConnector(app.isPackaged ? resolve(p
 var msxConnector = dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider, fetch, void 0, reportPerformance);
 var foundryOpenAIClient = runtimeEnvironment ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry) : void 0;
 var previewResponses = {
-	"account-pulse": "Summary\nFocus this week on the selected opportunity and validate its incomplete milestones.\n\nContext used\nSample account and opportunity context.\n\nObserved signals\nMSX sample evidence and local MCEM guidance.\n\nRecommended actions\nAccount Executive: confirm the next customer commitment.\n\nSources\nMSX sample; MCEM local snapshot.\n\nAssumptions and missing information\nExternal signals are unavailable in sample mode.\n\nFeedback prompt\nWas this focus actionable?",
+	"account-pulse": "## Summary\n\nFocus this week on the selected opportunity and validate its incomplete milestones.\n\n## Context used\n\nSample account and opportunity context.\n\n## Observed signals\n\n- MSX sample evidence\n- Local MCEM guidance\n\n## Recommended actions\n\n| Owner | Action |\n| --- | --- |\n| Account Executive | Confirm the next customer commitment. |\n\n## Sources\n\nMSX sample; MCEM local snapshot.\n\n## Assumptions and missing information\n\nExternal signals are unavailable in sample mode.\n\n## Feedback prompt\n\nWas this focus actionable?",
 	"mcem-coach": "Use the deterministic MCEM diagnostic shown in the workbench.",
 	"pursuit-executive": "Summary\nPrepare the pursuit around the selected opportunity gaps.\n\nContext used\nSample account, opportunity, and MCEM context.\n\nObserved signals\nThe local evaluation identifies incomplete exit criteria.\n\nRecommended actions\nSpecialist / SSP: schedule validation and confirm owners.\n\nExecutive brief or 30/60 day pursuit plan\nDays 1-30: close evidence gaps. Days 31-60: validate value and executive alignment.\n\nSources\nMSX sample; MCEM local snapshot.\n\nAssumptions and missing information\nRecent customer activity is not available.\n\nFeedback prompt\nWas this plan useful?",
 	"risk-solution-play": "Summary\nThe selected opportunity has execution risk where exit-criteria evidence is incomplete.\n\nContext used\nSample account, opportunity, and MCEM context.\n\nObserved signals\nMissing or partial criterion evidence.\n\nRisks\nMedium: progression may be premature.\n\nRecommended actions\nAccount Executive: confirm the next customer step.\n\nSources\nMSX sample; MCEM local snapshot.\n\nAssumptions and missing information\nApproved content sources are unavailable in sample mode.\n\nFeedback prompt\nWas this risk review grounded?"
@@ -1150,7 +1149,7 @@ async function createWindow() {
 }
 if (!startupBlocked) {
 	registerReadOnlyIpc();
-	createWindow();
+	app.whenReady().then(createWindow);
 }
 app.on("window-all-closed", () => {
 	if (process.platform !== "darwin") app.quit();

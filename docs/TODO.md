@@ -1,5 +1,12 @@
 # TLC follow-up work
 
+## Improve Foundry agent interaction
+
+- [x] Replace the single pre-populated prompt with four domain-relevant starter prompt choices for each agent.
+- [x] Submit a starter prompt immediately when selected while preserving freeform prompt entry and keyboard accessibility.
+- [x] Render agent responses in a safe Markdown viewer with readable headings, lists, links, tables, quotes, and code blocks.
+- [x] Add automated regression coverage for prompt selection, submission, agent switching, and Markdown rendering.
+
 ## Restore canonical MCEM knowledge access
 
 - Current project input: `docs/knowledge/MCEM Overview.pdf`.

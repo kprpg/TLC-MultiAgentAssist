@@ -110,13 +110,35 @@ button, input { letter-spacing: 0; }
 .agent-workbench-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
 .agent-workbench-heading h2 { margin: 4px 0 0; font-size: 16px; }
 .agent-workbench [role="tablist"] { width: 100%; overflow-x: auto; border-bottom: 1px solid var(--border); }
+.agent-prompt-suggestions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+.agent-prompt-card { min-height: 66px; padding: 12px 14px; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; font: 600 12px/1.4 "Segoe UI Variable", "Aptos", sans-serif; text-align: left; cursor: pointer; }
+.agent-prompt-card:hover:not(:disabled) { border-color: #0f6cbd; background: var(--evidence); }
+.agent-prompt-card:focus-visible { outline: 2px solid #0f6cbd; outline-offset: 2px; }
+.agent-prompt-card:disabled { color: var(--muted); cursor: wait; opacity: .65; }
 .agent-task-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; margin-top: 14px; }
 .agent-task-input textarea { min-height: 64px; }
 .agent-synthesis { margin-top: 14px; border: 1px solid var(--border); background: var(--surface); }
 .agent-synthesis-meta { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 14px; border-bottom: 1px solid var(--border-soft); }
 .agent-synthesis-meta strong { font-size: 12px; }
 .agent-synthesis-meta span { color: var(--muted); font-size: 10px; }
-.agent-synthesis-content { max-height: calc(100vh - 420px); min-height: 120px; overflow: auto; padding: 15px; color: var(--muted-strong); font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
+.agent-synthesis-content { max-height: calc(100vh - 420px); min-height: 120px; overflow: auto; padding: 15px; color: var(--muted-strong); font-size: 12px; line-height: 1.55; }
+.agent-synthesis-content > :first-child { margin-top: 0; }
+.agent-synthesis-content > :last-child { margin-bottom: 0; }
+.agent-synthesis-content h1, .agent-synthesis-content h2, .agent-synthesis-content h3 { margin: 18px 0 7px; color: var(--text); line-height: 1.3; }
+.agent-synthesis-content h1 { font-size: 18px; }
+.agent-synthesis-content h2 { padding-bottom: 5px; border-bottom: 1px solid var(--border-soft); font-size: 15px; }
+.agent-synthesis-content h3 { font-size: 13px; }
+.agent-synthesis-content p, .agent-synthesis-content ul, .agent-synthesis-content ol, .agent-synthesis-content blockquote { margin: 7px 0; }
+.agent-synthesis-content ul, .agent-synthesis-content ol { padding-left: 22px; }
+.agent-synthesis-content li + li { margin-top: 4px; }
+.agent-synthesis-content a { color: #0f6cbd; text-decoration: underline; }
+.agent-synthesis-content blockquote { padding: 8px 12px; border-left: 3px solid #0f6cbd; background: var(--surface-subtle); }
+.agent-synthesis-content code { padding: 2px 4px; border-radius: 3px; background: var(--surface-subtle); font-family: Consolas, monospace; }
+.agent-synthesis-content pre { overflow-x: auto; padding: 12px; background: var(--surface-subtle); }
+.agent-synthesis-content pre code { padding: 0; background: transparent; }
+.agent-synthesis-content table { width: 100%; margin: 10px 0; border-collapse: collapse; }
+.agent-synthesis-content th, .agent-synthesis-content td { padding: 7px 9px; border: 1px solid var(--border); text-align: left; }
+.agent-synthesis-content th { color: var(--text); background: var(--surface-subtle); }
 
 .actions-pane { padding: 24px 20px; border-left: 1px solid var(--border); }
 .actions-heading { display: flex; align-items: center; justify-content: space-between; }

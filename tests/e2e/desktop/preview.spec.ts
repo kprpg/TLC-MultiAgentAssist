@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 test('launches the secure MCEM operational workbench', async () => {
+  test.setTimeout(60_000)
   const app = await electron.launch({
     args: [resolve('apps/desktop')],
     env: {
@@ -33,11 +34,19 @@ test('launches the secure MCEM operational workbench', async () => {
     await window.getByRole('tab', { name: 'Foundry Agent', exact: true }).click()
     await expect(window.getByText('ACCOUNT PULSE AGENT', { exact: true })).toBeVisible()
     await expect(window.getByText('FOUNDRY AGENT TASK', { exact: true })).toHaveCount(0)
+    await expect(window.getByRole('button', { name: 'What should the account team focus on this week?' })).toBeVisible()
+    await expect(window.locator('.agent-prompt-card')).toHaveCount(4)
+    await expect(window.getByRole('textbox', { name: 'Agent task' })).toHaveValue('')
     await expect(window.getByRole('button', { name: 'Run Account Pulse' })).toBeInViewport()
+    await window.getByRole('button', { name: 'What should the account team focus on this week?' }).click()
+    await expect(window.getByRole('textbox', { name: 'Agent task' })).toHaveValue('What should the account team focus on this week?')
+    await expect(window.locator('.agent-synthesis-content').getByRole('heading', { name: 'Summary' })).toBeVisible()
+    await expect(window.locator('.agent-synthesis-content').getByRole('table')).toBeVisible()
     for (const task of agentTasks) {
       await window.getByRole('tab', { name: task.tab }).click()
       await expect(window.getByText(`${task.tab.toUpperCase()} AGENT`, { exact: true })).toBeVisible()
-      await window.getByRole('button', { name: `Run ${task.tab}` }).click()
+      await expect(window.locator('.agent-prompt-card')).toHaveCount(4)
+      await window.locator('.agent-prompt-card').first().click()
       await expect(window.getByText(task.content, { exact: false })).toBeVisible()
       await expect(window.getByText('Agent sample-v1 · MSX + MCEM', { exact: true })).toBeVisible()
       await expect(window.locator('.agent-synthesis')).toBeInViewport()

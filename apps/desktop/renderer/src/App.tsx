@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   Badge,
   Button,
@@ -31,11 +33,43 @@ import { contractVersion, type Account, type AgentCapability, type AgentTaskResp
 import { getDataModeLabel } from './data-mode-label.js'
 
 const prompt = 'How do we move this opportunity to the next MCEM stage?'
-const agentTasks: Record<AgentCapability, { label: string; prompt: string }> = {
-  'account-pulse': { label: 'Account Pulse', prompt: 'What should the account team focus on this week?' },
-  'mcem-coach': { label: 'MCEM Coach', prompt: 'How do we move this opportunity to the next MCEM stage?' },
-  'pursuit-executive': { label: 'Pursuit & Executive', prompt: 'Create an executive-ready pursuit plan for this opportunity.' },
-  'risk-solution-play': { label: 'Risk & Solution Play', prompt: 'Identify grounded risks and relevant solution-play actions.' }
+const agentTasks: Record<AgentCapability, { label: string; prompts: readonly string[] }> = {
+  'account-pulse': {
+    label: 'Account Pulse',
+    prompts: [
+      'What should the account team focus on this week?',
+      'Which opportunity signals need immediate attention?',
+      'Summarize recent account activity and customer commitments.',
+      'Rank the next best actions for this opportunity.'
+    ]
+  },
+  'mcem-coach': {
+    label: 'MCEM Coach',
+    prompts: [
+      'How do we move this opportunity to the next MCEM stage?',
+      'Which exit criteria are missing or only partially supported?',
+      'Compare the recorded stage with the evidence-based stage.',
+      'Create an owner-based plan to close the MCEM gaps.'
+    ]
+  },
+  'pursuit-executive': {
+    label: 'Pursuit & Executive',
+    prompts: [
+      'Create an executive-ready brief for this opportunity.',
+      'Build a 30/60 day pursuit plan with owners and milestones.',
+      'Prepare talking points and a customer ask for the next meeting.',
+      'Identify stakeholder gaps and recommend an engagement strategy.'
+    ]
+  },
+  'risk-solution-play': {
+    label: 'Risk & Solution Play',
+    prompts: [
+      'Identify the highest grounded risks and mitigation actions.',
+      'Recommend a solution play based on the available evidence.',
+      'Prepare likely objections, proof points, and a demo path.',
+      'Which blockers could delay this opportunity and who should own them?'
+    ]
+  }
 }
 const themeStorageKey = 'tlc-theme'
 type ThemeMode = 'light' | 'dark'
@@ -50,7 +84,7 @@ export function App() {
   const [result, setResult] = useState<McemResponse | null>(null)
   const [workbenchView, setWorkbenchView] = useState<WorkbenchView>('diagnostic')
   const [capability, setCapability] = useState<AgentCapability>('account-pulse')
-  const [taskPrompt, setTaskPrompt] = useState(agentTasks['account-pulse'].prompt)
+  const [taskPrompt, setTaskPrompt] = useState('')
   const [agentResult, setAgentResult] = useState<AgentTaskResponse | null>(null)
   const [agentStatus, setAgentStatus] = useState<'ready' | 'running' | 'error'>('ready')
   const [agentError, setAgentError] = useState('')
@@ -130,8 +164,11 @@ export function App() {
     }
   }
 
-  async function runAgentTask() {
+  async function runAgentTask(selectedPrompt = taskPrompt) {
     if (!accountId || !opportunityId) return
+    const submittedPrompt = selectedPrompt.trim()
+    if (submittedPrompt.length < 3) return
+    setTaskPrompt(selectedPrompt)
     setAgentStatus('running')
     setAgentError('')
     try {
@@ -140,7 +177,7 @@ export function App() {
         capability,
         accountId,
         opportunityId,
-        prompt: taskPrompt
+        prompt: submittedPrompt
       })
       setAgentResult(response)
       setAgentStatus('ready')
@@ -299,16 +336,29 @@ export function App() {
               <TabList selectedValue={capability} onTabSelect={(_, data) => {
                 const nextCapability = data.value as AgentCapability
                 setCapability(nextCapability)
-                setTaskPrompt(agentTasks[nextCapability].prompt)
+                setTaskPrompt('')
                 setAgentResult(null)
                 setAgentError('')
               }}>
-                {(Object.entries(agentTasks) as [AgentCapability, { label: string; prompt: string }][]).map(([value, task]) => (
+                {(Object.entries(agentTasks) as [AgentCapability, { label: string; prompts: readonly string[] }][]).map(([value, task]) => (
                   <Tab key={value} value={value}>{task.label}</Tab>
                 ))}
               </TabList>
+              <div className="agent-prompt-suggestions" aria-label={`${agentTasks[capability].label} suggested prompts`}>
+                {agentTasks[capability].prompts.map((suggestedPrompt) => (
+                  <button
+                    className="agent-prompt-card"
+                    key={suggestedPrompt}
+                    type="button"
+                    onClick={() => void runAgentTask(suggestedPrompt)}
+                    disabled={agentStatus === 'running'}
+                  >
+                    {suggestedPrompt}
+                  </button>
+                ))}
+              </div>
               <div className="agent-task-input">
-                <Textarea aria-label="Agent task" resize="vertical" value={taskPrompt} onChange={(_, data) => setTaskPrompt(data.value)} />
+                <Textarea aria-label="Agent task" placeholder="Ask a different question..." resize="vertical" value={taskPrompt} onChange={(_, data) => setTaskPrompt(data.value)} />
                 <Button appearance="primary" onClick={() => void runAgentTask()} disabled={agentStatus === 'running' || taskPrompt.trim().length < 3}>
                   {agentStatus === 'running' ? 'Analyzing...' : `Run ${agentTasks[capability].label}`}
                 </Button>
@@ -320,7 +370,20 @@ export function App() {
                   <strong>{agentTasks[agentResult.capability].label}</strong>
                   <span>Agent {agentResult.agentVersion} · {agentResult.sourceHealth.map((source) => source.source.toUpperCase()).join(' + ')}</span>
                 </div>
-                <div className="agent-synthesis-content">{agentResult.content}</div>
+                <div className="agent-synthesis-content">
+                  <Markdown
+                    remarkPlugins={[remarkGfm]}
+                    skipHtml
+                    components={{
+                      a: ({ href, children }) => <a href={href} onClick={(event) => {
+                        event.preventDefault()
+                        if (href) void window.tlc.openEvidence(href)
+                      }}>{children}</a>
+                    }}
+                  >
+                    {agentResult.content}
+                  </Markdown>
+                </div>
               </article>}
             </section>
           }

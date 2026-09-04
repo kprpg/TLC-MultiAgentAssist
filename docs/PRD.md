@@ -107,6 +107,8 @@ The application must provide:
 - Home view with weekly focus, recent signals, open risks, and recommended actions.
 - Four agent entry points presented as task-oriented tabs or navigation items.
 - Conversation or guided task pane with cited responses.
+- Three or four domain-relevant starter prompts for each agent, presented as keyboard-accessible choices that run immediately when selected while retaining a freeform prompt field.
+- Agent responses rendered as safe, readable Markdown, including headings, lists, links, tables, quotes, and code, rather than displaying Markdown source syntax.
 - Source health and freshness indicators.
 - Feedback controls: useful, inaccurate, missing source, wrong owner, not actionable.
 
@@ -268,6 +270,8 @@ The Teams channel must use Teams SSO, token exchange, and on-behalf-of access to
 | FR-10 | Provide sample-data mode and graceful connector degradation.                                  | Must                             |
 | FR-11 | Deep-link users to authorized source records and assets.                                      | Should                           |
 | FR-12 | Publish the same business capabilities through Teams.                                         | Later                            |
+| FR-13 | Present three or four relevant, selectable starter prompts for each of the four agents.       | Must                             |
+| FR-14 | Render agent response Markdown as accessible, sanitized rich content in the desktop client.   | Must                             |
 
 ## 15. Non-Functional Requirements
 
@@ -370,6 +374,8 @@ The MVP is accepted when:
 8. No workflow writes to MSX or sends external communication.
 9. Feedback is recorded with correlation ID, agent version, capability, and category.
 10. Security tests confirm token isolation, IPC validation, navigation allowlists, and secret-safe logging.
+11. Each agent displays three or four relevant starter prompts; selecting one submits that exact prompt and freeform entry remains available.
+12. Agent Markdown responses render as structured content without executing embedded HTML or scripts.
 
 ## 20. Risks and Mitigations
 
