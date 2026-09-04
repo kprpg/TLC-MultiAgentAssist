@@ -7,10 +7,10 @@ import { z } from "zod";
 import { PDFParse } from "pdf-parse";
 import { AIProjectClient } from "@azure/ai-projects";
 import { randomUUID } from "node:crypto";
-import { AlignmentType, Document, ExternalHyperlink, HeadingLevel, LevelFormat, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
+import { AlignmentType, Document, ExternalHyperlink, HeadingLevel, LevelFormat, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 var dataModeSchema = z.enum(["sample", "live"]);
 var sourceStateSchema = z.enum([
 	"sample",
@@ -1008,12 +1008,77 @@ function createRuntimeCredentials(authentication) {
 //#region apps/desktop/electron/main/outlook-compose.ts
 var maxComposeUriLength = 16e3;
 function createOutlookComposeUri(request) {
-	const composeUri = `mailto:${request.recipients.map(encodeURIComponent).join(",")}?${new URLSearchParams({
-		subject: request.subject,
-		body: request.responseMarkdown
-	}).toString()}`;
+	const recipients = request.recipients.map(encodeURIComponent).join(",");
+	const body = markdownToEmailText(request.responseMarkdown);
+	const composeUri = `mailto:${recipients}?subject=${encodeURIComponent(request.subject)}&body=${encodeURIComponent(body)}`;
 	if (composeUri.length > maxComposeUriLength) throw new Error("The response is too long to open in Outlook. Export it to Word instead.");
 	return composeUri;
+}
+function markdownToEmailText(markdown) {
+	return formatBlocks(unified().use(remarkParse).use(remarkGfm).parse(markdown).children).join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+function formatBlocks(nodes, indent = "") {
+	return nodes.flatMap((node) => {
+		switch (node.type) {
+			case "heading": {
+				const heading = inlineText(node.children).trim();
+				return heading ? [`${heading}\n${headingSeparator(heading, node.depth)}`] : [];
+			}
+			case "paragraph": return [inlineText(node.children).trim()];
+			case "list": return [node.children.map((item, index) => formatListItem(item, node.ordered ? `${(node.start ?? 1) + index}.` : "-", indent)).join("\n")];
+			case "table": return [formatTable(node)];
+			case "blockquote": return [formatBlocks(node.children, `${indent}  `).join("\n\n").split("\n").map((line) => `${indent}  ${line}`).join("\n")];
+			case "code": return [node.value.split("\n").map((line) => `${indent}    ${line}`).join("\n")];
+			case "thematicBreak": return ["----------------------------------------"];
+			case "html": return [];
+			default: return [];
+		}
+	}).filter(Boolean);
+}
+function formatListItem(item, marker, indent) {
+	const [first, ...rest] = item.children;
+	const lines = [`${indent}${marker} ${first?.type === "paragraph" ? inlineText(first.children).trim() : first ? formatBlocks([first], `${indent}  `).join("\n") : ""}`];
+	for (const child of rest) if (child.type === "list") lines.push(formatBlocks([child], `${indent}  `).join("\n"));
+	else lines.push(...formatBlocks([child], `${indent}  `).map((line) => `${indent}  ${line}`));
+	return lines.join("\n");
+}
+function formatTable(table) {
+	const rows = table.children.map((row) => row.children.map((cell) => inlineText(cell.children).trim()));
+	if (rows.length === 0) return "";
+	const columnCount = Math.max(...rows.map((row) => row.length));
+	const widths = Array.from({ length: columnCount }, (_, column) => Math.max(3, ...rows.map((row) => row[column]?.length ?? 0)));
+	const formatRow = (row) => row.map((cell, column) => (cell ?? "").padEnd(widths[column] ?? 3)).join(" | ").trimEnd();
+	const separator = widths.map((width) => "-".repeat(width)).join("-+-");
+	return [
+		formatRow(rows[0] ?? []),
+		separator,
+		...rows.slice(1).map(formatRow)
+	].join("\n");
+}
+function inlineText(nodes) {
+	return nodes.map((node) => {
+		switch (node.type) {
+			case "text":
+			case "inlineCode": return node.value;
+			case "break": return "\n";
+			case "link": {
+				const label = inlineText(node.children);
+				return label === node.url ? label : `${label} (${node.url})`;
+			}
+			case "image": return node.alt ? `${node.alt} (${node.url})` : node.url;
+			case "strong":
+			case "emphasis":
+			case "delete": return inlineText(node.children);
+			default: return textContent$1(node);
+		}
+	}).join("");
+}
+function textContent$1(node) {
+	if ("value" in node && typeof node.value === "string") return node.value;
+	return "children" in node && Array.isArray(node.children) ? node.children.map((child) => textContent$1(child)).join("") : "";
+}
+function headingSeparator(heading, depth) {
+	return (depth === 1 ? "=" : "-").repeat(Math.min(heading.length, 72));
 }
 //#endregion
 //#region apps/desktop/electron/main/response-document.ts
