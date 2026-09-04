@@ -109,6 +109,8 @@ The application must provide:
 - Conversation or guided task pane with cited responses.
 - Three or four domain-relevant starter prompts for each agent, presented as keyboard-accessible choices that run immediately when selected while retaining a freeform prompt field.
 - Agent responses rendered as safe, readable Markdown, including headings, lists, links, tables, quotes, and code, rather than displaying Markdown source syntax.
+- VS Code-style toolbar controls that independently collapse and restore the working-context and next-best-actions panes while expanding the central workbench.
+- Completed agent responses provide adjacent `Send E-mail` and `Export` actions. `Send E-mail` opens a recipient-addressed message in the user's Outlook client for human review and user-initiated sending; `Export` saves a formatted Word document.
 - Source health and freshness indicators.
 - Feedback controls: useful, inaccurate, missing source, wrong owner, not actionable.
 
@@ -256,22 +258,25 @@ The Teams channel must use Teams SSO, token exchange, and on-behalf-of access to
 
 ## 14. Functional Requirements
 
-| ID    | Requirement                                                                                   | Priority                         |
-| ----- | --------------------------------------------------------------------------------------------- | -------------------------------- |
-| FR-01 | Authenticate the local user through Azure CLI for supported Microsoft resources.              | Must                             |
-| FR-02 | Select an authorized MSX account and opportunity.                                             | Must                             |
-| FR-03 | Route requests through one orchestrated experience to four agents.                            | Must                             |
-| FR-04 | Provide MCEM guidance grounded in MSX evidence and approved MCEM content.                     | Must                             |
-| FR-05 | Generate weekly focus, executive brief, pursuit plan, risk review, and solution play outputs. | Must                             |
-| FR-06 | Cite sources, timestamps, assumptions, and missing data.                                      | Must                             |
-| FR-07 | Search approved SharePoint and Seismic content.                                               | Must, subject to access approval |
-| FR-08 | Enrich with approved LinkedIn signals.                                                        | Should, subject to API approval  |
-| FR-09 | Capture structured user feedback.                                                             | Must                             |
-| FR-10 | Provide sample-data mode and graceful connector degradation.                                  | Must                             |
-| FR-11 | Deep-link users to authorized source records and assets.                                      | Should                           |
-| FR-12 | Publish the same business capabilities through Teams.                                         | Later                            |
-| FR-13 | Present three or four relevant, selectable starter prompts for each of the four agents.       | Must                             |
-| FR-14 | Render agent response Markdown as accessible, sanitized rich content in the desktop client.   | Must                             |
+| ID    | Requirement                                                                                      | Priority                         |
+| ----- | ------------------------------------------------------------------------------------------------ | -------------------------------- |
+| FR-01 | Authenticate the local user through Azure CLI for supported Microsoft resources.                 | Must                             |
+| FR-02 | Select an authorized MSX account and opportunity.                                                | Must                             |
+| FR-03 | Route requests through one orchestrated experience to four agents.                               | Must                             |
+| FR-04 | Provide MCEM guidance grounded in MSX evidence and approved MCEM content.                        | Must                             |
+| FR-05 | Generate weekly focus, executive brief, pursuit plan, risk review, and solution play outputs.    | Must                             |
+| FR-06 | Cite sources, timestamps, assumptions, and missing data.                                         | Must                             |
+| FR-07 | Search approved SharePoint and Seismic content.                                                  | Must, subject to access approval |
+| FR-08 | Enrich with approved LinkedIn signals.                                                           | Should, subject to API approval  |
+| FR-09 | Capture structured user feedback.                                                                | Must                             |
+| FR-10 | Provide sample-data mode and graceful connector degradation.                                     | Must                             |
+| FR-11 | Deep-link users to authorized source records and assets.                                         | Should                           |
+| FR-12 | Publish the same business capabilities through Teams.                                            | Later                            |
+| FR-13 | Present three or four relevant, selectable starter prompts for each of the four agents.          | Must                             |
+| FR-14 | Render agent response Markdown as accessible, sanitized rich content in the desktop client.      | Must                             |
+| FR-15 | Independently collapse, restore, and persist the left context and right action pane states.      | Must                             |
+| FR-16 | Open a recipient-addressed message from a completed agent response in the user's Outlook client. | Must                             |
+| FR-17 | Export a completed agent response as a formatted Microsoft Word `.docx` file.                    | Must                             |
 
 ## 15. Non-Functional Requirements
 
@@ -376,6 +381,9 @@ The MVP is accepted when:
 10. Security tests confirm token isolation, IPC validation, navigation allowlists, and secret-safe logging.
 11. Each agent displays three or four relevant starter prompts; selecting one submits that exact prompt and freeform entry remains available.
 12. Agent Markdown responses render as structured content without executing embedded HTML or scripts.
+13. Keyboard-accessible toolbar toggles independently collapse and restore both side panes, expose their state through accessible attributes, persist the preference, and allow the central workbench to consume the available width.
+14. A completed agent response can open an addressed message through the operating system's Outlook mail handler without requesting Graph mail permissions; the user reviews and sends it from Outlook.
+15. A completed agent response can be saved through an operating-system save dialog as a valid `.docx` file preserving its title, headings, paragraphs, lists, tables, and links where supported.
 
 ## 20. Risks and Mitigations
 

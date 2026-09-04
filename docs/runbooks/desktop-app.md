@@ -44,7 +44,7 @@ Edit `config/foundry.environment.json` with your own values:
 - `authentication.appRegistration.tenantId`: your Microsoft Entra tenant ID.
 - `authentication.appRegistration.clientId`: the Application (client) ID of your public-client app registration.
 - `authentication.appRegistration.redirectUri`: a redirect URI configured under **Mobile and desktop applications**, normally `http://localhost`.
-- `authentication.scopes`: resource scopes for Foundry, MSX, and Microsoft Graph.
+- `authentication.scopes`: resource scopes for Foundry, MSX, and Microsoft Graph. Outlook compose handoff uses the operating system mail handler and does not require a Graph mail scope.
 - `authentication.expectedUserDomain`: the domain allowed by the local identity check.
 
 The private file is ignored by Git. The app validates it before creating credentials or connectors. Never add client secrets, access tokens, API keys, or credential-bearing connection strings; Electron uses a public-client sign-in and cannot safely hold a client secret.
@@ -63,14 +63,14 @@ In Microsoft Entra admin center:
 
 1. Create an app registration for this desktop app in the tenant that grants the developer access to the required resources.
 2. Under **Authentication**, add the **Mobile and desktop applications** redirect URI `http://localhost` and enable public-client flows when required by tenant policy.
-3. Under **API permissions**, add the delegated permissions approved for MSX and Microsoft Graph/SharePoint. Foundry access is also enforced through Azure RBAC; assign the signed-in developer an appropriate project role such as **Foundry User**.
+3. Under **API permissions**, add only the delegated permissions approved for MSX and Microsoft Graph/SharePoint data access. Outlook compose handoff does not require `Mail.ReadWrite` or `Mail.Send`. Foundry access is also enforced through Azure RBAC; assign the signed-in developer an appropriate project role such as **Foundry User**.
 4. Put only the tenant ID, client ID, redirect URI, and scopes in your private JSON file.
 
 Each developer can therefore use a different Foundry project and app registration without changing source code.
 
 ## Launch the app
 
-The example uses `"mode": "azure-cli"`, preserving the existing local development sign-in flow.
+The example uses `"mode": "azure-cli"`, preserving the existing local development sign-in flow for MSX and Foundry. Opening a prepared message in Outlook does not start a Microsoft Graph sign-in flow.
 
 Sign in with your own corporate identity:
 
@@ -144,6 +144,14 @@ The direct Node invocation avoids Windows command-shim issues that can affect `n
 ## Theme selection
 
 Use the sun or moon button in the top-right toolbar to switch between light and dark mode. The selected theme is saved locally and restored on the next launch.
+
+## Share an agent response
+
+After a Foundry agent response completes, use `Send E-mail` to enter recipients and an optional subject. TLC asks the operating system to open a prepared message in the default mail client. With Outlook registered as the mail handler, Outlook uses its signed-in corporate account; the user remains responsible for reviewing, editing, and sending the message.
+
+The compose handoff uses a `mailto:` URI, so very long responses cannot be transferred reliably. Use `Export` for responses that exceed the supported compose size.
+
+Use `Export` to choose a destination and save the response as a formatted Word `.docx` document. Cancelling the save dialog does not write a file.
 
 ## Troubleshooting
 

@@ -4,8 +4,16 @@ import remarkGfm from 'remark-gfm'
 import {
   Badge,
   Button,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
   Dropdown,
+  Field,
   FluentProvider,
+  Input,
   MessageBar,
   Option,
   ProgressBar,
@@ -18,11 +26,15 @@ import {
 } from '@fluentui/react-components'
 import {
   ArrowSync20Regular,
+  ArrowDownload20Regular,
   CheckmarkCircle20Filled,
   ChevronRight20Regular,
   DataUsage20Regular,
   DocumentSearch20Regular,
+  Mail20Regular,
   Open20Regular,
+  PanelLeft20Regular,
+  PanelRight20Regular,
   Person20Regular,
   ShieldCheckmark20Regular,
   WeatherMoon20Regular,
@@ -72,11 +84,15 @@ const agentTasks: Record<AgentCapability, { label: string; prompts: readonly str
   }
 }
 const themeStorageKey = 'tlc-theme'
+const leftPaneStorageKey = 'tlc-left-pane-collapsed'
+const rightPaneStorageKey = 'tlc-right-pane-collapsed'
 type ThemeMode = 'light' | 'dark'
 type WorkbenchView = 'diagnostic' | 'foundry-agent'
 
 export function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialTheme)
+  const [leftPaneCollapsed, setLeftPaneCollapsed] = useState(() => getInitialPaneState(leftPaneStorageKey))
+  const [rightPaneCollapsed, setRightPaneCollapsed] = useState(() => getInitialPaneState(rightPaneStorageKey))
   const [accounts, setAccounts] = useState<Account[]>([])
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [accountId, setAccountId] = useState('')
@@ -88,6 +104,11 @@ export function App() {
   const [agentResult, setAgentResult] = useState<AgentTaskResponse | null>(null)
   const [agentStatus, setAgentStatus] = useState<'ready' | 'running' | 'error'>('ready')
   const [agentError, setAgentError] = useState('')
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false)
+  const [emailRecipients, setEmailRecipients] = useState('')
+  const [emailSubject, setEmailSubject] = useState('')
+  const [shareStatus, setShareStatus] = useState<'ready' | 'running' | 'success' | 'error'>('ready')
+  const [shareMessage, setShareMessage] = useState('')
   const [dataStatus, setDataStatus] = useState<DesktopDataStatus | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'running' | 'error'>('loading')
   const [error, setError] = useState('')
@@ -98,6 +119,14 @@ export function App() {
     document.documentElement.dataset['theme'] = themeMode
     localStorage.setItem(themeStorageKey, themeMode)
   }, [themeMode])
+
+  useEffect(() => {
+    localStorage.setItem(leftPaneStorageKey, String(leftPaneCollapsed))
+  }, [leftPaneCollapsed])
+
+  useEffect(() => {
+    localStorage.setItem(rightPaneStorageKey, String(rightPaneCollapsed))
+  }, [rightPaneCollapsed])
 
   useEffect(() => {
     void Promise.all([window.tlc.getDataStatus(), window.tlc.listAccounts()]).then(([nextDataStatus, items]) => {
@@ -171,6 +200,8 @@ export function App() {
     setTaskPrompt(selectedPrompt)
     setAgentStatus('running')
     setAgentError('')
+    setShareStatus('ready')
+    setShareMessage('')
     try {
       const response = await window.tlc.runAgentTask({
         contractVersion,
@@ -184,6 +215,55 @@ export function App() {
     } catch (cause) {
       setAgentError(cause instanceof Error ? cause.message : 'The agent task could not be completed.')
       setAgentStatus('error')
+    }
+  }
+
+  function openEmailDialog() {
+    if (!agentResult) return
+    setEmailSubject(`${agentTasks[agentResult.capability].label}: ${opportunity?.name ?? 'Agent response'}`)
+    setShareStatus('ready')
+    setShareMessage('')
+    setEmailDialogOpen(true)
+  }
+
+  async function openEmailCompose() {
+    if (!agentResult) return
+    const recipients = emailRecipients.split(/[;,]/).map((recipient) => recipient.trim()).filter(Boolean)
+    setShareStatus('running')
+    setShareMessage('')
+    try {
+      await window.tlc.openEmailCompose({
+        contractVersion,
+        recipients,
+        subject: emailSubject,
+        responseTitle: agentTasks[agentResult.capability].label,
+        responseMarkdown: agentResult.content
+      })
+      setEmailDialogOpen(false)
+      setShareStatus('success')
+      setShareMessage('Outlook message opened for review. Send it from Outlook when ready.')
+    } catch (cause) {
+      setShareStatus('error')
+      setShareMessage(cause instanceof Error ? cause.message : 'The Outlook message could not be opened.')
+    }
+  }
+
+  async function exportAgentResponse() {
+    if (!agentResult) return
+    setShareStatus('running')
+    setShareMessage('')
+    try {
+      const response = await window.tlc.exportAgentResponse({
+        contractVersion,
+        responseTitle: `${agentTasks[agentResult.capability].label} - ${opportunity?.name ?? 'Agent response'}`,
+        responseMarkdown: agentResult.content,
+        generatedAt: agentResult.generatedAt
+      })
+      setShareStatus(response.state === 'saved' ? 'success' : 'ready')
+      setShareMessage(response.state === 'saved' ? 'Word document saved.' : '')
+    } catch (cause) {
+      setShareStatus('error')
+      setShareMessage(cause instanceof Error ? cause.message : 'The Word document could not be exported.')
     }
   }
 
@@ -204,6 +284,16 @@ export function App() {
     <FluentProvider className="app-provider" theme={themeMode === 'dark' ? webDarkTheme : webLightTheme}>
       <div className="app-frame">
       <header className="topbar">
+        <Button
+          appearance="subtle"
+          className="icon-control pane-toggle edge-pane-toggle"
+          icon={<PanelLeft20Regular />}
+          aria-label="Toggle working context"
+          aria-controls="working-context-pane"
+          aria-expanded={!leftPaneCollapsed}
+          title="Toggle working context"
+          onClick={() => setLeftPaneCollapsed((current) => !current)}
+        />
         <div className="brand-mark">TLC</div>
         <div className="brand-copy">
           <strong>Account Team Intelligence</strong>
@@ -222,6 +312,16 @@ export function App() {
           {getDataModeLabel(dataStatus)}
         </Badge>
         <div className="identity"><Person20Regular /><span>{dataStatus?.auth.displayName ?? (authReady ? 'Azure CLI connected' : 'Azure CLI sign-in required')}</span></div>
+        <Button
+          appearance="subtle"
+          className="icon-control pane-toggle edge-pane-toggle"
+          icon={<PanelRight20Regular />}
+          aria-label="Toggle next best actions"
+          aria-controls="next-best-actions-pane"
+          aria-expanded={!rightPaneCollapsed}
+          title="Toggle next best actions"
+          onClick={() => setRightPaneCollapsed((current) => !current)}
+        />
       </header>
 
       <div className={`sample-notice ${isLive && authReady ? 'live-notice' : ''}`}>
@@ -235,8 +335,8 @@ export function App() {
           : 'This automated preview uses sanitized MSX fixtures and the local MCEM Overview PDF snapshot. No live MSX or SharePoint calls are made.'}</span>
       </div>
 
-      <main className="workspace">
-        <aside className="context-rail">
+      <main className={`workspace${leftPaneCollapsed ? ' left-pane-collapsed' : ''}${rightPaneCollapsed ? ' right-pane-collapsed' : ''}`}>
+        {!leftPaneCollapsed && <aside className="context-rail" id="working-context-pane">
           <div className="section-label">WORKING CONTEXT</div>
           <label>Account</label>
           <Dropdown className="context-dropdown" inlinePopup value={account?.name ?? ''} selectedOptions={accountId ? [accountId] : []} onOptionSelect={(_, data) => {
@@ -265,7 +365,7 @@ export function App() {
               <Badge color="warning" appearance="tint">{source.state}</Badge>
             </div>)}
           </div>
-        </aside>
+        </aside>}
 
         <section className="analysis-pane" ref={analysisPaneRef}>
           <div className="analysis-header">
@@ -367,9 +467,16 @@ export function App() {
               {agentStatus === 'running' && <Spinner label={`Running ${agentTasks[capability].label}`} />}
               {agentResult && agentStatus !== 'running' && <article className="agent-synthesis">
                 <div className="agent-synthesis-meta">
-                  <strong>{agentTasks[agentResult.capability].label}</strong>
-                  <span>Agent {agentResult.agentVersion} · {agentResult.sourceHealth.map((source) => source.source.toUpperCase()).join(' + ')}</span>
+                  <div className="agent-synthesis-identity">
+                    <strong>{agentTasks[agentResult.capability].label}</strong>
+                    <span>Agent {agentResult.agentVersion} · {agentResult.sourceHealth.map((source) => source.source.toUpperCase()).join(' + ')}</span>
+                  </div>
+                  <div className="response-actions" aria-label="Response actions">
+                    <Button icon={<Mail20Regular />} onClick={openEmailDialog} disabled={shareStatus === 'running'}>Send E-mail</Button>
+                    <Button icon={<ArrowDownload20Regular />} onClick={() => void exportAgentResponse()} disabled={shareStatus === 'running'}>Export</Button>
+                  </div>
                 </div>
+                {shareMessage && <MessageBar intent={shareStatus === 'error' ? 'error' : 'success'}>{shareMessage}</MessageBar>}
                 <div className="agent-synthesis-content">
                   <Markdown
                     remarkPlugins={[remarkGfm]}
@@ -385,11 +492,34 @@ export function App() {
                   </Markdown>
                 </div>
               </article>}
+              <Dialog open={emailDialogOpen} onOpenChange={(_, data) => setEmailDialogOpen(data.open)}>
+                <DialogSurface>
+                  <DialogBody>
+                    <DialogTitle>Open Outlook message</DialogTitle>
+                    <DialogContent className="email-draft-form">
+                      <p>The message will open in Outlook using your signed-in account. Review it and press Send in Outlook.</p>
+                      <Field label="Recipients" hint="Separate multiple addresses with commas or semicolons.">
+                        <Input type="email" aria-label="Email recipients" value={emailRecipients} onChange={(_, data) => setEmailRecipients(data.value)} />
+                      </Field>
+                      <Field label="Subject">
+                        <Input aria-label="Email subject" value={emailSubject} onChange={(_, data) => setEmailSubject(data.value)} />
+                      </Field>
+                      {shareStatus === 'error' && shareMessage && <MessageBar intent="error">{shareMessage}</MessageBar>}
+                    </DialogContent>
+                    <DialogActions>
+                      <Button appearance="secondary" onClick={() => setEmailDialogOpen(false)}>Cancel</Button>
+                      <Button appearance="primary" icon={<Mail20Regular />} onClick={() => void openEmailCompose()} disabled={shareStatus === 'running' || !emailRecipients.trim() || !emailSubject.trim()}>
+                        {shareStatus === 'running' ? 'Opening...' : 'Open in Outlook'}
+                      </Button>
+                    </DialogActions>
+                  </DialogBody>
+                </DialogSurface>
+              </Dialog>
             </section>
           }
         </section>
 
-        <aside className="actions-pane">
+        {!rightPaneCollapsed && <aside className="actions-pane" id="next-best-actions-pane">
           <div className="actions-heading"><span className="section-label">NEXT BEST ACTIONS</span><Badge appearance="filled">{result?.recommendations.length ?? 0}</Badge></div>
           <p className="actions-intro">Resolve these gaps before treating the selected opportunity as Stage {result?.recordedStage ?? '—'} ready.</p>
           <div className="action-list">
@@ -404,7 +534,7 @@ export function App() {
             </article>)}
           </div>
           <div className="read-only-note"><ShieldCheckmark20Regular /><span>Read-only preview. TLC will not update MSX or contact customers.</span></div>
-        </aside>
+        </aside>}
       </main>
       </div>
     </FluentProvider>
@@ -415,4 +545,8 @@ function getInitialTheme(): ThemeMode {
   const savedTheme = localStorage.getItem(themeStorageKey)
   if (savedTheme === 'light' || savedTheme === 'dark') return savedTheme
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function getInitialPaneState(storageKey: string): boolean {
+  return localStorage.getItem(storageKey) === 'true'
 }

@@ -7,6 +7,15 @@
 - [x] Render agent responses in a safe Markdown viewer with readable headings, lists, links, tables, quotes, and code blocks.
 - [x] Add automated regression coverage for prompt selection, submission, agent switching, and Markdown rendering.
 
+## Improve workbench focus and response handoff
+
+- [x] Add accessible VS Code-style toolbar toggles for the working-context and next-best-actions panes.
+- [x] Persist each pane preference and expand the central workbench when either pane is collapsed.
+- [x] Add a completed-response action group for opening an addressed Outlook message and exporting a Word document.
+- [x] Open Outlook compose through validated main-process IPC without Graph mail permissions; leave sending to the user.
+- [x] Export structured agent Markdown through Electron's save dialog as a valid `.docx` file.
+- [x] Add automated regression coverage for pane state, Outlook compose URI shape, export document structure, IPC validation, and response controls.
+
 ## Restore canonical MCEM knowledge access
 
 - Current project input: `docs/knowledge/MCEM Overview.pdf`.

@@ -1,14 +1,16 @@
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
-import { dirname, join, resolve } from "node:path";
+import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
-import { copyFile, mkdir, readFile, stat } from "node:fs/promises";
-import { copyFile, mkdir, readFile, stat } from "node:fs/promises";
 import { PDFParse } from "pdf-parse";
 import { AIProjectClient } from "@azure/ai-projects";
 import { randomUUID } from "node:crypto";
+import { AlignmentType, Document, ExternalHyperlink, HeadingLevel, LevelFormat, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
 var dataModeSchema = z.enum(["sample", "live"]);
 var sourceStateSchema = z.enum([
 	"sample",
@@ -141,6 +143,24 @@ z.object({
 	content: z.string().min(1),
 	sourceHealth: z.array(sourceHealthSchema).min(1)
 });
+var emailComposeRequestSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	recipients: z.array(z.string().email()).min(1).max(20),
+	subject: z.string().trim().min(1).max(255),
+	responseTitle: z.string().trim().min(1).max(255),
+	responseMarkdown: z.string().min(1).max(2e5)
+}).strict();
+z.object({ state: z.literal("opened") }).strict();
+var exportResponseRequestSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	responseTitle: z.string().trim().min(1).max(255),
+	responseMarkdown: z.string().min(1).max(2e5),
+	generatedAt: z.string().datetime()
+}).strict();
+z.discriminatedUnion("state", [z.object({
+	state: z.literal("saved"),
+	filePath: z.string().min(1)
+}).strict(), z.object({ state: z.literal("cancelled") }).strict()]);
 var mcemResponseSchema = z.object({
 	contractVersion: z.literal("1.0"),
 	correlationId: z.string().uuid(),
@@ -949,33 +969,6 @@ async function prepareFoundryEnvironmentFile(options) {
 	};
 }
 //#endregion
-//#region apps/desktop/electron/main/packaged-configuration.ts
-async function prepareFoundryEnvironmentFile(options) {
-	const environment = options.environment ?? process.env;
-	const workingDirectory = options.workingDirectory ?? process.cwd();
-	const configuredPath = environment["TLC_FOUNDRY_ENV_FILE"]?.trim();
-	if (!options.isPackaged || configuredPath) return {
-		filePath: resolveFoundryEnvironmentPath(environment, workingDirectory),
-		created: false
-	};
-	const filePath = join(options.userDataPath, "foundry.environment.json");
-	try {
-		await stat(filePath);
-		return {
-			filePath,
-			created: false
-		};
-	} catch (error) {
-		if (error.code !== "ENOENT") throw error;
-	}
-	await mkdir(dirname(filePath), { recursive: true });
-	await copyFile(options.templatePath, filePath);
-	return {
-		filePath,
-		created: true
-	};
-}
-//#endregion
 //#region apps/desktop/electron/main/runtime-credentials.ts
 function createRuntimeCredentials(authentication) {
 	if (authentication.mode === "interactive-browser") {
@@ -990,6 +983,11 @@ function createRuntimeCredentials(authentication) {
 				tenantId: authentication.foundryTenantId,
 				clientId: appRegistration.clientId,
 				redirectUri: appRegistration.redirectUri
+			}),
+			graph: new InteractiveBrowserCredential({
+				tenantId: appRegistration.tenantId,
+				clientId: appRegistration.clientId,
+				redirectUri: appRegistration.redirectUri
 			})
 		};
 	}
@@ -998,8 +996,170 @@ function createRuntimeCredentials(authentication) {
 		foundry: new AzureCliCredential({
 			tenantId: authentication.foundryTenantId,
 			processTimeoutInMs: 3e4
-		})
+		}),
+		graph: authentication.appRegistration ? new InteractiveBrowserCredential({
+			tenantId: authentication.appRegistration.tenantId,
+			clientId: authentication.appRegistration.clientId,
+			redirectUri: authentication.appRegistration.redirectUri
+		}) : new AzureCliCredential({ processTimeoutInMs: 3e4 })
 	};
+}
+//#endregion
+//#region apps/desktop/electron/main/outlook-compose.ts
+var maxComposeUriLength = 16e3;
+function createOutlookComposeUri(request) {
+	const composeUri = `mailto:${request.recipients.map(encodeURIComponent).join(",")}?${new URLSearchParams({
+		subject: request.subject,
+		body: request.responseMarkdown
+	}).toString()}`;
+	if (composeUri.length > maxComposeUriLength) throw new Error("The response is too long to open in Outlook. Export it to Word instead.");
+	return composeUri;
+}
+//#endregion
+//#region apps/desktop/electron/main/response-document.ts
+var numberingReference = "agent-response-numbering";
+async function createResponseDocumentBuffer(request) {
+	const tree = unified().use(remarkParse).use(remarkGfm).parse(request.responseMarkdown);
+	const children = [
+		new Paragraph({
+			text: request.responseTitle,
+			heading: HeadingLevel.TITLE
+		}),
+		new Paragraph({ children: [new TextRun({
+			text: `Generated ${new Date(request.generatedAt).toLocaleString("en-US")}`,
+			color: "666666",
+			italics: true
+		})] }),
+		...tree.children.flatMap((node) => blockToDocument(node))
+	];
+	const document = new Document({
+		numbering: { config: [{
+			reference: numberingReference,
+			levels: [{
+				level: 0,
+				format: LevelFormat.DECIMAL,
+				text: "%1.",
+				alignment: AlignmentType.START,
+				style: { paragraph: { indent: {
+					left: 720,
+					hanging: 360
+				} } }
+			}]
+		}] },
+		sections: [{
+			properties: { page: {
+				size: {
+					width: 12240,
+					height: 15840
+				},
+				margin: {
+					top: 1080,
+					right: 1080,
+					bottom: 1080,
+					left: 1080
+				}
+			} },
+			children
+		}]
+	});
+	return Packer.toBuffer(document);
+}
+function blockToDocument(node) {
+	switch (node.type) {
+		case "heading": return [new Paragraph({
+			heading: headingLevel(node.depth),
+			children: inlineChildren(node.children)
+		})];
+		case "paragraph": return [new Paragraph({
+			children: inlineChildren(node.children),
+			spacing: { after: 120 }
+		})];
+		case "list": return node.children.flatMap((item) => item.children.flatMap((child) => {
+			const children = child.type === "paragraph" ? inlineChildren(child.children) : [new TextRun(textContent(child))];
+			return [new Paragraph(node.ordered ? {
+				children,
+				numbering: {
+					reference: numberingReference,
+					level: 0
+				}
+			} : {
+				children,
+				bullet: { level: 0 }
+			})];
+		}));
+		case "table": return [new Table({
+			width: {
+				size: 100,
+				type: WidthType.PERCENTAGE
+			},
+			rows: node.children.map((row) => new TableRow({ children: row.children.map((cell) => new TableCell({ children: [new Paragraph({ children: inlineChildren(cell.children) })] })) }))
+		})];
+		case "blockquote": return node.children.flatMap((child) => blockToDocument(child).map((block) => block instanceof Paragraph ? new Paragraph({
+			children: [new TextRun({
+				text: textContent(child),
+				italics: true,
+				color: "555555"
+			})],
+			indent: { left: 360 }
+		}) : block));
+		case "code": return [new Paragraph({
+			children: [new TextRun({
+				text: node.value,
+				font: "Consolas"
+			})],
+			shading: { fill: "F3F4F6" }
+		})];
+		case "thematicBreak": return [new Paragraph({ text: "" })];
+		default: return [];
+	}
+}
+function inlineChildren(nodes) {
+	return nodes.flatMap((node) => {
+		switch (node.type) {
+			case "text": return [new TextRun(node.value)];
+			case "strong": return [new TextRun({
+				text: textContent(node),
+				bold: true
+			})];
+			case "emphasis": return [new TextRun({
+				text: textContent(node),
+				italics: true
+			})];
+			case "delete": return [new TextRun({
+				text: textContent(node),
+				strike: true
+			})];
+			case "inlineCode": return [new TextRun({
+				text: node.value,
+				font: "Consolas"
+			})];
+			case "break": return [new TextRun({ break: 1 })];
+			case "link": return /^https:\/\//i.test(node.url) ? [new ExternalHyperlink({
+				link: node.url,
+				children: [new TextRun({
+					text: textContent(node),
+					style: "Hyperlink"
+				})]
+			})] : [new TextRun(textContent(node))];
+			default: return [new TextRun(textContent(node))];
+		}
+	});
+}
+function textContent(node) {
+	if (!node || typeof node !== "object") return "";
+	const candidate = node;
+	if (typeof candidate.value === "string") return candidate.value;
+	return Array.isArray(candidate.children) ? candidate.children.map(textContent).join("") : "";
+}
+function headingLevel(depth) {
+	return [
+		HeadingLevel.HEADING_1,
+		HeadingLevel.HEADING_2,
+		HeadingLevel.HEADING_3,
+		HeadingLevel.HEADING_4,
+		HeadingLevel.HEADING_5,
+		HeadingLevel.HEADING_6
+	][depth - 1] ?? HeadingLevel.HEADING_6;
 }
 //#endregion
 //#region apps/desktop/electron/main/index.ts
@@ -1029,7 +1189,8 @@ var authentication = runtimeEnvironment?.authentication;
 var fallbackCredential = new AzureCliCredential({ processTimeoutInMs: 3e4 });
 var credentials = authentication ? createRuntimeCredentials(authentication) : {
 	msx: fallbackCredential,
-	foundry: fallbackCredential
+	foundry: fallbackCredential,
+	graph: fallbackCredential
 };
 var tokenProvider = new AzureCliMsxTokenProvider({
 	credential: credentials.msx,
@@ -1042,7 +1203,6 @@ var tokenProvider = new AzureCliMsxTokenProvider({
 var reportPerformance = (event) => {
 	console.info(`[performance] ${JSON.stringify(event)}`);
 };
-var mcemConnector = new LocalPdfMcemGuidanceConnector(app.isPackaged ? resolve(process.resourcesPath, "docs/knowledge/MCEM Overview.pdf") : resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
 var mcemConnector = new LocalPdfMcemGuidanceConnector(app.isPackaged ? resolve(process.resourcesPath, "docs/knowledge/MCEM Overview.pdf") : resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
 var msxConnector = dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider, fetch, void 0, reportPerformance);
 var foundryOpenAIClient = runtimeEnvironment ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry) : void 0;
@@ -1079,21 +1239,6 @@ var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object
 		})
 	}];
 })), reportPerformance);
-async function openConfigurationAndExit(filePath, detail) {
-	if ((await dialog.showMessageBox({
-		type: "info",
-		title: "TLC MultiAgent Assist setup",
-		message: "Configure your environment before starting TLC MultiAgent Assist.",
-		detail: `${detail}\n\nConfiguration file:\n${filePath}`,
-		buttons: ["Open configuration", "Exit"],
-		defaultId: 0,
-		cancelId: 1,
-		noLink: true
-	})).response === 0) {
-		if (await shell.openPath(filePath)) shell.showItemInFolder(filePath);
-	}
-	app.quit();
-}
 async function openConfigurationAndExit(filePath, detail) {
 	if ((await dialog.showMessageBox({
 		type: "info",
@@ -1158,12 +1303,41 @@ function registerReadOnlyIpc() {
 		assertTrustedSender(event);
 		return orchestrator.runAgentTask(agentTaskRequestSchema.parse(request));
 	});
+	ipcMain.handle("tlc:open-email-compose", async (event, rawRequest) => {
+		assertTrustedSender(event);
+		const request = emailComposeRequestSchema.parse(rawRequest);
+		await shell.openExternal(createOutlookComposeUri(request));
+		return { state: "opened" };
+	});
+	ipcMain.handle("tlc:export-agent-response", async (event, rawRequest) => {
+		assertTrustedSender(event);
+		const request = exportResponseRequestSchema.parse(rawRequest);
+		const result = await dialog.showSaveDialog({
+			title: "Export agent response",
+			defaultPath: `${safeFileName(request.responseTitle)}.docx`,
+			filters: [{
+				name: "Microsoft Word document",
+				extensions: ["docx"]
+			}],
+			properties: ["createDirectory", "showOverwriteConfirmation"]
+		});
+		if (result.canceled || !result.filePath) return { state: "cancelled" };
+		const filePath = result.filePath.toLowerCase().endsWith(".docx") ? result.filePath : `${result.filePath}.docx`;
+		await writeFile(filePath, await createResponseDocumentBuffer(request));
+		return {
+			state: "saved",
+			filePath
+		};
+	});
 	ipcMain.handle("tlc:open-evidence", async (event, rawUrl) => {
 		assertTrustedSender(event);
 		const url = new URL(z.string().url().parse(rawUrl));
 		if (url.protocol !== "https:") throw new Error("Only HTTPS evidence links are allowed.");
 		await shell.openExternal(url.toString());
 	});
+}
+function safeFileName(value) {
+	return value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/[. ]+$/g, "").slice(0, 120) || "TLC agent response";
 }
 async function createWindow() {
 	const window = new BrowserWindow({
@@ -1192,7 +1366,6 @@ async function createWindow() {
 	if (developmentUrl) await window.loadURL(developmentUrl);
 	else await window.loadFile(rendererFile);
 }
-if (!startupBlocked) {
 if (!startupBlocked) {
 	registerReadOnlyIpc();
 	app.whenReady().then(createWindow);

@@ -1,9 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
 import { AzureCliCredential } from '@azure/identity'
+import { writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { z } from 'zod'
-import { agentTaskRequestSchema, mcemRequestSchema, type AgentCapability, type AuthStatus, type DesktopDataStatus, type PerformanceReporter } from '../../../../packages/common/index.js'
+import { agentTaskRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, mcemRequestSchema, type AgentCapability, type AuthStatus, type DesktopDataStatus, type PerformanceReporter } from '../../../../packages/common/index.js'
 import {
   loadFoundryEnvironment,
   type FoundryEnvironment
@@ -15,6 +16,8 @@ import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } 
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
 import { prepareFoundryEnvironmentFile } from './packaged-configuration.js'
 import { createRuntimeCredentials } from './runtime-credentials.js'
+import { createOutlookComposeUri } from './outlook-compose.js'
+import { createResponseDocumentBuffer } from './response-document.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -56,7 +59,7 @@ const authentication = runtimeEnvironment?.authentication
 const fallbackCredential = new AzureCliCredential({ processTimeoutInMs: 30_000 })
 const credentials = authentication
   ? createRuntimeCredentials(authentication)
-  : { msx: fallbackCredential, foundry: fallbackCredential }
+  : { msx: fallbackCredential, foundry: fallbackCredential, graph: fallbackCredential }
 const tokenProvider = new AzureCliMsxTokenProvider({
   credential: credentials.msx,
   ...(authentication
@@ -184,6 +187,26 @@ function registerReadOnlyIpc(): void {
     assertTrustedSender(event)
     return orchestrator.runAgentTask(agentTaskRequestSchema.parse(request))
   })
+  ipcMain.handle('tlc:open-email-compose', async (event, rawRequest: unknown) => {
+    assertTrustedSender(event)
+    const request = emailComposeRequestSchema.parse(rawRequest)
+    await shell.openExternal(createOutlookComposeUri(request))
+    return { state: 'opened' as const }
+  })
+  ipcMain.handle('tlc:export-agent-response', async (event, rawRequest: unknown) => {
+    assertTrustedSender(event)
+    const request = exportResponseRequestSchema.parse(rawRequest)
+    const result = await dialog.showSaveDialog({
+      title: 'Export agent response',
+      defaultPath: `${safeFileName(request.responseTitle)}.docx`,
+      filters: [{ name: 'Microsoft Word document', extensions: ['docx'] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation']
+    })
+    if (result.canceled || !result.filePath) return { state: 'cancelled' as const }
+    const filePath = result.filePath.toLowerCase().endsWith('.docx') ? result.filePath : `${result.filePath}.docx`
+    await writeFile(filePath, await createResponseDocumentBuffer(request))
+    return { state: 'saved' as const, filePath }
+  })
   ipcMain.handle('tlc:open-evidence', async (event, rawUrl: unknown) => {
     assertTrustedSender(event)
     const url = new URL(z.string().url().parse(rawUrl))
@@ -192,6 +215,10 @@ function registerReadOnlyIpc(): void {
     }
     await shell.openExternal(url.toString())
   })
+}
+
+function safeFileName(value: string): string {
+  return value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').replace(/[. ]+$/g, '').slice(0, 120) || 'TLC agent response'
 }
 
 async function createWindow(): Promise<void> {

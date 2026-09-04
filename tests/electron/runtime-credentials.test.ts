@@ -12,7 +12,7 @@ import { createRuntimeCredentials } from '../../apps/desktop/electron/main/runti
 const scopes = {
   foundry: ['https://ai.azure.com/.default'],
   msx: ['https://microsoftsales.crm.dynamics.com/.default'],
-  graph: ['https://graph.microsoft.com/.default']
+  graph: ['https://graph.microsoft.com/Mail.ReadWrite']
 }
 
 describe('runtime credentials', () => {
@@ -34,6 +34,28 @@ describe('runtime credentials', () => {
       tenantId: '33333333-3333-4333-8333-333333333333',
       processTimeoutInMs: 30_000
     })
+    expect(AzureCliCredential).toHaveBeenNthCalledWith(3, { processTimeoutInMs: 30_000 })
+  })
+
+  it('uses the public-client registration for Graph in Azure CLI mode when configured', () => {
+    createRuntimeCredentials({
+      mode: 'azure-cli',
+      expectedUserDomain: '@microsoft.com',
+      foundryTenantId: '33333333-3333-4333-8333-333333333333',
+      scopes,
+      appRegistration: {
+        tenantId: '11111111-1111-4111-8111-111111111111',
+        clientId: '22222222-2222-4222-8222-222222222222',
+        redirectUri: 'http://localhost'
+      }
+    })
+
+    expect(AzureCliCredential).toHaveBeenCalledTimes(2)
+    expect(InteractiveBrowserCredential).toHaveBeenCalledWith({
+      tenantId: '11111111-1111-4111-8111-111111111111',
+      clientId: '22222222-2222-4222-8222-222222222222',
+      redirectUri: 'http://localhost'
+    })
   })
 
   it('uses separate home and Foundry tenants in interactive browser mode', () => {
@@ -54,6 +76,9 @@ describe('runtime credentials', () => {
     }))
     expect(InteractiveBrowserCredential).toHaveBeenNthCalledWith(2, expect.objectContaining({
       tenantId: '33333333-3333-4333-8333-333333333333'
+    }))
+    expect(InteractiveBrowserCredential).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      tenantId: '11111111-1111-4111-8111-111111111111'
     }))
   })
 })

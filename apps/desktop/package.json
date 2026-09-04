@@ -9,9 +9,14 @@
   "dependencies": {
     "@azure/ai-projects": "^2.5.0",
     "@azure/identity": "^4.13.2",
+    "docx": "^9.7.1",
     "pdf-parse": "^2.4.5",
     "react-markdown": "^10.1.0",
+    "rehype-stringify": "^10.0.1",
     "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "unified": "^11.0.5",
     "zod": "4.4.3"
   },
   "build": {
@@ -40,11 +45,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "artifactName": "TLC-MultiAgent-Assist-${version}-Windows-${arch}.${ext}"
@@ -56,5 +65,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     }
+  },
+  "devDependencies": {
+    "jszip": "^3.10.1"
   }
 }

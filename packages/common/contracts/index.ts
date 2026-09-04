@@ -122,6 +122,30 @@ export const agentTaskResponseSchema = z.object({
   sourceHealth: z.array(sourceHealthSchema).min(1)
 })
 
+export const emailComposeRequestSchema = z.object({
+  contractVersion: z.literal(contractVersion),
+  recipients: z.array(z.string().email()).min(1).max(20),
+  subject: z.string().trim().min(1).max(255),
+  responseTitle: z.string().trim().min(1).max(255),
+  responseMarkdown: z.string().min(1).max(200_000)
+}).strict()
+
+export const emailComposeResultSchema = z.object({
+  state: z.literal('opened')
+}).strict()
+
+export const exportResponseRequestSchema = z.object({
+  contractVersion: z.literal(contractVersion),
+  responseTitle: z.string().trim().min(1).max(255),
+  responseMarkdown: z.string().min(1).max(200_000),
+  generatedAt: z.string().datetime()
+}).strict()
+
+export const exportResponseResultSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('saved'), filePath: z.string().min(1) }).strict(),
+  z.object({ state: z.literal('cancelled') }).strict()
+])
+
 export const mcemResponseSchema = z.object({
   contractVersion: z.literal(contractVersion),
   correlationId: z.string().uuid(),
@@ -158,4 +182,8 @@ export type McemResponse = z.infer<typeof mcemResponseSchema>
 export type AgentCapability = z.infer<typeof agentCapabilitySchema>
 export type AgentTaskRequest = z.infer<typeof agentTaskRequestSchema>
 export type AgentTaskResponse = z.infer<typeof agentTaskResponseSchema>
+export type EmailComposeRequest = z.infer<typeof emailComposeRequestSchema>
+export type EmailComposeResult = z.infer<typeof emailComposeResultSchema>
+export type ExportResponseRequest = z.infer<typeof exportResponseRequestSchema>
+export type ExportResponseResult = z.infer<typeof exportResponseResultSchema>
 export type Feedback = z.infer<typeof feedbackSchema>
