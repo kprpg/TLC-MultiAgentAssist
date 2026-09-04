@@ -1,9 +1,9 @@
-import { BrowserWindow, app, ipcMain, shell } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
-import { readFile, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, stat } from "node:fs/promises";
 import { PDFParse } from "pdf-parse";
 import { AIProjectClient } from "@azure/ai-projects";
 import { randomUUID } from "node:crypto";
@@ -920,6 +920,33 @@ function readMicrosoftCorpId(accessToken, expectedUserDomain = "@microsoft.com")
 	return corpId;
 }
 //#endregion
+//#region apps/desktop/electron/main/packaged-configuration.ts
+async function prepareFoundryEnvironmentFile(options) {
+	const environment = options.environment ?? process.env;
+	const workingDirectory = options.workingDirectory ?? process.cwd();
+	const configuredPath = environment["TLC_FOUNDRY_ENV_FILE"]?.trim();
+	if (!options.isPackaged || configuredPath) return {
+		filePath: resolveFoundryEnvironmentPath(environment, workingDirectory),
+		created: false
+	};
+	const filePath = join(options.userDataPath, "foundry.environment.json");
+	try {
+		await stat(filePath);
+		return {
+			filePath,
+			created: false
+		};
+	} catch (error) {
+		if (error.code !== "ENOENT") throw error;
+	}
+	await mkdir(dirname(filePath), { recursive: true });
+	await copyFile(options.templatePath, filePath);
+	return {
+		filePath,
+		created: true
+	};
+}
+//#endregion
 //#region apps/desktop/electron/main/runtime-credentials.ts
 function createRuntimeCredentials(authentication) {
 	if (authentication.mode === "interactive-browser") {
@@ -953,7 +980,23 @@ var preloadFile = resolve(desktopRoot, "dist-electron/preload/index.cjs");
 var developmentUrl = process.env["VITE_DEV_SERVER_URL"];
 var allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString();
 var dataMode = process.env["TLC_DATA_MODE"] === "sample" ? "sample" : "live";
-var runtimeEnvironment = dataMode === "live" ? await loadFoundryEnvironment(resolveFoundryEnvironmentPath()) : void 0;
+await app.whenReady();
+var preparedEnvironment = dataMode === "live" ? await prepareFoundryEnvironmentFile({
+	isPackaged: app.isPackaged,
+	userDataPath: app.getPath("userData"),
+	templatePath: resolve(process.resourcesPath, "config/foundry.environment.example.json")
+}) : void 0;
+var runtimeEnvironment;
+var startupBlocked = false;
+if (preparedEnvironment?.created) {
+	startupBlocked = true;
+	await openConfigurationAndExit(preparedEnvironment.filePath, "Your configuration file has been created. Set the Foundry project, agent names, tenant, client ID, and authentication mode, then reopen the application.");
+} else if (preparedEnvironment) try {
+	runtimeEnvironment = await loadFoundryEnvironment(preparedEnvironment.filePath);
+} catch (error) {
+	startupBlocked = true;
+	await openConfigurationAndExit(preparedEnvironment.filePath, `The configuration could not be loaded. Correct it, then reopen the application.\n\n${error instanceof Error ? error.message : String(error)}`);
+}
 var authentication = runtimeEnvironment?.authentication;
 var fallbackCredential = new AzureCliCredential({ processTimeoutInMs: 3e4 });
 var credentials = authentication ? createRuntimeCredentials(authentication) : {
@@ -971,7 +1014,7 @@ var tokenProvider = new AzureCliMsxTokenProvider({
 var reportPerformance = (event) => {
 	console.info(`[performance] ${JSON.stringify(event)}`);
 };
-var mcemConnector = new LocalPdfMcemGuidanceConnector(resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
+var mcemConnector = new LocalPdfMcemGuidanceConnector(app.isPackaged ? resolve(process.resourcesPath, "docs/knowledge/MCEM Overview.pdf") : resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
 var msxConnector = dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider, fetch, void 0, reportPerformance);
 var foundryOpenAIClient = runtimeEnvironment ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry) : void 0;
 var previewResponses = {
@@ -1007,6 +1050,21 @@ var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object
 		})
 	}];
 })), reportPerformance);
+async function openConfigurationAndExit(filePath, detail) {
+	if ((await dialog.showMessageBox({
+		type: "info",
+		title: "TLC MultiAgent Assist setup",
+		message: "Configure your environment before starting TLC MultiAgent Assist.",
+		detail: `${detail}\n\nConfiguration file:\n${filePath}`,
+		buttons: ["Open configuration", "Exit"],
+		defaultId: 0,
+		cancelId: 1,
+		noLink: true
+	})).response === 0) {
+		if (await shell.openPath(filePath)) shell.showItemInFolder(filePath);
+	}
+	app.quit();
+}
 async function getDataStatus() {
 	if (dataMode === "sample") return {
 		mode: "sample",
@@ -1090,10 +1148,10 @@ async function createWindow() {
 	if (developmentUrl) await window.loadURL(developmentUrl);
 	else await window.loadFile(rendererFile);
 }
-app.whenReady().then(() => {
+if (!startupBlocked) {
 	registerReadOnlyIpc();
 	createWindow();
-});
+}
 app.on("window-all-closed", () => {
 	if (process.platform !== "darwin") app.quit();
 });
