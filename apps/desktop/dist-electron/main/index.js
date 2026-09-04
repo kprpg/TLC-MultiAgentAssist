@@ -367,7 +367,7 @@ var LiveMsxConnector = class {
 			accountId: row._parentaccountid_value,
 			name: row.name,
 			recordedStage,
-			value: row.estimatedvalue || row.msp_consumptionconsumedrecurring || 0,
+			value: row.estimatedvalue ?? row.msp_consumptionconsumedrecurring ?? 0,
 			currency: "USD",
 			closeDate: closeDate?.slice(0, 10) ?? "1970-01-01"
 		};
