@@ -1,8 +1,10 @@
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
 import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
+import { copyFile, mkdir, readFile, stat } from "node:fs/promises";
 import { copyFile, mkdir, readFile, stat } from "node:fs/promises";
 import { PDFParse } from "pdf-parse";
 import { AIProjectClient } from "@azure/ai-projects";
@@ -947,6 +949,33 @@ async function prepareFoundryEnvironmentFile(options) {
 	};
 }
 //#endregion
+//#region apps/desktop/electron/main/packaged-configuration.ts
+async function prepareFoundryEnvironmentFile(options) {
+	const environment = options.environment ?? process.env;
+	const workingDirectory = options.workingDirectory ?? process.cwd();
+	const configuredPath = environment["TLC_FOUNDRY_ENV_FILE"]?.trim();
+	if (!options.isPackaged || configuredPath) return {
+		filePath: resolveFoundryEnvironmentPath(environment, workingDirectory),
+		created: false
+	};
+	const filePath = join(options.userDataPath, "foundry.environment.json");
+	try {
+		await stat(filePath);
+		return {
+			filePath,
+			created: false
+		};
+	} catch (error) {
+		if (error.code !== "ENOENT") throw error;
+	}
+	await mkdir(dirname(filePath), { recursive: true });
+	await copyFile(options.templatePath, filePath);
+	return {
+		filePath,
+		created: true
+	};
+}
+//#endregion
 //#region apps/desktop/electron/main/runtime-credentials.ts
 function createRuntimeCredentials(authentication) {
 	if (authentication.mode === "interactive-browser") {
@@ -1014,6 +1043,7 @@ var reportPerformance = (event) => {
 	console.info(`[performance] ${JSON.stringify(event)}`);
 };
 var mcemConnector = new LocalPdfMcemGuidanceConnector(app.isPackaged ? resolve(process.resourcesPath, "docs/knowledge/MCEM Overview.pdf") : resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
+var mcemConnector = new LocalPdfMcemGuidanceConnector(app.isPackaged ? resolve(process.resourcesPath, "docs/knowledge/MCEM Overview.pdf") : resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
 var msxConnector = dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider, fetch, void 0, reportPerformance);
 var foundryOpenAIClient = runtimeEnvironment ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry) : void 0;
 var previewResponses = {
@@ -1049,6 +1079,21 @@ var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object
 		})
 	}];
 })), reportPerformance);
+async function openConfigurationAndExit(filePath, detail) {
+	if ((await dialog.showMessageBox({
+		type: "info",
+		title: "TLC MultiAgent Assist setup",
+		message: "Configure your environment before starting TLC MultiAgent Assist.",
+		detail: `${detail}\n\nConfiguration file:\n${filePath}`,
+		buttons: ["Open configuration", "Exit"],
+		defaultId: 0,
+		cancelId: 1,
+		noLink: true
+	})).response === 0) {
+		if (await shell.openPath(filePath)) shell.showItemInFolder(filePath);
+	}
+	app.quit();
+}
 async function openConfigurationAndExit(filePath, detail) {
 	if ((await dialog.showMessageBox({
 		type: "info",
@@ -1147,6 +1192,7 @@ async function createWindow() {
 	if (developmentUrl) await window.loadURL(developmentUrl);
 	else await window.loadFile(rendererFile);
 }
+if (!startupBlocked) {
 if (!startupBlocked) {
 	registerReadOnlyIpc();
 	app.whenReady().then(createWindow);
