@@ -1,12 +1,12 @@
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
 import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
 import { PDFParse } from "pdf-parse";
 import { AIProjectClient } from "@azure/ai-projects";
-import { randomUUID } from "node:crypto";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
@@ -869,6 +869,7 @@ var ThinSliceOrchestrator = class {
 			"stale",
 			"unavailable"
 		].includes(source.state));
+		const responseContent = addMsxOpportunityLink(content.trim(), opportunityContext.opportunity.id);
 		return {
 			contractVersion: "1.0",
 			correlationId: randomUUID(),
@@ -877,11 +878,25 @@ var ThinSliceOrchestrator = class {
 			generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
 			mode: opportunityContext.sourceHealth.state === "sample" ? "sample" : "live",
 			state: isPartial ? "partial" : "complete",
-			content: content.trim(),
+			content: responseContent,
 			sourceHealth
 		};
 	}
 };
+function addMsxOpportunityLink(content, opportunityId) {
+	if (/microsoftsales\.crm\.dynamics\.com\/main\.aspx[^\s)]*\bopportunity\b/i.test(content)) return content;
+	const opportunityUrl = new URL("https://microsoftsales.crm.dynamics.com/main.aspx");
+	opportunityUrl.searchParams.set("pagetype", "entityrecord");
+	opportunityUrl.searchParams.set("etn", "opportunity");
+	opportunityUrl.searchParams.set("id", opportunityId);
+	const link = `**MSX Opportunity:** [Open opportunity in MSX](${opportunityUrl.toString()})`;
+	const lines = content.split("\n");
+	const accountLine = lines.findIndex((line) => /^\s*\*\*Account:\*\*/i.test(line));
+	const headingLine = lines.findIndex((line) => /^\s*#{1,6}\s+/.test(line));
+	const insertionIndex = accountLine >= 0 ? accountLine + 1 : headingLine >= 0 ? headingLine + 1 : 0;
+	lines.splice(insertionIndex, 0, link);
+	return lines.join("\n");
+}
 //#endregion
 //#region apps/desktop/electron/main/azure-cli-token-provider.ts
 var refreshBufferMs = 300 * 1e3;
@@ -1006,13 +1021,30 @@ function createRuntimeCredentials(authentication) {
 }
 //#endregion
 //#region apps/desktop/electron/main/outlook-compose.ts
-var maxComposeUriLength = 16e3;
-function createOutlookComposeUri(request) {
-	const recipients = request.recipients.map(encodeURIComponent).join(",");
-	const body = markdownToEmailText(request.responseMarkdown);
-	const composeUri = `mailto:${recipients}?subject=${encodeURIComponent(request.subject)}&body=${encodeURIComponent(body)}`;
-	if (composeUri.length > maxComposeUriLength) throw new Error("The response is too long to open in Outlook. Export it to Word instead.");
-	return composeUri;
+var mimeBoundary = "----tlc-agent-response-boundary";
+function createOutlookDraftMessage(request) {
+	const textBody = markdownToEmailText(request.responseMarkdown);
+	const htmlBody = markdownToEmailHtml(request.responseMarkdown);
+	return [
+		`To: ${request.recipients.map(sanitizeHeader).join(", ")}`,
+		`Subject: ${encodeMimeHeader(request.subject)}`,
+		"MIME-Version: 1.0",
+		"X-Unsent: 1",
+		`Content-Type: multipart/alternative; boundary="${mimeBoundary}"`,
+		"",
+		`--${mimeBoundary}`,
+		"Content-Type: text/plain; charset=\"UTF-8\"",
+		"Content-Transfer-Encoding: base64",
+		"",
+		encodeBase64Lines(textBody),
+		`--${mimeBoundary}`,
+		"Content-Type: text/html; charset=\"UTF-8\"",
+		"Content-Transfer-Encoding: base64",
+		"",
+		encodeBase64Lines(emailDocument(request.responseTitle, htmlBody)),
+		`--${mimeBoundary}--`,
+		""
+	].join("\r\n");
 }
 function markdownToEmailText(markdown) {
 	return formatBlocks(unified().use(remarkParse).use(remarkGfm).parse(markdown).children).join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
@@ -1080,9 +1112,87 @@ function textContent$1(node) {
 function headingSeparator(heading, depth) {
 	return (depth === 1 ? "=" : "-").repeat(Math.min(heading.length, 72));
 }
+function markdownToEmailHtml(markdown) {
+	return htmlBlocks(unified().use(remarkParse).use(remarkGfm).parse(markdown).children);
+}
+function htmlBlocks(nodes) {
+	return nodes.map((node) => {
+		switch (node.type) {
+			case "heading": return `<h${node.depth}>${inlineHtml(node.children)}</h${node.depth}>`;
+			case "paragraph": return `<p>${inlineHtml(node.children)}</p>`;
+			case "list": {
+				const tag = node.ordered ? "ol" : "ul";
+				return `<${tag}${node.ordered && node.start && node.start !== 1 ? ` start="${node.start}"` : ""}>${node.children.map((item) => `<li>${htmlBlocks(item.children)}</li>`).join("")}</${tag}>`;
+			}
+			case "table": return `<table><thead><tr>${node.children[0]?.children.map((cell) => `<th>${inlineHtml(cell.children)}</th>`).join("") ?? ""}</tr></thead><tbody>${node.children.slice(1).map((row) => `<tr>${row.children.map((cell) => `<td>${inlineHtml(cell.children)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+			case "blockquote": return `<blockquote>${htmlBlocks(node.children)}</blockquote>`;
+			case "code": return `<pre><code>${escapeHtml(node.value)}</code></pre>`;
+			case "thematicBreak": return "<hr>";
+			default: return "";
+		}
+	}).join("");
+}
+function inlineHtml(nodes) {
+	return nodes.map((node) => {
+		switch (node.type) {
+			case "text": return escapeHtml(node.value);
+			case "strong": return `<strong>${inlineHtml(node.children)}</strong>`;
+			case "emphasis": return `<em>${inlineHtml(node.children)}</em>`;
+			case "delete": return `<s>${inlineHtml(node.children)}</s>`;
+			case "inlineCode": return `<code>${escapeHtml(node.value)}</code>`;
+			case "break": return "<br>";
+			case "link": return /^https:\/\//i.test(node.url) ? `<a href="${escapeHtml(node.url)}">${inlineHtml(node.children)}</a>` : inlineHtml(node.children);
+			case "image": return node.alt ? escapeHtml(node.alt) : "";
+			default: return escapeHtml(textContent$1(node));
+		}
+	}).join("");
+}
+function emailDocument(title, body) {
+	return `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Aptos,Calibri,sans-serif;color:#242424;font-size:11pt;line-height:1.45}h1,h2,h3,h4,h5,h6{color:#17365d;margin:18px 0 8px}h1{font-size:22pt}h2{font-size:17pt}h3{font-size:13pt}p{margin:0 0 10px}li{margin:0 0 5px}table{border-collapse:collapse;margin:12px 0}th,td{border:1px solid #b7c9d6;padding:6px 9px;text-align:left}th{background:#eaf1f6;font-weight:700}blockquote{border-left:3px solid #8aa6b8;margin:12px 0;padding-left:12px;color:#555}code,pre{font-family:Consolas,monospace;background:#f3f4f6}pre{padding:10px;white-space:pre-wrap}a{color:#0563c1}</style></head><body><h1>${escapeHtml(title)}</h1>${body}</body></html>`;
+}
+function escapeHtml(value) {
+	return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll("\"", "&quot;").replaceAll("'", "&#39;");
+}
+function sanitizeHeader(value) {
+	return value.replace(/[\r\n]+/g, " ").trim();
+}
+function encodeMimeHeader(value) {
+	return `=?UTF-8?B?${Buffer.from(sanitizeHeader(value), "utf8").toString("base64")}?=`;
+}
+function encodeBase64Lines(value) {
+	return Buffer.from(value, "utf8").toString("base64").match(/.{1,76}/g)?.join("\r\n") ?? "";
+}
 //#endregion
 //#region apps/desktop/electron/main/response-document.ts
 var numberingReference = "agent-response-numbering";
+var bulletReference = "agent-response-bullets";
+var listLevels = Array.from({ length: 6 }, (_, level) => ({
+	level,
+	format: LevelFormat.DECIMAL,
+	text: `%${level + 1}.`,
+	alignment: AlignmentType.START,
+	style: { paragraph: { indent: {
+		left: 720 + level * 360,
+		hanging: 360
+	} } }
+}));
+var bulletLevels = [
+	"•",
+	"◦",
+	"▪",
+	"•",
+	"◦",
+	"▪"
+].map((text, level) => ({
+	level,
+	format: LevelFormat.BULLET,
+	text,
+	alignment: AlignmentType.START,
+	style: { paragraph: { indent: {
+		left: 720 + level * 360,
+		hanging: 360
+	} } }
+}));
 async function createResponseDocumentBuffer(request) {
 	const tree = unified().use(remarkParse).use(remarkGfm).parse(request.responseMarkdown);
 	const children = [
@@ -1098,18 +1208,79 @@ async function createResponseDocumentBuffer(request) {
 		...tree.children.flatMap((node) => blockToDocument(node))
 	];
 	const document = new Document({
+		styles: { default: {
+			document: {
+				run: {
+					font: "Aptos",
+					size: 22,
+					color: "242424"
+				},
+				paragraph: { spacing: {
+					after: 120,
+					line: 276
+				} }
+			},
+			title: {
+				run: {
+					font: "Aptos Display",
+					size: 36,
+					bold: true,
+					color: "17365D"
+				},
+				paragraph: { spacing: { after: 180 } }
+			},
+			heading1: {
+				run: {
+					font: "Aptos Display",
+					size: 30,
+					bold: true,
+					color: "17365D"
+				},
+				paragraph: {
+					spacing: {
+						before: 280,
+						after: 120
+					},
+					keepNext: true
+				}
+			},
+			heading2: {
+				run: {
+					font: "Aptos Display",
+					size: 26,
+					bold: true,
+					color: "24527A"
+				},
+				paragraph: {
+					spacing: {
+						before: 240,
+						after: 100
+					},
+					keepNext: true
+				}
+			},
+			heading3: {
+				run: {
+					font: "Aptos",
+					size: 23,
+					bold: true,
+					color: "2F5F85"
+				},
+				paragraph: {
+					spacing: {
+						before: 200,
+						after: 80
+					},
+					keepNext: true
+				}
+			}
+		} },
 		numbering: { config: [{
 			reference: numberingReference,
-			levels: [{
-				level: 0,
-				format: LevelFormat.DECIMAL,
-				text: "%1.",
-				alignment: AlignmentType.START,
-				style: { paragraph: { indent: {
-					left: 720,
-					hanging: 360
-				} } }
-			}]
+			levels: listLevels
+		}, {
+			reference: bulletReference,
+			levels: bulletLevels
 		}] },
 		sections: [{
 			properties: { page: {
@@ -1129,7 +1300,7 @@ async function createResponseDocumentBuffer(request) {
 	});
 	return Packer.toBuffer(document);
 }
-function blockToDocument(node) {
+function blockToDocument(node, listLevel = 0) {
 	switch (node.type) {
 		case "heading": return [new Paragraph({
 			heading: headingLevel(node.depth),
@@ -1140,16 +1311,14 @@ function blockToDocument(node) {
 			spacing: { after: 120 }
 		})];
 		case "list": return node.children.flatMap((item) => item.children.flatMap((child) => {
-			const children = child.type === "paragraph" ? inlineChildren(child.children) : [new TextRun(textContent(child))];
-			return [new Paragraph(node.ordered ? {
-				children,
+			if (child.type === "list") return blockToDocument(child, Math.min(listLevel + 1, 5));
+			return [new Paragraph({
+				children: child.type === "paragraph" ? inlineChildren(child.children) : [new TextRun(textContent(child))],
 				numbering: {
-					reference: numberingReference,
-					level: 0
-				}
-			} : {
-				children,
-				bullet: { level: 0 }
+					reference: node.ordered ? numberingReference : bulletReference,
+					level: listLevel
+				},
+				spacing: { after: 60 }
 			})];
 		}));
 		case "table": return [new Table({
@@ -1371,7 +1540,12 @@ function registerReadOnlyIpc() {
 	ipcMain.handle("tlc:open-email-compose", async (event, rawRequest) => {
 		assertTrustedSender(event);
 		const request = emailComposeRequestSchema.parse(rawRequest);
-		await shell.openExternal(createOutlookComposeUri(request));
+		const draftDirectory = resolve(app.getPath("temp"), "TLC-MultiAgentAssist", "email-drafts");
+		await mkdir(draftDirectory, { recursive: true });
+		const draftPath = resolve(draftDirectory, `${safeFileName(request.responseTitle)}-${randomUUID()}.eml`);
+		await writeFile(draftPath, createOutlookDraftMessage(request), "utf8");
+		const openError = await shell.openPath(draftPath);
+		if (openError) throw new Error(`Outlook could not open the email draft: ${openError}`);
 		return { state: "opened" };
 	});
 	ipcMain.handle("tlc:export-agent-response", async (event, rawRequest) => {

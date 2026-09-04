@@ -5,6 +5,32 @@ import remarkParse from 'remark-parse'
 import { unified } from 'unified'
 
 const maxComposeUriLength = 16_000
+const mimeBoundary = '----tlc-agent-response-boundary'
+
+export function createOutlookDraftMessage(request: EmailComposeRequest): string {
+  const textBody = markdownToEmailText(request.responseMarkdown)
+  const htmlBody = markdownToEmailHtml(request.responseMarkdown)
+  return [
+    `To: ${request.recipients.map(sanitizeHeader).join(', ')}`,
+    `Subject: ${encodeMimeHeader(request.subject)}`,
+    'MIME-Version: 1.0',
+    'X-Unsent: 1',
+    `Content-Type: multipart/alternative; boundary="${mimeBoundary}"`,
+    '',
+    `--${mimeBoundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    encodeBase64Lines(textBody),
+    `--${mimeBoundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    encodeBase64Lines(emailDocument(request.responseTitle, htmlBody)),
+    `--${mimeBoundary}--`,
+    ''
+  ].join('\r\n')
+}
 
 export function createOutlookComposeUri(request: EmailComposeRequest): string {
   const recipients = request.recipients.map(encodeURIComponent).join(',')
@@ -113,4 +139,82 @@ function textContent(node: BlockContent | PhrasingContent): string {
 
 function headingSeparator(heading: string, depth: number): string {
   return (depth === 1 ? '=' : '-').repeat(Math.min(heading.length, 72))
+}
+
+export function markdownToEmailHtml(markdown: string): string {
+  const tree = unified().use(remarkParse).use(remarkGfm).parse(markdown) as Root
+  return htmlBlocks(tree.children)
+}
+
+function htmlBlocks(nodes: readonly Content[]): string {
+  return nodes.map((node): string => {
+    switch (node.type) {
+      case 'heading':
+        return `<h${node.depth}>${inlineHtml(node.children)}</h${node.depth}>`
+      case 'paragraph':
+        return `<p>${inlineHtml(node.children)}</p>`
+      case 'list': {
+        const tag = node.ordered ? 'ol' : 'ul'
+        const start = node.ordered && node.start && node.start !== 1 ? ` start="${node.start}"` : ''
+        return `<${tag}${start}>${node.children.map((item) => `<li>${htmlBlocks(item.children)}</li>`).join('')}</${tag}>`
+      }
+      case 'table':
+        return `<table><thead><tr>${node.children[0]?.children.map((cell) => `<th>${inlineHtml(cell.children)}</th>`).join('') ?? ''}</tr></thead><tbody>${node.children.slice(1).map((row) => `<tr>${row.children.map((cell) => `<td>${inlineHtml(cell.children)}</td>`).join('')}</tr>`).join('')}</tbody></table>`
+      case 'blockquote':
+        return `<blockquote>${htmlBlocks(node.children)}</blockquote>`
+      case 'code':
+        return `<pre><code>${escapeHtml(node.value)}</code></pre>`
+      case 'thematicBreak':
+        return '<hr>'
+      default:
+        return ''
+    }
+  }).join('')
+}
+
+function inlineHtml(nodes: readonly PhrasingContent[]): string {
+  return nodes.map((node): string => {
+    switch (node.type) {
+      case 'text':
+        return escapeHtml(node.value)
+      case 'strong':
+        return `<strong>${inlineHtml(node.children)}</strong>`
+      case 'emphasis':
+        return `<em>${inlineHtml(node.children)}</em>`
+      case 'delete':
+        return `<s>${inlineHtml(node.children)}</s>`
+      case 'inlineCode':
+        return `<code>${escapeHtml(node.value)}</code>`
+      case 'break':
+        return '<br>'
+      case 'link':
+        return /^https:\/\//i.test(node.url)
+          ? `<a href="${escapeHtml(node.url)}">${inlineHtml(node.children)}</a>`
+          : inlineHtml(node.children)
+      case 'image':
+        return node.alt ? escapeHtml(node.alt) : ''
+      default:
+        return escapeHtml(textContent(node))
+    }
+  }).join('')
+}
+
+function emailDocument(title: string, body: string): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Aptos,Calibri,sans-serif;color:#242424;font-size:11pt;line-height:1.45}h1,h2,h3,h4,h5,h6{color:#17365d;margin:18px 0 8px}h1{font-size:22pt}h2{font-size:17pt}h3{font-size:13pt}p{margin:0 0 10px}li{margin:0 0 5px}table{border-collapse:collapse;margin:12px 0}th,td{border:1px solid #b7c9d6;padding:6px 9px;text-align:left}th{background:#eaf1f6;font-weight:700}blockquote{border-left:3px solid #8aa6b8;margin:12px 0;padding-left:12px;color:#555}code,pre{font-family:Consolas,monospace;background:#f3f4f6}pre{padding:10px;white-space:pre-wrap}a{color:#0563c1}</style></head><body><h1>${escapeHtml(title)}</h1>${body}</body></html>`
+}
+
+function escapeHtml(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;')
+}
+
+function sanitizeHeader(value: string): string {
+  return value.replace(/[\r\n]+/g, ' ').trim()
+}
+
+function encodeMimeHeader(value: string): string {
+  return `=?UTF-8?B?${Buffer.from(sanitizeHeader(value), 'utf8').toString('base64')}?=`
+}
+
+function encodeBase64Lines(value: string): string {
+  return Buffer.from(value, 'utf8').toString('base64').match(/.{1,76}/g)?.join('\r\n') ?? ''
 }

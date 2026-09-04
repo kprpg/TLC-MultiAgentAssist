@@ -74,6 +74,8 @@ button, input { letter-spacing: 0; }
 .workspace.left-pane-collapsed.right-pane-collapsed { grid-template-columns: minmax(510px, 1fr); }
 .context-rail, .actions-pane { min-height: 0; overflow: auto; background: var(--surface); }
 .context-rail { padding: 22px 18px; border-right: 1px solid var(--border); }
+.context-heading { display: flex; align-items: center; justify-content: space-between; min-height: 32px; }
+.context-refresh { flex: 0 0 auto; }
 .context-rail label { display: block; margin: 18px 0 7px; color: var(--muted-strong); font-size: 12px; font-weight: 650; }
 .context-dropdown { display: flex; width: 100% !important; min-width: 0 !important; max-width: 100% !important; }
 .section-label, .eyebrow { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .08em; }

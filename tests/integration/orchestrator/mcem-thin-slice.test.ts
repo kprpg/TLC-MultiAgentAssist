@@ -123,7 +123,7 @@ describe('MCEM Coach thin slice', () => {
       agentVersion: 'test-v2',
       mode: 'sample',
       state: 'partial',
-      content: `Grounded synthesis from ${capability}`,
+      content: `**MSX Opportunity:** [Open opportunity in MSX](https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=opportunity&id=opp-grid-modernization)\nGrounded synthesis from ${capability}`,
       sourceHealth: [
         expect.objectContaining({ source: 'msx', state: 'sample' }),
         expect.objectContaining({ source: 'mcem', state: 'partial' })
@@ -135,5 +135,36 @@ describe('MCEM Coach thin slice', () => {
       guidance: { stage: 3 },
       localEvaluation: { evidenceBasedStage: 2 }
     })
+  })
+
+  it('places a clickable MSX opportunity link after the account line', async () => {
+    const orchestrator = new ThinSliceOrchestrator(
+      new FixtureMsxConnector(),
+      mcemConnector(),
+      {
+        'account-pulse': {
+          version: 'test-v2',
+          agent: {
+            invoke: async () => '# Account Pulse\n**Opportunity:** Grid modernization\n**Account:** Contoso\n**Recorded / evidence-based stage:** 3 / 2'
+          }
+        }
+      }
+    )
+
+    const result = await orchestrator.runAgentTask({
+      contractVersion,
+      capability: 'account-pulse',
+      accountId: 'account-contoso',
+      opportunityId: 'opp-grid-modernization',
+      prompt: 'Analyze the selected opportunity.'
+    })
+
+    expect(result.content.split('\n')).toEqual([
+      '# Account Pulse',
+      '**Opportunity:** Grid modernization',
+      '**Account:** Contoso',
+      '**MSX Opportunity:** [Open opportunity in MSX](https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=opportunity&id=opp-grid-modernization)',
+      '**Recorded / evidence-based stage:** 3 / 2'
+    ])
   })
 })

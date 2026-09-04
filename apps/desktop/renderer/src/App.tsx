@@ -87,7 +87,7 @@ const agentTasks: Record<AgentCapability, { label: string; prompts: readonly str
 const themeStorageKey = 'tlc-theme'
 const leftPaneStorageKey = 'tlc-left-pane-collapsed'
 const rightPaneStorageKey = 'tlc-right-pane-collapsed'
-const sourceNoticeDismissedStorageKey = 'tlc-source-notice-v2-dismissed'
+const sourceNoticeDismissedStorageKey = 'tlc-source-notice-v3-dismissed'
 type ThemeMode = 'light' | 'dark'
 type WorkbenchView = 'diagnostic' | 'foundry-agent'
 
@@ -113,6 +113,7 @@ export function App() {
   const [shareStatus, setShareStatus] = useState<'ready' | 'running' | 'success' | 'error'>('ready')
   const [shareMessage, setShareMessage] = useState('')
   const [dataStatus, setDataStatus] = useState<DesktopDataStatus | null>(null)
+  const [contextRefreshing, setContextRefreshing] = useState(false)
   const [status, setStatus] = useState<'loading' | 'ready' | 'running' | 'error'>('loading')
   const [error, setError] = useState('')
   const analysisPaneRef = useRef<HTMLElement>(null)
@@ -148,6 +149,7 @@ export function App() {
   }, [])
 
   useEffect(() => {
+    if (contextRefreshing) return
     if (!accountId) {
       setOpportunities([])
       setOpportunityId('')
@@ -169,6 +171,7 @@ export function App() {
   }, [accountId])
 
   useEffect(() => {
+    if (contextRefreshing) return
     setResult(null)
     setAgentResult(null)
     if (opportunityId) void runCoach(opportunityId)
@@ -179,15 +182,15 @@ export function App() {
     setStatus('error')
   }
 
-  async function runCoach(selectedOpportunityId = opportunityId) {
-    if (!accountId || !selectedOpportunityId) return
+  async function runCoach(selectedOpportunityId = opportunityId, selectedAccountId = accountId) {
+    if (!selectedAccountId || !selectedOpportunityId) return
     const requestId = ++coachRequestIdRef.current
     setStatus('running')
     setError('')
     try {
       const response = await window.tlc.runMcemCoach({
         contractVersion,
-        accountId,
+        accountId: selectedAccountId,
         opportunityId: selectedOpportunityId,
         prompt
       })
@@ -197,6 +200,44 @@ export function App() {
     } catch (cause) {
       if (requestId !== coachRequestIdRef.current) return
       handleError(cause)
+    }
+  }
+
+  async function refreshAccountContext() {
+    if (contextRefreshing) return
+    setContextRefreshing(true)
+    setError('')
+    setResult(null)
+    setAgentResult(null)
+    try {
+      const [nextDataStatus, nextAccounts] = await Promise.all([
+        window.tlc.getDataStatus(),
+        window.tlc.listAccounts()
+      ])
+      const nextAccountId = nextAccounts.some((item) => item.id === accountId)
+        ? accountId
+        : nextAccounts[0]?.id ?? ''
+      const nextOpportunities = nextAccountId
+        ? await window.tlc.listOpportunities(nextAccountId)
+        : []
+      const nextOpportunityId = nextOpportunities.some((item) => item.id === opportunityId)
+        ? opportunityId
+        : nextOpportunities[0]?.id ?? ''
+
+      setDataStatus(nextDataStatus)
+      setAccounts(nextAccounts)
+      setAccountId(nextAccountId)
+      setOpportunities(nextOpportunities)
+      setOpportunityId(nextOpportunityId)
+      if (nextOpportunityId) {
+        await runCoach(nextOpportunityId, nextAccountId)
+      } else {
+        setStatus('ready')
+      }
+    } catch (cause) {
+      handleError(cause)
+    } finally {
+      setContextRefreshing(false)
     }
   }
 
@@ -295,10 +336,10 @@ export function App() {
           appearance="subtle"
           className="icon-control pane-toggle edge-pane-toggle"
           icon={<PanelLeft20Regular />}
-          aria-label="Toggle working context"
+          aria-label="Toggle account context"
           aria-controls="working-context-pane"
           aria-expanded={!leftPaneCollapsed}
-          title="Toggle working context"
+          title="Toggle account context"
           onClick={() => setLeftPaneCollapsed((current) => !current)}
         />
         <div className="brand-mark">TLC</div>
@@ -352,15 +393,26 @@ export function App() {
 
       <main className={`workspace${leftPaneCollapsed ? ' left-pane-collapsed' : ''}${rightPaneCollapsed ? ' right-pane-collapsed' : ''}`}>
         {!leftPaneCollapsed && <aside className="context-rail" id="working-context-pane">
-          <div className="section-label">WORKING CONTEXT</div>
+          <div className="context-heading">
+            <div className="section-label">ACCOUNT CONTEXT</div>
+            <Button
+              appearance="subtle"
+              className="icon-control context-refresh"
+              icon={contextRefreshing ? <Spinner size="tiny" /> : <ArrowSync20Regular />}
+              aria-label="Refresh account context from MSX"
+              title="Refresh account context from MSX"
+              disabled={contextRefreshing}
+              onClick={() => void refreshAccountContext()}
+            />
+          </div>
           <label>Account</label>
-          <Dropdown className="context-dropdown" inlinePopup value={account?.name ?? ''} selectedOptions={accountId ? [accountId] : []} onOptionSelect={(_, data) => {
+          <Dropdown className="context-dropdown" inlinePopup disabled={contextRefreshing} value={account?.name ?? ''} selectedOptions={accountId ? [accountId] : []} onOptionSelect={(_, data) => {
             if (data.optionValue) setAccountId(data.optionValue)
           }}>
             {accounts.map((item) => <Option key={item.id} value={item.id}>{item.name}</Option>)}
           </Dropdown>
           <label>Opportunity</label>
-          <Dropdown className="context-dropdown" inlinePopup value={opportunity?.name ?? ''} selectedOptions={opportunityId ? [opportunityId] : []} onOptionSelect={(_, data) => {
+          <Dropdown className="context-dropdown" inlinePopup disabled={contextRefreshing} value={opportunity?.name ?? ''} selectedOptions={opportunityId ? [opportunityId] : []} onOptionSelect={(_, data) => {
             if (data.optionValue) setOpportunityId(data.optionValue)
           }}>
             {opportunities.map((item) => <Option key={item.id} value={item.id}>{item.name}</Option>)}
@@ -385,7 +437,7 @@ export function App() {
         <section className="analysis-pane" ref={analysisPaneRef}>
           <div className="analysis-header">
             <div>
-              <div className="eyebrow">{workbenchView === 'diagnostic' ? 'MCEM OPPORTUNITY DIAGNOSTIC' : `${agentTasks[capability].label.toUpperCase()} AGENT`}</div>
+              <div className="eyebrow">{workbenchView === 'diagnostic' ? 'MCEM OPPORTUNITY ANALYSIS' : `${agentTasks[capability].label.toUpperCase()} AGENT`}</div>
               <h1>{opportunity?.name ?? 'Select an opportunity'}</h1>
               <p>{workbenchView === 'diagnostic' ? prompt : 'Ask a specialized account-team agent using grounded MSX and MCEM context.'}</p>
             </div>
@@ -403,8 +455,8 @@ export function App() {
           {result && <TabList className="workbench-view-tabs" aria-label="Workbench view" selectedValue={workbenchView} onTabSelect={(_, data) => {
             selectWorkbenchView(data.value as WorkbenchView)
           }}>
-            <Tab value="diagnostic">Diagnostic</Tab>
-            <Tab value="foundry-agent">Foundry Agent</Tab>
+            <Tab value="diagnostic">MSX</Tab>
+            <Tab value="foundry-agent">Multi-Agentic Guidance</Tab>
           </TabList>}
 
           {status === 'error' && <MessageBar intent="error">{error}</MessageBar>}

@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   windows:
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/master'
     runs-on: windows-latest
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
@@ -115,9 +116,45 @@ jobs:
             --title "TLC MultiAgent Assist Nightly $env:NIGHTLY_DATE" `
             --notes $notes
 
+      - name: Remove expired nightly releases
+        if: steps.changes.outputs.should_build == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_NIGHTLY_TAG: ${{ steps.label.outputs.tag }}
+        run: |
+          $expiredTags = gh release list `
+            --limit 100 `
+            --json tagName,isPrerelease,createdAt `
+            --jq ".[] | select(.isPrerelease and (.tagName | startswith(`"nightly-`"))) | [.createdAt, .tagName] | @tsv" |
+            Sort-Object -Descending |
+            Select-Object -Skip 14 |
+            ForEach-Object { ($_ -split "`t", 2)[1] } |
+            Where-Object { $_ -and $_ -ne $env:CURRENT_NIGHTLY_TAG }
+
+          foreach ($tag in $expiredTags) {
+            gh release delete $tag --cleanup-tag --yes
+          }
+
       - name: Record successful nightly commit
         if: steps.changes.outputs.should_build == 'true'
         shell: pwsh
         run: |
           git tag --force nightly-built $env:GITHUB_SHA
           git push origin refs/tags/nightly-built --force
+
+      - name: Write workflow summary
+        if: always()
+        shell: pwsh
+        env:
+          SHOULD_BUILD: ${{ steps.changes.outputs.should_build }}
+          NIGHTLY_TAG: ${{ steps.label.outputs.tag }}
+        run: |
+          if ($env:SHOULD_BUILD -eq 'true') {
+            "## Nightly desktop release" >> $env:GITHUB_STEP_SUMMARY
+            "Built and tested commit ``$env:GITHUB_SHA``." >> $env:GITHUB_STEP_SUMMARY
+            "Release tag: ``$env:NIGHTLY_TAG``." >> $env:GITHUB_STEP_SUMMARY
+          } else {
+            "## Nightly desktop release" >> $env:GITHUB_STEP_SUMMARY
+            "Skipped because ``master`` has not changed since the last successful nightly build." >> $env:GITHUB_STEP_SUMMARY
+          }

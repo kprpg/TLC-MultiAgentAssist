@@ -23,7 +23,8 @@ test('launches the secure MCEM operational workbench', async () => {
     await window.evaluate(() => {
       localStorage.removeItem('tlc-left-pane-collapsed')
       localStorage.removeItem('tlc-right-pane-collapsed')
-      localStorage.removeItem('tlc-source-notice-v2-dismissed')
+      localStorage.setItem('tlc-source-notice-v2-dismissed', 'true')
+      localStorage.removeItem('tlc-source-notice-v3-dismissed')
     })
     await window.reload()
     await expect(window.getByText('SAMPLE DATA')).toBeVisible()
@@ -37,13 +38,22 @@ test('launches the secure MCEM operational workbench', async () => {
     await expect(sourceNotice).toHaveCount(0)
     await expect(window.getByText('Evidence supports', { exact: true })).toBeVisible()
     await expect(window.getByText('NEXT BEST ACTIONS')).toBeVisible()
+    await expect(window.getByText('ACCOUNT CONTEXT', { exact: true })).toBeVisible()
+    const contextRefresh = window.getByRole('button', { name: 'Refresh account context from MSX' })
+    await expect(contextRefresh).toBeVisible()
+    await contextRefresh.click()
+    await expect(contextRefresh).toBeEnabled()
+    await expect(window.getByText('Evidence supports', { exact: true })).toBeVisible()
+    await expect(window.getByText('MCEM OPPORTUNITY ANALYSIS', { exact: true })).toBeVisible()
+    await expect(window.getByRole('tab', { name: 'MSX', exact: true })).toBeVisible()
+    await expect(window.getByRole('tab', { name: 'Multi-Agentic Guidance', exact: true })).toBeVisible()
     await expect(window.getByText('Stage 2', { exact: true })).toBeVisible()
     await expect(window.locator('.action-card')).toHaveCount(4)
     await expect(window.locator('.actions-intro')).toContainText('Stage 3 ready')
 
-    const contextToggle = window.getByRole('button', { name: 'Toggle working context' })
+    const contextToggle = window.getByRole('button', { name: 'Toggle account context' })
     const actionsToggle = window.getByRole('button', { name: 'Toggle next best actions' })
-    await expect(window.locator('.topbar > :first-child')).toHaveAttribute('aria-label', 'Toggle working context')
+    await expect(window.locator('.topbar > :first-child')).toHaveAttribute('aria-label', 'Toggle account context')
     await expect(window.locator('.topbar > :last-child')).toHaveAttribute('aria-label', 'Toggle next best actions')
     const initialAnalysisWidth = (await window.locator('.analysis-pane').boundingBox())!.width
     await expect(contextToggle).toHaveAttribute('aria-expanded', 'true')
@@ -69,7 +79,7 @@ test('launches the secure MCEM operational workbench', async () => {
       { tab: 'Pursuit & Executive', content: 'Prepare the pursuit around the selected opportunity gaps' },
       { tab: 'Risk & Solution Play', content: 'The selected opportunity has execution risk' }
     ]
-    await window.getByRole('tab', { name: 'Foundry Agent', exact: true }).click()
+    await window.getByRole('tab', { name: 'Multi-Agentic Guidance', exact: true }).click()
     await expect(window.getByText('ACCOUNT PULSE AGENT', { exact: true })).toBeVisible()
     await expect(window.getByText('FOUNDRY AGENT TASK', { exact: true })).toHaveCount(0)
     await expect(window.getByRole('button', { name: 'What should the account team focus on this week?' })).toBeVisible()
@@ -99,7 +109,7 @@ test('launches the secure MCEM operational workbench', async () => {
       await expect(window.locator('.agent-synthesis')).toBeInViewport()
     }
 
-    await window.getByRole('tab', { name: 'Diagnostic', exact: true }).click()
+    await window.getByRole('tab', { name: 'MSX', exact: true }).click()
 
     await window.evaluate(() => globalThis.scrollTo(0, 0))
     const startingTheme = await window.locator('html').getAttribute('data-theme')

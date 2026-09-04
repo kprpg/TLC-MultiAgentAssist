@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
 import { AzureCliCredential } from '@azure/identity'
-import { writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { z } from 'zod'
@@ -16,7 +17,7 @@ import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } 
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
 import { prepareFoundryEnvironmentFile } from './packaged-configuration.js'
 import { createRuntimeCredentials } from './runtime-credentials.js'
-import { createOutlookComposeUri } from './outlook-compose.js'
+import { createOutlookDraftMessage } from './outlook-compose.js'
 import { createResponseDocumentBuffer } from './response-document.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
@@ -190,7 +191,12 @@ function registerReadOnlyIpc(): void {
   ipcMain.handle('tlc:open-email-compose', async (event, rawRequest: unknown) => {
     assertTrustedSender(event)
     const request = emailComposeRequestSchema.parse(rawRequest)
-    await shell.openExternal(createOutlookComposeUri(request))
+    const draftDirectory = resolve(app.getPath('temp'), 'TLC-MultiAgentAssist', 'email-drafts')
+    await mkdir(draftDirectory, { recursive: true })
+    const draftPath = resolve(draftDirectory, `${safeFileName(request.responseTitle)}-${randomUUID()}.eml`)
+    await writeFile(draftPath, createOutlookDraftMessage(request), 'utf8')
+    const openError = await shell.openPath(draftPath)
+    if (openError) throw new Error(`Outlook could not open the email draft: ${openError}`)
     return { state: 'opened' as const }
   })
   ipcMain.handle('tlc:export-agent-response', async (event, rawRequest: unknown) => {

@@ -20,6 +20,23 @@ import { unified } from 'unified'
 import type { ExportResponseRequest } from '../../../../packages/common/index.js'
 
 const numberingReference = 'agent-response-numbering'
+const bulletReference = 'agent-response-bullets'
+
+const listLevels = Array.from({ length: 6 }, (_, level) => ({
+  level,
+  format: LevelFormat.DECIMAL,
+  text: `%${level + 1}.`,
+  alignment: AlignmentType.START,
+  style: { paragraph: { indent: { left: 720 + level * 360, hanging: 360 } } }
+}))
+
+const bulletLevels = ['•', '◦', '▪', '•', '◦', '▪'].map((text, level) => ({
+  level,
+  format: LevelFormat.BULLET,
+  text,
+  alignment: AlignmentType.START,
+  style: { paragraph: { indent: { left: 720 + level * 360, hanging: 360 } } }
+}))
 
 export async function createResponseDocumentBuffer(request: ExportResponseRequest): Promise<Buffer> {
   const tree = unified().use(remarkParse).use(remarkGfm).parse(request.responseMarkdown) as Root
@@ -31,17 +48,35 @@ export async function createResponseDocumentBuffer(request: ExportResponseReques
     ...tree.children.flatMap((node) => blockToDocument(node))
   ]
   const document = new Document({
+    styles: {
+      default: {
+        document: {
+          run: { font: 'Aptos', size: 22, color: '242424' },
+          paragraph: { spacing: { after: 120, line: 276 } }
+        },
+        title: {
+          run: { font: 'Aptos Display', size: 36, bold: true, color: '17365D' },
+          paragraph: { spacing: { after: 180 } }
+        },
+        heading1: {
+          run: { font: 'Aptos Display', size: 30, bold: true, color: '17365D' },
+          paragraph: { spacing: { before: 280, after: 120 }, keepNext: true }
+        },
+        heading2: {
+          run: { font: 'Aptos Display', size: 26, bold: true, color: '24527A' },
+          paragraph: { spacing: { before: 240, after: 100 }, keepNext: true }
+        },
+        heading3: {
+          run: { font: 'Aptos', size: 23, bold: true, color: '2F5F85' },
+          paragraph: { spacing: { before: 200, after: 80 }, keepNext: true }
+        }
+      }
+    },
     numbering: {
-      config: [{
-        reference: numberingReference,
-        levels: [{
-          level: 0,
-          format: LevelFormat.DECIMAL,
-          text: '%1.',
-          alignment: AlignmentType.START,
-          style: { paragraph: { indent: { left: 720, hanging: 360 } } }
-        }]
-      }]
+      config: [
+        { reference: numberingReference, levels: listLevels },
+        { reference: bulletReference, levels: bulletLevels }
+      ]
     },
     sections: [{
       properties: {
@@ -56,7 +91,7 @@ export async function createResponseDocumentBuffer(request: ExportResponseReques
   return Packer.toBuffer(document)
 }
 
-function blockToDocument(node: Content): Array<Paragraph | Table> {
+function blockToDocument(node: Content, listLevel = 0): Array<Paragraph | Table> {
   switch (node.type) {
     case 'heading':
       return [new Paragraph({ heading: headingLevel(node.depth), children: inlineChildren(node.children) })]
@@ -64,10 +99,13 @@ function blockToDocument(node: Content): Array<Paragraph | Table> {
       return [new Paragraph({ children: inlineChildren(node.children), spacing: { after: 120 } })]
     case 'list':
       return node.children.flatMap((item) => item.children.flatMap((child) => {
+        if (child.type === 'list') return blockToDocument(child, Math.min(listLevel + 1, 5))
         const children = child.type === 'paragraph' ? inlineChildren(child.children) : [new TextRun(textContent(child))]
-        return [new Paragraph(node.ordered
-          ? { children, numbering: { reference: numberingReference, level: 0 } }
-          : { children, bullet: { level: 0 } })]
+        return [new Paragraph({
+          children,
+          numbering: { reference: node.ordered ? numberingReference : bulletReference, level: listLevel },
+          spacing: { after: 60 }
+        })]
       }))
     case 'table':
       return [new Table({
