@@ -1,0 +1,123 @@
+name: Nightly desktop release
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build even when master has not changed
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly-desktop-release
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for changes since the last nightly build
+        id: changes
+        shell: pwsh
+        env:
+          FORCE_BUILD: ${{ inputs.force || 'false' }}
+        run: |
+          $lastBuiltCommit = git rev-list -n 1 refs/tags/nightly-built 2>$null
+          $hasChanges = $lastBuiltCommit -ne $env:GITHUB_SHA
+          $shouldBuild = $env:FORCE_BUILD -eq 'true' -or $hasChanges
+
+          "should_build=$($shouldBuild.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          if ($shouldBuild) {
+            Write-Host "Building commit $env:GITHUB_SHA (last nightly: $lastBuiltCommit)."
+          } else {
+            Write-Host "No changes since the last successful nightly build; skipping."
+          }
+
+      - name: Set up Node.js
+        if: steps.changes.outputs.should_build == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.changes.outputs.should_build == 'true'
+        run: npm ci
+
+      - name: Run structure, preflight, lint, typecheck, and test suites
+        if: steps.changes.outputs.should_build == 'true'
+        run: npm run phase0:check
+
+      - name: Run Electron smoke tests
+        if: steps.changes.outputs.should_build == 'true'
+        run: npm run test:smoke:desktop
+
+      - name: Package Windows application
+        if: steps.changes.outputs.should_build == 'true'
+        run: npm run desktop:package
+
+      - name: Label nightly artifacts
+        if: steps.changes.outputs.should_build == 'true'
+        id: label
+        shell: pwsh
+        run: |
+          $date = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd')
+          $shortSha = $env:GITHUB_SHA.Substring(0, 7)
+          $label = "nightly-$date-$shortSha"
+          $tag = "$label-run-$env:GITHUB_RUN_NUMBER"
+
+          Get-ChildItem release -File | Where-Object { $_.Extension -in '.exe', '.zip' } | ForEach-Object {
+            $newName = "$($_.BaseName)-$label$($_.Extension)"
+            Rename-Item $_.FullName $newName
+          }
+
+          "label=$label" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "date=$date" >> $env:GITHUB_OUTPUT
+
+      - name: Upload workflow artifacts
+        if: steps.changes.outputs.should_build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: TLC-MultiAgent-Assist-Windows-x64-${{ steps.label.outputs.label }}
+          path: |
+            release/*.exe
+            release/*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish nightly GitHub prerelease
+        if: steps.changes.outputs.should_build == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY_TAG: ${{ steps.label.outputs.tag }}
+          NIGHTLY_DATE: ${{ steps.label.outputs.date }}
+        run: |
+          $artifacts = Get-ChildItem release -File | Where-Object { $_.Extension -in '.exe', '.zip' } | ForEach-Object FullName
+          $notes = "Automated nightly build of commit $env:GITHUB_SHA. All validation and desktop smoke tests passed."
+          gh release create $env:NIGHTLY_TAG $artifacts `
+            --target $env:GITHUB_SHA `
+            --prerelease `
+            --title "TLC MultiAgent Assist Nightly $env:NIGHTLY_DATE" `
+            --notes $notes
+
+      - name: Record successful nightly commit
+        if: steps.changes.outputs.should_build == 'true'
+        shell: pwsh
+        run: |
+          git tag --force nightly-built $env:GITHUB_SHA
+          git push origin refs/tags/nightly-built --force

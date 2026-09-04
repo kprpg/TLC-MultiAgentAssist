@@ -1,12 +1,14 @@
 import { expect, test, _electron as electron } from '@playwright/test'
 import type { WebContents } from 'electron'
-import { mkdir } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 
 test('launches the secure MCEM operational workbench', async () => {
   test.setTimeout(60_000)
+  const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-electron-test-'))
   const app = await electron.launch({
-    args: [resolve('apps/desktop')],
+    args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
     env: {
       ...process.env,
       TLC_DATA_MODE: 'sample'
@@ -21,7 +23,7 @@ test('launches the secure MCEM operational workbench', async () => {
     await window.evaluate(() => {
       localStorage.removeItem('tlc-left-pane-collapsed')
       localStorage.removeItem('tlc-right-pane-collapsed')
-      localStorage.removeItem('tlc-source-notice-dismissed')
+      localStorage.removeItem('tlc-source-notice-v2-dismissed')
     })
     await window.reload()
     await expect(window.getByText('SAMPLE DATA')).toBeVisible()
@@ -180,5 +182,6 @@ test('launches the secure MCEM operational workbench', async () => {
     })
   } finally {
     await app.close()
+    await rm(userDataDirectory, { recursive: true, force: true })
   }
 })

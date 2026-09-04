@@ -87,7 +87,7 @@ const agentTasks: Record<AgentCapability, { label: string; prompts: readonly str
 const themeStorageKey = 'tlc-theme'
 const leftPaneStorageKey = 'tlc-left-pane-collapsed'
 const rightPaneStorageKey = 'tlc-right-pane-collapsed'
-const sourceNoticeDismissedStorageKey = 'tlc-source-notice-dismissed'
+const sourceNoticeDismissedStorageKey = 'tlc-source-notice-v2-dismissed'
 type ThemeMode = 'light' | 'dark'
 type WorkbenchView = 'diagnostic' | 'foundry-agent'
 
