@@ -1,0 +1,62 @@
+name: Continuous integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate and measure coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run structure, preflight, lint, typecheck, and test suites
+        id: validate
+        run: npm run phase0:check
+
+      - name: Generate coverage report
+        id: coverage
+        run: npm test -- --coverage
+
+      - name: Publish coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ github.sha }}
+          path: coverage/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Write workflow summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Continuous integration"
+            echo ""
+            echo "| Check | Result |"
+            echo "| --- | --- |"
+            echo "| Structure, preflight, lint, typecheck, tests | ${{ steps.validate.outcome }} |"
+            echo "| Coverage report | ${{ steps.coverage.outcome }} |"
+          } >> "$GITHUB_STEP_SUMMARY"
