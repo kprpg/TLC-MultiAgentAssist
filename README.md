@@ -4,6 +4,10 @@
 [![Nightly desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml)
 [![Publish desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/release.yml)
 
+[![Continuous integration](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/ci.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/ci.yml)
+[![Nightly desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml)
+[![Publish desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/release.yml)
+
 TLC MultiAgent Assist is a Windows desktop application that acts as an account assistant that combines live MSX opportunity context with contextual guidance provided on the opportunity to advance them forward
 
 ## Download
@@ -44,5 +48,4 @@ npm run desktop:package
 ```
 
 Artifacts are written to `release/`. Pushing a version tag such as `v0.1.0` runs the release workflow and publishes the installer and portable ZIP to GitHub Releases. The downloaded artifacts might have to be "Unblocked" on Windows (security) before it can be launched. Right omuse on the executable and select "Unblock" for this, before launching.
-
 
