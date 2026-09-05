@@ -12,13 +12,14 @@ import {
 } from '../../../../packages/common/configuration/foundry-environment.js'
 import { FixtureMsxConnector, LiveMsxConnector } from '../../../../packages/connectors/msx/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
-import { createFoundryOpenAIClient, FoundryPromptAgent, StaticPromptAgent } from '../../../../packages/connectors/foundry/index.js'
+import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../../packages/connectors/foundry/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
 import { prepareFoundryEnvironmentFile } from './packaged-configuration.js'
 import { createRuntimeCredentials } from './runtime-credentials.js'
 import { createOutlookDraftMessage } from './outlook-compose.js'
 import { createResponseDocumentBuffer } from './response-document.js'
+import { buildSampleAgentResponse } from './sample-agent-response.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -30,10 +31,10 @@ const dataMode = process.env['TLC_DATA_MODE'] === 'sample' ? 'sample' : 'live'
 
 const preparedEnvironment = dataMode === 'live'
   ? await prepareFoundryEnvironmentFile({
-      isPackaged: app.isPackaged,
-      userDataPath: app.getPath('userData'),
-      templatePath: resolve(process.resourcesPath, 'config/foundry.environment.example.json')
-    })
+    isPackaged: app.isPackaged,
+    userDataPath: app.getPath('userData'),
+    templatePath: resolve(process.resourcesPath, 'config/foundry.environment.example.json')
+  })
   : undefined
 let runtimeEnvironment: FoundryEnvironment | undefined
 let startupBlocked = false
@@ -65,10 +66,10 @@ const tokenProvider = new AzureCliMsxTokenProvider({
   credential: credentials.msx,
   ...(authentication
     ? {
-        scope: authentication.scopes.msx[0],
-        expectedUserDomain: authentication.expectedUserDomain,
-        authenticationLabel: authentication.mode === 'interactive-browser' ? 'Interactive sign-in' : 'Azure CLI'
-      }
+      scope: authentication.scopes.msx[0],
+      expectedUserDomain: authentication.expectedUserDomain,
+      authenticationLabel: authentication.mode === 'interactive-browser' ? 'Interactive sign-in' : 'Azure CLI'
+    }
     : {})
 })
 const reportPerformance: PerformanceReporter = (event) => {
@@ -84,16 +85,13 @@ const msxConnector = dataMode === 'sample'
 const foundryOpenAIClient = runtimeEnvironment
   ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry)
   : undefined
-const previewResponses: Record<AgentCapability, string> = {
-  'account-pulse': '## Summary\n\nFocus this week on the selected opportunity and validate its incomplete milestones.\n\n## Context used\n\nSample account and opportunity context.\n\n## Observed signals\n\n- MSX sample evidence\n- Local MCEM guidance\n\n## Recommended actions\n\n| Owner | Action |\n| --- | --- |\n| Account Executive | Confirm the next customer commitment. |\n\n## Sources\n\nMSX sample; MCEM local snapshot.\n\n## Assumptions and missing information\n\nExternal signals are unavailable in sample mode.\n\n## Feedback prompt\n\nWas this focus actionable?',
-  'mcem-coach': 'Use the deterministic MCEM diagnostic shown in the workbench.',
-  'pursuit-executive': 'Summary\nPrepare the pursuit around the selected opportunity gaps.\n\nContext used\nSample account, opportunity, and MCEM context.\n\nObserved signals\nThe local evaluation identifies incomplete exit criteria.\n\nRecommended actions\nSpecialist / SSP: schedule validation and confirm owners.\n\nExecutive brief or 30/60 day pursuit plan\nDays 1-30: close evidence gaps. Days 31-60: validate value and executive alignment.\n\nSources\nMSX sample; MCEM local snapshot.\n\nAssumptions and missing information\nRecent customer activity is not available.\n\nFeedback prompt\nWas this plan useful?',
-  'risk-solution-play': 'Summary\nThe selected opportunity has execution risk where exit-criteria evidence is incomplete.\n\nContext used\nSample account, opportunity, and MCEM context.\n\nObserved signals\nMissing or partial criterion evidence.\n\nRisks\nMedium: progression may be premature.\n\nRecommended actions\nAccount Executive: confirm the next customer step.\n\nSources\nMSX sample; MCEM local snapshot.\n\nAssumptions and missing information\nApproved content sources are unavailable in sample mode.\n\nFeedback prompt\nWas this risk review grounded?'
-}
 const taskAgents: TaskAgentRegistry = Object.fromEntries(
   (['account-pulse', 'mcem-coach', 'pursuit-executive', 'risk-solution-play'] as const).map((capability) => {
     if (!runtimeEnvironment) {
-      return [capability, { version: 'sample-v1', agent: new StaticPromptAgent<AgentTaskContext>(previewResponses[capability]) }]
+      return [capability, {
+        version: 'sample-v2',
+        agent: { invoke: async (context: AgentTaskContext) => buildSampleAgentResponse(capability, context) }
+      }]
     }
     const binding = {
       'account-pulse': runtimeEnvironment.foundry.agents.accountPulse,

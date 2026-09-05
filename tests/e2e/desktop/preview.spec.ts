@@ -37,7 +37,7 @@ test('launches the secure MCEM operational workbench', async () => {
     await window.reload()
     await expect(sourceNotice).toHaveCount(0)
     await expect(window.getByText('Evidence supports', { exact: true })).toBeVisible()
-    await expect(window.getByText('NEXT BEST ACTIONS')).toBeVisible()
+    await expect(window.getByText('NEXT BEST ACTIONS', { exact: true })).toBeVisible()
     await expect(window.getByText('ACCOUNT CONTEXT', { exact: true })).toBeVisible()
     const contextRefresh = window.getByRole('button', { name: 'Refresh account context from MSX' })
     await expect(contextRefresh).toBeVisible()
@@ -88,10 +88,10 @@ test('launches the secure MCEM operational workbench', async () => {
     await expect(window.locator('.actions-pane')).toBeVisible()
 
     const agentTasks = [
-      { tab: 'Account Pulse', content: 'Focus this week on the selected opportunity' },
-      { tab: 'MCEM Coach', content: 'Use the deterministic MCEM diagnostic' },
-      { tab: 'Pursuit & Executive', content: 'Prepare the pursuit around the selected opportunity gaps' },
-      { tab: 'Risk & Solution Play', content: 'The selected opportunity has execution risk' }
+      { tab: 'Account Pulse', content: 'Focus this week on Grid operations modernization' },
+      { tab: 'MCEM Coach', content: 'The opportunity is recorded at Stage 3' },
+      { tab: 'Pursuit & Executive', content: 'Prepare the pursuit for Grid operations modernization' },
+      { tab: 'Risk & Solution Play', content: 'Grid operations modernization has 4 progression risks' }
     ]
     await window.getByRole('tab', { name: 'Multi-Agentic Guidance', exact: true }).click()
     await expect(window.getByText('ACCOUNT PULSE AGENT', { exact: true })).toBeVisible()
@@ -119,7 +119,7 @@ test('launches the secure MCEM operational workbench', async () => {
       await expect(window.locator('.agent-prompt-card')).toHaveCount(4)
       await window.locator('.agent-prompt-card').first().click()
       await expect(window.getByText(task.content, { exact: false })).toBeVisible()
-      await expect(window.getByText('Agent sample-v1 · MSX + MCEM', { exact: true })).toBeVisible()
+      await expect(window.getByText('Agent sample-v2 · MSX + MCEM', { exact: true })).toBeVisible()
       await expect(window.locator('.agent-synthesis')).toBeInViewport()
     }
 
@@ -172,9 +172,23 @@ test('launches the secure MCEM operational workbench', async () => {
 
     await expect(opportunityDropdown).toContainText('AI-assisted customer service')
     await opportunityDropdown.click()
-    await expect(window.getByRole('option', { name: 'AI-assisted customer service' })).toBeVisible()
-    await window.getByRole('option', { name: 'AI-assisted customer service' }).click()
-    await expect(window.getByText('NEXT BEST ACTIONS')).toBeVisible()
+    await expect(window.getByRole('option', { name: 'Connected store modernization' })).toBeVisible()
+    await window.getByRole('option', { name: 'Connected store modernization' }).click()
+    await expect(window.getByRole('heading', { name: 'Connected store modernization' })).toBeVisible()
+    await expect(window.locator('.stage-comparison').getByText('Stage 1', { exact: true })).toHaveCount(2)
+    await expect(window.getByText('Recorded opportunity stage', { exact: true })).toBeVisible()
+    await expect(window.getByText('Based on current evidence', { exact: true })).toBeVisible()
+    await expect(window.locator('.criterion-row').filter({ hasText: 'Budget availability' })).toContainText('partial')
+    await expect(window.locator('.criterion-row').filter({ hasText: 'Approval process' })).toContainText('met')
+    await expect(window.locator('.criterion-row').filter({ hasText: 'Decision and implementation timing' })).toContainText('missing')
+    await expect(window.locator('.action-card')).toHaveCount(2)
+    await window.getByRole('tab', { name: 'Multi-Agentic Guidance', exact: true }).click()
+    await window.getByRole('tab', { name: 'Account Pulse', exact: true }).click()
+    await window.getByRole('button', { name: 'What should the account team focus on this week?' }).click()
+    await expect(window.locator('.agent-synthesis-content')).toContainText('Focus this week on Connected store modernization')
+    await expect(window.locator('.agent-synthesis-content')).toContainText('Budget availability: partial')
+    await expect(window.locator('.agent-synthesis-content')).toContainText('Decision and implementation timing: missing')
+    await expect(window.getByText('NEXT BEST ACTIONS', { exact: true })).toBeVisible()
     expect(pageErrors).toEqual([])
 
     await window.getByRole('button', { name: `Use ${nextTheme} mode` }).click()

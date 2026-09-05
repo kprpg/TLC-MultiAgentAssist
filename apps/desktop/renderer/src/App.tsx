@@ -464,9 +464,9 @@ export function App() {
 
           {result && status !== 'loading' && workbenchView === 'diagnostic' && <div className="diagnostic-view">
             <div className="stage-comparison">
-              <div><span>Recorded in MSX</span><strong>Stage {result.recordedStage}</strong><small>Solution Design</small></div>
+              <div><span>Recorded in MSX</span><strong>Stage {result.recordedStage}</strong><small>Recorded opportunity stage</small></div>
               <ChevronRight20Regular />
-              <div className="supported-stage"><span>Evidence supports</span><strong>Stage {result.evidenceBasedStage}</strong><small>Customer Agreement</small></div>
+              <div className="supported-stage"><span>Evidence supports</span><strong>Stage {result.evidenceBasedStage}</strong><small>Based on current evidence</small></div>
               <div className="stage-summary"><Warning20Filled /><span>{result.summary}</span></div>
             </div>
 

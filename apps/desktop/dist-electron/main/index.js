@@ -509,23 +509,80 @@ var accounts = [{
 	name: "Fabrikam Retail",
 	segment: "Enterprise"
 }];
-var opportunities = [{
-	id: "opp-grid-modernization",
-	accountId: "account-contoso",
-	name: "Grid operations modernization",
-	recordedStage: 3,
-	value: 42e5,
-	currency: "USD",
-	closeDate: "2026-10-30"
-}, {
-	id: "opp-ai-service",
-	accountId: "account-fabrikam",
-	name: "AI-assisted customer service",
-	recordedStage: 2,
-	value: 175e4,
-	currency: "USD",
-	closeDate: "2026-12-18"
-}];
+var opportunities = [
+	{
+		id: "opp-grid-modernization",
+		accountId: "account-contoso",
+		name: "Grid operations modernization",
+		recordedStage: 3,
+		value: 42e5,
+		currency: "USD",
+		closeDate: "2026-10-30"
+	},
+	{
+		id: "opp-ai-service",
+		accountId: "account-fabrikam",
+		name: "AI-assisted customer service",
+		recordedStage: 2,
+		value: 175e4,
+		currency: "USD",
+		closeDate: "2026-12-18"
+	},
+	{
+		id: "opp-cloud-security-readiness",
+		accountId: "account-contoso",
+		name: "Cloud security readiness",
+		recordedStage: 1,
+		value: 9e5,
+		currency: "USD",
+		closeDate: "2027-02-26"
+	},
+	{
+		id: "opp-data-estate-consolidation",
+		accountId: "account-contoso",
+		name: "Data estate consolidation",
+		recordedStage: 2,
+		value: 265e4,
+		currency: "USD",
+		closeDate: "2027-01-29"
+	},
+	{
+		id: "opp-ai-factory-rollout",
+		accountId: "account-contoso",
+		name: "AI factory rollout",
+		recordedStage: 4,
+		value: 61e5,
+		currency: "USD",
+		closeDate: "2026-11-20"
+	},
+	{
+		id: "opp-store-modernization",
+		accountId: "account-fabrikam",
+		name: "Connected store modernization",
+		recordedStage: 1,
+		value: 12e5,
+		currency: "USD",
+		closeDate: "2027-03-19"
+	},
+	{
+		id: "opp-unified-commerce",
+		accountId: "account-fabrikam",
+		name: "Unified commerce platform",
+		recordedStage: 3,
+		value: 38e5,
+		currency: "USD",
+		closeDate: "2026-12-11"
+	},
+	{
+		id: "opp-copilot-expansion",
+		accountId: "account-fabrikam",
+		name: "Store associate Copilot expansion",
+		recordedStage: 4,
+		value: 24e5,
+		currency: "USD",
+		closeDate: "2026-10-23"
+	}
+];
 var observationsByOpportunity = {
 	"opp-grid-modernization": [
 		{
@@ -579,6 +636,158 @@ var observationsByOpportunity = {
 			criterionId: "next-step",
 			status: "met",
 			detail: "Discovery workshop is confirmed for September 3."
+		}
+	],
+	"opp-cloud-security-readiness": [
+		{
+			criterionId: "budget",
+			status: "met",
+			detail: "The security program has approved discovery funding for the current fiscal year."
+		},
+		{
+			criterionId: "customer-outcome",
+			status: "partial",
+			detail: "Reducing critical cloud findings is the stated outcome, but the baseline and target are not recorded."
+		},
+		{
+			criterionId: "approval",
+			status: "missing",
+			detail: "The executive sponsor and security approval path have not been confirmed."
+		},
+		{
+			criterionId: "timing",
+			status: "met",
+			detail: "The customer must select a remediation approach before its February audit window."
+		}
+	],
+	"opp-data-estate-consolidation": [
+		{
+			criterionId: "customer-outcome",
+			status: "met",
+			detail: "The customer targets a 25% reduction in data-platform operating cost."
+		},
+		{
+			criterionId: "decision-team",
+			status: "partial",
+			detail: "The data and infrastructure leads are engaged; the economic buyer is not confirmed."
+		},
+		{
+			criterionId: "technical-validation",
+			status: "met",
+			detail: "Discovery documented the current estate, migration constraints, and candidate landing zones."
+		},
+		{
+			criterionId: "business-case",
+			status: "partial",
+			detail: "A cost model exists but excludes migration and change-management costs."
+		},
+		{
+			criterionId: "next-step",
+			status: "met",
+			detail: "A design review is scheduled with named customer and Microsoft owners."
+		}
+	],
+	"opp-ai-factory-rollout": [
+		{
+			criterionId: "customer-outcome",
+			status: "met",
+			detail: "Three production use cases have agreed adoption and cycle-time targets."
+		},
+		{
+			criterionId: "decision-team",
+			status: "met",
+			detail: "The executive sponsor, AI council, security approver, procurement lead, and delivery team are engaged."
+		},
+		{
+			criterionId: "technical-validation",
+			status: "met",
+			detail: "The pilot met its quality, safety, latency, and integration acceptance criteria."
+		},
+		{
+			criterionId: "business-case",
+			status: "met",
+			detail: "Finance validated the investment case and phased funding envelope."
+		},
+		{
+			criterionId: "next-step",
+			status: "partial",
+			detail: "The rollout plan is approved, but the first production deployment date has not been committed."
+		}
+	],
+	"opp-store-modernization": [
+		{
+			criterionId: "budget",
+			status: "partial",
+			detail: "Innovation funding is available for a pilot, but rollout funding has not been identified."
+		},
+		{
+			criterionId: "customer-outcome",
+			status: "met",
+			detail: "The customer wants to reduce checkout abandonment by 10% and improve inventory accuracy."
+		},
+		{
+			criterionId: "approval",
+			status: "met",
+			detail: "The retail operations sponsor and technology decision makers are identified."
+		},
+		{
+			criterionId: "timing",
+			status: "missing",
+			detail: "No decision date, purchase window, or compelling event is recorded."
+		}
+	],
+	"opp-unified-commerce": [
+		{
+			criterionId: "customer-outcome",
+			status: "met",
+			detail: "The program has measurable revenue, conversion, and order-fulfillment outcomes."
+		},
+		{
+			criterionId: "decision-team",
+			status: "met",
+			detail: "Commerce, finance, security, procurement, and executive stakeholders are mapped."
+		},
+		{
+			criterionId: "technical-validation",
+			status: "partial",
+			detail: "Core integration patterns are validated; peak-volume testing remains open."
+		},
+		{
+			criterionId: "business-case",
+			status: "met",
+			detail: "The customer approved a quantified business case and funding range."
+		},
+		{
+			criterionId: "next-step",
+			status: "partial",
+			detail: "A validation workshop is planned, but customer attendees are not final."
+		}
+	],
+	"opp-copilot-expansion": [
+		{
+			criterionId: "customer-outcome",
+			status: "met",
+			detail: "The expansion targets a 20% reduction in associate task time across 300 stores."
+		},
+		{
+			criterionId: "decision-team",
+			status: "met",
+			detail: "Retail operations, HR, security, finance, and deployment owners approved the expansion path."
+		},
+		{
+			criterionId: "technical-validation",
+			status: "met",
+			detail: "The production pilot met groundedness, adoption, and support acceptance criteria."
+		},
+		{
+			criterionId: "business-case",
+			status: "partial",
+			detail: "Benefits are validated, but the support-cost assumption needs finance confirmation."
+		},
+		{
+			criterionId: "next-step",
+			status: "met",
+			detail: "Wave-one deployment has named owners and a committed October start date."
 		}
 	]
 };
@@ -744,14 +953,6 @@ var FoundryPromptAgent = class {
 		} finally {
 			clearTimeout(timeout);
 		}
-	}
-};
-var StaticPromptAgent = class {
-	constructor(content) {
-		this.content = content;
-	}
-	async invoke(_context) {
-		return this.content;
 	}
 };
 //#endregion
@@ -1396,6 +1597,51 @@ function headingLevel(depth) {
 	][depth - 1] ?? HeadingLevel.HEADING_6;
 }
 //#endregion
+//#region apps/desktop/electron/main/sample-agent-response.ts
+var capabilitySummary = {
+	"account-pulse": (context) => `Focus this week on ${context.opportunityContext.opportunity.name} and close the highest-priority Stage ${context.guidance.stage} evidence gaps.`,
+	"mcem-coach": (context) => context.localEvaluation.summary,
+	"pursuit-executive": (context) => `Prepare the pursuit for ${context.opportunityContext.opportunity.name} around its Stage ${context.guidance.stage} gaps and customer commitments.`,
+	"risk-solution-play": (context) => `${context.opportunityContext.opportunity.name} has ${context.localEvaluation.recommendations.length} progression risk${context.localEvaluation.recommendations.length === 1 ? "" : "s"} requiring action.`
+};
+function buildSampleAgentResponse(capability, context) {
+	const { account, opportunity } = context.opportunityContext;
+	const criteria = context.localEvaluation.criteria.map((criterion) => `- **${criterion.label}: ${criterion.status}** - ${criterion.rationale}`).join("\n");
+	const recommendations = context.localEvaluation.recommendations.map((recommendation) => `| ${recommendation.ownerRole} | ${recommendation.action} | ${recommendation.confidence} |`).join("\n");
+	const missingInformation = context.localEvaluation.missingData.length > 0 ? context.localEvaluation.missingData.join("; ") : "No criterion evidence is missing; partially supported criteria still require confirmation.";
+	return `## Summary
+
+${capabilitySummary[capability](context)}
+
+## Context used
+
+**Opportunity:** ${opportunity.name}
+**Account:** ${account.name}
+**Recorded / evidence-based stage:** ${opportunity.recordedStage} / ${context.localEvaluation.evidenceBasedStage}
+
+## Exit criteria
+
+${criteria}
+
+## Recommended actions
+
+| Owner | Action | Confidence |
+| --- | --- | --- |
+${recommendations}
+
+## Sources
+
+Sanitized MSX sample evidence; ${context.guidance.title}, version ${context.guidance.version}.
+
+## Assumptions and missing information
+
+${missingInformation} External signals are unavailable in sample mode.
+
+## Feedback prompt
+
+Was this ${capability.replaceAll("-", " ")} guidance actionable?`;
+}
+//#endregion
 //#region apps/desktop/electron/main/index.ts
 var desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 var rendererFile = resolve(desktopRoot, "dist/renderer/index.html");
@@ -1440,12 +1686,6 @@ var reportPerformance = (event) => {
 var mcemConnector = new LocalPdfMcemGuidanceConnector(app.isPackaged ? resolve(process.resourcesPath, "docs/knowledge/MCEM Overview.pdf") : resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
 var msxConnector = dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider, fetch, void 0, reportPerformance);
 var foundryOpenAIClient = runtimeEnvironment ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry) : void 0;
-var previewResponses = {
-	"account-pulse": "## Summary\n\nFocus this week on the selected opportunity and validate its incomplete milestones.\n\n## Context used\n\nSample account and opportunity context.\n\n## Observed signals\n\n- MSX sample evidence\n- Local MCEM guidance\n\n## Recommended actions\n\n| Owner | Action |\n| --- | --- |\n| Account Executive | Confirm the next customer commitment. |\n\n## Sources\n\nMSX sample; MCEM local snapshot.\n\n## Assumptions and missing information\n\nExternal signals are unavailable in sample mode.\n\n## Feedback prompt\n\nWas this focus actionable?",
-	"mcem-coach": "Use the deterministic MCEM diagnostic shown in the workbench.",
-	"pursuit-executive": "Summary\nPrepare the pursuit around the selected opportunity gaps.\n\nContext used\nSample account, opportunity, and MCEM context.\n\nObserved signals\nThe local evaluation identifies incomplete exit criteria.\n\nRecommended actions\nSpecialist / SSP: schedule validation and confirm owners.\n\nExecutive brief or 30/60 day pursuit plan\nDays 1-30: close evidence gaps. Days 31-60: validate value and executive alignment.\n\nSources\nMSX sample; MCEM local snapshot.\n\nAssumptions and missing information\nRecent customer activity is not available.\n\nFeedback prompt\nWas this plan useful?",
-	"risk-solution-play": "Summary\nThe selected opportunity has execution risk where exit-criteria evidence is incomplete.\n\nContext used\nSample account, opportunity, and MCEM context.\n\nObserved signals\nMissing or partial criterion evidence.\n\nRisks\nMedium: progression may be premature.\n\nRecommended actions\nAccount Executive: confirm the next customer step.\n\nSources\nMSX sample; MCEM local snapshot.\n\nAssumptions and missing information\nApproved content sources are unavailable in sample mode.\n\nFeedback prompt\nWas this risk review grounded?"
-};
 var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object.fromEntries([
 	"account-pulse",
 	"mcem-coach",
@@ -1453,8 +1693,8 @@ var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object
 	"risk-solution-play"
 ].map((capability) => {
 	if (!runtimeEnvironment) return [capability, {
-		version: "sample-v1",
-		agent: new StaticPromptAgent(previewResponses[capability])
+		version: "sample-v2",
+		agent: { invoke: async (context) => buildSampleAgentResponse(capability, context) }
 	}];
 	const binding = {
 		"account-pulse": runtimeEnvironment.foundry.agents.accountPulse,

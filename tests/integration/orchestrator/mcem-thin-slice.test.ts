@@ -13,6 +13,24 @@ import {
 const mcemConnector = () => new LocalPdfMcemGuidanceConnector(resolve('docs/knowledge/MCEM Overview.pdf'))
 
 describe('MCEM Coach thin slice', () => {
+  it('provides a sample portfolio across recorded Stages 1 through 4 with explicit criterion evidence', async () => {
+    const connector = new FixtureMsxConnector()
+    const accounts = await connector.listAccounts()
+    const opportunities = (await Promise.all(accounts.map((account) => connector.listOpportunities(account.id)))).flat()
+
+    expect(accounts).toHaveLength(2)
+    expect(opportunities).toHaveLength(8)
+    expect(new Set(opportunities.map((opportunity) => opportunity.recordedStage))).toEqual(new Set([1, 2, 3, 4]))
+
+    for (const opportunity of opportunities) {
+      const context = await connector.getOpportunityContext(opportunity.id)
+      const statuses = new Set(context.observations.map((observation) => observation.status))
+      expect(context.observations.length).toBeGreaterThanOrEqual(4)
+      expect(statuses.has('met')).toBe(true)
+      expect(statuses.has('partial') || statuses.has('missing')).toBe(true)
+    }
+  })
+
   it('builds the automatic diagnostic locally without invoking a task agent', async () => {
     const invoke = vi.fn()
     const orchestrator = new ThinSliceOrchestrator(
