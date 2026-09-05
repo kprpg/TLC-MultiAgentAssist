@@ -43,5 +43,4 @@ Create local Windows release artifacts with:
 npm run desktop:package
 ```
 
-Artifacts are written to `release/`. Pushing a version tag such as `v0.1.0` runs the release workflow and publishes the installer and portable ZIP to GitHub Releases. The downloaded artifacts might have to be "Unblocked" on Windows (security) before it can be launched. Right omuse on the executable and select "Unblock" for this, before launching.
-
+Artifacts are written to `release/`. Pushing a version tag such as `v0.1.0` runs the release workflow and publishes the installer and portable ZIP to GitHub Releases. Manually running the release workflow publishes a visible GitHub Release with a run-specific tag such as `v0.1.0-build.2` unless a tag is supplied. The downloaded artifacts might have to be "Unblocked" on Windows (security) before it can be launched. Right omuse on the executable and select "Unblock" for this, before launching.
