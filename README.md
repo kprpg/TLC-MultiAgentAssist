@@ -1,5 +1,9 @@
 # TLC MultiAgent Assist
 
+[![Continuous integration](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/ci.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/ci.yml)
+[![Nightly desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml)
+[![Publish desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/release.yml)
+
 TLC MultiAgent Assist is a Windows desktop application that acts as an account assistant that combines live MSX opportunity context with contextual guidance provided on the opportunity to advance them forward
 
 ## Download
