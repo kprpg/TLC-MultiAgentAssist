@@ -36,7 +36,11 @@ jobs:
         env:
           FORCE_BUILD: ${{ inputs.force || 'false' }}
         run: |
-          $lastBuiltCommit = git rev-list -n 1 refs/tags/nightly-built 2>$null
+          $lastBuiltCommit = if (git tag --list nightly-built) {
+            git rev-list -n 1 refs/tags/nightly-built
+          } else {
+            ''
+          }
           $hasChanges = $lastBuiltCommit -ne $env:GITHUB_SHA
           $shouldBuild = $env:FORCE_BUILD -eq 'true' -or $hasChanges
 
