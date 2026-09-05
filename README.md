@@ -1,6 +1,6 @@
 # TLC MultiAgent Assist
 
-TLC MultiAgent Assist is a Windows desktop account assistant that combines live MSX opportunity context with Microsoft Foundry agents.
+TLC MultiAgent Assist is a Windows desktop application that acts as an account assistant that combines live MSX opportunity context with contextual guidance provided on the opportunity to advance them forward
 
 ## Download
 
