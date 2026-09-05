@@ -224,7 +224,7 @@ function registerReadOnlyIpc(): void {
 }
 
 function safeFileName(value: string): string {
-  return value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').replace(/[. ]+$/g, '').slice(0, 120) || 'TLC agent response'
+  return [...value].map((character) => character.charCodeAt(0) < 32 || '<>:"/\\|?*'.includes(character) ? '-' : character).join('').replace(/[. ]+$/g, '').slice(0, 120) || 'TLC agent response'
 }
 
 async function createWindow(): Promise<void> {

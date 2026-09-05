@@ -70,7 +70,7 @@ export class RecordingMcemAgent implements AgentInvoker<McemAgentContext> {
 export class StaticPromptAgent<TContext> implements AgentInvoker<TContext> {
   constructor(private readonly content: string) {}
 
-  async invoke(_context: TContext): Promise<string> {
+  async invoke(): Promise<string> {
     return this.content
   }
 }
