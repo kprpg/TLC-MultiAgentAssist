@@ -129,7 +129,7 @@ Build the Windows x64 installer and portable ZIP:
 npm run desktop:package
 ```
 
-Artifacts are written under `release/`. To publish them, update the version in `apps/desktop/package.json`, commit the change, and push a matching version tag such as `v0.1.0`. The `.github/workflows/release.yml` workflow validates, packages, and creates the GitHub Release automatically.
+Artifacts are written under `release/`. To publish them, update the version in `apps/desktop/package.json`, commit the change, and either push a matching version tag such as `v0.1.0` or run the `Publish desktop release` workflow manually. Manual runs publish `v<desktop package version>` by default, or an explicitly provided matching tag. The `.github/workflows/release.yml` workflow validates, packages, and creates the GitHub Release automatically.
 
 ## Validate the desktop experience
 
