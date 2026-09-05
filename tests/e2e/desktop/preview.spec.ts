@@ -51,6 +51,20 @@ test('launches the secure MCEM operational workbench', async () => {
     await expect(window.locator('.action-card')).toHaveCount(4)
     await expect(window.locator('.actions-intro')).toContainText('Stage 3 ready')
 
+    const topbarBox = await window.locator('.topbar').boundingBox()
+    const analysisStyles = await window.locator('.analysis-pane').evaluate((element) => {
+      const styles = getComputedStyle(element)
+      return { paddingTop: styles.paddingTop, paddingLeft: styles.paddingLeft }
+    })
+    const actionStyles = await window.locator('.action-list').evaluate((element) => {
+      const listStyles = getComputedStyle(element)
+      const contentStyles = getComputedStyle(element.querySelector('.action-content')!)
+      return { gap: listStyles.gap, paddingTop: contentStyles.paddingTop }
+    })
+    expect(topbarBox?.height).toBe(48)
+    expect(analysisStyles).toEqual({ paddingTop: '20px', paddingLeft: '18px' })
+    expect(actionStyles).toEqual({ gap: '8px', paddingTop: '10px' })
+
     const contextToggle = window.getByRole('button', { name: 'Toggle account context' })
     const actionsToggle = window.getByRole('button', { name: 'Toggle next best actions' })
     await expect(window.locator('.topbar > :first-child')).toHaveAttribute('aria-label', 'Toggle account context')
