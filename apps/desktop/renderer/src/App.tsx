@@ -463,11 +463,11 @@ export function App() {
           {(status === 'loading' || status === 'running') && <div className="loading-state"><Spinner label="Evaluating opportunity evidence" /></div>}
 
           {result && status !== 'loading' && workbenchView === 'diagnostic' && <div className="diagnostic-view">
-            <div className="stage-comparison">
+            <div className={`stage-comparison${result.evidenceBasedStage > result.recordedStage ? ' stage-comparison--advance' : ''}`}>
               <div><span>Recorded in MSX</span><strong>Stage {result.recordedStage}</strong><small>Recorded opportunity stage</small></div>
               <ChevronRight20Regular />
               <div className="supported-stage"><span>Evidence supports</span><strong>Stage {result.evidenceBasedStage}</strong><small>Based on current evidence</small></div>
-              <div className="stage-summary"><Warning20Filled /><span>{result.summary}</span></div>
+              <div className="stage-summary">{result.evidenceBasedStage > result.recordedStage ? <CheckmarkCircle20Filled /> : <Warning20Filled />}<span>{result.summary}</span></div>
             </div>
 
             <div className="criteria-heading">
@@ -588,7 +588,9 @@ export function App() {
 
         {!rightPaneCollapsed && <aside className="actions-pane" id="next-best-actions-pane">
           <div className="actions-heading"><span className="section-label">NEXT BEST ACTIONS</span><Badge appearance="filled">{result?.recommendations.length ?? 0}</Badge></div>
-          <p className="actions-intro">Resolve these gaps before treating the selected opportunity as Stage {result?.recordedStage ?? '—'} ready.</p>
+          <p className="actions-intro">{result && result.evidenceBasedStage > result.recordedStage
+            ? `Confirm the completed exit criteria with the customer before progressing to Stage ${result.evidenceBasedStage} in MSX.`
+            : `Resolve these gaps before treating the selected opportunity as Stage ${result?.recordedStage ?? '—'} ready.`}</p>
           <div className="action-list">
             {result?.recommendations.map((recommendation, index) => <article className="action-card" key={recommendation.id}>
               <div className="action-order">{index + 1}</div>

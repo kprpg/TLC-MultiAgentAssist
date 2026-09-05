@@ -51,4 +51,19 @@ describe('sample agent response', () => {
         expect(response).toContain('| Account Executive | Identify the approval path. | high |')
         expect(response).toContain('Approval process')
     })
+
+    it('describes complete current-stage evidence as advancement readiness', () => {
+        const readyContext = structuredClone(context) as AgentTaskContext
+        readyContext.localEvaluation.evidenceBasedStage = 2
+        readyContext.localEvaluation.criteria = [
+            { id: 'budget', label: 'Budget availability', status: 'met', rationale: 'Funding is approved.', evidenceIds: ['msx-1'] }
+        ]
+        readyContext.localEvaluation.missingData = []
+
+        const response = buildSampleAgentResponse('account-pulse', readyContext)
+
+        expect(response).toContain('confirming progression of Cloud security readiness to Stage 2')
+        expect(response).toContain('all current-stage exit criteria are supported')
+        expect(response).not.toContain('evidence gaps')
+    })
 })

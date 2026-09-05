@@ -170,7 +170,17 @@ test('launches the secure MCEM operational workbench', async () => {
     await expect(window.locator('.action-card')).toHaveCount(3)
     await expect(window.locator('.actions-intro')).toContainText('Stage 2 ready')
 
-    await expect(opportunityDropdown).toContainText('AI-assisted customer service')
+    await opportunityDropdown.click()
+    await expect(window.getByRole('option', { name: 'Customer data platform - ready to advance' })).toBeVisible()
+    await window.getByRole('option', { name: 'Customer data platform - ready to advance' }).click()
+    await expect(window.getByRole('heading', { name: 'Customer data platform - ready to advance' })).toBeVisible()
+    await expect(window.locator('.stage-comparison')).toContainText('Stage 2')
+    await expect(window.locator('.stage-comparison')).toContainText('Stage 3')
+    await expect(window.locator('.stage-comparison')).toHaveClass(/stage-comparison--advance/)
+    await expect(window.locator('.actions-intro')).toContainText('Confirm the completed exit criteria with the customer')
+    await expect(window.locator('.criterion-row')).toHaveCount(5)
+
+    await expect(opportunityDropdown).toContainText('Customer data platform - ready to advance')
     await opportunityDropdown.click()
     await expect(window.getByRole('option', { name: 'Connected store modernization' })).toBeVisible()
     await window.getByRole('option', { name: 'Connected store modernization' }).click()

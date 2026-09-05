@@ -1,11 +1,21 @@
 import type { AgentCapability } from '../../../../packages/common/index.js'
 import type { AgentTaskContext } from '../../../../packages/orchestrator/index.js'
 
+function isReadyToAdvance(context: AgentTaskContext): boolean {
+    return context.localEvaluation.evidenceBasedStage > context.opportunityContext.opportunity.recordedStage
+}
+
 const capabilitySummary: Record<AgentCapability, (context: AgentTaskContext) => string> = {
-    'account-pulse': (context) => `Focus this week on ${context.opportunityContext.opportunity.name} and close the highest-priority Stage ${context.guidance.stage} evidence gaps.`,
+    'account-pulse': (context) => isReadyToAdvance(context)
+        ? `Focus this week on confirming progression of ${context.opportunityContext.opportunity.name} to Stage ${context.localEvaluation.evidenceBasedStage}.`
+        : `Focus this week on ${context.opportunityContext.opportunity.name} and close the highest-priority Stage ${context.guidance.stage} evidence gaps.`,
     'mcem-coach': (context) => context.localEvaluation.summary,
-    'pursuit-executive': (context) => `Prepare the pursuit for ${context.opportunityContext.opportunity.name} around its Stage ${context.guidance.stage} gaps and customer commitments.`,
-    'risk-solution-play': (context) => `${context.opportunityContext.opportunity.name} has ${context.localEvaluation.recommendations.length} progression risk${context.localEvaluation.recommendations.length === 1 ? '' : 's'} requiring action.`
+    'pursuit-executive': (context) => isReadyToAdvance(context)
+        ? `Prepare ${context.opportunityContext.opportunity.name} for a customer-confirmed move to Stage ${context.localEvaluation.evidenceBasedStage}.`
+        : `Prepare the pursuit for ${context.opportunityContext.opportunity.name} around its Stage ${context.guidance.stage} gaps and customer commitments.`,
+    'risk-solution-play': (context) => isReadyToAdvance(context)
+        ? `${context.opportunityContext.opportunity.name} has complete current-stage evidence and is ready for progression review.`
+        : `${context.opportunityContext.opportunity.name} has ${context.localEvaluation.recommendations.length} progression risk${context.localEvaluation.recommendations.length === 1 ? '' : 's'} requiring action.`
 }
 
 export function buildSampleAgentResponse(capability: AgentCapability, context: AgentTaskContext): string {
@@ -18,7 +28,9 @@ export function buildSampleAgentResponse(capability: AgentCapability, context: A
         .join('\n')
     const missingInformation = context.localEvaluation.missingData.length > 0
         ? context.localEvaluation.missingData.join('; ')
-        : 'No criterion evidence is missing; partially supported criteria still require confirmation.'
+        : context.localEvaluation.criteria.some((criterion) => criterion.status === 'partial')
+            ? 'No criterion evidence is missing; partially supported criteria still require confirmation.'
+            : 'No criterion evidence is missing; all current-stage exit criteria are supported.'
 
     return `## Summary
 

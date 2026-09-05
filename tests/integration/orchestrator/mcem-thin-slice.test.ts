@@ -58,6 +58,24 @@ describe('MCEM Coach thin slice', () => {
     ])
   })
 
+  it('keeps complete evidence capped at Stage 5', async () => {
+    const connector = new FixtureMsxConnector()
+    const context = await connector.getOpportunityContext('opp-ai-store-operations')
+    const guidance = await mcemConnector().getStageGuidance(5)
+    const result = evaluateMcemProgress({
+      ...context,
+      opportunity: { ...context.opportunity, recordedStage: 5 }
+    }, guidance, '00000000-0000-4000-8000-000000000005')
+
+    expect(result.evidenceBasedStage).toBe(5)
+    expect(result.recommendations).toEqual([
+      expect.objectContaining({
+        id: 'recommendation-advance-stage',
+        action: 'Continue validating value realization and maintain current evidence in MSX.'
+      })
+    ])
+  })
+
   it('builds the automatic diagnostic locally without invoking a task agent', async () => {
     const invoke = vi.fn()
     const orchestrator = new ThinSliceOrchestrator(
