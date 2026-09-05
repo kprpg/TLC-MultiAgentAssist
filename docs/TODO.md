@@ -1,5 +1,15 @@
 # TLC follow-up work
 
+## Prioritized backlog
+
+> Planning capture only. Do not implement these items until they are explicitly approved and scoped.
+
+1. [ ] Fix SharePoint access.
+2. [ ] Revamp the UI.
+3. [ ] Connect to LinkedIn.
+4. [ ] Connect to Seismic.
+5. [ ] Evaluate deploying the UI as a static web page hosted in an Azure Storage account.
+
 ## Improve Foundry agent interaction
 
 - [x] Replace the single pre-populated prompt with four domain-relevant starter prompt choices for each agent.
