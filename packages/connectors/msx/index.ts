@@ -80,6 +80,42 @@ const opportunities: Opportunity[] = [
     value: 2400000,
     currency: 'USD',
     closeDate: '2026-10-23'
+  },
+  {
+    id: 'opp-resilient-cloud-foundation',
+    accountId: 'account-contoso',
+    name: 'Resilient cloud foundation - ready to advance',
+    recordedStage: 1,
+    value: 1450000,
+    currency: 'USD',
+    closeDate: '2027-03-12'
+  },
+  {
+    id: 'opp-predictive-maintenance-scale',
+    accountId: 'account-contoso',
+    name: 'Predictive maintenance scale-out - ready to advance',
+    recordedStage: 3,
+    value: 4750000,
+    currency: 'USD',
+    closeDate: '2026-12-04'
+  },
+  {
+    id: 'opp-customer-data-platform',
+    accountId: 'account-fabrikam',
+    name: 'Customer data platform - ready to advance',
+    recordedStage: 2,
+    value: 3200000,
+    currency: 'USD',
+    closeDate: '2027-01-15'
+  },
+  {
+    id: 'opp-ai-store-operations',
+    accountId: 'account-fabrikam',
+    name: 'AI store operations deployment - ready to advance',
+    recordedStage: 4,
+    value: 5250000,
+    currency: 'USD',
+    closeDate: '2026-11-13'
   }
 ]
 
@@ -137,6 +173,33 @@ const observationsByOpportunity: Record<string, OpportunityContext['observations
     { criterionId: 'technical-validation', status: 'met', detail: 'The production pilot met groundedness, adoption, and support acceptance criteria.' },
     { criterionId: 'business-case', status: 'partial', detail: 'Benefits are validated, but the support-cost assumption needs finance confirmation.' },
     { criterionId: 'next-step', status: 'met', detail: 'Wave-one deployment has named owners and a committed October start date.' }
+  ],
+  'opp-resilient-cloud-foundation': [
+    { criterionId: 'budget', status: 'met', detail: 'The customer has confirmed funding for discovery, design, and initial implementation.' },
+    { criterionId: 'customer-outcome', status: 'met', detail: 'Recovery-time, availability, and operational-efficiency targets have agreed baselines and owners.' },
+    { criterionId: 'approval', status: 'met', detail: 'The executive sponsor, economic buyer, architecture authority, and procurement path are confirmed.' },
+    { criterionId: 'timing', status: 'met', detail: 'The customer has committed to a November decision ahead of its data-center renewal event.' }
+  ],
+  'opp-predictive-maintenance-scale': [
+    { criterionId: 'customer-outcome', status: 'met', detail: 'The customer approved targets for unplanned downtime, maintenance cost, and asset availability.' },
+    { criterionId: 'decision-team', status: 'met', detail: 'Operations, finance, security, procurement, and executive stakeholders are aligned.' },
+    { criterionId: 'technical-validation', status: 'met', detail: 'The pilot met model-quality, integration, security, and field-operations acceptance criteria.' },
+    { criterionId: 'business-case', status: 'met', detail: 'Finance validated the scale-out business case using measured pilot outcomes.' },
+    { criterionId: 'next-step', status: 'met', detail: 'A customer-approved deployment decision meeting has named attendees, owners, and a committed date.' }
+  ],
+  'opp-customer-data-platform': [
+    { criterionId: 'customer-outcome', status: 'met', detail: 'The customer agreed measurable conversion, campaign-cycle, and data-quality outcomes.' },
+    { criterionId: 'decision-team', status: 'met', detail: 'Marketing, data, privacy, security, finance, and procurement decision makers are engaged.' },
+    { criterionId: 'technical-validation', status: 'met', detail: 'Discovery confirmed source systems, identity resolution, consent, and integration requirements.' },
+    { criterionId: 'business-case', status: 'met', detail: 'The expected return and implementation budget are documented and customer validated.' },
+    { criterionId: 'next-step', status: 'met', detail: 'The solution-design workshop is confirmed with customer and Microsoft owners.' }
+  ],
+  'opp-ai-store-operations': [
+    { criterionId: 'customer-outcome', status: 'met', detail: 'The customer approved labor-efficiency, task-completion, and associate-adoption targets.' },
+    { criterionId: 'decision-team', status: 'met', detail: 'Retail operations, HR, security, finance, legal, and deployment owners approved the path.' },
+    { criterionId: 'technical-validation', status: 'met', detail: 'The production pilot met quality, safety, accessibility, support, and integration criteria.' },
+    { criterionId: 'business-case', status: 'met', detail: 'Finance approved the deployment business case and full rollout funding.' },
+    { criterionId: 'next-step', status: 'met', detail: 'The first deployment wave has a customer-approved date, scope, and accountable owners.' }
   ]
 }
 

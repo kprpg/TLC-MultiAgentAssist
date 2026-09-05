@@ -28,7 +28,7 @@ export function evaluateMcemProgress(
   })
 
   const gaps = criteria.filter((criterion) => criterion.status !== 'met')
-  const recommendations = gaps.map((gap) => {
+  const gapRecommendations = gaps.map((gap) => {
     const criterion = guidance.criteria.find((candidate) => candidate.id === gap.id)
     if (!criterion) {
       throw new Error(`Guidance missing for criterion: ${gap.id}`)
@@ -45,8 +45,23 @@ export function evaluateMcemProgress(
   })
 
   const evidenceBasedStage = gaps.length === 0
-    ? context.opportunity.recordedStage
+    ? Math.min(5, context.opportunity.recordedStage + 1)
     : Math.max(1, context.opportunity.recordedStage - 1)
+  const recommendations = gaps.length === 0
+    ? [{
+        id: 'recommendation-advance-stage',
+        action: evidenceBasedStage > context.opportunity.recordedStage
+          ? `Review the completed exit criteria and advance the opportunity to Stage ${evidenceBasedStage} in MSX after customer confirmation.`
+          : 'Continue validating value realization and maintain current evidence in MSX.',
+        ownerRole: 'Account Executive',
+        rationale: evidenceBasedStage > context.opportunity.recordedStage
+          ? `All supplied Stage ${context.opportunity.recordedStage} exit criteria are met, supporting progression to Stage ${evidenceBasedStage}.`
+          : 'The opportunity is already at the highest supported MCEM stage.',
+        evidenceIds: [msxEvidenceId, guidanceEvidenceId],
+        assumption: false,
+        confidence: 'high' as const
+      }]
+    : gapRecommendations
   const generatedAt = new Date().toISOString()
 
   return mcemResponseSchema.parse({
@@ -57,9 +72,11 @@ export function evaluateMcemProgress(
     generatedAt,
     mode: context.sourceHealth.state === 'live' ? 'live' : 'sample',
     state: 'complete',
-    summary: evidenceBasedStage === context.opportunity.recordedStage
-      ? `The available evidence supports recorded Stage ${context.opportunity.recordedStage}.`
-      : `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the available evidence supports Stage ${evidenceBasedStage}.`,
+    summary: evidenceBasedStage > context.opportunity.recordedStage
+      ? `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the completed exit criteria support progression to Stage ${evidenceBasedStage}.`
+      : evidenceBasedStage === context.opportunity.recordedStage
+        ? `The available evidence supports recorded Stage ${context.opportunity.recordedStage}.`
+        : `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the available evidence supports Stage ${evidenceBasedStage}.`,
     recordedStage: context.opportunity.recordedStage,
     evidenceBasedStage,
     criteria,

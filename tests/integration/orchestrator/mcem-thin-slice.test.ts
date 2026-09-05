@@ -19,7 +19,7 @@ describe('MCEM Coach thin slice', () => {
     const opportunities = (await Promise.all(accounts.map((account) => connector.listOpportunities(account.id)))).flat()
 
     expect(accounts).toHaveLength(2)
-    expect(opportunities).toHaveLength(8)
+    expect(opportunities).toHaveLength(12)
     expect(new Set(opportunities.map((opportunity) => opportunity.recordedStage))).toEqual(new Set([1, 2, 3, 4]))
 
     for (const opportunity of opportunities) {
@@ -27,8 +27,35 @@ describe('MCEM Coach thin slice', () => {
       const statuses = new Set(context.observations.map((observation) => observation.status))
       expect(context.observations.length).toBeGreaterThanOrEqual(4)
       expect(statuses.has('met')).toBe(true)
-      expect(statuses.has('partial') || statuses.has('missing')).toBe(true)
     }
+  })
+
+  it.each([
+    ['account-contoso', 'opp-resilient-cloud-foundation', 1, 2],
+    ['account-fabrikam', 'opp-customer-data-platform', 2, 3],
+    ['account-contoso', 'opp-predictive-maintenance-scale', 3, 4],
+    ['account-fabrikam', 'opp-ai-store-operations', 4, 5]
+  ])('shows %s / %s as ready to progress from Stage %i to Stage %i', async (accountId, opportunityId, recordedStage, supportedStage) => {
+    const orchestrator = new ThinSliceOrchestrator(new FixtureMsxConnector(), mcemConnector())
+
+    const result = await orchestrator.runMcemCoach({
+      contractVersion,
+      accountId,
+      opportunityId,
+      prompt: 'Is this opportunity ready to advance?'
+    })
+
+    expect(result.recordedStage).toBe(recordedStage)
+    expect(result.evidenceBasedStage).toBe(supportedStage)
+    expect(result.criteria.every((criterion) => criterion.status === 'met')).toBe(true)
+    expect(result.missingData).toEqual([])
+    expect(result.recommendations).toEqual([
+      expect.objectContaining({
+        id: 'recommendation-advance-stage',
+        ownerRole: 'Account Executive',
+        action: expect.stringContaining(`advance the opportunity to Stage ${supportedStage}`)
+      })
+    ])
   })
 
   it('builds the automatic diagnostic locally without invoking a task agent', async () => {
