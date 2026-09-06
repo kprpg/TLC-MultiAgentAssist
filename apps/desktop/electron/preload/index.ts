@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Account, AgentTaskRequest, AgentTaskResponse, AuthStatus, DesktopDataStatus, EmailComposeRequest, EmailComposeResult, ExportResponseRequest, ExportResponseResult, McemRequest, McemResponse, Opportunity } from '../../../../packages/common/index.js'
+import type { Account, AgentTaskRequest, AgentTaskResponse, AuthStatus, DesktopDataStatus, EmailComposeRequest, EmailComposeResult, ExportResponseRequest, ExportResponseResult, McemRequest, McemResponse, Milestone, Opportunity } from '../../../../packages/common/index.js'
 
 export interface TlcDesktopApi {
   exitApplication(): Promise<void>
@@ -7,6 +7,7 @@ export interface TlcDesktopApi {
   connectMcem(): Promise<AuthStatus>
   listAccounts(): Promise<Account[]>
   listOpportunities(accountId: string): Promise<Opportunity[]>
+  listMilestones(opportunityId: string): Promise<Milestone[]>
   runMcemCoach(request: McemRequest): Promise<McemResponse>
   runAgentTask(request: AgentTaskRequest): Promise<AgentTaskResponse>
   openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
@@ -20,6 +21,7 @@ const api: TlcDesktopApi = {
   connectMcem: () => ipcRenderer.invoke('tlc:connect-mcem'),
   listAccounts: () => ipcRenderer.invoke('tlc:list-accounts'),
   listOpportunities: (accountId) => ipcRenderer.invoke('tlc:list-opportunities', accountId),
+  listMilestones: (opportunityId) => ipcRenderer.invoke('tlc:list-milestones', opportunityId),
   runMcemCoach: (request) => ipcRenderer.invoke('tlc:run-mcem-coach', request),
   runAgentTask: (request) => ipcRenderer.invoke('tlc:run-agent-task', request),
   openEmailCompose: (request) => ipcRenderer.invoke('tlc:open-email-compose', request),

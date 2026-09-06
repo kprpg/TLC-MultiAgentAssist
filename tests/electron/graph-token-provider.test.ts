@@ -16,7 +16,8 @@ describe('InteractiveGraphTokenProvider', () => {
 
     await expect(provider.connect()).resolves.toMatchObject({
       state: 'ready',
-      displayName: 'signed-in-user@microsoft.com'
+      displayName: 'signed-in-user@microsoft.com',
+      userEmail: 'signed-in-user@microsoft.com'
     })
     expect(credential.authenticate).toHaveBeenCalledWith('https://graph.microsoft.com/Sites.Read.All')
     expect(credential.getToken).toHaveBeenCalledWith('https://graph.microsoft.com/Sites.Read.All')

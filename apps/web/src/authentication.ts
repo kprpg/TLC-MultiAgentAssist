@@ -19,10 +19,8 @@ export function createAzureCliAuthentication(options: AzureCliAuthenticationOpti
         const accessToken = await credential.getToken(scope)
         if (!accessToken) throw new Error('Azure CLI did not return an MSX access token.')
 
-        return {
-            accessToken: accessToken.token,
-            clientPrincipal: readMicrosoftCorpId(accessToken.token, expectedUserDomain)
-        }
+        const userEmail = readMicrosoftCorpId(accessToken.token, expectedUserDomain)
+        return { accessToken: accessToken.token, clientPrincipal: userEmail, userEmail }
     }
 }
 

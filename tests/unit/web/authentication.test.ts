@@ -10,7 +10,8 @@ describe('local web authentication', () => {
 
         await expect(createAzureCliAuthentication({ credential })()).resolves.toEqual({
             accessToken: token,
-            clientPrincipal: 'signed-in-user@microsoft.com'
+            clientPrincipal: 'signed-in-user@microsoft.com',
+            userEmail: 'signed-in-user@microsoft.com'
         })
         expect(credential.getToken).toHaveBeenCalledWith('https://microsoftsales.crm.dynamics.com/.default')
     })

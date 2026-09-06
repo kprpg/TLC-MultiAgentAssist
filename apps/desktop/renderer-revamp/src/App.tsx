@@ -26,8 +26,8 @@ import {
   Sparkle20Regular,
   Warning20Filled
 } from '@fluentui/react-icons'
-import type { Account, AgentCapability, AgentTaskResponse, McemResponse, Opportunity } from '../../../../packages/common/index.js'
-import { contractVersion } from '../../../../packages/common/index.js'
+import type { Account, AgentCapability, AgentTaskResponse, McemResponse, Milestone, Opportunity } from '../../../../packages/common/index.js'
+import { addMsxOpportunityLink, contractVersion } from '../../../../packages/common/index.js'
 import { createDataClient, stageOwner, type RevampDataClient } from './data-client.js'
 import { suggestedPrompts } from './prompt-catalog.js'
 
@@ -76,6 +76,7 @@ function BladeHeader({ title, subtitle, collapsed, refreshing, onRefresh, onTogg
 function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
+  const [milestones, setMilestones] = useState<Milestone[]>([])
   const [account, setAccount] = useState<Account | null>(null)
   const [opportunity, setOpportunity] = useState<Opportunity | null>(null)
   const [result, setResult] = useState<McemResponse | null>(null)
@@ -128,6 +129,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setError('')
     setAccount(nextAccount)
     setOpportunity(null)
+    setMilestones([])
     setResult(null)
     setAgentResult(null)
     setLoading(true)
@@ -149,6 +151,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       setOpportunities(searchOpportunities.filter((item) => item.accountId === nextAccount.id))
     }
     setOpportunity(nextOpportunity)
+    setMilestones([])
     setResult(null)
     setAgentResult(null)
     setActionsOpen(true)
@@ -156,7 +159,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setLoading(true)
     setMobileBlade('milestones')
     try {
-      setResult(await client.runMcemCoach(nextAccount.id, nextOpportunity.id))
+      const [nextResult, nextMilestones] = await Promise.all([
+        client.runMcemCoach(nextAccount.id, nextOpportunity.id),
+        client.listMilestones(nextOpportunity.id)
+      ])
+      setResult(nextResult)
+      setMilestones(nextMilestones)
     } catch (cause) {
       handleError(cause)
     } finally {
@@ -194,9 +202,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     }
   }
 
-  function openEmailDialog() {
+  async function openEmailDialog() {
     if (!agentResult) return
     const label = capabilities.find((item) => item.id === agentResult.capability)?.label ?? 'Agent response'
+    setEmailRecipients(await client.getCurrentUserEmail().catch(() => undefined) ?? '')
     setEmailSubject(`${label}: ${opportunity?.name ?? 'Agent response'}`)
     setShareStatus('ready')
     setShareMessage('')
@@ -204,16 +213,22 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   }
 
   async function openEmailCompose() {
-    if (!agentResult) return
+    if (!agentResult || !opportunity) return
     const recipients = emailRecipients.split(/[;,]/).map((recipient) => recipient.trim()).filter(Boolean)
     const label = capabilities.find((item) => item.id === agentResult.capability)?.label ?? 'Agent response'
     setShareStatus('running')
     setShareMessage('')
     try {
-      await client.openEmailCompose({ contractVersion, recipients, subject: emailSubject, responseTitle: label, responseMarkdown: agentResult.content })
+      await client.openEmailCompose({
+        contractVersion,
+        recipients,
+        subject: emailSubject,
+        responseTitle: label,
+        responseMarkdown: addMsxOpportunityLink(agentResult.content, opportunity.id)
+      })
       setEmailDialogOpen(false)
       setShareStatus('success')
-      setShareMessage('Email message opened for review.')
+      setShareMessage(client.mode === 'desktop' ? 'Email message opened for review.' : 'Rich email draft downloaded for review.')
     } catch (cause) {
       setShareStatus('error')
       setShareMessage(cause instanceof Error ? cause.message : 'The email message could not be opened.')
@@ -277,7 +292,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setError('')
     setLoading(true)
     try {
-      setResult(await client.runMcemCoach(account.id, opportunity.id))
+      const [nextResult, nextMilestones] = await Promise.all([
+        client.runMcemCoach(account.id, opportunity.id),
+        client.listMilestones(opportunity.id)
+      ])
+      setResult(nextResult)
+      setMilestones(nextMilestones)
       if (centerTab === 'guidance' && taskPrompt.trim().length >= 3) {
         setAgentResult(await client.runAgentTask(capability, account.id, opportunity.id, taskPrompt.trim()))
       }
@@ -292,6 +312,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setAccount(null)
     setOpportunities([])
     setOpportunity(null)
+    setMilestones([])
     setResult(null)
     setAgentResult(null)
     setActionsOpen(false)
@@ -300,6 +321,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
   function closeMilestones() {
     setOpportunity(null)
+    setMilestones([])
     setResult(null)
     setAgentResult(null)
     setActionsOpen(false)
@@ -419,12 +441,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         {!collapsed.has('opportunities') && <div className="blade-body opportunity-list">
           {opportunities.map((item) => <Tooltip
             key={item.id}
-            content={<div className="opportunity-tooltip-content"><b>{item.name}</b><span>Stage owner: {stageOwner(item.recordedStage)}</span><span>Recorded stage: {item.recordedStage}</span><span>Value: {formatMoney(item.value, item.currency)}</span><span>Close: {item.closeDate}</span></div>}
+            content={<div className="opportunity-tooltip-content"><b>{item.name}</b><span>Opportunity owner: {item.owner ?? 'Not assigned'}</span><span>Stage owner: {stageOwner(item.recordedStage)}</span><span>Recorded stage: {item.recordedStage}</span><span>Value: {formatMoney(item.value, item.currency)}</span><span>Close: {item.closeDate}</span></div>}
             positioning="after"
             relationship="description"
           >
             <button className={`opportunity-button ${opportunity?.id === item.id ? 'selected' : ''}`} onClick={() => void selectOpportunity(item)}>
-              <span className="opportunity-main"><strong>{item.name}</strong><small>Stage {item.recordedStage} · {formatMoney(item.value, item.currency)}</small></span>
+              <span className="opportunity-main"><strong>{item.name}</strong><small>{item.owner ?? 'Owner not assigned'} · Stage {item.recordedStage} · {formatMoney(item.value, item.currency)} · {item.closeDate}</small></span>
               <ChevronRight20Regular />
             </button>
           </Tooltip>)}
@@ -435,12 +457,15 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       {opportunity && <section className={`blade milestone-blade ${collapsed.has('milestones') ? 'collapsed' : ''} ${mobileBlade === 'milestones' ? 'mobile-active' : ''}`} aria-label="Milestones blade">
         <BladeHeader title="Milestones" subtitle={opportunity.name} collapsed={collapsed.has('milestones')} refreshing={loading} onRefresh={() => void refreshOpportunityContext()} onToggle={() => toggleBlade('milestones')} onClose={closeMilestones} />
         {!collapsed.has('milestones') && <div className="blade-body milestone-list">
-          <div className="record-note">Derived from grounded next actions</div>
-          {result?.recommendations.map((item, index) => <button key={item.id} className="milestone-item" onClick={() => setMobileBlade('center')}>
-            <span className={`milestone-status ${item.confidence}`}>{index + 1}</span>
-            <span><strong>{item.action}</strong><small>{item.ownerRole} · {item.confidence} confidence</small></span>
-          </button>)}
-          {!result && <div className="empty-state compact">Loading milestones…</div>}
+          {milestones.map((item) => <article key={item.id} className="milestone-item">
+            <span className="milestone-status" aria-hidden="true"><ClipboardTaskListLtr20Regular /></span>
+            <span>
+              <strong>{item.name}</strong>
+              <small>{[item.status, item.owner, item.commitment, item.targetDate].filter(Boolean).join(' · ')}</small>
+            </span>
+          </article>)}
+          {loading && milestones.length === 0 && <div className="empty-state compact">Loading milestones…</div>}
+          {!loading && milestones.length === 0 && <div className="empty-state compact">No active milestones found for this opportunity.</div>}
         </div>}
         {collapsed.has('milestones') && <button className="collapsed-symbol" onClick={() => toggleBlade('milestones')} aria-label="Expand Milestones"><ClipboardTaskListLtr20Regular /></button>}
       </section>}
@@ -461,7 +486,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         {opportunity && <>
           <header className="workbench-header">
             <button className="icon-button mobile-only" onClick={() => setMobileBlade('milestones')} title="Back to milestones" aria-label="Back to milestones"><ChevronLeft20Regular /></button>
-            <div><p className="eyebrow">{account?.name}</p><h1>{opportunity.name}</h1><span>Stage {opportunity.recordedStage} · {formatMoney(opportunity.value, opportunity.currency)} · closes {opportunity.closeDate}</span></div>
+            <div><p className="eyebrow">{account?.name}</p><h1>{opportunity.name}</h1><span>{opportunity.owner ?? 'Owner not assigned'} · Stage {opportunity.recordedStage} · {formatMoney(opportunity.value, opportunity.currency)} · closes {opportunity.closeDate}</span></div>
             <button className="icon-button" title="More opportunity actions" aria-label="More opportunity actions"><MoreHorizontal20Regular /></button>
           </header>
           <div className="center-tabs" role="tablist" aria-label="Opportunity view">
@@ -508,14 +533,14 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
               </div>
             </article> : !agentLoading && <div className="empty-state compact">Choose a suggested prompt or ask a different question.</div>}
             <Dialog open={emailDialogOpen} onOpenChange={(_, data) => setEmailDialogOpen(data.open)}>
-              <DialogSurface><DialogBody><DialogTitle>Open email message</DialogTitle><DialogContent className="email-draft-form">
-                <p>The prepared message opens in your default mail application for review before sending.</p>
+              <DialogSurface><DialogBody><DialogTitle>{client.mode === 'desktop' ? 'Open email message' : 'Download email draft'}</DialogTitle><DialogContent className="email-draft-form">
+                <p>{client.mode === 'desktop' ? 'The prepared message opens in your default mail application for review before sending.' : 'A rich Outlook email draft downloads for review before sending.'}</p>
                 <Field label="Recipients" hint="Separate addresses with commas or semicolons."><Input type="email" aria-label="Email recipients" value={emailRecipients} onChange={(_, data) => setEmailRecipients(data.value)} /></Field>
                 <Field label="Subject"><Input aria-label="Email subject" value={emailSubject} onChange={(_, data) => setEmailSubject(data.value)} /></Field>
                 {shareStatus === 'error' && shareMessage && <MessageBar intent="error">{shareMessage}</MessageBar>}
               </DialogContent><DialogActions>
                 <Button onClick={() => setEmailDialogOpen(false)}>Cancel</Button>
-                <Button appearance="primary" icon={<Mail20Regular />} disabled={shareStatus === 'running' || !emailRecipients.trim() || !emailSubject.trim()} onClick={() => void openEmailCompose()}>{shareStatus === 'running' ? 'Opening...' : 'Open Email'}</Button>
+                <Button appearance="primary" icon={<Mail20Regular />} disabled={shareStatus === 'running' || !emailRecipients.trim() || !emailSubject.trim()} onClick={() => void openEmailCompose()}>{shareStatus === 'running' ? (client.mode === 'desktop' ? 'Opening...' : 'Preparing...') : (client.mode === 'desktop' ? 'Open Email' : 'Download Draft')}</Button>
               </DialogActions></DialogBody></DialogSurface>
             </Dialog>
           </div>}

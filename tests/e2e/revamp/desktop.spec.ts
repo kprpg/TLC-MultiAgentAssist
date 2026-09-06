@@ -15,6 +15,18 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
         const window = await app.firstWindow()
         const pageErrors: Error[] = []
         window.on('pageerror', (error) => pageErrors.push(error))
+        await app.evaluate(({ ipcMain }) => {
+            ipcMain.removeHandler('tlc:get-data-status')
+            ipcMain.handle('tlc:get-data-status', () => ({
+                mode: 'live',
+                auth: {
+                    state: 'ready',
+                    displayName: 'signed-in-user@microsoft.com',
+                    userEmail: 'signed-in-user@microsoft.com',
+                    detail: 'Authenticated test identity.'
+                }
+            }))
+        })
 
         await expect(window).toHaveTitle('TLC Account Team Intelligence | Desktop')
         await expect(window.getByText('DESKTOP · CONNECTED DATA')).toBeVisible()
@@ -25,26 +37,36 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
         await expect(window.getByRole('region', { name: 'Opportunities blade' })).toBeVisible()
         await expect(window.getByRole('region', { name: 'Opportunity workbench' }).getByRole('heading', { name: 'Contoso Energy' })).toBeVisible()
         const opportunity = window.getByRole('region', { name: 'Opportunities blade' }).getByRole('button', { name: /Grid operations modernization/ })
+        await expect(opportunity).toContainText('Avery Johnson · Stage 3 · $4.2M · 2026-10-30')
         await opportunity.hover()
+        await expect(window.getByRole('tooltip')).toContainText('Opportunity owner: Avery Johnson')
         await expect(window.getByRole('tooltip')).toContainText('Stage owner: Solution Engineer')
         await expect(window.getByRole('tooltip')).toContainText('Value: $4.2M')
 
         await opportunity.click()
         await expect(window.getByRole('region', { name: 'Milestones blade' })).toBeVisible()
-        await expect(window.getByRole('region', { name: 'Opportunity workbench' })).toContainText('Evidence supports')
+        const workbench = window.getByRole('region', { name: 'Opportunity workbench' })
+        await expect(workbench).toContainText('Avery Johnson · Stage 3 · $4.2M · closes 2026-10-30')
+        await expect(workbench).toContainText('Evidence supports')
         await expect(window.getByRole('complementary', { name: 'Next best actions blade' })).toBeVisible()
         await expect(window.getByRole('tab', { name: 'MSX' })).toHaveAttribute('aria-selected', 'true')
 
         await window.getByRole('button', { name: 'Collapse Accounts blade header' }).click()
         await expect(window.getByRole('button', { name: 'Expand Accounts', exact: true })).toBeVisible()
         await window.getByRole('button', { name: 'Refresh Milestones' }).click()
-        await expect(window.getByRole('region', { name: 'Milestones blade' })).toContainText('Agree the planned outcome')
+        await expect(window.getByRole('region', { name: 'Milestones blade' })).toContainText('Customer outcome validation')
         await window.getByRole('tab', { name: 'Multi-Agent Guidance' }).click()
         await expect(window.getByRole('tab', { name: 'Account Pulse' })).toHaveAttribute('aria-selected', 'true')
         await expect(window.locator('.agent-response')).toHaveCount(0)
         await window.getByRole('button', { name: 'What should the account team focus on this week?' }).click()
         await expect(window.locator('.agent-response')).toContainText('Grid operations modernization')
         await expect(window.getByRole('button', { name: 'Send Email' })).toBeVisible()
+        await window.getByRole('button', { name: 'Send Email' }).click()
+        const recipients = window.getByRole('textbox', { name: 'Email recipients' })
+        await expect(recipients).toHaveValue('signed-in-user@microsoft.com')
+        await recipients.fill('reviewer@example.com')
+        await expect(recipients).toHaveValue('reviewer@example.com')
+        await window.getByRole('button', { name: 'Cancel' }).click()
         await expect(window.getByRole('button', { name: 'Export' })).toBeVisible()
         await window.getByRole('button', { name: 'Close Next best actions' }).click()
         await expect(window.getByRole('complementary', { name: 'Next best actions blade' })).toHaveCount(0)

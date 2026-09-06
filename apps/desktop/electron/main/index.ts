@@ -184,6 +184,10 @@ function registerReadOnlyIpc(): void {
     assertTrustedSender(event)
     return orchestrator.listOpportunities(z.string().min(1).parse(accountId))
   })
+  ipcMain.handle('tlc:list-milestones', (event, opportunityId: unknown) => {
+    assertTrustedSender(event)
+    return orchestrator.listMilestones(z.string().min(1).parse(opportunityId))
+  })
   ipcMain.handle('tlc:run-mcem-coach', (event, request: unknown) => {
     assertTrustedSender(event)
     return orchestrator.runMcemCoach(mcemRequestSchema.parse(request))

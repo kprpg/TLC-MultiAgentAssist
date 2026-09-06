@@ -5,6 +5,7 @@ import { contractVersion } from '../../../packages/common/index.js'
 
 const authenticationHeaders = {
     'x-ms-client-principal': 'encoded-principal',
+    'x-ms-client-principal-name': 'signed-in-user@microsoft.com',
     'x-ms-token-aad-access-token': 'delegated-msx-token'
 }
 
@@ -42,14 +43,27 @@ describe('hosted web API', () => {
         expect(createRuntime).toHaveBeenCalledTimes(2)
         expect(createRuntime).toHaveBeenNthCalledWith(1, {
             accessToken: 'delegated-msx-token',
-            clientPrincipal: 'encoded-principal'
+            clientPrincipal: 'encoded-principal',
+            userEmail: 'signed-in-user@microsoft.com'
         })
+    })
+
+    it('returns the authenticated user email without creating a data runtime', async () => {
+        const createRuntime = vi.fn(() => runtime())
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime }))
+
+        const response = await fetch(`${baseUrl}/api/me`, { headers: authenticationHeaders })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ email: 'signed-in-user@microsoft.com' })
+        expect(createRuntime).not.toHaveBeenCalled()
     })
 
     it('uses host-provided local authentication without trusting request headers', async () => {
         const authenticate = vi.fn(async () => ({
             accessToken: 'local-azure-cli-token',
-            clientPrincipal: 'signed-in-user@microsoft.com'
+            clientPrincipal: 'signed-in-user@microsoft.com',
+            userEmail: 'signed-in-user@microsoft.com'
         }))
         const createRuntime = vi.fn(() => runtime())
         const baseUrl = await listen(buildWebApiHandler({ authenticate, createRuntime }))
@@ -65,7 +79,8 @@ describe('hosted web API', () => {
         expect(authenticate).toHaveBeenCalledTimes(1)
         expect(createRuntime).toHaveBeenCalledWith({
             accessToken: 'local-azure-cli-token',
-            clientPrincipal: 'signed-in-user@microsoft.com'
+            clientPrincipal: 'signed-in-user@microsoft.com',
+            userEmail: 'signed-in-user@microsoft.com'
         })
     })
 
@@ -107,6 +122,22 @@ describe('hosted web API', () => {
         expect(response.status).toBe(404)
     })
 
+    it('returns validated milestones for an authenticated web opportunity', async () => {
+        const webRuntime = runtime()
+        vi.mocked(webRuntime.listMilestones).mockResolvedValue([{
+            id: 'milestone-1', opportunityId: 'opportunity-1', name: 'Customer pilot', status: 'On track'
+        }])
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => webRuntime }))
+
+        const response = await fetch(`${baseUrl}/api/opportunities/opportunity-1/milestones`, { headers: authenticationHeaders })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual([{
+            id: 'milestone-1', opportunityId: 'opportunity-1', name: 'Customer pilot', status: 'On track'
+        }])
+        expect(webRuntime.listMilestones).toHaveBeenCalledWith('opportunity-1')
+    })
+
     it('rejects malformed contract requests without invoking the orchestrator', async () => {
         const webRuntime = runtime()
         const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => webRuntime }))
@@ -135,7 +166,7 @@ describe('hosted web API', () => {
         expect(body).not.toContain('secret downstream detail')
     })
 
-    it('prepares a same-origin email compose URI without sending the response', async () => {
+    it('downloads a rich unsent email draft without sending the response', async () => {
         const createRuntime = vi.fn(() => runtime())
         const baseUrl = await listen(buildWebApiHandler({ createRuntime }))
 
@@ -147,15 +178,20 @@ describe('hosted web API', () => {
                 recipients: ['seller@example.com'],
                 subject: 'Account guidance',
                 responseTitle: 'Account Pulse',
-                responseMarkdown: '## Next step\n\n- Confirm owner'
+                responseMarkdown: '## Next step\n\n**Owner:** Confirm owner\n\n[Open opportunity](https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=opportunity&id=opp-1)'
             })
         })
 
         expect(response.status).toBe(200)
-        expect(await response.json()).toEqual(expect.objectContaining({
-            state: 'opened',
-            composeUri: expect.stringMatching(/^mailto:seller%40example\.com\?subject=Account%20guidance/)
-        }))
+        expect(response.headers.get('content-type')).toBe('message/rfc822; charset=utf-8')
+        expect(response.headers.get('x-tlc-file-name')).toBe('Account guidance.eml')
+        const draft = await response.text()
+        expect(draft).toContain('X-Unsent: 1')
+        expect(draft).toContain('Content-Type: text/html; charset="UTF-8"')
+        const encodedHtml = Buffer.from(draft.split('Content-Type: text/html; charset="UTF-8"')[1]!.split('\r\n\r\n')[1]!.split('\r\n------tlc-agent-response-boundary--')[0]!.replaceAll('\r\n', ''), 'base64').toString('utf8')
+        expect(encodedHtml).toContain('<h2>Next step</h2>')
+        expect(encodedHtml).toContain('<strong>Owner:</strong>')
+        expect(encodedHtml).toContain('<a href="https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=opportunity&amp;id=opp-1">Open opportunity</a>')
         expect(createRuntime).not.toHaveBeenCalled()
     })
 
@@ -197,6 +233,7 @@ function runtime(): WebRuntime {
     return {
         listAccounts: vi.fn(async () => [{ id: 'account-1', name: 'Contoso', segment: 'Live MSX' }]),
         listOpportunities: vi.fn(async () => []),
+        listMilestones: vi.fn(async () => []),
         runMcemCoach: vi.fn(),
         runAgentTask: vi.fn()
     }

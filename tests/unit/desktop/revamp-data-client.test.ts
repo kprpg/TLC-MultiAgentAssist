@@ -3,6 +3,43 @@ import { createWebApiClient } from '../../../apps/desktop/renderer-revamp/src/da
 import { contractVersion } from '../../../packages/common/index.js'
 
 describe('revamp live web data client', () => {
+    it('downloads the rich email draft returned by the web host', async () => {
+        const click = vi.fn()
+        const anchor = { href: '', download: '', click }
+        const createObjectURL = vi.fn(() => 'blob:email-draft')
+        const revokeObjectURL = vi.fn()
+        vi.stubGlobal('document', { createElement: vi.fn(() => anchor) })
+        vi.stubGlobal('URL', { createObjectURL, revokeObjectURL })
+        const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('MIME-Version: 1.0', {
+            status: 200,
+            headers: { 'content-type': 'message/rfc822', 'x-tlc-file-name': 'Account guidance.eml' }
+        }))
+
+        await expect(createWebApiClient(fetcher).openEmailCompose({
+            contractVersion,
+            recipients: ['seller@example.com'],
+            subject: 'Account guidance',
+            responseTitle: 'Account Pulse',
+            responseMarkdown: '## Guidance'
+        })).resolves.toEqual({ state: 'opened' })
+
+        expect(anchor.download).toBe('Account guidance.eml')
+        expect(click).toHaveBeenCalledOnce()
+        expect(createObjectURL).toHaveBeenCalledOnce()
+        expect(revokeObjectURL).toHaveBeenCalledWith('blob:email-draft')
+        vi.unstubAllGlobals()
+    })
+
+    it('retrieves the authenticated email used to pre-populate email recipients', async () => {
+        const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(
+            JSON.stringify({ email: 'signed-in-user@microsoft.com' }),
+            { status: 200, headers: { 'content-type': 'application/json' } }
+        ))
+
+        await expect(createWebApiClient(fetcher).getCurrentUserEmail()).resolves.toBe('signed-in-user@microsoft.com')
+        expect(fetcher).toHaveBeenCalledWith('/api/me', expect.objectContaining({ credentials: 'same-origin' }))
+    })
+
     it('uses the same-origin account API and validates its response', async () => {
         const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify([
             { id: 'account-1', name: 'Account One', segment: 'Enterprise' }
@@ -23,6 +60,17 @@ describe('revamp live web data client', () => {
         await expect(createWebApiClient(fetcher).listOpportunities('account/one'))
             .rejects.toThrow('MSX access is not authorized.')
         expect(fetcher).toHaveBeenCalledWith('/api/accounts/account%2Fone/opportunities', expect.any(Object))
+    })
+
+    it('retrieves and validates milestones from the authenticated web API', async () => {
+        const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify([{
+            id: 'milestone-1', opportunityId: 'opportunity-1', name: 'Customer pilot', status: 'On track'
+        }]), { status: 200, headers: { 'content-type': 'application/json' } }))
+
+        await expect(createWebApiClient(fetcher).listMilestones('opportunity/one')).resolves.toEqual([
+            { id: 'milestone-1', opportunityId: 'opportunity-1', name: 'Customer pilot', status: 'On track' }
+        ])
+        expect(fetcher).toHaveBeenCalledWith('/api/opportunities/opportunity%2Fone/milestones', expect.any(Object))
     })
 
     it('requests a same-origin application exit from the web host', async () => {

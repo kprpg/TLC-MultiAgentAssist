@@ -3,23 +3,28 @@ import {
     agentTaskResponseSchema,
     contractVersion,
     mcemResponseSchema,
+    milestoneSchema,
     opportunitySchema,
     type Account,
     type AgentCapability,
     type AgentTaskResponse,
+    type DesktopDataStatus,
     type EmailComposeRequest,
     type EmailComposeResult,
     type ExportResponseRequest,
     type ExportResponseResult,
     type McemResponse,
+    type Milestone,
     type Opportunity
 } from '../../../../packages/common/index.js'
 
 export interface RevampDataClient {
     readonly mode: 'desktop' | 'web-live' | 'web-sample'
     exitApplication(): Promise<void>
+    getCurrentUserEmail(): Promise<string | undefined>
     listAccounts(): Promise<Account[]>
     listOpportunities(accountId: string): Promise<Opportunity[]>
+    listMilestones(opportunityId: string): Promise<Milestone[]>
     runMcemCoach(accountId: string, opportunityId: string): Promise<McemResponse>
     runAgentTask(capability: AgentCapability, accountId: string, opportunityId: string, prompt: string): Promise<AgentTaskResponse>
     openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
@@ -48,8 +53,13 @@ export function createWebApiClient(fetcher: Fetcher = fetch): RevampDataClient {
     return {
         mode: 'web-live',
         exitApplication: async () => { await apiRequest(fetcher, '/api/exit', { method: 'POST' }) },
+        getCurrentUserEmail: async () => {
+            const result = await apiRequest(fetcher, '/api/me') as { email?: unknown }
+            return typeof result.email === 'string' ? result.email : undefined
+        },
         listAccounts: async () => accountSchema.array().parse(await apiRequest(fetcher, '/api/accounts')),
         listOpportunities: async (accountId) => opportunitySchema.array().parse(await apiRequest(fetcher, `/api/accounts/${encodeURIComponent(accountId)}/opportunities`)),
+        listMilestones: async (opportunityId) => milestoneSchema.array().parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/milestones`)),
         runMcemCoach: async (accountId, opportunityId) => mcemResponseSchema.parse(await apiRequest(fetcher, '/api/mcem-coach', {
             method: 'POST',
             body: JSON.stringify({ contractVersion, accountId, opportunityId, prompt: 'How do we move this opportunity to the next MCEM stage?' })
@@ -59,9 +69,23 @@ export function createWebApiClient(fetcher: Fetcher = fetch): RevampDataClient {
             body: JSON.stringify({ contractVersion, capability, accountId, opportunityId, prompt })
         })),
         openEmailCompose: async (request) => {
-            const result = await apiRequest(fetcher, '/api/open-email-compose', { method: 'POST', body: JSON.stringify(request) }) as { state?: unknown; composeUri?: unknown }
-            if (result.state !== 'opened' || typeof result.composeUri !== 'string') throw new Error('The web host returned an invalid email compose response.')
-            window.location.assign(result.composeUri)
+            const response = await fetcher('/api/open-email-compose', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { accept: 'message/rfc822', 'content-type': 'application/json' },
+                body: JSON.stringify(request)
+            })
+            if (!response.ok) {
+                const payload = await response.json().catch(() => null) as { error?: string } | null
+                throw new Error(payload?.error ?? `The server request failed (${response.status}).`)
+            }
+            const blob = await response.blob()
+            const downloadUrl = URL.createObjectURL(blob)
+            const anchor = document.createElement('a')
+            anchor.href = downloadUrl
+            anchor.download = response.headers.get('x-tlc-file-name') || 'TLC-agent-response.eml'
+            anchor.click()
+            URL.revokeObjectURL(downloadUrl)
             return { state: 'opened' }
         },
         exportAgentResponse: async (request) => {
@@ -90,8 +114,10 @@ export function createWebApiClient(fetcher: Fetcher = fetch): RevampDataClient {
 
 interface DesktopBridge {
     exitApplication(): Promise<void>
+    getDataStatus(): Promise<DesktopDataStatus>
     listAccounts(): Promise<Account[]>
     listOpportunities(accountId: string): Promise<Opportunity[]>
+    listMilestones(opportunityId: string): Promise<Milestone[]>
     runMcemCoach(request: { contractVersion: typeof contractVersion; accountId: string; opportunityId: string; prompt: string }): Promise<McemResponse>
     runAgentTask(request: { contractVersion: typeof contractVersion; capability: AgentCapability; accountId: string; opportunityId: string; prompt: string }): Promise<AgentTaskResponse>
     openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
@@ -111,15 +137,25 @@ const accounts: Account[] = [
 ]
 
 const opportunities: Opportunity[] = [
-    { id: 'opp-grid-modernization', accountId: 'account-contoso', name: 'Grid operations modernization', recordedStage: 3, value: 4200000, currency: 'USD', closeDate: '2026-10-30' },
-    { id: 'opp-cloud-security-readiness', accountId: 'account-contoso', name: 'Cloud security readiness', recordedStage: 1, value: 900000, currency: 'USD', closeDate: '2027-02-26' },
+    { id: 'opp-grid-modernization', accountId: 'account-contoso', name: 'Grid operations modernization', owner: 'Avery Johnson', recordedStage: 3, value: 4200000, currency: 'USD', closeDate: '2026-10-30' },
+    { id: 'opp-cloud-security-readiness', accountId: 'account-contoso', name: 'Cloud security readiness', owner: 'Jordan Lee', recordedStage: 1, value: 900000, currency: 'USD', closeDate: '2027-02-26' },
     { id: 'opp-data-estate-consolidation', accountId: 'account-contoso', name: 'Data estate consolidation', recordedStage: 2, value: 2650000, currency: 'USD', closeDate: '2027-01-29' },
     { id: 'opp-resilient-cloud-foundation', accountId: 'account-contoso', name: 'Resilient cloud foundation - ready to advance', recordedStage: 1, value: 1450000, currency: 'USD', closeDate: '2027-03-12' },
     { id: 'opp-ai-service', accountId: 'account-fabrikam', name: 'AI-assisted customer service', recordedStage: 2, value: 1750000, currency: 'USD', closeDate: '2026-12-18' },
     { id: 'opp-store-modernization', accountId: 'account-fabrikam', name: 'Connected store modernization', recordedStage: 1, value: 1200000, currency: 'USD', closeDate: '2027-03-19' },
     { id: 'opp-unified-commerce', accountId: 'account-fabrikam', name: 'Unified commerce platform', recordedStage: 3, value: 3800000, currency: 'USD', closeDate: '2026-12-11' },
-    { id: 'opp-customer-data-platform', accountId: 'account-fabrikam', name: 'Customer data platform - ready to advance', recordedStage: 2, value: 3200000, currency: 'USD', closeDate: '2027-01-15' }
+    { id: 'opp-customer-data-platform', accountId: 'account-fabrikam', name: 'Customer data platform - ready to advance', owner: 'Morgan Lee', recordedStage: 2, value: 3200000, currency: 'USD', closeDate: '2027-01-15' }
 ]
+
+const milestones: Milestone[] = opportunities.flatMap((opportunity, index) => [{
+    id: `${opportunity.id}-milestone`,
+    opportunityId: opportunity.id,
+    name: index % 2 === 0 ? 'Customer outcome validation' : 'Technical validation workshop',
+    status: index % 3 === 0 ? 'On track' : 'In progress',
+    targetDate: opportunity.closeDate,
+    owner: opportunity.owner ?? 'Account team',
+    commitment: index % 2 === 0 ? 'Committed' : 'Best case'
+}])
 
 const criteriaLabels = ['Customer outcome', 'Decision team', 'Technical validation', 'Business case', 'Next committed step']
 const roleByStage = ['Account Executive', 'Specialist / SSP', 'Solution Engineer', 'Cloud Solution Architect', 'CSAM']
@@ -179,8 +215,10 @@ function webClient(): RevampDataClient {
     return {
         mode: 'web-sample',
         exitApplication: async () => { await apiRequest(fetch, '/api/exit', { method: 'POST' }) },
+        getCurrentUserEmail: async () => undefined,
         listAccounts: async () => structuredClone(accounts),
         listOpportunities: async (accountId) => structuredClone(opportunities.filter((item) => item.accountId === accountId)),
+        listMilestones: async (opportunityId) => structuredClone(milestones.filter((item) => item.opportunityId === opportunityId)),
         runMcemCoach: async (_accountId, opportunityId) => {
             const opportunity = opportunities.find((item) => item.id === opportunityId)
             if (!opportunity) throw new Error('Unknown sample opportunity.')
@@ -212,8 +250,10 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
     return {
         mode: 'desktop',
         exitApplication: () => bridge.exitApplication(),
+        getCurrentUserEmail: async () => (await bridge.getDataStatus()).auth.userEmail,
         listAccounts: () => bridge.listAccounts(),
         listOpportunities: (accountId) => bridge.listOpportunities(accountId),
+        listMilestones: (opportunityId) => bridge.listMilestones(opportunityId),
         runMcemCoach: (accountId, opportunityId) => bridge.runMcemCoach({ contractVersion, accountId, opportunityId, prompt: 'How do we move this opportunity to the next MCEM stage?' }),
         runAgentTask: (capability, accountId, opportunityId, prompt) => bridge.runAgentTask({ contractVersion, capability, accountId, opportunityId, prompt }),
         openEmailCompose: (request) => bridge.openEmailCompose(request),

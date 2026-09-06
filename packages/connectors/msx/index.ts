@@ -1,4 +1,4 @@
-import type { Account, Opportunity } from '../../common/index.js'
+import type { Account, Milestone, Opportunity } from '../../common/index.js'
 import type { MsxConnector, OpportunityContext } from '../common/index.js'
 
 export { LiveMsxConnector, MsxRequestError, type MsxAccessTokenProvider } from './live.js'
@@ -13,6 +13,7 @@ const opportunities: Opportunity[] = [
     id: 'opp-grid-modernization',
     accountId: 'account-contoso',
     name: 'Grid operations modernization',
+    owner: 'Avery Johnson',
     recordedStage: 3,
     value: 4200000,
     currency: 'USD',
@@ -119,6 +120,19 @@ const opportunities: Opportunity[] = [
   }
 ]
 
+const milestonesByOpportunity: Record<string, Milestone[]> = Object.fromEntries(opportunities.map((opportunity) => [
+  opportunity.id,
+  [{
+    id: `${opportunity.id}-milestone`,
+    opportunityId: opportunity.id,
+    name: 'Customer outcome validation',
+    status: 'In progress',
+    targetDate: opportunity.closeDate,
+    owner: 'Account team',
+    commitment: 'Best case'
+  }]
+]))
+
 const observationsByOpportunity: Record<string, OpportunityContext['observations']> = {
   'opp-grid-modernization': [
     { criterionId: 'customer-outcome', status: 'partial', detail: 'Reliability improvement is named but has no baseline or target.' },
@@ -210,6 +224,10 @@ export class FixtureMsxConnector implements MsxConnector {
 
   async listOpportunities(accountId: string): Promise<Opportunity[]> {
     return structuredClone(opportunities.filter((opportunity) => opportunity.accountId === accountId))
+  }
+
+  async listMilestones(opportunityId: string): Promise<Milestone[]> {
+    return structuredClone(milestonesByOpportunity[opportunityId] ?? [])
   }
 
   async getOpportunityContext(opportunityId: string): Promise<OpportunityContext> {

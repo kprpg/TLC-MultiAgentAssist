@@ -9,15 +9,17 @@ import {
     exportResponseRequestSchema,
     mcemRequestSchema,
     mcemResponseSchema,
+    milestoneSchema,
     opportunitySchema,
     type Account,
     type AgentTaskRequest,
     type AgentTaskResponse,
     type McemRequest,
     type McemResponse,
+    type Milestone,
     type Opportunity
 } from '../../../packages/common/index.js'
-import { createOutlookComposeUri } from '../../desktop/electron/main/outlook-compose.js'
+import { createOutlookDraftMessage } from '../../desktop/electron/main/outlook-compose.js'
 import { createResponseDocumentBuffer } from '../../desktop/electron/main/response-document.js'
 
 const accountIdSchema = z.string().min(1).max(200)
@@ -26,6 +28,7 @@ const maximumBodyBytes = 1_048_576
 export interface WebRuntime {
     listAccounts(): Promise<Account[]>
     listOpportunities(accountId: string): Promise<Opportunity[]>
+    listMilestones(opportunityId: string): Promise<Milestone[]>
     runMcemCoach(request: McemRequest): Promise<McemResponse>
     runAgentTask(request: AgentTaskRequest): Promise<AgentTaskResponse>
 }
@@ -33,6 +36,7 @@ export interface WebRuntime {
 export interface AuthenticatedRequest {
     accessToken: string
     clientPrincipal: string
+    userEmail: string
 }
 
 export interface WebApiOptions {
@@ -69,9 +73,19 @@ export function buildWebApiHandler(options: WebApiOptions) {
             const authentication = await (options.authenticate ?? readEasyAuthAuthentication)(request)
             assertSameOriginMutation(request)
 
+            if (request.method === 'GET' && url.pathname === '/api/me') {
+                sendJson(response, 200, { email: authentication.userEmail })
+                return true
+            }
+
             if (request.method === 'POST' && url.pathname === '/api/open-email-compose') {
                 const input = emailComposeRequestSchema.parse(await readJsonBody(request))
-                sendJson(response, 200, { state: 'opened', composeUri: createOutlookComposeUri(input) })
+                const fileName = safeEmailFileName(input.subject)
+                response.statusCode = 200
+                response.setHeader('content-type', 'message/rfc822; charset=utf-8')
+                response.setHeader('content-disposition', `attachment; filename="${fileName}"`)
+                response.setHeader('x-tlc-file-name', fileName)
+                response.end(createOutlookDraftMessage(input), 'utf8')
                 return true
             }
 
@@ -98,6 +112,13 @@ export function buildWebApiHandler(options: WebApiOptions) {
             if (request.method === 'GET' && opportunitiesMatch) {
                 const accountId = accountIdSchema.parse(decodeURIComponent(opportunitiesMatch[1]!))
                 sendJson(response, 200, opportunitySchema.array().parse(await runtime.listOpportunities(accountId)))
+                return true
+            }
+
+            const milestonesMatch = /^\/api\/opportunities\/([^/]+)\/milestones$/.exec(url.pathname)
+            if (request.method === 'GET' && milestonesMatch) {
+                const opportunityId = accountIdSchema.parse(decodeURIComponent(milestonesMatch[1]!))
+                sendJson(response, 200, milestoneSchema.array().parse(await runtime.listMilestones(opportunityId)))
                 return true
             }
 
@@ -136,10 +157,11 @@ function safeDocumentFileName(title: string): string {
 export function readEasyAuthAuthentication(request: IncomingMessage): AuthenticatedRequest {
     const accessToken = singleHeader(request, 'x-ms-token-aad-access-token')
     const clientPrincipal = singleHeader(request, 'x-ms-client-principal')
-    if (!accessToken || !clientPrincipal) {
+    const userEmail = singleHeader(request, 'x-ms-client-principal-name')
+    if (!accessToken || !clientPrincipal || !userEmail) {
         throw new HttpError(401, 'Sign in with Microsoft Entra ID to access live data.')
     }
-    return { accessToken, clientPrincipal }
+    return { accessToken, clientPrincipal, userEmail }
 }
 
 function assertSameOriginMutation(request: IncomingMessage): void {
@@ -186,4 +208,10 @@ class HttpError extends Error {
     constructor(readonly statusCode: number, message: string) {
         super(message)
     }
+}
+
+function safeEmailFileName(subject: string): string {
+    const safeSubject = Array.from(subject, (character) => character.charCodeAt(0) < 32 || '<>:"/\\|?*'.includes(character) ? '-' : character)
+        .join('').replace(/[. ]+$/g, '').slice(0, 120).trim()
+    return `${safeSubject || 'TLC-agent-response'}.eml`
 }

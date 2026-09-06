@@ -22,6 +22,7 @@ export const sourceHealthSchema = z.object({
 export const authStatusSchema = z.object({
   state: z.enum(['ready', 'cli-missing', 'login-required', 'tenant-mismatch', 'consent-required', 'permission-missing']),
   displayName: z.string().min(1).optional(),
+  userEmail: z.string().email().optional(),
   tenantName: z.string().min(1).optional(),
   detail: z.string().min(1)
 })
@@ -41,10 +42,21 @@ export const opportunitySchema = z.object({
   id: z.string().min(1),
   accountId: z.string().min(1),
   name: z.string().min(1),
+  owner: z.string().min(1).optional(),
   recordedStage: z.number().int().min(1).max(5),
   value: z.number().nonnegative(),
   currency: z.string().length(3),
   closeDate: z.string().date()
+})
+
+export const milestoneSchema = z.object({
+  id: z.string().min(1),
+  opportunityId: z.string().min(1),
+  name: z.string().min(1),
+  status: z.string().min(1),
+  targetDate: z.string().date().optional(),
+  owner: z.string().min(1).optional(),
+  commitment: z.string().min(1).optional()
 })
 
 export const evidenceSchema = z.object({
@@ -174,6 +186,7 @@ export const feedbackSchema = z.object({
 
 export type Account = z.infer<typeof accountSchema>
 export type Opportunity = z.infer<typeof opportunitySchema>
+export type Milestone = z.infer<typeof milestoneSchema>
 export type SourceHealth = z.infer<typeof sourceHealthSchema>
 export type AuthStatus = z.infer<typeof authStatusSchema>
 export type DesktopDataStatus = z.infer<typeof desktopDataStatusSchema>

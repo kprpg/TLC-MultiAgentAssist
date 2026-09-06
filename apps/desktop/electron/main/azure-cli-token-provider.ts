@@ -54,6 +54,7 @@ export class AzureCliMsxTokenProvider implements MsxAccessTokenProvider {
       return {
         state: 'ready',
         ...(this.corpId ? { displayName: this.corpId } : {}),
+        ...(this.corpId ? { userEmail: this.corpId } : {}),
         detail: `${this.authenticationLabel} is signed in as ${this.corpId ?? 'an authorized user'}.`
       }
     } catch (cause) {
