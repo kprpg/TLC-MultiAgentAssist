@@ -40,6 +40,16 @@ npm run web:build
 
 This builds the shared renderer under `apps/desktop/dist/revamp` and the Node host under `apps/web/dist`.
 
+To stage the deployable web release locally and run its production-host smoke test:
+
+```powershell
+npm run web:package
+npm install --omit=dev --ignore-scripts --package-lock=false --prefix release-web/package
+npm run test:smoke:web-release
+```
+
+The web release workflow performs these checks in isolation and publishes an Azure App Service ZIP for tags such as `web-v0.1.0`. The ZIP includes production dependencies, the built host and renderer, the MCEM guidance document, and the safe Foundry configuration example. It never includes `config/foundry.environment.json`.
+
 After a build, the host can also be started directly with `npm start`. Set `TLC_WEB_MODE` first when a mode other than the environment-derived default is required.
 
 ## Local Startup

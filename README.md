@@ -2,10 +2,8 @@
 
 [![Continuous integration](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/ci.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/ci.yml)
 [![Nightly desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml)
-[![Publish desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/release.yml)
-
-
-
+[![Desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/desktop-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/desktop-release.yml)
+[![Web release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/web-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/web-release.yml)
 
 TLC MultiAgent Assist is a Windows desktop application that acts as an account assistant that combines live MSX opportunity context with contextual guidance provided on the opportunity to advance them forward
 
@@ -65,5 +63,8 @@ Create local Windows release artifacts with:
 npm run desktop:package
 ```
 
-Artifacts are written to `release/`. Pushing a version tag such as `v0.1.0` runs the release workflow and publishes the installer and portable ZIP to GitHub Releases. Manually running the release workflow publishes a visible GitHub Release with a run-specific tag such as `v0.1.0-build.2` unless a tag is supplied. Downloaded artifacts might need to be unblocked before launch. Right-click the executable, select **Properties**, and choose **Unblock**.
+Artifacts are written to `release/`. Pushing a version tag such as `v0.1.0` runs the desktop release workflow and publishes the installer and portable ZIP to GitHub Releases. Manually running the workflow publishes a visible GitHub Release with a run-specific tag such as `v0.1.0-build.2` unless a tag is supplied. Downloaded artifacts might need to be unblocked before launch. Right-click the executable, select **Properties**, and choose **Unblock**.
 
+Pushing a tag such as `web-v0.1.0` runs the web release workflow. It validates the repository, builds and smoke-tests an isolated production package, and publishes an Azure App Service-ready ZIP to GitHub Releases. Web releases are kept separate from the latest desktop release.
+
+Deployment details are documented in the [web app runbook](docs/runbooks/web-app.md).

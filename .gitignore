@@ -11,4 +11,5 @@ out/
 release/
 release-staging/
 release-fixed/
+release-web/
 docs/runbooks/Account-Pulse.md

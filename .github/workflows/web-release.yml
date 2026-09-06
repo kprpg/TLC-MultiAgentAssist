@@ -1,0 +1,120 @@
+name: Build and publish web release
+
+on:
+  push:
+    tags:
+      - "web-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional release tag. Defaults to web-v<web-version>-build.<run-number>."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          package_version=$(node -p "require('./apps/web/package.json').version")
+          release_tag="$GITHUB_REF_NAME"
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ -z "$REQUESTED_TAG" ]]; then
+              release_tag="web-v${package_version}-build.${GITHUB_RUN_NUMBER}"
+            else
+              release_tag="$(echo "$REQUESTED_TAG" | xargs)"
+            fi
+          fi
+
+          if [[ -z "$release_tag" ]]; then
+            echo "Unable to determine release tag." >&2
+            exit 1
+          fi
+
+          echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Verify release version
+        if: startsWith(github.ref, 'refs/tags/web-v')
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
+          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+        run: |
+          if [[ "$RELEASE_TAG" != "web-v$PACKAGE_VERSION" ]]; then
+            echo "Tag $RELEASE_TAG does not match web package version web-v$PACKAGE_VERSION." >&2
+            exit 1
+          fi
+
+      - name: Run validation suite
+        run: npm run phase0:check
+
+      - name: Stage web application
+        run: npm run web:package
+
+      - name: Install production dependencies
+        run: npm install --omit=dev --ignore-scripts --package-lock=false --prefix release-web/package
+
+      - name: Isolate and smoke-test release package
+        shell: bash
+        run: |
+          mv release-web/package "$RUNNER_TEMP/tlc-web-package"
+          npm run test:smoke:web-release -- "$RUNNER_TEMP/tlc-web-package"
+
+      - name: Create App Service ZIP
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
+        run: |
+          artifact="$GITHUB_WORKSPACE/release-web/TLC-MultiAgent-Assist-${PACKAGE_VERSION}-Web-AppService.zip"
+          mkdir -p "$GITHUB_WORKSPACE/release-web"
+          cd "$RUNNER_TEMP/tlc-web-package"
+          zip -qr "$artifact" .
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TLC-MultiAgent-Assist-Web-AppService
+          path: release-web/*.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
+          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+        run: |
+          artifact=$(find release-web -maxdepth 1 -type f -name '*.zip' -print -quit)
+          if [[ -z "$artifact" ]]; then
+            echo "No web release artifact was found." >&2
+            exit 1
+          fi
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            gh release create "$RELEASE_TAG" "$artifact" --target "$GITHUB_SHA" --generate-notes --title "TLC MultiAgent Assist Web v${PACKAGE_VERSION} (build ${GITHUB_RUN_NUMBER})" --latest=false
+          else
+            gh release create "$RELEASE_TAG" "$artifact" --verify-tag --generate-notes --title "TLC MultiAgent Assist Web $RELEASE_TAG" --latest=false
+          fi

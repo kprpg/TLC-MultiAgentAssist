@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { z } from 'zod'
-import { agentTaskRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, mcemRequestSchema, type AgentCapability, type AuthStatus, type DesktopDataStatus, type PerformanceReporter } from '../../../../packages/common/index.js'
+import { agentTaskRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, mcemRequestSchema, type AuthStatus, type DesktopDataStatus, type PerformanceReporter } from '../../../../packages/common/index.js'
 import {
   loadFoundryEnvironment,
   type FoundryEnvironment
