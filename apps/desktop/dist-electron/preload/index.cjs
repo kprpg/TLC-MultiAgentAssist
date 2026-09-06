@@ -1,10 +1,12 @@
 let electron = require("electron");
 //#region apps/desktop/electron/preload/index.ts
 electron.contextBridge.exposeInMainWorld("tlc", {
+	exitApplication: () => electron.ipcRenderer.invoke("tlc:exit-application"),
 	getDataStatus: () => electron.ipcRenderer.invoke("tlc:get-data-status"),
 	connectMcem: () => electron.ipcRenderer.invoke("tlc:connect-mcem"),
 	listAccounts: () => electron.ipcRenderer.invoke("tlc:list-accounts"),
 	listOpportunities: (accountId) => electron.ipcRenderer.invoke("tlc:list-opportunities", accountId),
+	listMilestones: (opportunityId) => electron.ipcRenderer.invoke("tlc:list-milestones", opportunityId),
 	runMcemCoach: (request) => electron.ipcRenderer.invoke("tlc:run-mcem-coach", request),
 	runAgentTask: (request) => electron.ipcRenderer.invoke("tlc:run-agent-task", request),
 	openEmailCompose: (request) => electron.ipcRenderer.invoke("tlc:open-email-compose", request),

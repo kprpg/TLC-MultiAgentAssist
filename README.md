@@ -4,10 +4,8 @@
 [![Nightly desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml)
 [![Publish desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/release.yml)
 
-TLC MultiAgent Assist is a Windows desktop account assistant that combines live MSX opportunity context with Microsoft Foundry agents.
-[![Continuous integration](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/ci.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/ci.yml)
-[![Nightly desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml)
-[![Publish desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/release.yml)
+
+
 
 TLC MultiAgent Assist is a Windows desktop application that acts as an account assistant that combines live MSX opportunity context with contextual guidance provided on the opportunity to advance them forward
 
@@ -28,18 +26,37 @@ Windows may show a SmartScreen warning until release artifacts are code-signed. 
 2. Replace the placeholder Foundry project endpoint, agent names, tenant ID, client ID, authentication mode, and scopes.
 3. Save the file and reopen the app.
 
-The configuration is stored at `%APPDATA%\TLC MultiAgent Assist\foundry.environment.json`. It is not bundled into future upgrades and must never contain client secrets, access tokens, API keys, or credential-bearing connection strings.
+The configuration is stored at `%APPDATA%\@tlc\desktop\foundry.environment.json`. It is not bundled into future upgrades and must never contain client secrets, access tokens, API keys, or credential-bearing connection strings.
 
 For interactive sign-in, configure a public-client Microsoft Entra app registration and set `authentication.mode` to `interactive-browser`. The default `azure-cli` mode requires the Azure CLI and an authenticated `az login` session.
 
-See [Desktop setup and troubleshooting](docs/runbooks/desktop-app.md) for the complete configuration field reference and prerequisites.
+See the runbooks for complete prerequisites, build commands, startup modes, and authentication details:
+
+- [Desktop setup and troubleshooting](docs/runbooks/desktop-app.md)
+- [Web setup and hosting](docs/runbooks/web-app.md)
 
 ## Development
+
+Desktop:
 
 ```powershell
 npm install
 Copy-Item config/foundry.environment.example.json config/foundry.environment.json
 npm run desktop:start
+```
+
+Web with sample data:
+
+```powershell
+npm install
+npm run web:start
+```
+
+Web with live local data uses the same private environment file plus an Azure CLI sign-in:
+
+```powershell
+az login
+npm run web:start:live
 ```
 
 Create local Windows release artifacts with:
@@ -48,6 +65,5 @@ Create local Windows release artifacts with:
 npm run desktop:package
 ```
 
-Artifacts are written to `release/`. Pushing a version tag such as `v0.1.0` runs the release workflow and publishes the installer and portable ZIP to GitHub Releases. Manually running the release workflow publishes a visible GitHub Release with a run-specific tag such as `v0.1.0-build.2` unless a tag is supplied. The downloaded artifacts might have to be "Unblocked" on Windows (security) before it can be launched. Right omuse on the executable and select "Unblock" for this, before launching.
-Artifacts are written to `release/`. Pushing a version tag such as `v0.1.0` runs the release workflow and publishes the installer and portable ZIP to GitHub Releases. The downloaded artifacts might have to be "Unblocked" on Windows (security) before it can be launched. Right omuse on the executable and select "Unblock" for this, before launching.
+Artifacts are written to `release/`. Pushing a version tag such as `v0.1.0` runs the release workflow and publishes the installer and portable ZIP to GitHub Releases. Manually running the release workflow publishes a visible GitHub Release with a run-specific tag such as `v0.1.0-build.2` unless a tag is supplied. Downloaded artifacts might need to be unblocked before launch. Right-click the executable, select **Properties**, and choose **Unblock**.
 

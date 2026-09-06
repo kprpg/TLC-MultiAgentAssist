@@ -16,40 +16,52 @@ describe('LiveMsxConnector', () => {
         })
       }
       if (url.pathname.endsWith('/msp_dealteams')) {
-        return json({ value: [
-          { _msp_parentopportunityid_value: 'opp-1' },
-          { _msp_parentopportunityid_value: 'opp-2' }
-        ] })
+        return json({
+          value: [
+            { _msp_parentopportunityid_value: 'opp-1' },
+            { _msp_parentopportunityid_value: 'opp-2' }
+          ]
+        })
       }
       if (url.pathname.endsWith('/opportunities')) {
         expect(url.searchParams.get('$filter')).toContain('statecode eq 0')
-        return json({ value: [
-          {
-            opportunityid: 'opp-1',
-            _parentaccountid_value: 'account-b',
-            name: 'Second opportunity',
-            estimatedvalue: 0,
-            msp_consumptionconsumedrecurring: 275000
-          },
-          { opportunityid: 'opp-2', _parentaccountid_value: 'account-a', name: 'First opportunity', msp_activesalesstage: 2, estimatedvalue: 1500000 }
-        ] })
+        return json({
+          value: [
+            {
+              opportunityid: 'opp-1',
+              _parentaccountid_value: 'account-b',
+              '_ownerid_value@OData.Community.Display.V1.FormattedValue': 'Morgan Lee',
+              name: 'Second opportunity',
+              estimatedvalue: 0,
+              msp_consumptionconsumedrecurring: 275000
+            },
+            { opportunityid: 'opp-2', _parentaccountid_value: 'account-a', name: 'First opportunity', msp_activesalesstage: 2, estimatedvalue: 1500000 }
+          ]
+        })
       }
       if (url.pathname.endsWith('/accounts')) {
-        return json({ value: [
-          { accountid: 'account-b', name: 'Beta' },
-          { accountid: 'account-a', name: 'Alpha' }
-        ] })
+        return json({
+          value: [
+            { accountid: 'account-b', name: 'Beta' },
+            { accountid: 'account-a', name: 'Alpha' }
+          ]
+        })
       }
       if (url.pathname.endsWith('/msp_engagementmilestones')) {
         expect(url.searchParams.get('$filter')).toBe('statecode eq 0 and _msp_opportunityid_value eq opp-2')
-        return json({ value: [{
-          msp_engagementmilestoneid: 'milestone-1',
-          msp_name: 'Customer pilot',
-          _ownerid_value: 'owner-1',
-          msp_milestonedate: '2026-10-15',
-          msp_milestonestatus: 861980000,
-          msp_monthlyuse: 25000
-        }] })
+        return json({
+          value: [{
+            msp_engagementmilestoneid: 'milestone-1',
+            msp_name: 'Customer pilot',
+            _ownerid_value: 'owner-1',
+            '_ownerid_value@OData.Community.Display.V1.FormattedValue': 'Taylor Kim',
+            msp_milestonedate: '2026-10-15',
+            msp_milestonestatus: 861980000,
+            'msp_milestonestatus@OData.Community.Display.V1.FormattedValue': 'On track',
+            'msp_commitmentrecommendation@OData.Community.Display.V1.FormattedValue': 'Committed',
+            msp_monthlyuse: 25000
+          }]
+        })
       }
       throw new Error(`Unexpected request: ${url}`)
     })
@@ -61,8 +73,17 @@ describe('LiveMsxConnector', () => {
     ])
     await expect(connector.listOpportunities('account-a')).resolves.toHaveLength(1)
     await expect(connector.listOpportunities('account-b')).resolves.toEqual([
-      expect.objectContaining({ id: 'opp-1', value: 275000 })
+      expect.objectContaining({ id: 'opp-1', owner: 'Morgan Lee', value: 275000 })
     ])
+    await expect(connector.listMilestones('opp-2')).resolves.toEqual([{
+      id: 'milestone-1',
+      opportunityId: 'opp-2',
+      name: 'Customer pilot',
+      status: 'On track',
+      targetDate: '2026-10-15',
+      owner: 'Taylor Kim',
+      commitment: 'Committed'
+    }])
     const firstContext = await connector.getOpportunityContext('opp-2')
     const secondContext = await connector.getOpportunityContext('opp-2')
     expect(firstContext.observations).toEqual(expect.arrayContaining([

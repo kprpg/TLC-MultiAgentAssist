@@ -10,6 +10,9 @@ import {
 } from '../../../packages/common/configuration/foundry-environment.js'
 
 const temporaryDirectories: string[] = []
+const foundryTenantId = '173eb3fc-9ba1-437f-99a1-89d5e53b91d1'
+const appTenantId = '72f988bf-86f1-41af-91ab-2d7cd011db47'
+const clientId = '9aa1bb31-9ef6-40b6-968d-5580ef3df0e7'
 
 const validEnvironment = {
   schemaVersion: 1,
@@ -17,10 +20,10 @@ const validEnvironment = {
   authentication: {
     mode: 'interactive-browser',
     expectedUserDomain: '@microsoft.com',
-    foundryTenantId: '33333333-3333-4333-8333-333333333333',
+    foundryTenantId,
     appRegistration: {
-      tenantId: '11111111-1111-4111-8111-111111111111',
-      clientId: '22222222-2222-4222-8222-222222222222',
+      tenantId: appTenantId,
+      clientId,
       redirectUri: 'http://localhost'
     },
     scopes: {
@@ -46,23 +49,12 @@ afterEach(async () => {
 })
 
 describe('Foundry environment configuration', () => {
-  it('keeps the checked-in sample valid and safe for Azure CLI startup', async () => {
+  it('rejects the checked-in template before its placeholders reach Azure authentication', async () => {
     const filePath = fileURLToPath(new URL('../../../config/foundry.environment.example.json', import.meta.url))
 
-    await expect(loadFoundryEnvironment(filePath)).resolves.toMatchObject({
-      authentication: {
-        mode: 'azure-cli',
-        foundryTenantId: '33333333-3333-4333-8333-333333333333'
-      },
-      foundry: {
-        agents: {
-          mcemCoach: { type: 'prompt', protocol: 'responses' },
-          riskSolutionPlay: { type: 'prompt', protocol: 'responses' },
-          pursuitExecutive: { type: 'prompt', protocol: 'responses' },
-          accountPulse: { type: 'prompt', protocol: 'responses' }
-        }
-      }
-    })
+    await expect(loadFoundryEnvironment(filePath)).rejects.toThrow(
+      'Replace the template UUID with the Azure resource value.'
+    )
   })
 
   it('loads developer-specific Foundry and app registration settings', async () => {

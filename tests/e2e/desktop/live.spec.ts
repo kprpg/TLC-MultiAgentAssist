@@ -14,23 +14,32 @@ test('retrieves live MSX data and completes all four Foundry-backed UI tasks', a
 
   try {
     const window = await app.firstWindow()
-    await expect(window.getByText('LIVE MSX', { exact: true })).toBeVisible({ timeout: 60_000 })
+    await expect(window.getByText('Live MSX', { exact: true }).first()).toBeVisible({ timeout: 60_000 })
+    await window.getByRole('region', { name: 'Accounts blade' }).getByRole('button')
+      .filter({ hasText: 'Live MSX' }).first().click()
+    const opportunitiesBlade = window.getByRole('region', { name: 'Opportunities blade' })
+    await expect(opportunitiesBlade).toBeVisible({ timeout: 60_000 })
+    await opportunitiesBlade.locator('.opportunity-button').first().click()
     await expect.poll(async () => {
       const alert = window.locator('[role="alert"]')
       if (await alert.count() > 0) return `error: ${await alert.first().innerText()}`
-      return await window.getByRole('tab', { name: 'Multi-Agentic Guidance', exact: true }).isVisible() ? 'ready' : 'loading'
+      return await window.getByRole('tab', { name: 'Multi-Agent Guidance', exact: true }).isVisible() ? 'ready' : 'loading'
     }, { timeout: 120_000 }).toBe('ready')
-    await window.getByRole('tab', { name: 'Multi-Agentic Guidance', exact: true }).click()
-    await expect(window.getByRole('button', { name: 'Run Account Pulse' })).toBeInViewport()
-    for (const task of ['Account Pulse', 'MCEM Coach', 'Pursuit & Executive', 'Risk & Solution Play']) {
+    await window.getByRole('tab', { name: 'Multi-Agent Guidance', exact: true }).click()
+    const tasks = [
+      ['Account Pulse', 'What should the account team focus on this week?'],
+      ['MCEM Coach', 'How do we move this opportunity to the next MCEM stage?'],
+      ['Pursuit', 'Create an executive-ready brief for this opportunity.'],
+      ['Risk & Play', 'Identify the highest grounded risks and mitigation actions.']
+    ] as const
+    for (const [task, prompt] of tasks) {
       await window.getByRole('tab', { name: task }).click()
-      await window.getByRole('button', { name: `Run ${task}` }).click()
-      const synthesis = window.locator('.agent-synthesis')
-      await expect(synthesis).toBeVisible({ timeout: 90_000 })
-      await expect(synthesis.locator('.agent-synthesis-content')).not.toBeEmpty()
-      await expect(synthesis.getByText('Agent active · MSX + MCEM', { exact: true })).toBeVisible()
+      await window.getByRole('button', { name: prompt }).click()
+      const response = window.locator('.agent-response')
+      await expect(response.locator('.eyebrow')).toHaveText(task, { timeout: 90_000 })
+      await expect(response).not.toBeEmpty()
     }
-    await expect(window.locator('[role="alert"]')).toHaveCount(0)
+    await expect(window.locator('.error-state')).toHaveCount(0)
   } finally {
     await app.close()
   }

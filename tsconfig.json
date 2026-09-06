@@ -7,5 +7,9 @@
     "noEmit": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["vitest.config.ts", "tests/**/*.ts"]
+  "include": [
+    "vitest.config.ts",
+    "tests/**/*.ts",
+    "apps/desktop/renderer-revamp/src/vite-env.d.ts"
+  ]
 }

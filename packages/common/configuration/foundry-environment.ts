@@ -2,9 +2,20 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { z } from 'zod'
 
+const templatePlaceholderIds = new Set([
+  '11111111-1111-4111-8111-111111111111',
+  '22222222-2222-4222-8222-222222222222',
+  '33333333-3333-4333-8333-333333333333'
+])
+
+const configuredUuidSchema = z.string().uuid().refine(
+  (value) => !templatePlaceholderIds.has(value),
+  'Replace the template UUID with the Azure resource value.'
+)
+
 const appRegistrationSchema = z.object({
-  tenantId: z.string().uuid(),
-  clientId: z.string().uuid(),
+  tenantId: configuredUuidSchema,
+  clientId: configuredUuidSchema,
   redirectUri: z.string().url()
 }).strict()
 
@@ -18,14 +29,14 @@ const authenticationSchema = z.discriminatedUnion('mode', [
   z.object({
     mode: z.literal('azure-cli'),
     expectedUserDomain: z.string().regex(/^@[a-z0-9.-]+$/),
-    foundryTenantId: z.string().uuid(),
+    foundryTenantId: configuredUuidSchema,
     scopes: resourceScopesSchema,
     appRegistration: appRegistrationSchema.optional()
   }).strict(),
   z.object({
     mode: z.literal('interactive-browser'),
     expectedUserDomain: z.string().regex(/^@[a-z0-9.-]+$/),
-    foundryTenantId: z.string().uuid(),
+    foundryTenantId: configuredUuidSchema,
     scopes: resourceScopesSchema,
     appRegistration: appRegistrationSchema
   }).strict()
@@ -42,7 +53,10 @@ export const foundryEnvironmentSchema = z.object({
   environment: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
   authentication: authenticationSchema,
   foundry: z.object({
-    projectEndpoint: z.string().url(),
+    projectEndpoint: z.string().url().refine(
+      (value) => !value.includes('YOUR-FOUNDRY-ACCOUNT') && !value.includes('/YOUR-PROJECT'),
+      'Replace the template endpoint with the Microsoft Foundry project endpoint.'
+    ),
     requestTimeoutMs: z.number().int().min(1_000).max(300_000),
     agents: z.object({
       mcemCoach: foundryAgentSchema,

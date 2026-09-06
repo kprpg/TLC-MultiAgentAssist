@@ -64,6 +64,7 @@ export class InteractiveGraphTokenProvider {
     return {
       state: 'ready',
       ...(this.corpId ? { displayName: this.corpId } : {}),
+      ...(this.corpId ? { userEmail: this.corpId } : {}),
       detail: `TLC has delegated Microsoft Graph access as ${this.corpId ?? 'a Microsoft corporate user'}.`
     }
   }

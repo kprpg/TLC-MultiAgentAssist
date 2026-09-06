@@ -12,7 +12,8 @@ describe('AzureCliMsxTokenProvider', () => {
     await expect(provider.getAccessToken()).resolves.toBe(token)
     await expect(provider.getAuthStatus()).resolves.toMatchObject({
       state: 'ready',
-      displayName: 'signed-in-user@microsoft.com'
+      displayName: 'signed-in-user@microsoft.com',
+      userEmail: 'signed-in-user@microsoft.com'
     })
     expect(credential.getToken).toHaveBeenCalledWith('https://microsoftsales.crm.dynamics.com/.default')
     expect(credential.getToken).toHaveBeenCalledTimes(1)

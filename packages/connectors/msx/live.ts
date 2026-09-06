@@ -1,4 +1,4 @@
-import { measurePerformance, type Account, type Opportunity, type PerformanceReporter } from '../../common/index.js'
+import { measurePerformance, type Account, type Milestone, type Opportunity, type PerformanceReporter } from '../../common/index.js'
 import type { CriterionObservation, MsxConnector, OpportunityContext } from '../common/index.js'
 
 const defaultBaseUrl = 'https://microsoftsales.crm.dynamics.com/api/data/v9.2/'
@@ -29,6 +29,7 @@ interface AccountRow {
 interface OpportunityRow {
   opportunityid: string
   _parentaccountid_value?: string
+  _ownerid_value?: string
   name: string
   msp_activesalesstage?: number
   estimatedvalue?: number
@@ -46,6 +47,7 @@ interface MilestoneRow {
   msp_milestonestatus?: number
   msp_commitmentrecommendation?: number
   msp_monthlyuse?: number
+  [key: string]: unknown
 }
 
 export class MsxRequestError extends Error {
@@ -62,6 +64,7 @@ export class LiveMsxConnector implements MsxConnector {
   private readonly baseUrl: URL
   private portfolioPromise: Promise<{ accounts: Account[]; opportunities: Opportunity[] }> | undefined
   private readonly observationPromises = new Map<string, Promise<CriterionObservation[]>>()
+  private readonly milestonePromises = new Map<string, Promise<MilestoneRow[]>>()
 
   constructor(
     private readonly tokenProvider: MsxAccessTokenProvider,
@@ -82,6 +85,22 @@ export class LiveMsxConnector implements MsxConnector {
     return structuredClone(
       portfolio.opportunities.filter((opportunity) => opportunity.accountId === accountId)
     )
+  }
+
+  async listMilestones(opportunityId: string): Promise<Milestone[]> {
+    const portfolio = await this.getPortfolio()
+    if (!portfolio.opportunities.some((opportunity) => opportunity.id === opportunityId)) {
+      throw new Error('The opportunity is not in the signed-in user’s active MSX portfolio.')
+    }
+    return (await this.getMilestoneRows(opportunityId)).map((row) => ({
+      id: row.msp_engagementmilestoneid,
+      opportunityId,
+      name: row.msp_name?.trim() || 'Unnamed milestone',
+      status: formattedValue(row, 'msp_milestonestatus') ?? 'Status not recorded',
+      ...(row.msp_milestonedate ? { targetDate: row.msp_milestonedate.slice(0, 10) } : {}),
+      ...(formattedValue(row, '_ownerid_value') ? { owner: formattedValue(row, '_ownerid_value') } : {}),
+      ...(formattedValue(row, 'msp_commitmentrecommendation') ? { commitment: formattedValue(row, 'msp_commitmentrecommendation') } : {})
+    }))
   }
 
   async getOpportunityContext(opportunityId: string): Promise<OpportunityContext> {
@@ -110,17 +129,14 @@ export class LiveMsxConnector implements MsxConnector {
   refresh(): void {
     this.portfolioPromise = undefined
     this.observationPromises.clear()
+    this.milestonePromises.clear()
   }
 
   private getOpportunityObservations(opportunity: Opportunity): Promise<CriterionObservation[]> {
     let observations = this.observationPromises.get(opportunity.id)
     if (!observations) {
       observations = measurePerformance('msx.opportunity-evidence', this.performanceReporter, async () => {
-        const milestones = await this.requestAll<MilestoneRow>('msp_engagementmilestones', {
-          '$select': 'msp_engagementmilestoneid,msp_name,_ownerid_value,msp_milestonedate,msp_milestonestatus,msp_commitmentrecommendation,msp_monthlyuse',
-          '$filter': `statecode eq 0 and _msp_opportunityid_value eq ${opportunity.id}`,
-          '$orderby': 'msp_milestonedate asc'
-        })
+        const milestones = await this.getMilestoneRows(opportunity.id)
         return mapOpportunityObservations(opportunity, milestones)
       }).catch((error: unknown) => {
         this.observationPromises.delete(opportunity.id)
@@ -129,6 +145,22 @@ export class LiveMsxConnector implements MsxConnector {
       this.observationPromises.set(opportunity.id, observations)
     }
     return observations
+  }
+
+  private getMilestoneRows(opportunityId: string): Promise<MilestoneRow[]> {
+    let milestones = this.milestonePromises.get(opportunityId)
+    if (!milestones) {
+      milestones = this.requestAll<MilestoneRow>('msp_engagementmilestones', {
+        '$select': 'msp_engagementmilestoneid,msp_name,_ownerid_value,msp_milestonedate,msp_milestonestatus,msp_commitmentrecommendation,msp_monthlyuse',
+        '$filter': `statecode eq 0 and _msp_opportunityid_value eq ${opportunityId}`,
+        '$orderby': 'msp_milestonedate asc'
+      }).catch((error: unknown) => {
+        this.milestonePromises.delete(opportunityId)
+        throw error
+      })
+      this.milestonePromises.set(opportunityId, milestones)
+    }
+    return milestones
   }
 
   private getPortfolio(): Promise<{ accounts: Account[]; opportunities: Opportunity[] }> {
@@ -153,7 +185,7 @@ export class LiveMsxConnector implements MsxConnector {
       'opportunities',
       'opportunityid',
       opportunityIds,
-      'opportunityid,_parentaccountid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate'
+      'opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate'
     ))
     const activeOpportunities = opportunityRows.filter((row) => row._parentaccountid_value)
     const accountIds = unique(
@@ -190,6 +222,7 @@ export class LiveMsxConnector implements MsxConnector {
       id: row.opportunityid,
       accountId: row._parentaccountid_value!,
       name: row.name,
+      ...(formattedValue(row, '_ownerid_value') ? { owner: formattedValue(row, '_ownerid_value') } : {}),
       recordedStage,
       value: row.estimatedvalue || row.msp_consumptionconsumedrecurring || 0,
       currency: 'USD',
@@ -260,6 +293,11 @@ function unique(values: string[]): string[] {
 
 function isPresent(value: string | undefined): value is string {
   return Boolean(value)
+}
+
+function formattedValue(row: Record<string, unknown>, field: string): string | undefined {
+  const value = row[`${field}${formattedValueSuffix}`]
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
 function mapOpportunityObservations(opportunity: Opportunity, milestones: MilestoneRow[]): CriterionObservation[] {

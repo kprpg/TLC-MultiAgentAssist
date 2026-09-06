@@ -1,0 +1,16 @@
+{
+  "name": "@tlc/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build --config vite.config.ts",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "vite": "^8.0.10"
+  }
+}

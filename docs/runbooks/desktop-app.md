@@ -4,15 +4,24 @@
 
 Open the repository's [latest release page](https://github.com/kprpg/TLC-MultiAgentAssist/releases/latest) and download either the Windows x64 installer (`.exe`) or portable archive (`.zip`).
 
-On first launch, the packaged app creates `%APPDATA%\TLC MultiAgent Assist\foundry.environment.json` from the bundled template and opens it for editing. Configure the fields described below, save the file, and restart the app. Upgrades preserve this per-user file.
+On first launch, the packaged app creates `%APPDATA%\@tlc\desktop\foundry.environment.json` from the bundled template and opens it for editing. Configure the fields described below, save the file, and restart the app. Upgrades preserve this per-user file.
 
 The release is currently unsigned, so Windows may display a SmartScreen warning. Verify that the download came from this repository's GitHub Releases page before running it.
 
 ## Prerequisites
 
-- Windows 10 or later
+To install a release, only Windows 10 or later is required. Building from source also requires:
+
 - Node.js 22.12 or later
 - npm 10 or later
+- Git, to clone the repository
+
+Live mode additionally requires:
+
+- Access to MSX and the configured Microsoft Foundry project
+- The four deployed Foundry agents named in the environment file
+- Azure CLI and an authenticated corporate session when using `azure-cli` mode
+- A Microsoft Entra public-client app registration when using `interactive-browser` mode
 
 Check the installed versions:
 
@@ -91,7 +100,7 @@ npm run desktop:start
 This command builds the Electron main process, preload script, and React renderer before launching the application.
 By default, accounts and opportunities come from live MSX and are scoped to active opportunities where that corporate user is on the deal team. Access tokens remain in the trusted Electron main process.
 
-The Foundry endpoint and four agent bindings are validated at startup. Foundry invocation is enabled as each agent package is implemented; the current MCEM Coach remains deterministic and local.
+The Foundry endpoint and four agent bindings are validated at startup. Multi-Agent Guidance invokes the configured remote Foundry agents; grounded MCEM context is assembled locally and passed through the trusted main process.
 
 To launch with sanitized fixtures instead:
 
@@ -99,6 +108,14 @@ To launch with sanitized fixtures instead:
 $env:TLC_DATA_MODE = 'sample'
 npm run desktop:start
 ```
+
+### Authentication flow
+
+- In `azure-cli` mode, Electron asks `AzureCliCredential` for resource-specific tokens. MSX uses the active Azure CLI identity, Foundry targets `authentication.foundryTenantId`, and Graph uses Azure CLI unless an app registration is configured. Tokens stay in the Electron main process and are not exposed to the renderer.
+- In `interactive-browser` mode, Electron opens the system browser for delegated Microsoft Entra sign-in using the configured public-client app registration. MSX, Foundry, and Graph receive separate resource tokens; no client secret is stored in the app.
+- In sample mode, no Azure or Microsoft Entra authentication occurs.
+
+Known template UUIDs and `YOUR-*` endpoints are rejected before credentials are created.
 
 ## Development mode
 
@@ -120,6 +137,7 @@ Generated files are written under:
 
 - `apps/desktop/dist-electron`
 - `apps/desktop/dist/renderer`
+- `apps/desktop/dist/revamp`
 
 ## Package a Windows release
 

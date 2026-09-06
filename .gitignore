@@ -10,4 +10,5 @@ config/foundry.environment.json
 out/
 release/
 release-staging/
+release-fixed/
 docs/runbooks/Account-Pulse.md

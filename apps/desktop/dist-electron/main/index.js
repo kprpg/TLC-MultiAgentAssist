@@ -41,6 +41,7 @@ var authStatusSchema = z.object({
 		"permission-missing"
 	]),
 	displayName: z.string().min(1).optional(),
+	userEmail: z.string().email().optional(),
 	tenantName: z.string().min(1).optional(),
 	detail: z.string().min(1)
 });
@@ -57,10 +58,20 @@ z.object({
 	id: z.string().min(1),
 	accountId: z.string().min(1),
 	name: z.string().min(1),
+	owner: z.string().min(1).optional(),
 	recordedStage: z.number().int().min(1).max(5),
 	value: z.number().nonnegative(),
 	currency: z.string().length(3),
 	closeDate: z.string().date()
+});
+z.object({
+	id: z.string().min(1),
+	opportunityId: z.string().min(1),
+	name: z.string().min(1),
+	status: z.string().min(1),
+	targetDate: z.string().date().optional(),
+	owner: z.string().min(1).optional(),
+	commitment: z.string().min(1).optional()
 });
 var evidenceSchema = z.object({
 	id: z.string().min(1),
@@ -219,9 +230,15 @@ function report(reporter, operation, startedAt, outcome) {
 }
 //#endregion
 //#region packages/common/configuration/foundry-environment.ts
+var templatePlaceholderIds = new Set([
+	"11111111-1111-4111-8111-111111111111",
+	"22222222-2222-4222-8222-222222222222",
+	"33333333-3333-4333-8333-333333333333"
+]);
+var configuredUuidSchema = z.string().uuid().refine((value) => !templatePlaceholderIds.has(value), "Replace the template UUID with the Azure resource value.");
 var appRegistrationSchema = z.object({
-	tenantId: z.string().uuid(),
-	clientId: z.string().uuid(),
+	tenantId: configuredUuidSchema,
+	clientId: configuredUuidSchema,
 	redirectUri: z.string().url()
 }).strict();
 var resourceScopesSchema = z.object({
@@ -232,13 +249,13 @@ var resourceScopesSchema = z.object({
 var authenticationSchema = z.discriminatedUnion("mode", [z.object({
 	mode: z.literal("azure-cli"),
 	expectedUserDomain: z.string().regex(/^@[a-z0-9.-]+$/),
-	foundryTenantId: z.string().uuid(),
+	foundryTenantId: configuredUuidSchema,
 	scopes: resourceScopesSchema,
 	appRegistration: appRegistrationSchema.optional()
 }).strict(), z.object({
 	mode: z.literal("interactive-browser"),
 	expectedUserDomain: z.string().regex(/^@[a-z0-9.-]+$/),
-	foundryTenantId: z.string().uuid(),
+	foundryTenantId: configuredUuidSchema,
 	scopes: resourceScopesSchema,
 	appRegistration: appRegistrationSchema
 }).strict()]);
@@ -252,7 +269,7 @@ var foundryEnvironmentSchema = z.object({
 	environment: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
 	authentication: authenticationSchema,
 	foundry: z.object({
-		projectEndpoint: z.string().url(),
+		projectEndpoint: z.string().url().refine((value) => !value.includes("YOUR-FOUNDRY-ACCOUNT") && !value.includes("/YOUR-PROJECT"), "Replace the template endpoint with the Microsoft Foundry project endpoint."),
 		requestTimeoutMs: z.number().int().min(1e3).max(3e5),
 		agents: z.object({
 			mcemCoach: foundryAgentSchema,
@@ -296,6 +313,7 @@ var LiveMsxConnector = class {
 	baseUrl;
 	portfolioPromise;
 	observationPromises = /* @__PURE__ */ new Map();
+	milestonePromises = /* @__PURE__ */ new Map();
 	constructor(tokenProvider, fetchImplementation = fetch, baseUrl = defaultBaseUrl, performanceReporter) {
 		this.tokenProvider = tokenProvider;
 		this.fetchImplementation = fetchImplementation;
@@ -309,6 +327,18 @@ var LiveMsxConnector = class {
 	async listOpportunities(accountId) {
 		const portfolio = await this.getPortfolio();
 		return structuredClone(portfolio.opportunities.filter((opportunity) => opportunity.accountId === accountId));
+	}
+	async listMilestones(opportunityId) {
+		if (!(await this.getPortfolio()).opportunities.some((opportunity) => opportunity.id === opportunityId)) throw new Error("The opportunity is not in the signed-in user’s active MSX portfolio.");
+		return (await this.getMilestoneRows(opportunityId)).map((row) => ({
+			id: row.msp_engagementmilestoneid,
+			opportunityId,
+			name: row.msp_name?.trim() || "Unnamed milestone",
+			status: formattedValue(row, "msp_milestonestatus") ?? "Status not recorded",
+			...row.msp_milestonedate ? { targetDate: row.msp_milestonedate.slice(0, 10) } : {},
+			...formattedValue(row, "_ownerid_value") ? { owner: formattedValue(row, "_ownerid_value") } : {},
+			...formattedValue(row, "msp_commitmentrecommendation") ? { commitment: formattedValue(row, "msp_commitmentrecommendation") } : {}
+		}));
 	}
 	async getOpportunityContext(opportunityId) {
 		const portfolio = await this.getPortfolio();
@@ -334,16 +364,13 @@ var LiveMsxConnector = class {
 	refresh() {
 		this.portfolioPromise = void 0;
 		this.observationPromises.clear();
+		this.milestonePromises.clear();
 	}
 	getOpportunityObservations(opportunity) {
 		let observations = this.observationPromises.get(opportunity.id);
 		if (!observations) {
 			observations = measurePerformance("msx.opportunity-evidence", this.performanceReporter, async () => {
-				return mapOpportunityObservations(opportunity, await this.requestAll("msp_engagementmilestones", {
-					"$select": "msp_engagementmilestoneid,msp_name,_ownerid_value,msp_milestonedate,msp_milestonestatus,msp_commitmentrecommendation,msp_monthlyuse",
-					"$filter": `statecode eq 0 and _msp_opportunityid_value eq ${opportunity.id}`,
-					"$orderby": "msp_milestonedate asc"
-				}));
+				return mapOpportunityObservations(opportunity, await this.getMilestoneRows(opportunity.id));
 			}).catch((error) => {
 				this.observationPromises.delete(opportunity.id);
 				throw error;
@@ -351,6 +378,21 @@ var LiveMsxConnector = class {
 			this.observationPromises.set(opportunity.id, observations);
 		}
 		return observations;
+	}
+	getMilestoneRows(opportunityId) {
+		let milestones = this.milestonePromises.get(opportunityId);
+		if (!milestones) {
+			milestones = this.requestAll("msp_engagementmilestones", {
+				"$select": "msp_engagementmilestoneid,msp_name,_ownerid_value,msp_milestonedate,msp_milestonestatus,msp_commitmentrecommendation,msp_monthlyuse",
+				"$filter": `statecode eq 0 and _msp_opportunityid_value eq ${opportunityId}`,
+				"$orderby": "msp_milestonedate asc"
+			}).catch((error) => {
+				this.milestonePromises.delete(opportunityId);
+				throw error;
+			});
+			this.milestonePromises.set(opportunityId, milestones);
+		}
+		return milestones;
 	}
 	getPortfolio() {
 		this.portfolioPromise ??= this.loadPortfolio().catch((error) => {
@@ -365,7 +407,7 @@ var LiveMsxConnector = class {
 			"$select": "_msp_parentopportunityid_value",
 			"$filter": `statecode eq 0 and _msp_dealteamuserid_value eq ${identity.UserId}`
 		}))).map((row) => row._msp_parentopportunityid_value).filter(isPresent));
-		const activeOpportunities = (await measurePerformance("msx.opportunities", this.performanceReporter, () => this.requestByIds("opportunities", "opportunityid", opportunityIds, "opportunityid,_parentaccountid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate"))).filter((row) => row._parentaccountid_value);
+		const activeOpportunities = (await measurePerformance("msx.opportunities", this.performanceReporter, () => this.requestByIds("opportunities", "opportunityid", opportunityIds, "opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate"))).filter((row) => row._parentaccountid_value);
 		const accountIds = unique(activeOpportunities.map((row) => row._parentaccountid_value).filter(isPresent));
 		const accounts = (await measurePerformance("msx.accounts", this.performanceReporter, () => this.requestByIds("accounts", "accountid", accountIds, "accountid,name"))).map((row) => ({
 			id: row.accountid,
@@ -388,6 +430,7 @@ var LiveMsxConnector = class {
 			id: row.opportunityid,
 			accountId: row._parentaccountid_value,
 			name: row.name,
+			...formattedValue(row, "_ownerid_value") ? { owner: formattedValue(row, "_ownerid_value") } : {},
 			recordedStage,
 			value: row.estimatedvalue || row.msp_consumptionconsumedrecurring || 0,
 			currency: "USD",
@@ -439,6 +482,10 @@ function unique(values) {
 }
 function isPresent(value) {
 	return Boolean(value);
+}
+function formattedValue(row, field) {
+	const value = row[`${field}${formattedValueSuffix}`];
+	return typeof value === "string" && value.trim() ? value.trim() : void 0;
 }
 function mapOpportunityObservations(opportunity, milestones) {
 	const observations = [];
@@ -514,6 +561,7 @@ var opportunities = [
 		id: "opp-grid-modernization",
 		accountId: "account-contoso",
 		name: "Grid operations modernization",
+		owner: "Avery Johnson",
 		recordedStage: 3,
 		value: 42e5,
 		currency: "USD",
@@ -619,6 +667,15 @@ var opportunities = [
 		closeDate: "2026-11-13"
 	}
 ];
+var milestonesByOpportunity = Object.fromEntries(opportunities.map((opportunity) => [opportunity.id, [{
+	id: `${opportunity.id}-milestone`,
+	opportunityId: opportunity.id,
+	name: "Customer outcome validation",
+	status: "In progress",
+	targetDate: opportunity.closeDate,
+	owner: "Account team",
+	commitment: "Best case"
+}]]));
 var observationsByOpportunity = {
 	"opp-grid-modernization": [
 		{
@@ -937,6 +994,9 @@ var FixtureMsxConnector = class {
 	async listOpportunities(accountId) {
 		return structuredClone(opportunities.filter((opportunity) => opportunity.accountId === accountId));
 	}
+	async listMilestones(opportunityId) {
+		return structuredClone(milestonesByOpportunity[opportunityId] ?? []);
+	}
 	async getOpportunityContext(opportunityId) {
 		const opportunity = opportunities.find((candidate) => candidate.id === opportunityId);
 		if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`);
@@ -1191,6 +1251,9 @@ var ThinSliceOrchestrator = class {
 	listOpportunities(accountId) {
 		return this.msx.listOpportunities(accountId);
 	}
+	listMilestones(opportunityId) {
+		return this.msx.listMilestones(opportunityId);
+	}
 	async runMcemCoach(input) {
 		const request = mcemRequestSchema.parse(input);
 		const context = await this.msx.getOpportunityContext(request.opportunityId);
@@ -1276,6 +1339,7 @@ var AzureCliMsxTokenProvider = class {
 			return {
 				state: "ready",
 				...this.corpId ? { displayName: this.corpId } : {},
+				...this.corpId ? { userEmail: this.corpId } : {},
 				detail: `${this.authenticationLabel} is signed in as ${this.corpId ?? "an authorized user"}.`
 			};
 		} catch (cause) {
@@ -1795,7 +1859,7 @@ Was this ${capability.replaceAll("-", " ")} guidance actionable?`;
 //#endregion
 //#region apps/desktop/electron/main/index.ts
 var desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-var rendererFile = resolve(desktopRoot, "dist/renderer/index.html");
+var rendererFile = process.env["TLC_UI_MODE"] === "legacy" ? resolve(desktopRoot, "dist/renderer/index.html") : resolve(desktopRoot, "dist/revamp/desktop.html");
 var preloadFile = resolve(desktopRoot, "dist-electron/preload/index.cjs");
 var developmentUrl = process.env["VITE_DEV_SERVER_URL"];
 var allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString();
@@ -1904,6 +1968,10 @@ function assertTrustedSender(event) {
 	if (!senderUrl || !senderUrl.startsWith(allowedRendererUrl)) throw new Error("Rejected IPC request from an untrusted renderer.");
 }
 function registerReadOnlyIpc() {
+	ipcMain.handle("tlc:exit-application", (event) => {
+		assertTrustedSender(event);
+		setImmediate(() => app.quit());
+	});
 	ipcMain.handle("tlc:get-data-status", (event) => {
 		assertTrustedSender(event);
 		return getDataStatus();
@@ -1919,6 +1987,10 @@ function registerReadOnlyIpc() {
 	ipcMain.handle("tlc:list-opportunities", (event, accountId) => {
 		assertTrustedSender(event);
 		return orchestrator.listOpportunities(z.string().min(1).parse(accountId));
+	});
+	ipcMain.handle("tlc:list-milestones", (event, opportunityId) => {
+		assertTrustedSender(event);
+		return orchestrator.listMilestones(z.string().min(1).parse(opportunityId));
 	});
 	ipcMain.handle("tlc:run-mcem-coach", (event, request) => {
 		assertTrustedSender(event);

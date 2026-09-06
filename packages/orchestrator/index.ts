@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {
+  addMsxOpportunityLink,
   agentTaskRequestSchema,
   contractVersion,
   mcemRequestSchema,
@@ -9,6 +10,7 @@ import {
   type AgentTaskResponse,
   type McemRequest,
   type McemResponse,
+  type Milestone,
   type Opportunity,
   measurePerformance,
   type PerformanceReporter
@@ -54,7 +56,7 @@ export class ThinSliceOrchestrator {
     private readonly mcem: McemGuidanceConnector,
     private readonly taskAgents: TaskAgentRegistry = {},
     private readonly performanceReporter?: PerformanceReporter
-  ) {}
+  ) { }
 
   listAccounts(): Promise<Account[]> {
     return this.msx.listAccounts()
@@ -62,6 +64,10 @@ export class ThinSliceOrchestrator {
 
   listOpportunities(accountId: string): Promise<Opportunity[]> {
     return this.msx.listOpportunities(accountId)
+  }
+
+  listMilestones(opportunityId: string): Promise<Milestone[]> {
+    return this.msx.listMilestones(opportunityId)
   }
 
   async runMcemCoach(input: McemRequest): Promise<McemResponse> {
@@ -117,20 +123,4 @@ export class ThinSliceOrchestrator {
   }
 }
 
-export function addMsxOpportunityLink(content: string, opportunityId: string): string {
-  if (/microsoftsales\.crm\.dynamics\.com\/main\.aspx[^\s)]*\bopportunity\b/i.test(content)) return content
-
-  const opportunityUrl = new URL('https://microsoftsales.crm.dynamics.com/main.aspx')
-  opportunityUrl.searchParams.set('pagetype', 'entityrecord')
-  opportunityUrl.searchParams.set('etn', 'opportunity')
-  opportunityUrl.searchParams.set('id', opportunityId)
-  const link = `**MSX Opportunity:** [Open opportunity in MSX](${opportunityUrl.toString()})`
-  const lines = content.split('\n')
-  const accountLine = lines.findIndex((line) => /^\s*\*\*Account:\*\*/i.test(line))
-  const headingLine = lines.findIndex((line) => /^\s*#{1,6}\s+/.test(line))
-  const insertionIndex = accountLine >= 0
-    ? accountLine + 1
-    : headingLine >= 0 ? headingLine + 1 : 0
-  lines.splice(insertionIndex, 0, link)
-  return lines.join('\n')
-}
+export { addMsxOpportunityLink }
