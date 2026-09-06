@@ -2,7 +2,6 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { loadFoundryEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
 
 const manifestSchema = z.object({
   schemaVersion: z.literal(1),
@@ -59,9 +58,21 @@ const goldenScenarioSchema = z.object({
   }).strict()).min(3)
 }).strict()
 
+const environmentAgentBindingsSchema = z.object({
+  foundry: z.object({
+    agents: z.object({
+      mcemCoach: z.object({ name: z.string(), type: z.literal('prompt'), protocol: z.literal('responses') }),
+      riskSolutionPlay: z.object({ name: z.string(), type: z.literal('prompt'), protocol: z.literal('responses') }),
+      pursuitExecutive: z.object({ name: z.string(), type: z.literal('prompt'), protocol: z.literal('responses') }),
+      accountPulse: z.object({ name: z.string(), type: z.literal('prompt'), protocol: z.literal('responses') })
+    })
+  })
+})
+
 describe('Foundry agent manifests', () => {
   it('keeps all prompt-agent source names aligned with the checked-in environment sample', async () => {
-    const environment = await loadFoundryEnvironment(resolve('config/foundry.environment.example.json'))
+    const environmentContent = await readFile(resolve('config/foundry.environment.example.json'), 'utf8')
+    const environment = environmentAgentBindingsSchema.parse(JSON.parse(environmentContent))
     const suiteNames = new Set<string>()
 
     for (const [binding, directory, uniqueRequirements] of agentBindings) {

@@ -23,7 +23,9 @@ import { buildSampleAgentResponse } from './sample-agent-response.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
-const rendererFile = resolve(desktopRoot, 'dist/renderer/index.html')
+const rendererFile = process.env['TLC_UI_MODE'] === 'legacy'
+  ? resolve(desktopRoot, 'dist/renderer/index.html')
+  : resolve(desktopRoot, 'dist/revamp/desktop.html')
 const preloadFile = resolve(desktopRoot, 'dist-electron/preload/index.cjs')
 const developmentUrl = process.env['VITE_DEV_SERVER_URL']
 const allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString()
@@ -162,6 +164,10 @@ function assertTrustedSender(event: IpcMainInvokeEvent): void {
 }
 
 function registerReadOnlyIpc(): void {
+  ipcMain.handle('tlc:exit-application', (event) => {
+    assertTrustedSender(event)
+    setImmediate(() => app.quit())
+  })
   ipcMain.handle('tlc:get-data-status', (event) => {
     assertTrustedSender(event)
     return getDataStatus()

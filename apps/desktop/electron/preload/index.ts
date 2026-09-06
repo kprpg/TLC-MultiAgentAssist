@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { Account, AgentTaskRequest, AgentTaskResponse, AuthStatus, DesktopDataStatus, EmailComposeRequest, EmailComposeResult, ExportResponseRequest, ExportResponseResult, McemRequest, McemResponse, Opportunity } from '../../../../packages/common/index.js'
 
 export interface TlcDesktopApi {
+  exitApplication(): Promise<void>
   getDataStatus(): Promise<DesktopDataStatus>
   connectMcem(): Promise<AuthStatus>
   listAccounts(): Promise<Account[]>
@@ -14,6 +15,7 @@ export interface TlcDesktopApi {
 }
 
 const api: TlcDesktopApi = {
+  exitApplication: () => ipcRenderer.invoke('tlc:exit-application'),
   getDataStatus: () => ipcRenderer.invoke('tlc:get-data-status'),
   connectMcem: () => ipcRenderer.invoke('tlc:connect-mcem'),
   listAccounts: () => ipcRenderer.invoke('tlc:list-accounts'),

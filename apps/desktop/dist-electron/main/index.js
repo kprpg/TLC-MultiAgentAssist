@@ -219,9 +219,15 @@ function report(reporter, operation, startedAt, outcome) {
 }
 //#endregion
 //#region packages/common/configuration/foundry-environment.ts
+var templatePlaceholderIds = new Set([
+	"11111111-1111-4111-8111-111111111111",
+	"22222222-2222-4222-8222-222222222222",
+	"33333333-3333-4333-8333-333333333333"
+]);
+var configuredUuidSchema = z.string().uuid().refine((value) => !templatePlaceholderIds.has(value), "Replace the template UUID with the Azure resource value.");
 var appRegistrationSchema = z.object({
-	tenantId: z.string().uuid(),
-	clientId: z.string().uuid(),
+	tenantId: configuredUuidSchema,
+	clientId: configuredUuidSchema,
 	redirectUri: z.string().url()
 }).strict();
 var resourceScopesSchema = z.object({
@@ -232,13 +238,13 @@ var resourceScopesSchema = z.object({
 var authenticationSchema = z.discriminatedUnion("mode", [z.object({
 	mode: z.literal("azure-cli"),
 	expectedUserDomain: z.string().regex(/^@[a-z0-9.-]+$/),
-	foundryTenantId: z.string().uuid(),
+	foundryTenantId: configuredUuidSchema,
 	scopes: resourceScopesSchema,
 	appRegistration: appRegistrationSchema.optional()
 }).strict(), z.object({
 	mode: z.literal("interactive-browser"),
 	expectedUserDomain: z.string().regex(/^@[a-z0-9.-]+$/),
-	foundryTenantId: z.string().uuid(),
+	foundryTenantId: configuredUuidSchema,
 	scopes: resourceScopesSchema,
 	appRegistration: appRegistrationSchema
 }).strict()]);
@@ -252,7 +258,7 @@ var foundryEnvironmentSchema = z.object({
 	environment: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
 	authentication: authenticationSchema,
 	foundry: z.object({
-		projectEndpoint: z.string().url(),
+		projectEndpoint: z.string().url().refine((value) => !value.includes("YOUR-FOUNDRY-ACCOUNT") && !value.includes("/YOUR-PROJECT"), "Replace the template endpoint with the Microsoft Foundry project endpoint."),
 		requestTimeoutMs: z.number().int().min(1e3).max(3e5),
 		agents: z.object({
 			mcemCoach: foundryAgentSchema,
@@ -1795,7 +1801,7 @@ Was this ${capability.replaceAll("-", " ")} guidance actionable?`;
 //#endregion
 //#region apps/desktop/electron/main/index.ts
 var desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-var rendererFile = resolve(desktopRoot, "dist/renderer/index.html");
+var rendererFile = process.env["TLC_UI_MODE"] === "legacy" ? resolve(desktopRoot, "dist/renderer/index.html") : resolve(desktopRoot, "dist/revamp/desktop.html");
 var preloadFile = resolve(desktopRoot, "dist-electron/preload/index.cjs");
 var developmentUrl = process.env["VITE_DEV_SERVER_URL"];
 var allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString();
@@ -1904,6 +1910,10 @@ function assertTrustedSender(event) {
 	if (!senderUrl || !senderUrl.startsWith(allowedRendererUrl)) throw new Error("Rejected IPC request from an untrusted renderer.");
 }
 function registerReadOnlyIpc() {
+	ipcMain.handle("tlc:exit-application", (event) => {
+		assertTrustedSender(event);
+		setImmediate(() => app.quit());
+	});
 	ipcMain.handle("tlc:get-data-status", (event) => {
 		assertTrustedSender(event);
 		return getDataStatus();

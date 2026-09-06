@@ -1,6 +1,7 @@
 let electron = require("electron");
 //#region apps/desktop/electron/preload/index.ts
 electron.contextBridge.exposeInMainWorld("tlc", {
+	exitApplication: () => electron.ipcRenderer.invoke("tlc:exit-application"),
 	getDataStatus: () => electron.ipcRenderer.invoke("tlc:get-data-status"),
 	connectMcem: () => electron.ipcRenderer.invoke("tlc:connect-mcem"),
 	listAccounts: () => electron.ipcRenderer.invoke("tlc:list-accounts"),

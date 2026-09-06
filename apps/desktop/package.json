@@ -29,6 +29,7 @@
     "files": [
       "dist-electron/**/*",
       "dist/renderer/**/*",
+      "dist/revamp/**/*",
       "package.json"
     ],
     "extraResources": [
