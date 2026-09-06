@@ -26,8 +26,15 @@ test('retrieves live MSX data and completes all four Foundry-backed UI tasks', a
       return await window.getByRole('tab', { name: 'Multi-Agent Guidance', exact: true }).isVisible() ? 'ready' : 'loading'
     }, { timeout: 120_000 }).toBe('ready')
     await window.getByRole('tab', { name: 'Multi-Agent Guidance', exact: true }).click()
-    for (const task of ['Account Pulse', 'MCEM Coach', 'Pursuit', 'Risk & Play']) {
+    const tasks = [
+      ['Account Pulse', 'What should the account team focus on this week?'],
+      ['MCEM Coach', 'How do we move this opportunity to the next MCEM stage?'],
+      ['Pursuit', 'Create an executive-ready brief for this opportunity.'],
+      ['Risk & Play', 'Identify the highest grounded risks and mitigation actions.']
+    ] as const
+    for (const [task, prompt] of tasks) {
       await window.getByRole('tab', { name: task }).click()
+      await window.getByRole('button', { name: prompt }).click()
       const response = window.locator('.agent-response')
       await expect(response.locator('.eyebrow')).toHaveText(task, { timeout: 90_000 })
       await expect(response).not.toBeEmpty()

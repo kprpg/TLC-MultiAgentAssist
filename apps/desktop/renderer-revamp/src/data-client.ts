@@ -7,6 +7,10 @@ import {
     type Account,
     type AgentCapability,
     type AgentTaskResponse,
+    type EmailComposeRequest,
+    type EmailComposeResult,
+    type ExportResponseRequest,
+    type ExportResponseResult,
     type McemResponse,
     type Opportunity
 } from '../../../../packages/common/index.js'
@@ -17,7 +21,10 @@ export interface RevampDataClient {
     listAccounts(): Promise<Account[]>
     listOpportunities(accountId: string): Promise<Opportunity[]>
     runMcemCoach(accountId: string, opportunityId: string): Promise<McemResponse>
-    runAgentTask(capability: AgentCapability, accountId: string, opportunityId: string): Promise<AgentTaskResponse>
+    runAgentTask(capability: AgentCapability, accountId: string, opportunityId: string, prompt: string): Promise<AgentTaskResponse>
+    openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
+    exportAgentResponse(request: ExportResponseRequest): Promise<ExportResponseResult>
+    openEvidence(url: string): Promise<void>
 }
 
 type Fetcher = typeof fetch
@@ -47,10 +54,37 @@ export function createWebApiClient(fetcher: Fetcher = fetch): RevampDataClient {
             method: 'POST',
             body: JSON.stringify({ contractVersion, accountId, opportunityId, prompt: 'How do we move this opportunity to the next MCEM stage?' })
         })),
-        runAgentTask: async (capability, accountId, opportunityId) => agentTaskResponseSchema.parse(await apiRequest(fetcher, '/api/agent-task', {
+        runAgentTask: async (capability, accountId, opportunityId, prompt) => agentTaskResponseSchema.parse(await apiRequest(fetcher, '/api/agent-task', {
             method: 'POST',
-            body: JSON.stringify({ contractVersion, capability, accountId, opportunityId, prompt: 'Give the account team grounded guidance for this opportunity.' })
-        }))
+            body: JSON.stringify({ contractVersion, capability, accountId, opportunityId, prompt })
+        })),
+        openEmailCompose: async (request) => {
+            const result = await apiRequest(fetcher, '/api/open-email-compose', { method: 'POST', body: JSON.stringify(request) }) as { state?: unknown; composeUri?: unknown }
+            if (result.state !== 'opened' || typeof result.composeUri !== 'string') throw new Error('The web host returned an invalid email compose response.')
+            window.location.assign(result.composeUri)
+            return { state: 'opened' }
+        },
+        exportAgentResponse: async (request) => {
+            const response = await fetcher('/api/export-agent-response', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { accept: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'content-type': 'application/json' },
+                body: JSON.stringify(request)
+            })
+            if (!response.ok) {
+                const payload = await response.json().catch(() => null) as { error?: string } | null
+                throw new Error(payload?.error ?? `The server request failed (${response.status}).`)
+            }
+            const blob = await response.blob()
+            const downloadUrl = URL.createObjectURL(blob)
+            const anchor = document.createElement('a')
+            anchor.href = downloadUrl
+            anchor.download = response.headers.get('x-tlc-file-name') || 'TLC-agent-response.docx'
+            anchor.click()
+            URL.revokeObjectURL(downloadUrl)
+            return { state: 'saved', filePath: anchor.download }
+        },
+        openEvidence: async (url) => { window.open(url, '_blank', 'noopener,noreferrer') }
     }
 }
 
@@ -60,6 +94,9 @@ interface DesktopBridge {
     listOpportunities(accountId: string): Promise<Opportunity[]>
     runMcemCoach(request: { contractVersion: typeof contractVersion; accountId: string; opportunityId: string; prompt: string }): Promise<McemResponse>
     runAgentTask(request: { contractVersion: typeof contractVersion; capability: AgentCapability; accountId: string; opportunityId: string; prompt: string }): Promise<AgentTaskResponse>
+    openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
+    exportAgentResponse(request: ExportResponseRequest): Promise<ExportResponseResult>
+    openEvidence(url: string): Promise<void>
 }
 
 declare global {
@@ -149,7 +186,7 @@ function webClient(): RevampDataClient {
             if (!opportunity) throw new Error('Unknown sample opportunity.')
             return buildWebEvaluation(opportunity)
         },
-        runAgentTask: async (capability, _accountId, opportunityId) => {
+        runAgentTask: async (capability, _accountId, opportunityId, prompt) => {
             const opportunity = opportunities.find((item) => item.id === opportunityId)
             if (!opportunity) throw new Error('Unknown sample opportunity.')
             const generatedAt = new Date().toISOString()
@@ -161,10 +198,13 @@ function webClient(): RevampDataClient {
                 generatedAt,
                 mode: 'sample',
                 state: 'complete',
-                content: `## ${capability.replaceAll('-', ' ')}\n\n**${opportunity.name}** is shown using sanitized web-preview evidence.\n\n- Validate the next customer commitment.\n- Confirm the accountable role and target date.\n- Record the outcome in MSX after human review.`,
+                content: `## ${capability.replaceAll('-', ' ')}\n\n**${opportunity.name}** is shown using sanitized web-preview evidence.\n\n> Requested: ${prompt}\n\n- Validate the next customer commitment.\n- Confirm the accountable role and target date.\n- Record the outcome in MSX after human review.`,
                 sourceHealth: [{ source: 'msx', state: 'sample', detail: 'Sanitized static sample.', checkedAt: generatedAt }]
             }
-        }
+        },
+        openEmailCompose: createWebApiClient().openEmailCompose,
+        exportAgentResponse: createWebApiClient().exportAgentResponse,
+        openEvidence: createWebApiClient().openEvidence
     }
 }
 
@@ -175,7 +215,10 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         listAccounts: () => bridge.listAccounts(),
         listOpportunities: (accountId) => bridge.listOpportunities(accountId),
         runMcemCoach: (accountId, opportunityId) => bridge.runMcemCoach({ contractVersion, accountId, opportunityId, prompt: 'How do we move this opportunity to the next MCEM stage?' }),
-        runAgentTask: (capability, accountId, opportunityId) => bridge.runAgentTask({ contractVersion, capability, accountId, opportunityId, prompt: 'Give the account team grounded guidance for this opportunity.' })
+        runAgentTask: (capability, accountId, opportunityId, prompt) => bridge.runAgentTask({ contractVersion, capability, accountId, opportunityId, prompt }),
+        openEmailCompose: (request) => bridge.openEmailCompose(request),
+        exportAgentResponse: (request) => bridge.exportAgentResponse(request),
+        openEvidence: (url) => bridge.openEvidence(url)
     }
 }
 

@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Button, FluentProvider, Tooltip, webDarkTheme, webLightTheme } from '@fluentui/react-components'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Field, FluentProvider, Input, MessageBar, Spinner, Textarea, Tooltip, webDarkTheme, webLightTheme } from '@fluentui/react-components'
 import {
   Apps20Regular,
+  ArrowDownload20Regular,
   ArrowClockwise20Regular,
   Building20Regular,
   CheckmarkCircle20Filled,
@@ -14,6 +17,7 @@ import {
   Home20Regular,
   Lightbulb20Regular,
   List20Regular,
+  Mail20Regular,
   MoreHorizontal20Regular,
   PanelRight20Regular,
   Person20Regular,
@@ -23,7 +27,9 @@ import {
   Warning20Filled
 } from '@fluentui/react-icons'
 import type { Account, AgentCapability, AgentTaskResponse, McemResponse, Opportunity } from '../../../../packages/common/index.js'
+import { contractVersion } from '../../../../packages/common/index.js'
 import { createDataClient, stageOwner, type RevampDataClient } from './data-client.js'
+import { suggestedPrompts } from './prompt-catalog.js'
 
 type Shell = 'desktop' | 'web'
 type CenterTab = 'msx' | 'guidance'
@@ -75,7 +81,14 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [result, setResult] = useState<McemResponse | null>(null)
   const [centerTab, setCenterTab] = useState<CenterTab>('msx')
   const [capability, setCapability] = useState<AgentCapability>('account-pulse')
+  const [taskPrompt, setTaskPrompt] = useState('')
   const [agentResult, setAgentResult] = useState<AgentTaskResponse | null>(null)
+  const [agentLoading, setAgentLoading] = useState(false)
+  const [emailDialogOpen, setEmailDialogOpen] = useState(false)
+  const [emailRecipients, setEmailRecipients] = useState('')
+  const [emailSubject, setEmailSubject] = useState('')
+  const [shareStatus, setShareStatus] = useState<'ready' | 'running' | 'success' | 'error'>('ready')
+  const [shareMessage, setShareMessage] = useState('')
   const [collapsed, setCollapsed] = useState<Set<Blade>>(new Set())
   const [actionsOpen, setActionsOpen] = useState(true)
   const [mobileBlade, setMobileBlade] = useState<Blade | 'center'>('accounts')
@@ -151,19 +164,79 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     }
   }
 
-  async function loadGuidance(nextCapability = capability) {
+  function loadGuidance(nextCapability = capability) {
     if (!account || !opportunity) return
     setCapability(nextCapability)
     setCenterTab('guidance')
+    setTaskPrompt('')
     setAgentResult(null)
-    setLoading(true)
+    setShareMessage('')
     setMobileBlade('center')
+  }
+
+  async function runAgentPrompt(selectedPrompt = taskPrompt, selectedCapability = capability) {
+    if (!account || !opportunity) return
+    const prompt = selectedPrompt.trim()
+    if (prompt.length < 3) return
+    setCapability(selectedCapability)
+    setTaskPrompt(selectedPrompt)
+    setAgentResult(null)
+    setAgentLoading(true)
+    setError('')
+    setShareStatus('ready')
+    setShareMessage('')
     try {
-      setAgentResult(await client.runAgentTask(nextCapability, account.id, opportunity.id))
+      setAgentResult(await client.runAgentTask(selectedCapability, account.id, opportunity.id, prompt))
     } catch (cause) {
       handleError(cause)
     } finally {
-      setLoading(false)
+      setAgentLoading(false)
+    }
+  }
+
+  function openEmailDialog() {
+    if (!agentResult) return
+    const label = capabilities.find((item) => item.id === agentResult.capability)?.label ?? 'Agent response'
+    setEmailSubject(`${label}: ${opportunity?.name ?? 'Agent response'}`)
+    setShareStatus('ready')
+    setShareMessage('')
+    setEmailDialogOpen(true)
+  }
+
+  async function openEmailCompose() {
+    if (!agentResult) return
+    const recipients = emailRecipients.split(/[;,]/).map((recipient) => recipient.trim()).filter(Boolean)
+    const label = capabilities.find((item) => item.id === agentResult.capability)?.label ?? 'Agent response'
+    setShareStatus('running')
+    setShareMessage('')
+    try {
+      await client.openEmailCompose({ contractVersion, recipients, subject: emailSubject, responseTitle: label, responseMarkdown: agentResult.content })
+      setEmailDialogOpen(false)
+      setShareStatus('success')
+      setShareMessage('Email message opened for review.')
+    } catch (cause) {
+      setShareStatus('error')
+      setShareMessage(cause instanceof Error ? cause.message : 'The email message could not be opened.')
+    }
+  }
+
+  async function exportAgentResponse() {
+    if (!agentResult) return
+    const label = capabilities.find((item) => item.id === agentResult.capability)?.label ?? 'Agent response'
+    setShareStatus('running')
+    setShareMessage('')
+    try {
+      const response = await client.exportAgentResponse({
+        contractVersion,
+        responseTitle: `${label} - ${opportunity?.name ?? 'Agent response'}`,
+        responseMarkdown: agentResult.content,
+        generatedAt: agentResult.generatedAt
+      })
+      setShareStatus(response.state === 'saved' ? 'success' : 'ready')
+      setShareMessage(response.state === 'saved' ? 'Word document saved.' : '')
+    } catch (cause) {
+      setShareStatus('error')
+      setShareMessage(cause instanceof Error ? cause.message : 'The Word document could not be exported.')
     }
   }
 
@@ -205,7 +278,9 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setLoading(true)
     try {
       setResult(await client.runMcemCoach(account.id, opportunity.id))
-      if (centerTab === 'guidance') setAgentResult(await client.runAgentTask(capability, account.id, opportunity.id))
+      if (centerTab === 'guidance' && taskPrompt.trim().length >= 3) {
+        setAgentResult(await client.runAgentTask(capability, account.id, opportunity.id, taskPrompt.trim()))
+      }
     } catch (cause) {
       handleError(cause)
     } finally {
@@ -391,7 +466,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           </header>
           <div className="center-tabs" role="tablist" aria-label="Opportunity view">
             <button role="tab" aria-selected={centerTab === 'msx'} onClick={() => setCenterTab('msx')}>MSX</button>
-            <button role="tab" aria-selected={centerTab === 'guidance'} onClick={() => void loadGuidance()}>Multi-Agent Guidance</button>
+            <button role="tab" aria-selected={centerTab === 'guidance'} onClick={() => loadGuidance()}>Multi-Agent Guidance</button>
           </div>
           {loading && <div className="loading-state">Loading grounded context…</div>}
           {error && <div className="error-state">{error}</div>}
@@ -409,9 +484,40 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           </div>}
           {!loading && centerTab === 'guidance' && <div className="workbench-content guidance-view">
             <div className="agent-tabs" role="tablist" aria-label="Agent role">
-              {capabilities.map((item) => <button key={item.id} role="tab" aria-selected={capability === item.id} onClick={() => void loadGuidance(item.id)}>{item.label}</button>)}
+              {capabilities.map((item) => <button key={item.id} role="tab" aria-selected={capability === item.id} onClick={() => loadGuidance(item.id)}>{item.label}</button>)}
             </div>
-            {agentResult ? <article className="agent-response"><p className="eyebrow">{capabilities.find((item) => item.id === agentResult.capability)?.label}</p>{agentResult.content.split('\n').filter(Boolean).map((line, index) => <p key={`${line}-${index}`}>{line.replace(/^#+\s*/, '').replace(/^[-*]\s*/, '• ')}</p>)}</article> : <div className="empty-state">Choose an agent role to generate grounded guidance.</div>}
+            <div className="agent-prompt-suggestions" aria-label={`${capabilities.find((item) => item.id === capability)?.label} suggested prompts`}>
+              {suggestedPrompts[capability].map((prompt) => <button key={prompt} type="button" disabled={agentLoading} onClick={() => void runAgentPrompt(prompt)}>{prompt}</button>)}
+            </div>
+            <div className="agent-composer">
+              <Textarea aria-label="Agent task" placeholder="Ask a different question..." resize="vertical" value={taskPrompt} onChange={(_, data) => setTaskPrompt(data.value)} />
+              <Button appearance="primary" disabled={agentLoading || taskPrompt.trim().length < 3} onClick={() => void runAgentPrompt()}>{agentLoading ? 'Analyzing...' : 'Send'}</Button>
+            </div>
+            {agentLoading && <Spinner label={`Running ${capabilities.find((item) => item.id === capability)?.label}`} />}
+            {agentResult && !agentLoading ? <article className="agent-response">
+              <header className="agent-response-header">
+                <div><p className="eyebrow">{capabilities.find((item) => item.id === agentResult.capability)?.label}</p><small>Agent {agentResult.agentVersion}</small></div>
+                <div className="response-actions" aria-label="Response actions">
+                  <Button icon={<Mail20Regular />} disabled={shareStatus === 'running'} onClick={openEmailDialog}>Send Email</Button>
+                  <Button icon={<ArrowDownload20Regular />} disabled={shareStatus === 'running'} onClick={() => void exportAgentResponse()}>Export</Button>
+                </div>
+              </header>
+              {shareMessage && <MessageBar intent={shareStatus === 'error' ? 'error' : 'success'}>{shareMessage}</MessageBar>}
+              <div className="agent-response-markdown">
+                <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ a: ({ href, children }) => <a href={href} onClick={(event) => { event.preventDefault(); if (href) void client.openEvidence(href) }}>{children}</a> }}>{agentResult.content}</Markdown>
+              </div>
+            </article> : !agentLoading && <div className="empty-state compact">Choose a suggested prompt or ask a different question.</div>}
+            <Dialog open={emailDialogOpen} onOpenChange={(_, data) => setEmailDialogOpen(data.open)}>
+              <DialogSurface><DialogBody><DialogTitle>Open email message</DialogTitle><DialogContent className="email-draft-form">
+                <p>The prepared message opens in your default mail application for review before sending.</p>
+                <Field label="Recipients" hint="Separate addresses with commas or semicolons."><Input type="email" aria-label="Email recipients" value={emailRecipients} onChange={(_, data) => setEmailRecipients(data.value)} /></Field>
+                <Field label="Subject"><Input aria-label="Email subject" value={emailSubject} onChange={(_, data) => setEmailSubject(data.value)} /></Field>
+                {shareStatus === 'error' && shareMessage && <MessageBar intent="error">{shareMessage}</MessageBar>}
+              </DialogContent><DialogActions>
+                <Button onClick={() => setEmailDialogOpen(false)}>Cancel</Button>
+                <Button appearance="primary" icon={<Mail20Regular />} disabled={shareStatus === 'running' || !emailRecipients.trim() || !emailSubject.trim()} onClick={() => void openEmailCompose()}>{shareStatus === 'running' ? 'Opening...' : 'Open Email'}</Button>
+              </DialogActions></DialogBody></DialogSurface>
+            </Dialog>
           </div>}
         </>}
       </section>

@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildWebApiHandler, type WebRuntime } from '../../../apps/web/src/app.js'
+import { contractVersion } from '../../../packages/common/index.js'
 
 const authenticationHeaders = {
     'x-ms-client-principal': 'encoded-principal',
@@ -132,6 +133,52 @@ describe('hosted web API', () => {
         const body = await response.text()
         expect(JSON.parse(body)).toMatchObject({ error: 'The server could not complete the request.' })
         expect(body).not.toContain('secret downstream detail')
+    })
+
+    it('prepares a same-origin email compose URI without sending the response', async () => {
+        const createRuntime = vi.fn(() => runtime())
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime }))
+
+        const response = await fetch(`${baseUrl}/api/open-email-compose`, {
+            method: 'POST',
+            headers: { ...authenticationHeaders, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+            body: JSON.stringify({
+                contractVersion,
+                recipients: ['seller@example.com'],
+                subject: 'Account guidance',
+                responseTitle: 'Account Pulse',
+                responseMarkdown: '## Next step\n\n- Confirm owner'
+            })
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual(expect.objectContaining({
+            state: 'opened',
+            composeUri: expect.stringMatching(/^mailto:seller%40example\.com\?subject=Account%20guidance/)
+        }))
+        expect(createRuntime).not.toHaveBeenCalled()
+    })
+
+    it('exports the Markdown response as an authenticated Word document', async () => {
+        const createRuntime = vi.fn(() => runtime())
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime }))
+
+        const response = await fetch(`${baseUrl}/api/export-agent-response`, {
+            method: 'POST',
+            headers: { ...authenticationHeaders, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+            body: JSON.stringify({
+                contractVersion,
+                responseTitle: 'Account Pulse: Contoso?',
+                responseMarkdown: '# Account Pulse\n\n| Owner | Action |\n| --- | --- |\n| Alex | Confirm |',
+                generatedAt: '2026-04-01T12:00:00.000Z'
+            })
+        })
+
+        expect(response.status).toBe(200)
+        expect(response.headers.get('content-type')).toBe('application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        expect(response.headers.get('x-tlc-file-name')).toBe('Account Pulse- Contoso-.docx')
+        expect(Buffer.from(await response.arrayBuffer()).subarray(0, 2).toString()).toBe('PK')
+        expect(createRuntime).not.toHaveBeenCalled()
     })
 
     function listen(handler: ReturnType<typeof buildWebApiHandler>): Promise<string> {

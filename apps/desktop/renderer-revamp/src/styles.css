@@ -741,6 +741,41 @@ button {
     border-bottom: 1px solid var(--cp-border);
 }
 
+.agent-prompt-suggestions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.agent-prompt-suggestions button {
+    min-height: 58px;
+    padding: 10px 12px;
+    color: var(--cp-text);
+    background: var(--cp-surface);
+    border: 1px solid var(--cp-border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1.4;
+    text-align: left;
+}
+
+.agent-prompt-suggestions button:hover,
+.agent-prompt-suggestions button:focus-visible {
+    background: var(--cp-accent-soft);
+    border-color: var(--cp-accent);
+    outline: 0;
+}
+
+.agent-composer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 8px;
+    margin-top: 10px;
+}
+
 .agent-response {
     margin-top: 14px;
     padding: 16px;
@@ -749,10 +784,68 @@ button {
     border-radius: 6px;
 }
 
-.agent-response p {
-    margin: 7px 0;
+.agent-response-header,
+.response-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.agent-response-header small {
+    color: var(--cp-text-muted);
     font-size: 12px;
-    line-height: 1.5;
+}
+
+.agent-response-markdown {
+    margin-top: 14px;
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+.agent-response-markdown h1,
+.agent-response-markdown h2,
+.agent-response-markdown h3 {
+    margin: 18px 0 8px;
+    font-size: 16px;
+}
+
+.agent-response-markdown p,
+.agent-response-markdown ul,
+.agent-response-markdown ol,
+.agent-response-markdown blockquote,
+.agent-response-markdown pre,
+.agent-response-markdown table {
+    margin: 8px 0;
+}
+
+.agent-response-markdown blockquote {
+    padding-left: 12px;
+    border-left: 3px solid var(--cp-accent);
+    color: var(--cp-text-muted);
+}
+
+.agent-response-markdown table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.agent-response-markdown th,
+.agent-response-markdown td {
+    padding: 6px 8px;
+    border: 1px solid var(--cp-border);
+    text-align: left;
+}
+
+.agent-response-markdown pre {
+    overflow-x: auto;
+    padding: 10px;
+    background: var(--cp-surface-soft);
+}
+
+.email-draft-form {
+    display: grid;
+    gap: 12px;
 }
 
 .action-item {
@@ -939,6 +1032,16 @@ button {
 
     .agent-tabs button {
         white-space: nowrap;
+    }
+
+    .agent-prompt-suggestions,
+    .agent-composer {
+        grid-template-columns: 1fr;
+    }
+
+    .agent-response-header {
+        align-items: flex-start;
+        flex-direction: column;
     }
 
 }

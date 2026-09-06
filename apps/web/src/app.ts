@@ -5,6 +5,8 @@ import {
     accountSchema,
     agentTaskRequestSchema,
     agentTaskResponseSchema,
+    emailComposeRequestSchema,
+    exportResponseRequestSchema,
     mcemRequestSchema,
     mcemResponseSchema,
     opportunitySchema,
@@ -15,6 +17,8 @@ import {
     type McemResponse,
     type Opportunity
 } from '../../../packages/common/index.js'
+import { createOutlookComposeUri } from '../../desktop/electron/main/outlook-compose.js'
+import { createResponseDocumentBuffer } from '../../desktop/electron/main/response-document.js'
 
 const accountIdSchema = z.string().min(1).max(200)
 const maximumBodyBytes = 1_048_576
@@ -64,6 +68,25 @@ export function buildWebApiHandler(options: WebApiOptions) {
 
             const authentication = await (options.authenticate ?? readEasyAuthAuthentication)(request)
             assertSameOriginMutation(request)
+
+            if (request.method === 'POST' && url.pathname === '/api/open-email-compose') {
+                const input = emailComposeRequestSchema.parse(await readJsonBody(request))
+                sendJson(response, 200, { state: 'opened', composeUri: createOutlookComposeUri(input) })
+                return true
+            }
+
+            if (request.method === 'POST' && url.pathname === '/api/export-agent-response') {
+                const input = exportResponseRequestSchema.parse(await readJsonBody(request))
+                const document = await createResponseDocumentBuffer(input)
+                const fileName = safeDocumentFileName(input.responseTitle)
+                response.statusCode = 200
+                response.setHeader('content-type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+                response.setHeader('content-disposition', `attachment; filename="${fileName}"`)
+                response.setHeader('x-tlc-file-name', fileName)
+                response.end(document)
+                return true
+            }
+
             const runtime = await options.createRuntime(authentication)
 
             if (request.method === 'GET' && url.pathname === '/api/accounts') {
@@ -102,6 +125,12 @@ export function buildWebApiHandler(options: WebApiOptions) {
             return true
         }
     }
+}
+
+function safeDocumentFileName(title: string): string {
+    const safeTitle = Array.from(title, (character) => character.charCodeAt(0) < 32 || '<>:"/\\|?*'.includes(character) ? '-' : character)
+        .join('').replace(/[. ]+$/g, '').slice(0, 120).trim()
+    return `${safeTitle || 'TLC-agent-response'}.docx`
 }
 
 export function readEasyAuthAuthentication(request: IncomingMessage): AuthenticatedRequest {
