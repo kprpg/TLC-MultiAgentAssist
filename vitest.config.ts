@@ -6,7 +6,7 @@ export default defineConfig({
     include: ['tests/**/*.{test,spec}.ts'],
     exclude: ['tests/e2e/**'],
     coverage: {
-      reporter: ['text', 'html']
+      reporter: ['text', 'html', 'json', 'lcov']
     }
   }
 })
