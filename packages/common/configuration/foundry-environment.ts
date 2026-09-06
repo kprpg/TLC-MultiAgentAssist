@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { posix, win32 } from 'node:path'
 import { z } from 'zod'
+
+const windowsAbsolutePathPattern = /^[a-zA-Z]:[\\/]/
 
 const templatePlaceholderIds = new Set([
   '11111111-1111-4111-8111-111111111111',
@@ -74,7 +76,9 @@ export function resolveFoundryEnvironmentPath(
   workingDirectory = process.cwd()
 ): string {
   const configuredPath = environment['TLC_FOUNDRY_ENV_FILE']?.trim()
-  return resolve(workingDirectory, configuredPath || 'config/foundry.environment.json')
+  const relativePath = configuredPath || 'config/foundry.environment.json'
+  const path = windowsAbsolutePathPattern.test(workingDirectory) ? win32 : posix
+  return path.resolve(workingDirectory, relativePath)
 }
 
 export async function loadFoundryEnvironment(filePath: string): Promise<FoundryEnvironment> {
