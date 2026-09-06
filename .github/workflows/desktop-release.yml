@@ -1,4 +1,4 @@
-name: Publish desktop release
+name: Build and publish desktop release
 
 on:
   push:
@@ -43,10 +43,10 @@ jobs:
           $releaseTag = $env:GITHUB_REF_NAME
 
           if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
-            if ([string]::IsNullOrWhiteSpace($env:REQUESTED_TAG)) {
-              $releaseTag = "v$packageVersion-build.$env:GITHUB_RUN_NUMBER"
+            $releaseTag = if ([string]::IsNullOrWhiteSpace($env:REQUESTED_TAG)) {
+              "v$packageVersion-build.$env:GITHUB_RUN_NUMBER"
             } else {
-              $releaseTag = $env:REQUESTED_TAG.Trim()
+              $env:REQUESTED_TAG.Trim()
             }
           }
 
@@ -68,10 +68,14 @@ jobs:
             throw "Tag $env:RELEASE_TAG does not match desktop package version v$env:PACKAGE_VERSION."
           }
 
-      - name: Validate
-        run: |
-          npm run typecheck
-          npm test
+      - name: Run validation suite
+        run: npm run phase0:check
+
+      - name: Run legacy desktop smoke test
+        run: npm run test:smoke:desktop
+
+      - name: Run revamp desktop smoke test
+        run: npm run test:smoke:revamp:desktop
 
       - name: Package Windows application
         run: npm run desktop:package
@@ -83,6 +87,7 @@ jobs:
           path: |
             release/*.exe
             release/*.zip
+          if-no-files-found: error
 
       - name: Publish GitHub Release
         shell: pwsh
@@ -97,7 +102,7 @@ jobs:
           }
 
           if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
-            gh release create $env:RELEASE_TAG $artifacts --target $env:GITHUB_SHA --generate-notes --title "TLC MultiAgent Assist v$env:PACKAGE_VERSION (build $env:GITHUB_RUN_NUMBER)" --latest
+            gh release create $env:RELEASE_TAG $artifacts --target $env:GITHUB_SHA --generate-notes --title "TLC MultiAgent Assist Desktop v$env:PACKAGE_VERSION (build $env:GITHUB_RUN_NUMBER)" --latest
           } else {
-            gh release create $env:RELEASE_TAG $artifacts --verify-tag --generate-notes --title "TLC MultiAgent Assist $env:RELEASE_TAG"
+            gh release create $env:RELEASE_TAG $artifacts --verify-tag --generate-notes --title "TLC MultiAgent Assist Desktop $env:RELEASE_TAG" --latest
           }
