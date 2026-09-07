@@ -20,7 +20,7 @@ test('launches the secure MCEM operational workbench', async () => {
     const window = await app.firstWindow()
     const pageErrors: Error[] = []
     window.on('pageerror', (error) => pageErrors.push(error))
-    await expect(window).toHaveTitle('TLC Account Team Intelligence | Desktop')
+    await expect(window).toHaveTitle('TLC Account Team Intelligence')
     await window.evaluate(() => {
       localStorage.removeItem('tlc-left-pane-collapsed')
       localStorage.removeItem('tlc-right-pane-collapsed')
@@ -63,7 +63,7 @@ test('launches the secure MCEM operational workbench', async () => {
       return { gap: listStyles.gap, paddingTop: contentStyles.paddingTop }
     })
     expect(topbarBox?.height).toBe(48)
-    expect(analysisStyles).toEqual({ paddingTop: '20px', paddingLeft: '18px' })
+    expect(analysisStyles).toEqual({ paddingTop: '20px', paddingLeft: '22px' })
     expect(actionStyles).toEqual({ gap: '8px', paddingTop: '10px' })
 
     const contextToggle = window.getByRole('button', { name: 'Toggle account context' })
