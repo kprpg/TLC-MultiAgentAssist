@@ -19,7 +19,7 @@ test('launches the secure MCEM operational workbench', async () => {
     const window = await app.firstWindow()
     const pageErrors: Error[] = []
     window.on('pageerror', (error) => pageErrors.push(error))
-    await expect(window).toHaveTitle('TLC Account Team Intelligence')
+    await expect(window).toHaveTitle('TLC Account Team Intelligence | Desktop')
     await window.evaluate(() => {
       localStorage.removeItem('tlc-left-pane-collapsed')
       localStorage.removeItem('tlc-right-pane-collapsed')
