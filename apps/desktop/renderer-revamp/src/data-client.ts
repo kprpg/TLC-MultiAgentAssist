@@ -236,7 +236,7 @@ function webClient(): RevampDataClient {
                 generatedAt,
                 mode: 'sample',
                 state: 'complete',
-                content: `## ${capability.replaceAll('-', ' ')}\n\n**${opportunity.name}** is shown using sanitized web-preview evidence.\n\n> Requested: ${prompt}\n\n- Validate the next customer commitment.\n- Confirm the accountable role and target date.\n- Record the outcome in MSX after human review.`,
+                content: `## ${capability.replaceAll('-', ' ')}\n\n**${opportunity.name}** is shown using sanitized web-preview evidence.\n\n> Requested: ${prompt}\n\nOwner-based plan to close gaps\n\n1. ATS — Customer outcomes\n\n- Gap: Missing\n- Evidence: Confirm the accountable role and target date.\n\nRecommended sequence\n\n- Validate the next customer commitment.\n- Record the outcome in MSX after human review.\n\nAssumptions / cautions\n\n- Do not treat internal evidence as customer approval.`,
                 sourceHealth: [{ source: 'msx', state: 'sample', detail: 'Sanitized static sample.', checkedAt: generatedAt }]
             }
         },

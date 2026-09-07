@@ -207,6 +207,22 @@ z.object({
 	comment: z.string().max(500).optional()
 });
 //#endregion
+//#region packages/common/sharing/opportunity-link.ts
+function addMsxOpportunityLink(content, opportunityId) {
+	if (/microsoftsales\.crm\.dynamics\.com\/main\.aspx[^\s)]*\bopportunity\b/i.test(content)) return content;
+	const opportunityUrl = new URL("https://microsoftsales.crm.dynamics.com/main.aspx");
+	opportunityUrl.searchParams.set("pagetype", "entityrecord");
+	opportunityUrl.searchParams.set("etn", "opportunity");
+	opportunityUrl.searchParams.set("id", opportunityId);
+	const link = `**MSX Opportunity:** [Open opportunity in MSX](${opportunityUrl.toString()})`;
+	const lines = content.split("\n");
+	const accountLine = lines.findIndex((line) => /^\s*\*\*Account:\*\*/i.test(line));
+	const headingLine = lines.findIndex((line) => /^\s*#{1,6}\s+/.test(line));
+	const insertionIndex = accountLine >= 0 ? accountLine + 1 : headingLine >= 0 ? headingLine + 1 : 0;
+	lines.splice(insertionIndex, 0, link);
+	return lines.join("\n");
+}
+//#endregion
 //#region packages/common/telemetry/performance.ts
 async function measurePerformance(operation, reporter, action) {
 	const startedAt = globalThis.performance.now();
@@ -1295,20 +1311,6 @@ var ThinSliceOrchestrator = class {
 		};
 	}
 };
-function addMsxOpportunityLink(content, opportunityId) {
-	if (/microsoftsales\.crm\.dynamics\.com\/main\.aspx[^\s)]*\bopportunity\b/i.test(content)) return content;
-	const opportunityUrl = new URL("https://microsoftsales.crm.dynamics.com/main.aspx");
-	opportunityUrl.searchParams.set("pagetype", "entityrecord");
-	opportunityUrl.searchParams.set("etn", "opportunity");
-	opportunityUrl.searchParams.set("id", opportunityId);
-	const link = `**MSX Opportunity:** [Open opportunity in MSX](${opportunityUrl.toString()})`;
-	const lines = content.split("\n");
-	const accountLine = lines.findIndex((line) => /^\s*\*\*Account:\*\*/i.test(line));
-	const headingLine = lines.findIndex((line) => /^\s*#{1,6}\s+/.test(line));
-	const insertionIndex = accountLine >= 0 ? accountLine + 1 : headingLine >= 0 ? headingLine + 1 : 0;
-	lines.splice(insertionIndex, 0, link);
-	return lines.join("\n");
-}
 //#endregion
 //#region apps/desktop/electron/main/azure-cli-token-provider.ts
 var refreshBufferMs = 300 * 1e3;
@@ -2039,7 +2041,7 @@ function registerReadOnlyIpc() {
 	});
 }
 function safeFileName(value) {
-	return value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/[. ]+$/g, "").slice(0, 120) || "TLC agent response";
+	return [...value].map((character) => character.charCodeAt(0) < 32 || "<>:\"/\\|?*".includes(character) ? "-" : character).join("").replace(/[. ]+$/g, "").slice(0, 120) || "TLC agent response";
 }
 async function createWindow() {
 	const window = new BrowserWindow({
