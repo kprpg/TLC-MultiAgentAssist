@@ -51,6 +51,12 @@ body,
 #root>.fluent-provider {
     width: 100%;
     height: 100%;
+    --fontSizeBase100: 10px;
+    --fontSizeBase200: 11px;
+    --fontSizeBase300: 12px;
+    --lineHeightBase100: 14px;
+    --lineHeightBase200: 14px;
+    --lineHeightBase300: 16px;
 }
 
 body {
@@ -58,7 +64,8 @@ body {
     background: var(--cp-bg);
     color: var(--cp-text);
     font-family: var(--fontFamilyBase, "Segoe UI"), Aptos, Calibri, sans-serif;
-    font-size: 14px;
+    font-size: 12px;
+    line-height: 1.35;
 }
 
 button,
@@ -73,7 +80,7 @@ button {
 
 .app-shell {
     display: grid;
-    grid-template-rows: 48px minmax(0, 1fr);
+    grid-template-rows: 44px minmax(0, 1fr);
     width: 100%;
     height: 100%;
 }
@@ -82,8 +89,8 @@ button {
     display: grid;
     grid-template-columns: auto auto minmax(220px, 520px) 1fr auto;
     align-items: center;
-    gap: 12px;
-    padding: 0 12px;
+    gap: 10px;
+    padding: 0 10px;
     background: var(--cp-surface);
     border-bottom: 1px solid var(--cp-border);
 }
@@ -106,12 +113,12 @@ button {
 }
 
 .brand strong {
-    font-size: 16px;
+    font-size: 14px;
 }
 
 .brand span {
     color: var(--cp-text-muted);
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .global-search {
@@ -119,7 +126,7 @@ button {
     display: flex;
     align-items: center;
     gap: 8px;
-    height: 30px;
+    height: 28px;
     padding: 0 10px;
     background: var(--cp-surface-soft);
     border: 1px solid var(--cp-border);
@@ -180,13 +187,13 @@ button {
 }
 
 .search-results strong {
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .search-results small,
 .search-results p {
     color: var(--cp-text-muted);
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .search-results p {
@@ -199,7 +206,7 @@ button {
     color: var(--cp-accent);
     background: var(--cp-accent-soft);
     border-radius: 4px;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
 }
 
@@ -239,18 +246,18 @@ button {
 .icon-rail {
     z-index: 3;
     display: flex;
-    flex: 0 0 48px;
+    flex: 0 0 44px;
     flex-direction: column;
     align-items: center;
     gap: 4px;
-    padding-top: 8px;
+    padding-top: 6px;
     background: var(--cp-bg-elevated);
     border-right: 1px solid var(--cp-border);
 }
 
 .rail-button {
-    width: 40px;
-    height: 40px;
+    width: 36px;
+    height: 36px;
     border-left: 3px solid transparent;
     color: var(--cp-text-muted);
 }
@@ -279,10 +286,6 @@ button {
     flex-basis: 286px;
 }
 
-.milestone-blade {
-    flex-basis: 300px;
-}
-
 .action-blade {
     flex-basis: 310px;
     border-right: 0;
@@ -294,19 +297,65 @@ button {
     flex-basis: 44px;
 }
 
+.blade-resize-handle {
+    position: absolute;
+    z-index: 5;
+    top: 0;
+    bottom: 0;
+    width: 9px;
+    cursor: col-resize;
+    touch-action: none;
+    outline: 0;
+}
+
+.blade-resize-handle.end {
+    right: -5px;
+}
+
+.blade-resize-handle.start {
+    left: -5px;
+}
+
+.blade-resize-handle::after {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 4px;
+    width: 1px;
+    background: transparent;
+    content: '';
+}
+
+.blade-resize-handle:hover::after,
+.blade-resize-handle:focus-visible::after,
+.blade-resize-handle:active::after {
+    width: 2px;
+    background: var(--cp-accent);
+}
+
+body.resizing-blade {
+    cursor: col-resize;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+body.resizing-blade .blade {
+    transition: none;
+}
+
 .blade-header {
     display: flex;
-    min-height: 58px;
+    min-height: 52px;
     align-items: flex-start;
     justify-content: space-between;
     gap: 8px;
-    padding: 12px 9px 10px 14px;
+    padding: 9px 8px 7px 12px;
     border-bottom: 1px solid var(--cp-border);
 }
 
 .blade-header h2 {
     margin: 0;
-    font-size: 16px;
+    font-size: 14px;
     line-height: 1.25;
 }
 
@@ -314,7 +363,7 @@ button {
     display: block;
     margin-top: 2px;
     color: var(--cp-text-muted);
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .blade-header-actions {
@@ -337,23 +386,22 @@ button {
 .blade-body {
     min-height: 0;
     overflow: auto;
-    padding: 10px;
+    padding: 8px;
 }
 
 .blade-intro {
-    margin: 0 4px 10px;
+    margin: 0 3px 8px;
     color: var(--cp-text-muted);
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.4;
 }
 
 .account-list,
-.opportunity-list,
-.milestone-list,
+.opportunity-tree,
 .action-list {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 3px;
 }
 
 .account-button,
@@ -364,8 +412,8 @@ button {
     display: grid;
     width: 100%;
     align-items: center;
-    gap: 9px;
-    padding: 9px;
+    gap: 8px;
+    padding: 7px 8px;
     text-align: left;
     background: transparent;
     border: 1px solid transparent;
@@ -400,7 +448,7 @@ button {
     border: 1px solid var(--cp-border);
     border-radius: 4px;
     color: var(--cp-accent);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 800;
 }
 
@@ -424,20 +472,62 @@ button {
 .account-button small,
 .opportunity-button small,
 .milestone-item small {
-    margin-top: 3px;
+    margin-top: 2px;
     color: var(--cp-text-muted);
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .opportunity-button {
     grid-template-columns: minmax(0, 1fr) auto;
-    min-height: 56px;
+    min-height: 48px;
+}
+
+.opportunity-node {
+    min-width: 0;
+}
+
+.opportunity-node.expanded {
+    background: var(--cp-surface-soft);
+    border-radius: 4px;
+}
+
+.milestone-tree {
+    margin: 0 6px 7px 17px;
+    padding-left: 9px;
+    border-left: 1px solid var(--cp-border-strong);
+}
+
+.milestone-tree-header {
+    display: flex;
+    height: 28px;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--cp-text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.tree-refresh-button {
+    min-width: 24px !important;
+    width: 24px;
+    height: 24px;
+}
+
+.milestone-tree .milestone-item {
+    padding: 5px 4px;
+}
+
+.tree-state {
+    padding: 8px 4px;
+    color: var(--cp-text-muted);
+    font-size: 11px;
 }
 
 .opportunity-tooltip-content b,
 .opportunity-tooltip-content span {
     display: block;
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.5;
 }
 
@@ -450,7 +540,7 @@ button {
     color: var(--cp-text-muted);
     background: var(--cp-surface-soft);
     border-radius: 4px;
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .milestone-item {
@@ -459,7 +549,7 @@ button {
 }
 
 .milestone-item strong {
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.35;
 }
 
@@ -471,7 +561,7 @@ button {
     border: 1px solid var(--cp-border);
     border-radius: 50%;
     color: var(--cp-accent);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
 }
 
@@ -511,7 +601,7 @@ button {
 .eyebrow {
     margin: 0;
     color: var(--cp-accent);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 800;
 }
 
@@ -521,7 +611,7 @@ button {
 
 .landing-state h1 {
     margin: 5px 0 7px;
-    font-size: 27px;
+    font-size: 22px;
     font-weight: 600;
 }
 
@@ -529,7 +619,7 @@ button {
     max-width: 540px;
     margin: 0 0 22px;
     color: var(--cp-text-muted);
-    font-size: 13px;
+    font-size: 12px;
     line-height: 1.5;
 }
 
@@ -558,47 +648,47 @@ button {
 .landing-accounts small {
     margin-top: 3px;
     color: var(--cp-text-muted);
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .workbench-header {
     display: flex;
-    min-height: 82px;
+    min-height: 70px;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 12px;
-    padding: 16px 18px 12px;
+    gap: 10px;
+    padding: 11px 16px 9px;
     background: var(--cp-bg-elevated);
     border-bottom: 1px solid var(--cp-border);
 }
 
 .workbench-header h1 {
-    margin: 3px 0 4px;
-    font-size: 20px;
+    margin: 2px 0 3px;
+    font-size: 16px;
     font-weight: 600;
 }
 
 .workbench-header span {
     color: var(--cp-text-muted);
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .center-tabs {
     display: flex;
-    gap: 18px;
-    padding: 0 18px;
+    gap: 16px;
+    padding: 0 16px;
     background: var(--cp-bg-elevated);
     border-bottom: 1px solid var(--cp-border);
 }
 
 .center-tabs button,
 .agent-tabs button {
-    padding: 10px 2px 8px;
+    padding: 8px 2px 7px;
     background: transparent;
     border: 0;
     border-bottom: 2px solid transparent;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
 }
 
@@ -609,7 +699,11 @@ button {
 }
 
 .workbench-content {
-    padding: 16px 18px 28px;
+    padding: 13px 16px 24px;
+}
+
+.workbench-content.guidance-view {
+    padding: 10px 14px 20px;
 }
 
 .stage-band {
@@ -634,14 +728,14 @@ button {
 
 .stage-band span {
     color: var(--cp-text-muted);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
 }
 
 .stage-band strong {
     margin-top: 2px;
-    font-size: 17px;
+    font-size: 15px;
 }
 
 .stage-band p {
@@ -652,7 +746,7 @@ button {
     padding-left: 12px;
     border-left: 1px solid var(--cp-border);
     color: var(--cp-text-muted);
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.4;
 }
 
@@ -664,17 +758,17 @@ button {
     display: flex;
     align-items: end;
     justify-content: space-between;
-    margin: 19px 0 8px;
+    margin: 15px 0 7px;
 }
 
 .section-heading h2 {
     margin: 3px 0 0;
-    font-size: 16px;
+    font-size: 14px;
 }
 
 .section-heading>span {
     color: var(--cp-text-muted);
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .criteria-table {
@@ -696,13 +790,13 @@ button {
 }
 
 .criterion-row strong {
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .criterion-row p {
     margin: 2px 0 0;
     color: var(--cp-text-muted);
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.35;
 }
 
@@ -730,34 +824,39 @@ button {
     padding: 3px 6px;
     background: var(--cp-surface-soft);
     border-radius: 4px;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
 }
 
 .agent-tabs {
     display: flex;
-    gap: 15px;
+    gap: 13px;
     border-bottom: 1px solid var(--cp-border);
+}
+
+.guidance-view .agent-tabs button {
+    padding-top: 6px;
+    padding-bottom: 5px;
 }
 
 .agent-prompt-suggestions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    margin-top: 14px;
+    gap: 5px;
+    margin-top: 8px;
 }
 
 .agent-prompt-suggestions button {
-    min-height: 58px;
-    padding: 10px 12px;
+    min-height: 38px;
+    padding: 4px 7px;
     color: var(--cp-text);
     background: var(--cp-surface);
     border: 1px solid var(--cp-border);
     border-radius: 6px;
     cursor: pointer;
-    font-size: 12px;
-    line-height: 1.4;
+    font-size: 11px;
+    line-height: 1.25;
     text-align: left;
 }
 
@@ -772,13 +871,25 @@ button {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: end;
-    gap: 8px;
-    margin-top: 10px;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.agent-composer textarea {
+    min-height: 48px;
+    height: 48px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+}
+
+.agent-composer button {
+    min-width: 72px;
+    height: 32px;
 }
 
 .agent-response {
-    margin-top: 14px;
-    padding: 16px;
+    margin-top: 8px;
+    padding: 10px 12px;
     background: var(--cp-surface);
     border: 1px solid var(--cp-border);
     border-radius: 6px;
@@ -794,20 +905,45 @@ button {
 
 .agent-response-header small {
     color: var(--cp-text-muted);
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .agent-response-markdown {
-    margin-top: 14px;
-    font-size: 13px;
-    line-height: 1.55;
+    margin-top: 8px;
+    font-size: 12px;
+    line-height: 1.5;
 }
 
 .agent-response-markdown h1,
 .agent-response-markdown h2,
 .agent-response-markdown h3 {
-    margin: 18px 0 8px;
+    color: var(--cp-text);
+    letter-spacing: 0;
+}
+
+.agent-response-markdown h1,
+.agent-response-markdown>h2:first-child {
+    margin: 4px 0 10px;
     font-size: 16px;
+    font-weight: 700;
+}
+
+.agent-response-markdown h2:not(:first-child) {
+    margin: 18px 0 7px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--cp-border);
+    font-size: 14px;
+    font-weight: 650;
+}
+
+.agent-response-markdown h3 {
+    margin: 12px 0 5px;
+    padding: 5px 8px;
+    background: var(--cp-surface-soft);
+    border-left: 3px solid var(--cp-accent);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
 }
 
 .agent-response-markdown p,
@@ -817,6 +953,11 @@ button {
 .agent-response-markdown pre,
 .agent-response-markdown table {
     margin: 8px 0;
+}
+
+.agent-response-markdown li>strong:first-child {
+    font-weight: 650;
+    color: var(--cp-text);
 }
 
 .agent-response-markdown blockquote {
@@ -849,7 +990,7 @@ button {
 }
 
 .action-item {
-    padding: 11px;
+    padding: 8px 9px;
     background: var(--cp-surface-soft);
     border-left: 3px solid var(--cp-accent);
 }
@@ -868,17 +1009,17 @@ button {
     background: var(--cp-accent);
     color: var(--cp-accent-fg);
     border-radius: 50%;
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .action-meta b {
     color: var(--cp-accent);
-    font-size: 12px;
+    font-size: 11px;
     text-transform: uppercase;
 }
 
 .action-item h3 {
-    margin: 8px 0 5px;
+    margin: 6px 0 3px;
     font-size: 12px;
     line-height: 1.35;
 }
@@ -886,15 +1027,15 @@ button {
 .action-item p {
     margin: 0;
     color: var(--cp-text-muted);
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.4;
 }
 
 .action-item small {
     display: block;
-    margin-top: 7px;
+    margin-top: 5px;
     color: var(--cp-text-soft);
-    font-size: 12px;
+    font-size: 11px;
 }
 
 .empty-state,
@@ -905,7 +1046,7 @@ button {
     place-items: center;
     padding: 24px;
     color: var(--cp-text-muted);
-    font-size: 12px;
+    font-size: 11px;
     text-align: center;
 }
 
@@ -959,6 +1100,10 @@ button {
         box-shadow: none;
     }
 
+    .blade-resize-handle {
+        display: none;
+    }
+
     .blade.mobile-active,
     .center-pane.mobile-active {
         display: flex;
@@ -974,7 +1119,7 @@ button {
 
     .mobile-nav {
         display: grid;
-        grid-template-columns: repeat(5, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         background: var(--cp-surface);
         border-top: 1px solid var(--cp-border);
     }
@@ -989,7 +1134,7 @@ button {
         border: 0;
         background: transparent;
         color: var(--cp-text-muted);
-        font-size: 12px;
+        font-size: 11px;
     }
 
     .mobile-nav button.active {
@@ -1023,7 +1168,7 @@ button {
     }
 
     .workbench-header h1 {
-        font-size: 17px;
+        font-size: 16px;
     }
 
     .agent-tabs {

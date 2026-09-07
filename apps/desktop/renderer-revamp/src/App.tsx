@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Field, FluentProvider, Input, MessageBar, Spinner, Textarea, Tooltip, webDarkTheme, webLightTheme } from '@fluentui/react-components'
+import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Field, FluentProvider, Input, Menu, MenuItemRadio, MenuList, MenuPopover, MenuTrigger, MessageBar, Spinner, Textarea, Tooltip, webDarkTheme, webLightTheme } from '@fluentui/react-components'
 import {
   Apps20Regular,
   ArrowDownload20Regular,
   ArrowClockwise20Regular,
   Building20Regular,
   CheckmarkCircle20Filled,
+  ChevronDown20Regular,
   ChevronDoubleLeft20Regular,
   ChevronDoubleRight20Regular,
   ChevronLeft20Regular,
@@ -23,6 +24,7 @@ import {
   Person20Regular,
   Power20Regular,
   Search20Regular,
+  ArrowSort20Regular,
   Sparkle20Regular,
   Warning20Filled
 } from '@fluentui/react-icons'
@@ -30,13 +32,25 @@ import type { Account, AgentCapability, AgentTaskResponse, McemResponse, Milesto
 import { addMsxOpportunityLink, contractVersion } from '../../../../packages/common/index.js'
 import { createDataClient, stageOwner, type RevampDataClient } from './data-client.js'
 import { suggestedPrompts } from './prompt-catalog.js'
+import { formatResponseMarkdown } from './response-markdown.js'
+import { sortOpportunities, type OpportunitySort } from './opportunity-sort.js'
 
 type Shell = 'desktop' | 'web'
 type CenterTab = 'msx' | 'guidance'
-type Blade = 'accounts' | 'opportunities' | 'milestones' | 'actions'
+type Blade = 'accounts' | 'opportunities' | 'actions'
 type SearchResult =
   | { type: 'account'; account: Account }
   | { type: 'opportunity'; account: Account; opportunity: Opportunity }
+
+type BladeWidths = Record<Blade, number>
+
+const bladeWidthStorageKey = 'tlc.blade-widths.v1'
+const defaultBladeWidths: BladeWidths = { accounts: 230, opportunities: 320, actions: 310 }
+const bladeWidthLimits: Record<Blade, { min: number; max: number }> = {
+  accounts: { min: 180, max: 420 },
+  opportunities: { min: 220, max: 500 },
+  actions: { min: 240, max: 520 }
+}
 
 const capabilities: { id: AgentCapability; label: string }[] = [
   { id: 'account-pulse', label: 'Account Pulse' },
@@ -55,10 +69,11 @@ function stageStatus(result: McemResponse): 'advance' | 'aligned' | 'gap' {
   return 'gap'
 }
 
-function BladeHeader({ title, subtitle, collapsed, refreshing, onRefresh, onToggle, onClose }: { title: string; subtitle?: string; collapsed: boolean; refreshing: boolean; onRefresh(): void; onToggle(): void; onClose?: () => void }) {
+function BladeHeader({ title, subtitle, collapsed, refreshing, actions, onRefresh, onToggle, onClose }: { title: string; subtitle?: string; collapsed: boolean; refreshing: boolean; actions?: React.ReactNode; onRefresh(): void; onToggle(): void; onClose?: () => void }) {
   return <header className="blade-header">
     {!collapsed && <div><h2>{title}</h2>{subtitle && <span>{subtitle}</span>}</div>}
     <div className="blade-header-actions">
+      {!collapsed && actions}
       {!collapsed && <Button appearance="subtle" className="icon-button" disabled={refreshing} icon={<ArrowClockwise20Regular />} onClick={onRefresh} aria-label={`Refresh ${title}`} title={`Refresh ${title}`} />}
       <Button
         appearance="subtle"
@@ -73,9 +88,73 @@ function BladeHeader({ title, subtitle, collapsed, refreshing, onRefresh, onTogg
   </header>
 }
 
+function loadBladeWidths(): BladeWidths {
+  try {
+    const stored = JSON.parse(localStorage.getItem(bladeWidthStorageKey) ?? '{}') as Partial<BladeWidths>
+    return Object.fromEntries(Object.entries(defaultBladeWidths).map(([blade, defaultWidth]) => {
+      const key = blade as Blade
+      const width = stored[key]
+      const { min, max } = bladeWidthLimits[key]
+      return [key, typeof width === 'number' && Number.isFinite(width) ? Math.min(max, Math.max(min, width)) : defaultWidth]
+    })) as BladeWidths
+  } catch {
+    return defaultBladeWidths
+  }
+}
+
+function BladeResizeHandle({ blade, label, edge, width, onResize }: { blade: Blade; label: string; edge: 'start' | 'end'; width: number; onResize(width: number): void }) {
+  const drag = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null)
+  const limits = bladeWidthLimits[blade]
+
+  function resize(nextWidth: number) {
+    onResize(Math.min(limits.max, Math.max(limits.min, nextWidth)))
+  }
+
+  function finishResize(event: React.PointerEvent<HTMLDivElement>) {
+    if (drag.current?.pointerId !== event.pointerId) return
+    drag.current = null
+    document.body.classList.remove('resizing-blade')
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+
+  return <div
+    className={`blade-resize-handle ${edge}`}
+    role="separator"
+    aria-label={`Resize ${label}`}
+    aria-orientation="vertical"
+    aria-valuemin={limits.min}
+    aria-valuemax={limits.max}
+    aria-valuenow={Math.round(width)}
+    tabIndex={0}
+    title={`Drag to resize ${label}. Double-click to reset.`}
+    onDoubleClick={() => resize(defaultBladeWidths[blade])}
+    onKeyDown={(event) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+      event.preventDefault()
+      const dividerDelta = event.key === 'ArrowRight' ? 10 : -10
+      resize(width + (edge === 'end' ? dividerDelta : -dividerDelta))
+    }}
+    onPointerDown={(event) => {
+      if (event.button !== 0) return
+      drag.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: width }
+      event.currentTarget.setPointerCapture(event.pointerId)
+      document.body.classList.add('resizing-blade')
+      event.preventDefault()
+    }}
+    onPointerMove={(event) => {
+      if (drag.current?.pointerId !== event.pointerId) return
+      const dividerDelta = event.clientX - drag.current.startX
+      resize(drag.current.startWidth + (edge === 'end' ? dividerDelta : -dividerDelta))
+    }}
+    onPointerUp={finishResize}
+    onPointerCancel={finishResize}
+  />
+}
+
 function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
+  const [opportunitySort, setOpportunitySort] = useState<OpportunitySort>('closeDate')
   const [milestones, setMilestones] = useState<Milestone[]>([])
   const [account, setAccount] = useState<Account | null>(null)
   const [opportunity, setOpportunity] = useState<Opportunity | null>(null)
@@ -91,6 +170,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [shareStatus, setShareStatus] = useState<'ready' | 'running' | 'success' | 'error'>('ready')
   const [shareMessage, setShareMessage] = useState('')
   const [collapsed, setCollapsed] = useState<Set<Blade>>(new Set())
+  const [bladeWidths, setBladeWidths] = useState<BladeWidths>(loadBladeWidths)
   const [actionsOpen, setActionsOpen] = useState(true)
   const [mobileBlade, setMobileBlade] = useState<Blade | 'center'>('accounts')
   const [loading, setLoading] = useState(true)
@@ -99,6 +179,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [searchOpportunities, setSearchOpportunities] = useState<Opportunity[]>([])
   const [searchLoading, setSearchLoading] = useState(true)
   const [exiting, setExiting] = useState(false)
+  const sortedOpportunities = sortOpportunities(opportunities, opportunitySort)
 
   useEffect(() => {
     void client.listAccounts().then(async (items) => {
@@ -112,6 +193,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     })
   }, [client])
 
+  useEffect(() => {
+    localStorage.setItem(bladeWidthStorageKey, JSON.stringify(bladeWidths))
+  }, [bladeWidths])
+
   function handleError(cause: unknown) {
     setError(cause instanceof Error ? cause.message : 'The request could not be completed.')
   }
@@ -123,6 +208,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       else next.add(blade)
       return next
     })
+  }
+
+  function resizeBlade(blade: Blade, width: number) {
+    setBladeWidths((current) => ({ ...current, [blade]: width }))
   }
 
   async function selectAccount(nextAccount: Account) {
@@ -157,7 +246,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setActionsOpen(true)
     setCenterTab('msx')
     setLoading(true)
-    setMobileBlade('milestones')
+    setMobileBlade('opportunities')
     try {
       const [nextResult, nextMilestones] = await Promise.all([
         client.runMcemCoach(nextAccount.id, nextOpportunity.id),
@@ -224,7 +313,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         recipients,
         subject: emailSubject,
         responseTitle: label,
-        responseMarkdown: addMsxOpportunityLink(agentResult.content, opportunity.id)
+        responseMarkdown: formatResponseMarkdown(addMsxOpportunityLink(agentResult.content, opportunity.id))
       })
       setEmailDialogOpen(false)
       setShareStatus('success')
@@ -244,7 +333,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       const response = await client.exportAgentResponse({
         contractVersion,
         responseTitle: `${label} - ${opportunity?.name ?? 'Agent response'}`,
-        responseMarkdown: agentResult.content,
+        responseMarkdown: formatResponseMarkdown(agentResult.content),
         generatedAt: agentResult.generatedAt
       })
       setShareStatus(response.state === 'saved' ? 'success' : 'ready')
@@ -317,15 +406,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setAgentResult(null)
     setActionsOpen(false)
     setMobileBlade('accounts')
-  }
-
-  function closeMilestones() {
-    setOpportunity(null)
-    setMilestones([])
-    setResult(null)
-    setAgentResult(null)
-    setActionsOpen(false)
-    setMobileBlade('opportunities')
   }
 
   const normalizedSearch = searchQuery.trim().toLocaleLowerCase()
@@ -421,7 +501,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         <button className="rail-button" title="Guidance" aria-label="Guidance"><Sparkle20Regular /></button>
       </nav>
 
-      <section className={`blade account-blade ${collapsed.has('accounts') ? 'collapsed' : ''} ${mobileBlade === 'accounts' ? 'mobile-active' : ''}`} aria-label="Accounts blade">
+      <section className={`blade account-blade ${collapsed.has('accounts') ? 'collapsed' : ''} ${mobileBlade === 'accounts' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('accounts') ? undefined : bladeWidths.accounts }} aria-label="Accounts blade">
         <BladeHeader title="Accounts" subtitle={`${accounts.length} customer accounts`} collapsed={collapsed.has('accounts')} refreshing={loading || searchLoading} onRefresh={() => void refreshAccounts()} onToggle={() => toggleBlade('accounts')} />
         {!collapsed.has('accounts') && <div className="blade-body">
           <p className="blade-intro">Choose an account to open its active opportunities.</p>
@@ -434,40 +514,52 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           </div>
         </div>}
         {collapsed.has('accounts') && <button className="collapsed-symbol" onClick={() => toggleBlade('accounts')} aria-label="Expand Accounts"><Building20Regular /></button>}
+        {!collapsed.has('accounts') && <BladeResizeHandle blade="accounts" label="Accounts blade" edge="end" width={bladeWidths.accounts} onResize={(width) => resizeBlade('accounts', width)} />}
       </section>
 
-      {account && <section className={`blade opportunity-blade ${collapsed.has('opportunities') ? 'collapsed' : ''} ${mobileBlade === 'opportunities' ? 'mobile-active' : ''}`} aria-label="Opportunities blade">
-        <BladeHeader title="Opportunities" subtitle={account.name} collapsed={collapsed.has('opportunities')} refreshing={loading} onRefresh={() => void refreshOpportunities()} onToggle={() => toggleBlade('opportunities')} onClose={closeOpportunities} />
-        {!collapsed.has('opportunities') && <div className="blade-body opportunity-list">
-          {opportunities.map((item) => <Tooltip
-            key={item.id}
-            content={<div className="opportunity-tooltip-content"><b>{item.name}</b><span>Opportunity owner: {item.owner ?? 'Not assigned'}</span><span>Stage owner: {stageOwner(item.recordedStage)}</span><span>Recorded stage: {item.recordedStage}</span><span>Value: {formatMoney(item.value, item.currency)}</span><span>Close: {item.closeDate}</span></div>}
-            positioning="after"
-            relationship="description"
-          >
-            <button className={`opportunity-button ${opportunity?.id === item.id ? 'selected' : ''}`} onClick={() => void selectOpportunity(item)}>
-              <span className="opportunity-main"><strong>{item.name}</strong><small>{item.owner ?? 'Owner not assigned'} · Stage {item.recordedStage} · {formatMoney(item.value, item.currency)} · {item.closeDate}</small></span>
-              <ChevronRight20Regular />
-            </button>
-          </Tooltip>)}
+      {account && <section className={`blade opportunity-blade ${collapsed.has('opportunities') ? 'collapsed' : ''} ${mobileBlade === 'opportunities' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('opportunities') ? undefined : bladeWidths.opportunities }} aria-label="Opportunities blade">
+        <BladeHeader title="Opportunities" subtitle={account.name} collapsed={collapsed.has('opportunities')} refreshing={loading} actions={<Menu checkedValues={{ opportunitySort: [opportunitySort] }} onCheckedValueChange={(_, data) => setOpportunitySort(data.checkedItems[0] as OpportunitySort)} positioning="below-end">
+          <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button" icon={<ArrowSort20Regular />} aria-label="Sort opportunities" title={`Sort opportunities by ${opportunitySort === 'closeDate' ? 'Close Date' : opportunitySort === 'stage' ? 'Stage' : 'Value'}`} /></MenuTrigger>
+          <MenuPopover><MenuList aria-label="Sort opportunities by">
+            <MenuItemRadio name="opportunitySort" value="closeDate">Close Date</MenuItemRadio>
+            <MenuItemRadio name="opportunitySort" value="stage">Stage</MenuItemRadio>
+            <MenuItemRadio name="opportunitySort" value="value">$ Value</MenuItemRadio>
+          </MenuList></MenuPopover>
+        </Menu>} onRefresh={() => void refreshOpportunities()} onToggle={() => toggleBlade('opportunities')} onClose={closeOpportunities} />
+        {!collapsed.has('opportunities') && <div className="blade-body opportunity-tree" role="tree" aria-label={`${account.name} opportunities and milestones`}>
+          {sortedOpportunities.map((item) => {
+            const selected = opportunity?.id === item.id
+            return <div key={item.id} className={`opportunity-node ${selected ? 'expanded' : ''}`} role="treeitem" aria-expanded={selected} aria-selected={selected}>
+              <Tooltip
+                content={<div className="opportunity-tooltip-content"><b>{item.name}</b><span>Opportunity owner: {item.owner ?? 'Not assigned'}</span><span>Stage owner: {stageOwner(item.recordedStage)}</span><span>Recorded stage: {item.recordedStage}</span><span>Value: {formatMoney(item.value, item.currency)}</span><span>Close: {item.closeDate}</span></div>}
+                positioning="after"
+                relationship="description"
+              >
+                <button className={`opportunity-button ${selected ? 'selected' : ''}`} onClick={() => void selectOpportunity(item)}>
+                  <span className="opportunity-main"><strong>{item.name}</strong><small>{item.owner ?? 'Owner not assigned'} · Stage {item.recordedStage} · {formatMoney(item.value, item.currency)} · {item.closeDate}</small></span>
+                  {selected ? <ChevronDown20Regular /> : <ChevronRight20Regular />}
+                </button>
+              </Tooltip>
+              {selected && <div className="milestone-tree" role="group" aria-label={`${item.name} milestones`}>
+                <div className="milestone-tree-header">
+                  <span>Milestones</span>
+                  <Button appearance="subtle" className="tree-refresh-button" disabled={loading} icon={<ArrowClockwise20Regular />} onClick={() => void refreshOpportunityContext()} aria-label="Refresh Milestones" title="Refresh milestones" />
+                </div>
+                {milestones.map((milestone) => <article key={milestone.id} className="milestone-item" role="treeitem">
+                  <span className="milestone-status" aria-hidden="true"><ClipboardTaskListLtr20Regular /></span>
+                  <span>
+                    <strong>{milestone.name}</strong>
+                    <small>{[milestone.status, milestone.owner, milestone.commitment, milestone.targetDate].filter(Boolean).join(' · ')}</small>
+                  </span>
+                </article>)}
+                {loading && milestones.length === 0 && <div className="tree-state">Loading milestones…</div>}
+                {!loading && milestones.length === 0 && <div className="tree-state">No active milestones found.</div>}
+              </div>}
+            </div>
+          })}
         </div>}
         {collapsed.has('opportunities') && <button className="collapsed-symbol" onClick={() => toggleBlade('opportunities')} aria-label="Expand Opportunities"><List20Regular /></button>}
-      </section>}
-
-      {opportunity && <section className={`blade milestone-blade ${collapsed.has('milestones') ? 'collapsed' : ''} ${mobileBlade === 'milestones' ? 'mobile-active' : ''}`} aria-label="Milestones blade">
-        <BladeHeader title="Milestones" subtitle={opportunity.name} collapsed={collapsed.has('milestones')} refreshing={loading} onRefresh={() => void refreshOpportunityContext()} onToggle={() => toggleBlade('milestones')} onClose={closeMilestones} />
-        {!collapsed.has('milestones') && <div className="blade-body milestone-list">
-          {milestones.map((item) => <article key={item.id} className="milestone-item">
-            <span className="milestone-status" aria-hidden="true"><ClipboardTaskListLtr20Regular /></span>
-            <span>
-              <strong>{item.name}</strong>
-              <small>{[item.status, item.owner, item.commitment, item.targetDate].filter(Boolean).join(' · ')}</small>
-            </span>
-          </article>)}
-          {loading && milestones.length === 0 && <div className="empty-state compact">Loading milestones…</div>}
-          {!loading && milestones.length === 0 && <div className="empty-state compact">No active milestones found for this opportunity.</div>}
-        </div>}
-        {collapsed.has('milestones') && <button className="collapsed-symbol" onClick={() => toggleBlade('milestones')} aria-label="Expand Milestones"><ClipboardTaskListLtr20Regular /></button>}
+        {!collapsed.has('opportunities') && <BladeResizeHandle blade="opportunities" label="Opportunities blade" edge="end" width={bladeWidths.opportunities} onResize={(width) => resizeBlade('opportunities', width)} />}
       </section>}
 
       <section className={`center-pane ${mobileBlade === 'center' ? 'mobile-active' : ''}`} aria-label="Opportunity workbench">
@@ -478,14 +570,14 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           <p>{account ? 'Choose an active opportunity to review its grounded MSX evidence and multi-agent guidance.' : 'Open an account blade, inspect its opportunities, then review grounded MSX evidence and multi-agent guidance.'}</p>
           <div className="landing-accounts">
             {account
-              ? opportunities.map((item) => <button key={item.id} onClick={() => void selectOpportunity(item)}><List20Regular /><span><strong>{item.name}</strong><small>Stage {item.recordedStage} · {formatMoney(item.value, item.currency)}</small></span><ChevronRight20Regular /></button>)
+              ? sortedOpportunities.map((item) => <button key={item.id} onClick={() => void selectOpportunity(item)}><List20Regular /><span><strong>{item.name}</strong><small>Stage {item.recordedStage} · {formatMoney(item.value, item.currency)}</small></span><ChevronRight20Regular /></button>)
               : accounts.map((item) => <button key={item.id} onClick={() => void selectAccount(item)}><Building20Regular /><span><strong>{item.name}</strong><small>{item.segment}</small></span><ChevronRight20Regular /></button>)}
           </div>
         </div>}
 
         {opportunity && <>
           <header className="workbench-header">
-            <button className="icon-button mobile-only" onClick={() => setMobileBlade('milestones')} title="Back to milestones" aria-label="Back to milestones"><ChevronLeft20Regular /></button>
+            <button className="icon-button mobile-only" onClick={() => setMobileBlade('opportunities')} title="Back to opportunities" aria-label="Back to opportunities"><ChevronLeft20Regular /></button>
             <div><p className="eyebrow">{account?.name}</p><h1>{opportunity.name}</h1><span>{opportunity.owner ?? 'Owner not assigned'} · Stage {opportunity.recordedStage} · {formatMoney(opportunity.value, opportunity.currency)} · closes {opportunity.closeDate}</span></div>
             <button className="icon-button" title="More opportunity actions" aria-label="More opportunity actions"><MoreHorizontal20Regular /></button>
           </header>
@@ -515,7 +607,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
               {suggestedPrompts[capability].map((prompt) => <button key={prompt} type="button" disabled={agentLoading} onClick={() => void runAgentPrompt(prompt)}>{prompt}</button>)}
             </div>
             <div className="agent-composer">
-              <Textarea aria-label="Agent task" placeholder="Ask a different question..." resize="vertical" value={taskPrompt} onChange={(_, data) => setTaskPrompt(data.value)} />
+              <Textarea aria-label="Agent task" placeholder="Ask a different question..." resize="vertical" rows={2} value={taskPrompt} onChange={(_, data) => setTaskPrompt(data.value)} />
               <Button appearance="primary" disabled={agentLoading || taskPrompt.trim().length < 3} onClick={() => void runAgentPrompt()}>{agentLoading ? 'Analyzing...' : 'Send'}</Button>
             </div>
             {agentLoading && <Spinner label={`Running ${capabilities.find((item) => item.id === capability)?.label}`} />}
@@ -529,7 +621,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
               </header>
               {shareMessage && <MessageBar intent={shareStatus === 'error' ? 'error' : 'success'}>{shareMessage}</MessageBar>}
               <div className="agent-response-markdown">
-                <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ a: ({ href, children }) => <a href={href} onClick={(event) => { event.preventDefault(); if (href) void client.openEvidence(href) }}>{children}</a> }}>{agentResult.content}</Markdown>
+                <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ a: ({ href, children }) => <a href={href} onClick={(event) => { event.preventDefault(); if (href) void client.openEvidence(href) }}>{children}</a> }}>{formatResponseMarkdown(agentResult.content)}</Markdown>
               </div>
             </article> : !agentLoading && <div className="empty-state compact">Choose a suggested prompt or ask a different question.</div>}
             <Dialog open={emailDialogOpen} onOpenChange={(_, data) => setEmailDialogOpen(data.open)}>
@@ -547,7 +639,8 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         </>}
       </section>
 
-      {opportunity && actionsOpen && <aside className={`blade action-blade ${collapsed.has('actions') ? 'collapsed' : ''} ${mobileBlade === 'actions' ? 'mobile-active' : ''}`} aria-label="Next best actions blade">
+      {opportunity && actionsOpen && <aside className={`blade action-blade ${collapsed.has('actions') ? 'collapsed' : ''} ${mobileBlade === 'actions' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('actions') ? undefined : bladeWidths.actions }} aria-label="Next best actions blade">
+        {!collapsed.has('actions') && <BladeResizeHandle blade="actions" label="Next best actions blade" edge="start" width={bladeWidths.actions} onResize={(width) => resizeBlade('actions', width)} />}
         <BladeHeader title="Next best actions" subtitle="Role based" collapsed={collapsed.has('actions')} refreshing={loading} onRefresh={() => void refreshOpportunityContext()} onToggle={() => toggleBlade('actions')} onClose={() => { setActionsOpen(false); setMobileBlade('center') }} />
         {!collapsed.has('actions') && <div className="blade-body action-list">
           {result?.recommendations.map((item, index) => <article key={item.id} className="action-item">
@@ -562,7 +655,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     {opportunity && <nav className="mobile-nav" aria-label="Mobile workspace navigation">
       <button className={mobileBlade === 'accounts' ? 'active' : ''} onClick={() => setMobileBlade('accounts')}><Building20Regular /><span>Accounts</span></button>
       <button className={mobileBlade === 'opportunities' ? 'active' : ''} onClick={() => setMobileBlade('opportunities')}><List20Regular /><span>Opportunities</span></button>
-      <button className={mobileBlade === 'milestones' ? 'active' : ''} onClick={() => setMobileBlade('milestones')}><ClipboardTaskListLtr20Regular /><span>Milestones</span></button>
       <button className={mobileBlade === 'center' ? 'active' : ''} onClick={() => setMobileBlade('center')}><Lightbulb20Regular /><span>Analysis</span></button>
       <button className={mobileBlade === 'actions' ? 'active' : ''} onClick={() => { setActionsOpen(true); setMobileBlade('actions') }}><PanelRight20Regular /><span>Actions</span></button>
     </nav>}
