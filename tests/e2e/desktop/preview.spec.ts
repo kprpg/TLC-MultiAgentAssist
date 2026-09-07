@@ -11,6 +11,7 @@ test('launches the secure MCEM operational workbench', async () => {
     args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
     env: {
       ...process.env,
+      TLC_UI_MODE: 'legacy',
       TLC_DATA_MODE: 'sample'
     }
   })
