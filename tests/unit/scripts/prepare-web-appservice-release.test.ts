@@ -44,4 +44,20 @@ describe('App Service release package', () => {
         ])
         expect(archive.file('package/server.js')).toBeNull()
     })
+
+    it('archives more files than the Windows open-file limit permits at once', async () => {
+        const temporaryDirectory = await mkdtemp(join(tmpdir(), 'tlc-web-appservice-many-files-test-'))
+        temporaryDirectories.push(temporaryDirectory)
+        const packageRoot = join(temporaryDirectory, 'package')
+        const artifactPath = join(temporaryDirectory, 'release', 'app.zip')
+        await mkdir(packageRoot, { recursive: true })
+        await Promise.all(Array.from({ length: 512 }, (_, index) =>
+            writeFile(join(packageRoot, `file-${index}.txt`), String(index))))
+
+        await createAppServiceZip(packageRoot, artifactPath)
+
+        const archive = await JSZip.loadAsync(await readFile(artifactPath))
+        const files = Object.values(archive.files).filter((entry) => !entry.dir)
+        expect(files).toHaveLength(512)
+    })
 })

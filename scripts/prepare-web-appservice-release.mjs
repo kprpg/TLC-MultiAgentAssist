@@ -1,4 +1,4 @@
-import { createReadStream, createWriteStream } from 'node:fs'
+import { createWriteStream } from 'node:fs'
 import { mkdir, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative, resolve, sep } from 'node:path'
@@ -57,7 +57,7 @@ async function addDirectory(archive, root, currentDirectory) {
       await addDirectory(archive, root, absolutePath)
     } else if (entry.isFile() || entry.isSymbolicLink()) {
       const metadata = await stat(absolutePath)
-      archive.file(archivePath, createReadStream(absolutePath), { unixPermissions: metadata.mode })
+      archive.file(archivePath, await readFile(absolutePath), { unixPermissions: metadata.mode })
     }
   }
 }
