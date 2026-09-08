@@ -657,7 +657,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                     <span className="milestone-status" aria-hidden="true"><ClipboardTaskListLtr20Regular /></span>
                     <span>
                       <strong>{milestone.name}</strong>
-                      <small>{[milestone.status, milestone.owner, milestone.commitment, milestone.targetDate, milestone.estimatedMonthlyUsage === undefined ? undefined : formatMoney(milestone.estimatedMonthlyUsage, opportunity.currency)].filter(Boolean).join(' · ')}</small>
+                      <small>{[milestone.status, milestone.owner, milestone.commitment, milestone.targetDate, milestone.estimatedMonthlyUsage === undefined ? undefined : formatMoney(milestone.estimatedMonthlyUsage, item.currency)].filter(Boolean).join(' · ')}</small>
                     </span>
                     <Menu positioning="below-end">
                       <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button milestone-actions" icon={<MoreHorizontal20Regular />} aria-label={`Edit ${milestone.name}`} title="Edit milestone" /></MenuTrigger>
