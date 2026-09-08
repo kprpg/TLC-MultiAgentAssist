@@ -11,7 +11,9 @@ import {
   type McemRequest,
   type McemResponse,
   type Milestone,
+  type MilestoneUpdate,
   type Opportunity,
+  type OpportunityUpdate,
   measurePerformance,
   type PerformanceReporter
 } from '../common/index.js'
@@ -68,6 +70,14 @@ export class ThinSliceOrchestrator {
 
   listMilestones(opportunityId: string): Promise<Milestone[]> {
     return this.msx.listMilestones(opportunityId)
+  }
+
+  updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone> {
+    return this.msx.updateMilestone(opportunityId, milestoneId, update)
+  }
+
+  updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity> {
+    return this.msx.updateOpportunity(opportunityId, update)
   }
 
   async runMcemCoach(input: McemRequest): Promise<McemResponse> {

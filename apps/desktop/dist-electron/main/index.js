@@ -62,7 +62,8 @@ z.object({
 	recordedStage: z.number().int().min(1).max(5),
 	value: z.number().nonnegative(),
 	currency: z.string().length(3),
-	closeDate: z.string().date()
+	closeDate: z.string().date(),
+	comments: z.string().optional()
 });
 z.object({
 	id: z.string().min(1),
@@ -71,8 +72,28 @@ z.object({
 	status: z.string().min(1),
 	targetDate: z.string().date().optional(),
 	owner: z.string().min(1).optional(),
-	commitment: z.string().min(1).optional()
+	commitment: z.string().min(1).optional(),
+	riskDetails: z.string().optional(),
+	comments: z.string().optional()
 });
+var milestoneStatusSchema = z.enum([
+	"On Track",
+	"At Risk",
+	"Blocked",
+	"Completed",
+	"Cancelled",
+	"Lost to Competitor",
+	"Hygiene/Duplicate"
+]);
+var customerCommitmentSchema = z.enum(["Uncommitted", "Committed"]);
+var milestoneUpdateSchema = z.object({
+	status: milestoneStatusSchema.optional(),
+	riskDetails: z.string().max(3e4).optional(),
+	targetDate: z.string().date().optional(),
+	customerCommitment: customerCommitmentSchema.optional(),
+	comments: z.string().max(3e4).optional()
+}).refine((value) => Object.keys(value).length > 0, "At least one milestone field is required.");
+var opportunityUpdateSchema = z.object({ comments: z.string().max(3e4) });
 var evidenceSchema = z.object({
 	id: z.string().min(1),
 	source: z.enum(["msx", "mcem"]),
@@ -318,6 +339,32 @@ async function loadFoundryEnvironment(filePath) {
 //#region packages/connectors/msx/live.ts
 var defaultBaseUrl = "https://microsoftsales.crm.dynamics.com/api/data/v9.2/";
 var formattedValueSuffix = "@OData.Community.Display.V1.FormattedValue";
+var milestoneStatusCodes = {
+	"On Track": 86198e4,
+	"At Risk": 861980001,
+	Blocked: 861980002,
+	Completed: 861980003,
+	Cancelled: 861980004
+};
+var customerCommitmentCodes = {
+	Uncommitted: 86198e4,
+	Committed: 861980003
+};
+function msxWriteMetadataFromEnvironment(environment) {
+	const riskDetailsField = environment["TLC_MSX_RISK_DETAILS_FIELD"]?.trim();
+	const configuredCodes = {};
+	for (const [status, variable] of [["Lost to Competitor", "TLC_MSX_STATUS_LOST_TO_COMPETITOR"], ["Hygiene/Duplicate", "TLC_MSX_STATUS_HYGIENE_DUPLICATE"]]) {
+		const rawValue = environment[variable]?.trim();
+		if (!rawValue) continue;
+		const code = Number(rawValue);
+		if (!Number.isSafeInteger(code)) throw new Error(`${variable} must be an integer MSX option code.`);
+		configuredCodes[status] = code;
+	}
+	return {
+		...riskDetailsField ? { riskDetailsField } : {},
+		...Object.keys(configuredCodes).length > 0 ? { milestoneStatusCodes: configuredCodes } : {}
+	};
+}
 var MsxRequestError = class extends Error {
 	constructor(message, status) {
 		super(message);
@@ -330,11 +377,13 @@ var LiveMsxConnector = class {
 	portfolioPromise;
 	observationPromises = /* @__PURE__ */ new Map();
 	milestonePromises = /* @__PURE__ */ new Map();
-	constructor(tokenProvider, fetchImplementation = fetch, baseUrl = defaultBaseUrl, performanceReporter) {
+	constructor(tokenProvider, fetchImplementation = fetch, baseUrl = defaultBaseUrl, performanceReporter, writeMetadata = {}) {
 		this.tokenProvider = tokenProvider;
 		this.fetchImplementation = fetchImplementation;
 		this.performanceReporter = performanceReporter;
+		this.writeMetadata = writeMetadata;
 		this.baseUrl = new URL(baseUrl);
+		if (writeMetadata.riskDetailsField && !/^[A-Za-z][A-Za-z0-9_]*$/.test(writeMetadata.riskDetailsField)) throw new Error("The MSX risk details logical field name is invalid.");
 	}
 	async listAccounts() {
 		const portfolio = await this.getPortfolio();
@@ -353,8 +402,42 @@ var LiveMsxConnector = class {
 			status: formattedValue(row, "msp_milestonestatus") ?? "Status not recorded",
 			...row.msp_milestonedate ? { targetDate: row.msp_milestonedate.slice(0, 10) } : {},
 			...formattedValue(row, "_ownerid_value") ? { owner: formattedValue(row, "_ownerid_value") } : {},
-			...formattedValue(row, "msp_commitmentrecommendation") ? { commitment: formattedValue(row, "msp_commitmentrecommendation") } : {}
+			...formattedValue(row, "msp_commitmentrecommendation") ? { commitment: formattedValue(row, "msp_commitmentrecommendation") } : {},
+			...this.writeMetadata.riskDetailsField && typeof row[this.writeMetadata.riskDetailsField] === "string" ? { riskDetails: row[this.writeMetadata.riskDetailsField] } : {},
+			...typeof row.msp_forecastcomments === "string" ? { comments: row.msp_forecastcomments } : {}
 		}));
+	}
+	async updateMilestone(opportunityId, milestoneId, input) {
+		const update = milestoneUpdateSchema.parse(input);
+		const statusCode = update.status ? {
+			...milestoneStatusCodes,
+			...this.writeMetadata.milestoneStatusCodes
+		}[milestoneStatusSchema.parse(update.status)] : void 0;
+		if (update.status && statusCode === void 0) throw new Error(`The MSX option code for milestone status "${update.status}" is not configured.`);
+		if (update.riskDetails !== void 0 && !this.writeMetadata.riskDetailsField) throw new Error("The MSX logical field name for Risk/Blocker Details is not configured.");
+		await this.assertOpportunityAccess(opportunityId);
+		if (!(await this.getMilestoneRows(opportunityId)).some((milestone) => milestone.msp_engagementmilestoneid === milestoneId)) throw new Error("The milestone is not in the selected opportunity.");
+		await this.patch(`msp_engagementmilestones(${milestoneId})`, {
+			...statusCode !== void 0 ? { msp_milestonestatus: statusCode } : {},
+			...update.riskDetails !== void 0 ? { [this.writeMetadata.riskDetailsField]: update.riskDetails } : {},
+			...update.targetDate ? { msp_milestonedate: update.targetDate } : {},
+			...update.customerCommitment ? { msp_commitmentrecommendation: customerCommitmentCodes[customerCommitmentSchema.parse(update.customerCommitment)] } : {},
+			...update.comments !== void 0 ? { msp_forecastcomments: update.comments } : {}
+		});
+		this.milestonePromises.delete(opportunityId);
+		this.observationPromises.delete(opportunityId);
+		const updated = (await this.listMilestones(opportunityId)).find((milestone) => milestone.id === milestoneId);
+		if (!updated) throw new Error("MSX updated the milestone but it could not be reloaded.");
+		return updated;
+	}
+	async updateOpportunity(opportunityId, input) {
+		const update = opportunityUpdateSchema.parse(input);
+		await this.assertOpportunityAccess(opportunityId);
+		await this.patch(`opportunities(${opportunityId})`, { description: update.comments });
+		this.portfolioPromise = void 0;
+		const opportunity = (await this.getPortfolio()).opportunities.find((candidate) => candidate.id === opportunityId);
+		if (!opportunity) throw new Error("MSX updated the opportunity but it could not be reloaded.");
+		return structuredClone(opportunity);
 	}
 	async getOpportunityContext(opportunityId) {
 		const portfolio = await this.getPortfolio();
@@ -382,6 +465,9 @@ var LiveMsxConnector = class {
 		this.observationPromises.clear();
 		this.milestonePromises.clear();
 	}
+	async assertOpportunityAccess(opportunityId) {
+		if (!(await this.getPortfolio()).opportunities.some((opportunity) => opportunity.id === opportunityId)) throw new Error("The opportunity is not in the signed-in user’s active MSX portfolio.");
+	}
 	getOpportunityObservations(opportunity) {
 		let observations = this.observationPromises.get(opportunity.id);
 		if (!observations) {
@@ -399,7 +485,17 @@ var LiveMsxConnector = class {
 		let milestones = this.milestonePromises.get(opportunityId);
 		if (!milestones) {
 			milestones = this.requestAll("msp_engagementmilestones", {
-				"$select": "msp_engagementmilestoneid,msp_name,_ownerid_value,msp_milestonedate,msp_milestonestatus,msp_commitmentrecommendation,msp_monthlyuse",
+				"$select": [
+					"msp_engagementmilestoneid",
+					"msp_name",
+					"_ownerid_value",
+					"msp_milestonedate",
+					"msp_milestonestatus",
+					"msp_commitmentrecommendation",
+					"msp_monthlyuse",
+					"msp_forecastcomments",
+					this.writeMetadata.riskDetailsField
+				].filter(Boolean).join(","),
 				"$filter": `statecode eq 0 and _msp_opportunityid_value eq ${opportunityId}`,
 				"$orderby": "msp_milestonedate asc"
 			}).catch((error) => {
@@ -423,7 +519,7 @@ var LiveMsxConnector = class {
 			"$select": "_msp_parentopportunityid_value",
 			"$filter": `statecode eq 0 and _msp_dealteamuserid_value eq ${identity.UserId}`
 		}))).map((row) => row._msp_parentopportunityid_value).filter(isPresent));
-		const activeOpportunities = (await measurePerformance("msx.opportunities", this.performanceReporter, () => this.requestByIds("opportunities", "opportunityid", opportunityIds, "opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate"))).filter((row) => row._parentaccountid_value);
+		const activeOpportunities = (await measurePerformance("msx.opportunities", this.performanceReporter, () => this.requestByIds("opportunities", "opportunityid", opportunityIds, "opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description"))).filter((row) => row._parentaccountid_value);
 		const accountIds = unique(activeOpportunities.map((row) => row._parentaccountid_value).filter(isPresent));
 		const accounts = (await measurePerformance("msx.accounts", this.performanceReporter, () => this.requestByIds("accounts", "accountid", accountIds, "accountid,name"))).map((row) => ({
 			id: row.accountid,
@@ -450,7 +546,8 @@ var LiveMsxConnector = class {
 			recordedStage,
 			value: row.estimatedvalue || row.msp_consumptionconsumedrecurring || 0,
 			currency: "USD",
-			closeDate: closeDate?.slice(0, 10) ?? "1970-01-01"
+			closeDate: closeDate?.slice(0, 10) ?? "1970-01-01",
+			...typeof row.description === "string" ? { comments: row.description } : {}
 		};
 	}
 	async requestByIds(entitySet, idField, ids, select) {
@@ -488,6 +585,22 @@ var LiveMsxConnector = class {
 		} });
 		if (!response.ok) throw new MsxRequestError(`MSX request failed with status ${response.status}.`, response.status);
 		return await response.json();
+	}
+	async patch(path, body) {
+		const url = new URL(path, this.baseUrl);
+		this.assertTrustedUrl(url);
+		const accessToken = await this.tokenProvider.getAccessToken();
+		const response = await this.fetchImplementation(url, {
+			method: "PATCH",
+			headers: {
+				Authorization: `Bearer ${accessToken}`,
+				Accept: "application/json",
+				"Content-Type": "application/json",
+				"If-Match": "*"
+			},
+			body: JSON.stringify(body)
+		});
+		if (!response.ok) throw new MsxRequestError(`MSX update failed with status ${response.status}.`, response.status);
 	}
 	assertTrustedUrl(url) {
 		if (url.origin !== this.baseUrl.origin || !url.pathname.startsWith(this.baseUrl.pathname)) throw new MsxRequestError("MSX returned an untrusted continuation URL.");
@@ -1013,6 +1126,22 @@ var FixtureMsxConnector = class {
 	async listMilestones(opportunityId) {
 		return structuredClone(milestonesByOpportunity[opportunityId] ?? []);
 	}
+	async updateMilestone(opportunityId, milestoneId, update) {
+		const milestone = milestonesByOpportunity[opportunityId]?.find((candidate) => candidate.id === milestoneId);
+		if (!milestone) throw new Error(`Unknown sample milestone: ${milestoneId}`);
+		if (update.status !== void 0) milestone.status = update.status;
+		if (update.targetDate !== void 0) milestone.targetDate = update.targetDate;
+		if (update.customerCommitment !== void 0) milestone.commitment = update.customerCommitment;
+		if (update.riskDetails !== void 0) milestone.riskDetails = update.riskDetails;
+		if (update.comments !== void 0) milestone.comments = update.comments;
+		return structuredClone(milestone);
+	}
+	async updateOpportunity(opportunityId, update) {
+		const opportunity = opportunities.find((candidate) => candidate.id === opportunityId);
+		if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`);
+		opportunity.comments = update.comments;
+		return structuredClone(opportunity);
+	}
 	async getOpportunityContext(opportunityId) {
 		const opportunity = opportunities.find((candidate) => candidate.id === opportunityId);
 		if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`);
@@ -1269,6 +1398,12 @@ var ThinSliceOrchestrator = class {
 	}
 	listMilestones(opportunityId) {
 		return this.msx.listMilestones(opportunityId);
+	}
+	updateMilestone(opportunityId, milestoneId, update) {
+		return this.msx.updateMilestone(opportunityId, milestoneId, update);
+	}
+	updateOpportunity(opportunityId, update) {
+		return this.msx.updateOpportunity(opportunityId, update);
 	}
 	async runMcemCoach(input) {
 		const request = mcemRequestSchema.parse(input);
@@ -1901,7 +2036,7 @@ var reportPerformance = (event) => {
 	console.info(`[performance] ${JSON.stringify(event)}`);
 };
 var mcemConnector = new LocalPdfMcemGuidanceConnector(app.isPackaged ? resolve(process.resourcesPath, "docs/knowledge/MCEM Overview.pdf") : resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
-var msxConnector = dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider, fetch, void 0, reportPerformance);
+var msxConnector = dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider, fetch, void 0, reportPerformance, msxWriteMetadataFromEnvironment(process.env));
 var foundryOpenAIClient = runtimeEnvironment ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry) : void 0;
 var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object.fromEntries([
 	"account-pulse",
@@ -1969,7 +2104,7 @@ function assertTrustedSender(event) {
 	const senderUrl = event.senderFrame?.url;
 	if (!senderUrl || !senderUrl.startsWith(allowedRendererUrl)) throw new Error("Rejected IPC request from an untrusted renderer.");
 }
-function registerReadOnlyIpc() {
+function registerIpc() {
 	ipcMain.handle("tlc:exit-application", (event) => {
 		assertTrustedSender(event);
 		setImmediate(() => app.quit());
@@ -1993,6 +2128,14 @@ function registerReadOnlyIpc() {
 	ipcMain.handle("tlc:list-milestones", (event, opportunityId) => {
 		assertTrustedSender(event);
 		return orchestrator.listMilestones(z.string().min(1).parse(opportunityId));
+	});
+	ipcMain.handle("tlc:update-milestone", (event, opportunityId, milestoneId, update) => {
+		assertTrustedSender(event);
+		return orchestrator.updateMilestone(z.string().min(1).parse(opportunityId), z.string().min(1).parse(milestoneId), milestoneUpdateSchema.parse(update));
+	});
+	ipcMain.handle("tlc:update-opportunity", (event, opportunityId, update) => {
+		assertTrustedSender(event);
+		return orchestrator.updateOpportunity(z.string().min(1).parse(opportunityId), opportunityUpdateSchema.parse(update));
 	});
 	ipcMain.handle("tlc:run-mcem-coach", (event, request) => {
 		assertTrustedSender(event);
@@ -2071,7 +2214,7 @@ async function createWindow() {
 	else await window.loadFile(rendererFile);
 }
 if (!startupBlocked) {
-	registerReadOnlyIpc();
+	registerIpc();
 	app.whenReady().then(createWindow);
 }
 app.on("window-all-closed", () => {

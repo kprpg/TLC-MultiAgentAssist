@@ -138,6 +138,43 @@ describe('hosted web API', () => {
         expect(webRuntime.listMilestones).toHaveBeenCalledWith('opportunity-1')
     })
 
+    it('validates and forwards partial MSX updates', async () => {
+        const webRuntime = runtime()
+        vi.mocked(webRuntime.updateMilestone).mockResolvedValue({
+            id: 'milestone-1', opportunityId: 'opportunity-1', name: 'Customer pilot', status: 'At Risk'
+        })
+        vi.mocked(webRuntime.updateOpportunity).mockResolvedValue({
+            id: 'opportunity-1', accountId: 'account-1', name: 'Pilot', recordedStage: 2, value: 100, currency: 'USD', closeDate: '2026-10-01', comments: 'Customer confirmed.'
+        })
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => webRuntime }))
+        const headers = { ...authenticationHeaders, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }
+
+        const milestoneResponse = await fetch(`${baseUrl}/api/opportunities/opportunity-1/milestones/milestone-1`, {
+            method: 'PATCH', headers, body: JSON.stringify({ status: 'At Risk' })
+        })
+        const opportunityResponse = await fetch(`${baseUrl}/api/opportunities/opportunity-1`, {
+            method: 'PATCH', headers, body: JSON.stringify({ comments: 'Customer confirmed.' })
+        })
+
+        expect(milestoneResponse.status).toBe(200)
+        expect(opportunityResponse.status).toBe(200)
+        expect(webRuntime.updateMilestone).toHaveBeenCalledWith('opportunity-1', 'milestone-1', { status: 'At Risk' })
+        expect(webRuntime.updateOpportunity).toHaveBeenCalledWith('opportunity-1', { comments: 'Customer confirmed.' })
+    })
+
+    it('rejects an empty milestone update before invoking the runtime', async () => {
+        const webRuntime = runtime()
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => webRuntime }))
+        const response = await fetch(`${baseUrl}/api/opportunities/opportunity-1/milestones/milestone-1`, {
+            method: 'PATCH',
+            headers: { ...authenticationHeaders, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+            body: '{}'
+        })
+
+        expect(response.status).toBe(400)
+        expect(webRuntime.updateMilestone).not.toHaveBeenCalled()
+    })
+
     it('rejects malformed contract requests without invoking the orchestrator', async () => {
         const webRuntime = runtime()
         const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => webRuntime }))
@@ -234,6 +271,8 @@ function runtime(): WebRuntime {
         listAccounts: vi.fn(async () => [{ id: 'account-1', name: 'Contoso', segment: 'Live MSX' }]),
         listOpportunities: vi.fn(async () => []),
         listMilestones: vi.fn(async () => []),
+        updateMilestone: vi.fn(),
+        updateOpportunity: vi.fn(),
         runMcemCoach: vi.fn(),
         runAgentTask: vi.fn()
     }

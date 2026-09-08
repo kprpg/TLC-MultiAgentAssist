@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { LiveMsxConnector } from '../../packages/connectors/msx/index.js'
+import { LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../packages/connectors/msx/index.js'
 
 const baseUrl = 'https://microsoftsales.crm.dynamics.com/api/data/v9.2/'
 
@@ -33,9 +33,10 @@ describe('LiveMsxConnector', () => {
               '_ownerid_value@OData.Community.Display.V1.FormattedValue': 'Morgan Lee',
               name: 'Second opportunity',
               estimatedvalue: 0,
-              msp_consumptionconsumedrecurring: 275000
+              msp_consumptionconsumedrecurring: 275000,
+              description: null
             },
-            { opportunityid: 'opp-2', _parentaccountid_value: 'account-a', name: 'First opportunity', msp_activesalesstage: 2, estimatedvalue: 1500000 }
+            { opportunityid: 'opp-2', _parentaccountid_value: 'account-a', name: 'First opportunity', msp_activesalesstage: 2, estimatedvalue: 1500000, description: null }
           ]
         })
       }
@@ -59,7 +60,8 @@ describe('LiveMsxConnector', () => {
             msp_milestonestatus: 861980000,
             'msp_milestonestatus@OData.Community.Display.V1.FormattedValue': 'On track',
             'msp_commitmentrecommendation@OData.Community.Display.V1.FormattedValue': 'Committed',
-            msp_monthlyuse: 25000
+            msp_monthlyuse: 25000,
+            msp_forecastcomments: null
           }]
         })
       }
@@ -75,6 +77,7 @@ describe('LiveMsxConnector', () => {
     await expect(connector.listOpportunities('account-b')).resolves.toEqual([
       expect.objectContaining({ id: 'opp-1', owner: 'Morgan Lee', value: 275000 })
     ])
+    expect((await connector.listOpportunities('account-b'))[0]).not.toHaveProperty('comments')
     await expect(connector.listMilestones('opp-2')).resolves.toEqual([{
       id: 'milestone-1',
       opportunityId: 'opp-2',
@@ -109,6 +112,89 @@ describe('LiveMsxConnector', () => {
     )
 
     await expect(connector.listAccounts()).rejects.toThrow('untrusted continuation URL')
+  })
+
+  it('updates only requested milestone and opportunity fields with strict PATCH requests', async () => {
+    let comments = 'Original opportunity comment'
+    let milestoneRead = 0
+    const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input))
+      if (init?.method === 'PATCH') {
+        expect(new Headers(init.headers).get('If-Match')).toBe('*')
+        if (url.pathname.endsWith('/msp_engagementmilestones(milestone-1)')) {
+          expect(JSON.parse(String(init.body))).toEqual({
+            msp_milestonestatus: 861980001,
+            msp_riskblockerdetails: 'Sponsor approval is late.',
+            msp_milestonedate: '2026-11-20',
+            msp_commitmentrecommendation: 861980003,
+            msp_forecastcomments: 'Reviewed with the account team.'
+          })
+        } else if (url.pathname.endsWith('/opportunities(opp-1)')) {
+          expect(JSON.parse(String(init.body))).toEqual({ description: 'Updated opportunity comment' })
+          comments = 'Updated opportunity comment'
+        } else {
+          throw new Error(`Unexpected PATCH: ${url}`)
+        }
+        return new Response(null, { status: 204 })
+      }
+      if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+      if (url.pathname.endsWith('/msp_dealteams')) return json({ value: [{ _msp_parentopportunityid_value: 'opp-1' }] })
+      if (url.pathname.endsWith('/opportunities')) return json({ value: [{ opportunityid: 'opp-1', _parentaccountid_value: 'account-1', name: 'Opportunity', estimatedvalue: 100, description: comments }] })
+      if (url.pathname.endsWith('/accounts')) return json({ value: [{ accountid: 'account-1', name: 'Account' }] })
+      if (url.pathname.endsWith('/msp_engagementmilestones')) {
+        milestoneRead += 1
+        return json({
+          value: [{
+            msp_engagementmilestoneid: 'milestone-1',
+            msp_name: 'Milestone',
+            msp_milestonedate: milestoneRead === 1 ? '2026-10-15' : '2026-11-20',
+            msp_riskblockerdetails: milestoneRead === 1 ? '' : 'Sponsor approval is late.',
+            msp_forecastcomments: milestoneRead === 1 ? '' : 'Reviewed with the account team.',
+            'msp_milestonestatus@OData.Community.Display.V1.FormattedValue': milestoneRead === 1 ? 'On Track' : 'At Risk',
+            'msp_commitmentrecommendation@OData.Community.Display.V1.FormattedValue': milestoneRead === 1 ? 'Uncommitted' : 'Committed'
+          }]
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const connector = new LiveMsxConnector(
+      { getAccessToken: vi.fn().mockResolvedValue('secret-token') },
+      request as typeof fetch,
+      undefined,
+      undefined,
+      { riskDetailsField: 'msp_riskblockerdetails' }
+    )
+
+    await expect(connector.updateMilestone('opp-1', 'milestone-1', {
+      status: 'At Risk',
+      riskDetails: 'Sponsor approval is late.',
+      targetDate: '2026-11-20',
+      customerCommitment: 'Committed',
+      comments: 'Reviewed with the account team.'
+    })).resolves.toEqual(expect.objectContaining({
+      status: 'At Risk',
+      targetDate: '2026-11-20',
+      commitment: 'Committed',
+      riskDetails: 'Sponsor approval is late.',
+      comments: 'Reviewed with the account team.'
+    }))
+    await expect(connector.updateOpportunity('opp-1', { comments: 'Updated opportunity comment' }))
+      .resolves.toEqual(expect.objectContaining({ comments: 'Updated opportunity comment' }))
+    expect(request.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(2)
+  })
+
+  it('exports and parses tenant-specific write metadata from the connector entry point', () => {
+    expect(msxWriteMetadataFromEnvironment({
+      TLC_MSX_RISK_DETAILS_FIELD: 'msp_verifiedriskdetails',
+      TLC_MSX_STATUS_LOST_TO_COMPETITOR: '861980005',
+      TLC_MSX_STATUS_HYGIENE_DUPLICATE: '861980006'
+    })).toEqual({
+      riskDetailsField: 'msp_verifiedriskdetails',
+      milestoneStatusCodes: {
+        'Lost to Competitor': 861980005,
+        'Hygiene/Duplicate': 861980006
+      }
+    })
   })
 })
 

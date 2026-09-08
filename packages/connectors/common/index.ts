@@ -1,4 +1,4 @@
-import type { Account, Milestone, Opportunity, SourceHealth } from '../../common/index.js'
+import type { Account, Milestone, MilestoneUpdate, Opportunity, OpportunityUpdate, SourceHealth } from '../../common/index.js'
 
 export interface CriterionObservation {
   criterionId: string
@@ -36,6 +36,8 @@ export interface MsxConnector {
   listAccounts(): Promise<Account[]>
   listOpportunities(accountId: string): Promise<Opportunity[]>
   listMilestones(opportunityId: string): Promise<Milestone[]>
+  updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
+  updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
   getOpportunityContext(opportunityId: string): Promise<OpportunityContext>
 }
 

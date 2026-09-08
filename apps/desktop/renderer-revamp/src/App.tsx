@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Field, FluentProvider, Input, Menu, MenuItemRadio, MenuList, MenuPopover, MenuTrigger, MessageBar, Spinner, Textarea, Tooltip, webDarkTheme, webLightTheme } from '@fluentui/react-components'
+import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Field, FluentProvider, Input, Menu, MenuItem, MenuItemRadio, MenuList, MenuPopover, MenuTrigger, MessageBar, Spinner, Textarea, Tooltip, webDarkTheme, webLightTheme } from '@fluentui/react-components'
 import {
   Apps20Regular,
   ArrowDownload20Regular,
@@ -28,7 +28,7 @@ import {
   Sparkle20Regular,
   Warning20Filled
 } from '@fluentui/react-icons'
-import type { Account, AgentCapability, AgentTaskResponse, McemResponse, Milestone, Opportunity } from '../../../../packages/common/index.js'
+import type { Account, AgentCapability, AgentTaskResponse, CustomerCommitment, McemResponse, Milestone, MilestoneStatus, MilestoneUpdate, Opportunity } from '../../../../packages/common/index.js'
 import { addMsxOpportunityLink, contractVersion } from '../../../../packages/common/index.js'
 import { createDataClient, stageOwner, type RevampDataClient } from './data-client.js'
 import { suggestedPrompts } from './prompt-catalog.js'
@@ -43,6 +43,8 @@ type SearchResult =
   | { type: 'opportunity'; account: Account; opportunity: Opportunity }
 
 type BladeWidths = Record<Blade, number>
+type MilestoneField = 'status' | 'riskDetails' | 'targetDate' | 'customerCommitment' | 'comments'
+type MilestoneEdit = { milestoneId: string; field: MilestoneField; value: string }
 
 const bladeWidthStorageKey = 'tlc.blade-widths.v1'
 const defaultBladeWidths: BladeWidths = { accounts: 230, opportunities: 320, actions: 310 }
@@ -58,6 +60,16 @@ const capabilities: { id: AgentCapability; label: string }[] = [
   { id: 'pursuit-executive', label: 'Pursuit' },
   { id: 'risk-solution-play', label: 'Risk & Play' }
 ]
+
+const milestoneStatuses: MilestoneStatus[] = ['On Track', 'At Risk', 'Blocked', 'Completed', 'Cancelled', 'Lost to Competitor', 'Hygiene/Duplicate']
+const customerCommitments: CustomerCommitment[] = ['Uncommitted', 'Committed']
+const milestoneFieldLabels: Record<MilestoneField, string> = {
+  status: 'Milestone Status',
+  riskDetails: 'Risk/Blocker Details',
+  targetDate: 'Milestone Est Date',
+  customerCommitment: 'Customer Commitment',
+  comments: 'Milestone Comments'
+}
 
 function formatMoney(value: number, currency: string): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 1 }).format(value)
@@ -179,6 +191,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [searchOpportunities, setSearchOpportunities] = useState<Opportunity[]>([])
   const [searchLoading, setSearchLoading] = useState(true)
   const [exiting, setExiting] = useState(false)
+  const [milestoneEdit, setMilestoneEdit] = useState<MilestoneEdit | null>(null)
+  const [opportunityCommentsOpen, setOpportunityCommentsOpen] = useState(false)
+  const [opportunityComments, setOpportunityComments] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
   const sortedOpportunities = sortOpportunities(opportunities, opportunitySort)
 
   useEffect(() => {
@@ -199,6 +215,53 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
   function handleError(cause: unknown) {
     setError(cause instanceof Error ? cause.message : 'The request could not be completed.')
+  }
+
+  function startMilestoneEdit(milestone: Milestone, field: MilestoneField) {
+    const value = field === 'customerCommitment' ? milestone.commitment ?? 'Uncommitted' : milestone[field] ?? ''
+    setError('')
+    setMilestoneEdit({ milestoneId: milestone.id, field, value })
+  }
+
+  async function saveMilestoneEdit() {
+    if (!opportunity || !milestoneEdit) return
+    const { milestoneId, field, value } = milestoneEdit
+    let update: MilestoneUpdate
+    switch (field) {
+      case 'status': update = { status: value as MilestoneStatus }; break
+      case 'customerCommitment': update = { customerCommitment: value as CustomerCommitment }; break
+      case 'targetDate': update = { targetDate: value }; break
+      case 'riskDetails': update = { riskDetails: value }; break
+      case 'comments': update = { comments: value }; break
+    }
+    setSavingEdit(true)
+    setError('')
+    try {
+      const saved = await client.updateMilestone(opportunity.id, milestoneId, update)
+      setMilestones((current) => current.map((item) => item.id === saved.id ? saved : item))
+      setMilestoneEdit(null)
+    } catch (cause) {
+      handleError(cause)
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
+  async function saveOpportunityComments() {
+    if (!opportunity) return
+    setSavingEdit(true)
+    setError('')
+    try {
+      const saved = await client.updateOpportunity(opportunity.id, { comments: opportunityComments })
+      setOpportunity(saved)
+      setOpportunities((current) => current.map((item) => item.id === saved.id ? saved : item))
+      setSearchOpportunities((current) => current.map((item) => item.id === saved.id ? saved : item))
+      setOpportunityCommentsOpen(false)
+    } catch (cause) {
+      handleError(cause)
+    } finally {
+      setSavingEdit(false)
+    }
   }
 
   function toggleBlade(blade: Blade) {
@@ -545,13 +608,30 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                   <span>Milestones</span>
                   <Button appearance="subtle" className="tree-refresh-button" disabled={loading} icon={<ArrowClockwise20Regular />} onClick={() => void refreshOpportunityContext()} aria-label="Refresh Milestones" title="Refresh milestones" />
                 </div>
-                {milestones.map((milestone) => <article key={milestone.id} className="milestone-item" role="treeitem">
-                  <span className="milestone-status" aria-hidden="true"><ClipboardTaskListLtr20Regular /></span>
-                  <span>
-                    <strong>{milestone.name}</strong>
-                    <small>{[milestone.status, milestone.owner, milestone.commitment, milestone.targetDate].filter(Boolean).join(' · ')}</small>
-                  </span>
-                </article>)}
+                {milestones.map((milestone) => <div key={milestone.id} className="milestone-edit-row">
+                  <article className="milestone-item" role="treeitem">
+                    <span className="milestone-status" aria-hidden="true"><ClipboardTaskListLtr20Regular /></span>
+                    <span>
+                      <strong>{milestone.name}</strong>
+                      <small>{[milestone.status, milestone.owner, milestone.commitment, milestone.targetDate].filter(Boolean).join(' · ')}</small>
+                    </span>
+                    <Menu positioning="below-end">
+                      <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button milestone-actions" icon={<MoreHorizontal20Regular />} aria-label={`Edit ${milestone.name}`} title="Edit milestone" /></MenuTrigger>
+                      <MenuPopover><MenuList>
+                        {(Object.keys(milestoneFieldLabels) as MilestoneField[]).map((field) => <MenuItem key={field} onClick={() => startMilestoneEdit(milestone, field)}>{milestoneFieldLabels[field]}</MenuItem>)}
+                      </MenuList></MenuPopover>
+                    </Menu>
+                  </article>
+                  {milestoneEdit?.milestoneId === milestone.id && <div className="record-editor" aria-label={`Edit ${milestoneFieldLabels[milestoneEdit.field]}`}>
+                    <Field label={milestoneFieldLabels[milestoneEdit.field]}>
+                      {milestoneEdit.field === 'status' && <select value={milestoneEdit.value} onChange={(event) => setMilestoneEdit({ ...milestoneEdit, value: event.target.value })}>{milestoneStatuses.map((value) => <option key={value}>{value}</option>)}</select>}
+                      {milestoneEdit.field === 'customerCommitment' && <select value={milestoneEdit.value} onChange={(event) => setMilestoneEdit({ ...milestoneEdit, value: event.target.value })}>{customerCommitments.map((value) => <option key={value}>{value}</option>)}</select>}
+                      {milestoneEdit.field === 'targetDate' && <Input type="date" value={milestoneEdit.value} onChange={(_, data) => setMilestoneEdit({ ...milestoneEdit, value: data.value })} />}
+                      {(milestoneEdit.field === 'riskDetails' || milestoneEdit.field === 'comments') && <Textarea resize="vertical" value={milestoneEdit.value} onChange={(_, data) => setMilestoneEdit({ ...milestoneEdit, value: data.value })} />}
+                    </Field>
+                    <div className="record-editor-actions"><Button disabled={savingEdit} onClick={() => setMilestoneEdit(null)}>Cancel</Button><Button appearance="primary" disabled={savingEdit || (milestoneEdit.field === 'targetDate' && !milestoneEdit.value)} onClick={() => void saveMilestoneEdit()}>{savingEdit ? 'Saving...' : 'Save'}</Button></div>
+                  </div>}
+                </div>)}
                 {loading && milestones.length === 0 && <div className="tree-state">Loading milestones…</div>}
                 {!loading && milestones.length === 0 && <div className="tree-state">No active milestones found.</div>}
               </div>}
@@ -579,8 +659,15 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           <header className="workbench-header">
             <button className="icon-button mobile-only" onClick={() => setMobileBlade('opportunities')} title="Back to opportunities" aria-label="Back to opportunities"><ChevronLeft20Regular /></button>
             <div><p className="eyebrow">{account?.name}</p><h1>{opportunity.name}</h1><span>{opportunity.owner ?? 'Owner not assigned'} · Stage {opportunity.recordedStage} · {formatMoney(opportunity.value, opportunity.currency)} · closes {opportunity.closeDate}</span></div>
-            <button className="icon-button" title="More opportunity actions" aria-label="More opportunity actions"><MoreHorizontal20Regular /></button>
+            <Menu positioning="below-end">
+              <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button" icon={<MoreHorizontal20Regular />} title="More opportunity actions" aria-label="More opportunity actions" /></MenuTrigger>
+              <MenuPopover><MenuList><MenuItem onClick={() => { setOpportunityComments(opportunity.comments ?? ''); setOpportunityCommentsOpen(true); setError('') }}>Edit comments</MenuItem></MenuList></MenuPopover>
+            </Menu>
           </header>
+          {opportunityCommentsOpen && <div className="record-editor opportunity-editor" aria-label="Edit opportunity comments">
+            <Field label="Comments"><Textarea resize="vertical" value={opportunityComments} onChange={(_, data) => setOpportunityComments(data.value)} /></Field>
+            <div className="record-editor-actions"><Button disabled={savingEdit} onClick={() => setOpportunityCommentsOpen(false)}>Cancel</Button><Button appearance="primary" disabled={savingEdit} onClick={() => void saveOpportunityComments()}>{savingEdit ? 'Saving...' : 'Save'}</Button></div>
+          </div>}
           <div className="center-tabs" role="tablist" aria-label="Opportunity view">
             <button role="tab" aria-selected={centerTab === 'msx'} onClick={() => setCenterTab('msx')}>MSX</button>
             <button role="tab" aria-selected={centerTab === 'guidance'} onClick={() => loadGuidance()}>Multi-Agent Guidance</button>

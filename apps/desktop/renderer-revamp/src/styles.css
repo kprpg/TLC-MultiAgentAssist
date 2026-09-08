@@ -544,8 +544,50 @@ body.resizing-blade .blade {
 }
 
 .milestone-item {
-    grid-template-columns: 24px minmax(0, 1fr);
+    grid-template-columns: 24px minmax(0, 1fr) 28px;
     align-items: start;
+}
+
+.milestone-actions {
+    min-width: 26px !important;
+    width: 26px;
+    height: 26px;
+}
+
+.record-editor {
+    display: grid;
+    gap: 10px;
+    padding: 10px 8px 12px;
+    background: var(--cp-surface-soft);
+    border-top: 1px solid var(--cp-border);
+    border-bottom: 1px solid var(--cp-border);
+}
+
+.record-editor select {
+    width: 100%;
+    min-height: 32px;
+    padding: 4px 28px 4px 9px;
+    color: var(--cp-text);
+    background: var(--cp-surface);
+    border: 1px solid var(--cp-border-strong);
+    border-radius: 4px;
+    font: inherit;
+}
+
+.record-editor textarea {
+    min-height: 96px;
+}
+
+.record-editor-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.opportunity-editor {
+    margin: 0 clamp(12px, 3vw, 32px);
+    padding-inline: 0;
+    background: transparent;
 }
 
 .milestone-item strong {

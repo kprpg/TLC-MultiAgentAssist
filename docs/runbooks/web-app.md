@@ -90,15 +90,20 @@ All browser API calls are same-origin. Mutating cross-origin requests are reject
 
 Optional settings:
 
-| Setting                  | Purpose                                  | Default                                       |
-| ------------------------ | ---------------------------------------- | --------------------------------------------- |
-| `PORT`                   | HTTP listener port                       | `8080`                                        |
-| `HOST`                   | HTTP listener address                    | `127.0.0.1` locally; `0.0.0.0` in App Service |
-| `TLC_WEB_MODE`           | `sample`, `azure-cli`, or `easy-auth`    | `sample` locally; `easy-auth` in App Service  |
-| `TLC_WEB_STATIC_ROOT`    | Built renderer directory                 | `apps/desktop/dist/revamp`                    |
-| `TLC_FOUNDRY_ENV_FILE`   | Foundry environment JSON                 | `config/foundry.environment.json`             |
-| `TLC_MCEM_GUIDANCE_PATH` | MCEM guidance PDF                        | `docs/knowledge/MCEM Overview.pdf`            |
-| `AZURE_CLIENT_ID`        | User-assigned managed identity client ID | unset                                         |
+| Setting                             | Purpose                                  | Default                                       |
+| ----------------------------------- | ---------------------------------------- | --------------------------------------------- |
+| `PORT`                              | HTTP listener port                       | `8080`                                        |
+| `HOST`                              | HTTP listener address                    | `127.0.0.1` locally; `0.0.0.0` in App Service |
+| `TLC_WEB_MODE`                      | `sample`, `azure-cli`, or `easy-auth`    | `sample` locally; `easy-auth` in App Service  |
+| `TLC_WEB_STATIC_ROOT`               | Built renderer directory                 | `apps/desktop/dist/revamp`                    |
+| `TLC_FOUNDRY_ENV_FILE`              | Foundry environment JSON                 | `config/foundry.environment.json`             |
+| `TLC_MCEM_GUIDANCE_PATH`            | MCEM guidance PDF                        | `docs/knowledge/MCEM Overview.pdf`            |
+| `TLC_MSX_RISK_DETAILS_FIELD`        | Verified Risk/Blocker logical field name | unset; corresponding update is rejected       |
+| `TLC_MSX_STATUS_LOST_TO_COMPETITOR` | Verified integer option value            | unset; corresponding update is rejected       |
+| `TLC_MSX_STATUS_HYGIENE_DUPLICATE`  | Verified integer option value            | unset; corresponding update is rejected       |
+| `AZURE_CLIENT_ID`                   | User-assigned managed identity client ID | unset                                         |
+
+The host validates the optional MSX field name and option values at startup and never guesses Dataverse metadata. Supply these settings in the local process environment or App Service application settings only after confirming the values for the target tenant.
 
 ## App Service Authentication
 

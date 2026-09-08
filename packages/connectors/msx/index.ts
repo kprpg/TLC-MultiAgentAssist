@@ -1,7 +1,13 @@
-import type { Account, Milestone, Opportunity } from '../../common/index.js'
+import type { Account, Milestone, MilestoneUpdate, Opportunity, OpportunityUpdate } from '../../common/index.js'
 import type { MsxConnector, OpportunityContext } from '../common/index.js'
 
-export { LiveMsxConnector, MsxRequestError, type MsxAccessTokenProvider } from './live.js'
+export {
+  LiveMsxConnector,
+  MsxRequestError,
+  msxWriteMetadataFromEnvironment,
+  type MsxAccessTokenProvider,
+  type MsxWriteMetadata
+} from './live.js'
 
 const accounts: Account[] = [
   { id: 'account-contoso', name: 'Contoso Energy', segment: 'Strategic' },
@@ -228,6 +234,24 @@ export class FixtureMsxConnector implements MsxConnector {
 
   async listMilestones(opportunityId: string): Promise<Milestone[]> {
     return structuredClone(milestonesByOpportunity[opportunityId] ?? [])
+  }
+
+  async updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone> {
+    const milestone = milestonesByOpportunity[opportunityId]?.find((candidate) => candidate.id === milestoneId)
+    if (!milestone) throw new Error(`Unknown sample milestone: ${milestoneId}`)
+    if (update.status !== undefined) milestone.status = update.status
+    if (update.targetDate !== undefined) milestone.targetDate = update.targetDate
+    if (update.customerCommitment !== undefined) milestone.commitment = update.customerCommitment
+    if (update.riskDetails !== undefined) milestone.riskDetails = update.riskDetails
+    if (update.comments !== undefined) milestone.comments = update.comments
+    return structuredClone(milestone)
+  }
+
+  async updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity> {
+    const opportunity = opportunities.find((candidate) => candidate.id === opportunityId)
+    if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`)
+    opportunity.comments = update.comments
+    return structuredClone(opportunity)
   }
 
   async getOpportunityContext(opportunityId: string): Promise<OpportunityContext> {
