@@ -56,6 +56,7 @@ export const milestoneSchema = z.object({
   name: z.string().min(1),
   status: z.string().min(1),
   targetDate: z.string().date().optional(),
+  estimatedMonthlyUsage: z.number().optional(),
   owner: z.string().min(1).optional(),
   commitment: z.string().min(1).optional(),
   riskDetails: z.string().optional(),

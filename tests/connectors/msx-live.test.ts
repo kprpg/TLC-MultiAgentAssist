@@ -84,6 +84,7 @@ describe('LiveMsxConnector', () => {
       name: 'Customer pilot',
       status: 'On track',
       targetDate: '2026-10-15',
+      estimatedMonthlyUsage: 25000,
       owner: 'Taylor Kim',
       commitment: 'Committed'
     }])

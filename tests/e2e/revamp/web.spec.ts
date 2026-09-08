@@ -132,6 +132,27 @@ test('sorts opportunities by close date, stage, and value across refreshes', asy
     await expect(firstOpportunity).toContainText('Resilient cloud foundation - ready to advance')
 })
 
+test('offers milestone sorting beside the milestone refresh control', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: /Contoso Energy/ }).first().click()
+    await page.getByRole('region', { name: 'Opportunities blade' }).getByRole('button', { name: /^Grid operations modernization / }).click()
+
+    const milestoneGroup = page.getByRole('group', { name: 'Grid operations modernization milestones' })
+    const sortButton = milestoneGroup.getByRole('button', { name: 'Sort milestones' })
+    const refreshButton = milestoneGroup.getByRole('button', { name: 'Refresh Milestones' })
+    const [sortBox, refreshBox] = await Promise.all([sortButton.boundingBox(), refreshButton.boundingBox()])
+
+    expect(sortBox).not.toBeNull()
+    expect(refreshBox).not.toBeNull()
+    expect(sortBox!.x).toBeLessThan(refreshBox!.x)
+
+    await sortButton.click()
+    await expect(page.getByRole('menuitemradio', { name: 'Milestone Est. Date' })).toBeVisible()
+    await expect(page.getByRole('menuitemradio', { name: 'Est. Change in Monthly Usage ($ Value)', exact: true })).toBeVisible()
+    await expect(page.getByRole('menuitemradio', { name: 'Customer Commitment' })).toBeVisible()
+    await expect(page.getByRole('menuitemradio', { name: 'Milestone Status' })).toBeVisible()
+})
+
 test('edits milestone fields and opportunity comments with save and cancel', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/')

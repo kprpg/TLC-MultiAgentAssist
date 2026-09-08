@@ -34,6 +34,7 @@ import { createDataClient, stageOwner, type RevampDataClient } from './data-clie
 import { suggestedPrompts } from './prompt-catalog.js'
 import { formatResponseMarkdown } from './response-markdown.js'
 import { sortOpportunities, type OpportunitySort } from './opportunity-sort.js'
+import { sortMilestones, type MilestoneSort } from './milestone-sort.js'
 
 type Shell = 'desktop' | 'web'
 type CenterTab = 'msx' | 'guidance'
@@ -168,6 +169,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [opportunitySort, setOpportunitySort] = useState<OpportunitySort>('closeDate')
   const [milestones, setMilestones] = useState<Milestone[]>([])
+  const [milestoneSort, setMilestoneSort] = useState<MilestoneSort>('targetDate')
   const [account, setAccount] = useState<Account | null>(null)
   const [opportunity, setOpportunity] = useState<Opportunity | null>(null)
   const [result, setResult] = useState<McemResponse | null>(null)
@@ -197,6 +199,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [opportunityComments, setOpportunityComments] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
   const sortedOpportunities = sortOpportunities(opportunities, opportunitySort)
+  const sortedMilestones = sortMilestones(milestones, milestoneSort)
 
   useEffect(() => {
     void client.listAccounts().then(async (items) => {
@@ -636,14 +639,25 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
               {expanded && <div className="milestone-tree" role="group" aria-label={`${item.name} milestones`}>
                 <div className="milestone-tree-header">
                   <span>Milestones</span>
-                  <Button appearance="subtle" className="tree-refresh-button" disabled={loading} icon={<ArrowClockwise20Regular />} onClick={() => void refreshOpportunityContext()} aria-label="Refresh Milestones" title="Refresh milestones" />
+                  <div className="milestone-tree-actions">
+                    <Menu checkedValues={{ milestoneSort: [milestoneSort] }} onCheckedValueChange={(_, data) => setMilestoneSort(data.checkedItems[0] as MilestoneSort)} positioning="below-end">
+                      <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="tree-refresh-button" icon={<ArrowSort20Regular />} aria-label="Sort milestones" title="Sort milestones" /></MenuTrigger>
+                      <MenuPopover><MenuList aria-label="Sort milestones by">
+                        <MenuItemRadio name="milestoneSort" value="targetDate">Milestone Est. Date</MenuItemRadio>
+                        <MenuItemRadio name="milestoneSort" value="estimatedMonthlyUsage">Est. Change in Monthly Usage ($ Value)</MenuItemRadio>
+                        <MenuItemRadio name="milestoneSort" value="commitment">Customer Commitment</MenuItemRadio>
+                        <MenuItemRadio name="milestoneSort" value="status">Milestone Status</MenuItemRadio>
+                      </MenuList></MenuPopover>
+                    </Menu>
+                    <Button appearance="subtle" className="tree-refresh-button" disabled={loading} icon={<ArrowClockwise20Regular />} onClick={() => void refreshOpportunityContext()} aria-label="Refresh Milestones" title="Refresh milestones" />
+                  </div>
                 </div>
-                {milestones.map((milestone) => <div key={milestone.id} className="milestone-edit-row">
+                {sortedMilestones.map((milestone) => <div key={milestone.id} className="milestone-edit-row">
                   <article className="milestone-item" role="treeitem">
                     <span className="milestone-status" aria-hidden="true"><ClipboardTaskListLtr20Regular /></span>
                     <span>
                       <strong>{milestone.name}</strong>
-                      <small>{[milestone.status, milestone.owner, milestone.commitment, milestone.targetDate].filter(Boolean).join(' · ')}</small>
+                      <small>{[milestone.status, milestone.owner, milestone.commitment, milestone.targetDate, milestone.estimatedMonthlyUsage === undefined ? undefined : formatMoney(milestone.estimatedMonthlyUsage, opportunity.currency)].filter(Boolean).join(' · ')}</small>
                     </span>
                     <Menu positioning="below-end">
                       <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button milestone-actions" icon={<MoreHorizontal20Regular />} aria-label={`Edit ${milestone.name}`} title="Edit milestone" /></MenuTrigger>

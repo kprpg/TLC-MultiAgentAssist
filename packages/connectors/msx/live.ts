@@ -155,6 +155,7 @@ export class LiveMsxConnector implements MsxConnector {
       name: row.msp_name?.trim() || 'Unnamed milestone',
       status: formattedValue(row, 'msp_milestonestatus') ?? 'Status not recorded',
       ...(row.msp_milestonedate ? { targetDate: row.msp_milestonedate.slice(0, 10) } : {}),
+      ...(typeof row.msp_monthlyuse === 'number' ? { estimatedMonthlyUsage: row.msp_monthlyuse } : {}),
       ...(formattedValue(row, '_ownerid_value') ? { owner: formattedValue(row, '_ownerid_value') } : {}),
       ...(formattedValue(row, 'msp_commitmentrecommendation') ? { commitment: formattedValue(row, 'msp_commitmentrecommendation') } : {}),
       ...(this.writeMetadata.riskDetailsField && typeof row[this.writeMetadata.riskDetailsField] === 'string'
