@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:net'
+import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 
-const packageRoot = resolve(process.argv[2] || 'release-web/package')
+export async function smokeWebRelease(packageRoot = resolve('release-web/package')) {
 const port = await findAvailablePort()
 const child = spawn(process.execPath, ['server.js'], {
   cwd: packageRoot,
@@ -41,15 +42,16 @@ try {
   ])
   if (child.exitCode === null) child.kill('SIGKILL')
 }
+}
 
-async function fetchWithRetry(url) {
+export async function fetchWithRetry(url, { attempts = 120, delayMs = 500, fetchFn = fetch } = {}) {
   let lastError
-  for (let attempt = 0; attempt < 30; attempt += 1) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      return await fetch(url)
+      return await fetchFn(url)
     } catch (error) {
       lastError = error
-      await new Promise((resolveDelay) => setTimeout(resolveDelay, 250))
+      if (attempt < attempts - 1) await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs))
     }
   }
   throw lastError
@@ -65,4 +67,8 @@ async function findAvailablePort() {
   await new Promise((resolveClose) => server.close(resolveClose))
   if (!address || typeof address === 'string') throw new Error('Unable to allocate a test port.')
   return address.port
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await smokeWebRelease(resolve(process.argv[2] || 'release-web/package'))
 }
