@@ -71,27 +71,8 @@ jobs:
       - name: Run validation suite
         run: npm run phase0:check
 
-      - name: Stage web application
-        run: npm run web:package
-
-      - name: Install production dependencies
-        run: npm install --omit=dev --ignore-scripts --package-lock=false --prefix release-web/package
-
-      - name: Isolate and smoke-test release package
-        shell: bash
-        run: |
-          mv release-web/package "$RUNNER_TEMP/tlc-web-package"
-          npm run test:smoke:web-release -- "$RUNNER_TEMP/tlc-web-package"
-
-      - name: Create App Service ZIP
-        shell: bash
-        env:
-          PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
-        run: |
-          artifact="$GITHUB_WORKSPACE/release-web/TLC-MultiAgent-Assist-${PACKAGE_VERSION}-Web-AppService.zip"
-          mkdir -p "$GITHUB_WORKSPACE/release-web"
-          cd "$RUNNER_TEMP/tlc-web-package"
-          zip -qr "$artifact" .
+      - name: Prepare and test App Service package
+        run: npm run web:release
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
