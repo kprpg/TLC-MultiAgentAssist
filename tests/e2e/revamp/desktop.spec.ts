@@ -36,7 +36,7 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
         await window.getByRole('button', { name: /Contoso Energy/ }).first().click()
         await expect(window.getByRole('region', { name: 'Opportunities blade' })).toBeVisible()
         await expect(window.getByRole('region', { name: 'Opportunity workbench' }).getByRole('heading', { name: 'Contoso Energy' })).toBeVisible()
-        const opportunity = window.getByRole('region', { name: 'Opportunities blade' }).getByRole('button', { name: /Grid operations modernization/ })
+        const opportunity = window.getByRole('region', { name: 'Opportunities blade' }).getByRole('button', { name: /^Grid operations modernization / })
         await expect(opportunity).toContainText('Avery Johnson · Stage 3 · $4.2M · 2026-10-30')
         await opportunity.hover()
         await expect(window.getByRole('tooltip')).toContainText('Opportunity owner: Avery Johnson')

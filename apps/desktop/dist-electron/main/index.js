@@ -2,7 +2,7 @@ import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
 import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
 import { PDFParse } from "pdf-parse";
@@ -267,6 +267,7 @@ function report(reporter, operation, startedAt, outcome) {
 }
 //#endregion
 //#region packages/common/configuration/foundry-environment.ts
+var windowsAbsolutePathPattern = /^[a-zA-Z]:[\\/]/;
 var templatePlaceholderIds = new Set([
 	"11111111-1111-4111-8111-111111111111",
 	"22222222-2222-4222-8222-222222222222",
@@ -317,8 +318,8 @@ var foundryEnvironmentSchema = z.object({
 	}).strict()
 }).strict();
 function resolveFoundryEnvironmentPath(environment = process.env, workingDirectory = process.cwd()) {
-	const configuredPath = environment["TLC_FOUNDRY_ENV_FILE"]?.trim();
-	return resolve(workingDirectory, configuredPath || "config/foundry.environment.json");
+	const relativePath = environment["TLC_FOUNDRY_ENV_FILE"]?.trim() || "config/foundry.environment.json";
+	return (windowsAbsolutePathPattern.test(workingDirectory) ? win32 : posix).resolve(workingDirectory, relativePath);
 }
 async function loadFoundryEnvironment(filePath) {
 	let content;
