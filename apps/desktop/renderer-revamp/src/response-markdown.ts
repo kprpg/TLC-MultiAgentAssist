@@ -15,7 +15,8 @@ export function formatResponseMarkdown(markdown: string): string {
             if (sectionHeadingPattern.test(trimmed)) return `## ${trimmed}`
 
             const numberedOwner = trimmed.match(/^\d+[.)]\s+(.+)$/)
-            if (numberedOwner && ownerRolePattern.test(numberedOwner[1])) return `### ${numberedOwner[1]}`
+            const owner = numberedOwner?.[1]
+            if (owner && ownerRolePattern.test(owner)) return `### ${owner}`
 
             return line.replace(evidenceLabelPattern, '$1**$2:**$4')
         })
