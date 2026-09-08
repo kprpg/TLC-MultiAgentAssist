@@ -2,7 +2,7 @@ import { AzureCliCredential, ManagedIdentityCredential } from '@azure/identity'
 import { resolve } from 'node:path'
 import type { AgentCapability } from '../../../packages/common/index.js'
 import { resolveFoundryEnvironmentPath, loadFoundryEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
-import { LiveMsxConnector } from '../../../packages/connectors/msx/index.js'
+import { LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../packages/connectors/foundry/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
@@ -49,7 +49,7 @@ export async function createHostedRuntimeFactory(options: HostedRuntimeOptions =
     )
 
     return ({ accessToken }: AuthenticatedRequest): WebRuntime => {
-        const msx = new LiveMsxConnector({ getAccessToken: async () => accessToken })
+        const msx = new LiveMsxConnector({ getAccessToken: async () => accessToken }, fetch, undefined, undefined, msxWriteMetadataFromEnvironment(environment))
         return new ThinSliceOrchestrator(msx, guidance, taskAgents)
     }
 }

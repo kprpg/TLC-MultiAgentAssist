@@ -46,7 +46,8 @@ export const opportunitySchema = z.object({
   recordedStage: z.number().int().min(1).max(5),
   value: z.number().nonnegative(),
   currency: z.string().length(3),
-  closeDate: z.string().date()
+  closeDate: z.string().date(),
+  comments: z.string().optional()
 })
 
 export const milestoneSchema = z.object({
@@ -56,7 +57,33 @@ export const milestoneSchema = z.object({
   status: z.string().min(1),
   targetDate: z.string().date().optional(),
   owner: z.string().min(1).optional(),
-  commitment: z.string().min(1).optional()
+  commitment: z.string().min(1).optional(),
+  riskDetails: z.string().optional(),
+  comments: z.string().optional()
+})
+
+export const milestoneStatusSchema = z.enum([
+  'On Track',
+  'At Risk',
+  'Blocked',
+  'Completed',
+  'Cancelled',
+  'Lost to Competitor',
+  'Hygiene/Duplicate'
+])
+
+export const customerCommitmentSchema = z.enum(['Uncommitted', 'Committed'])
+
+export const milestoneUpdateSchema = z.object({
+  status: milestoneStatusSchema.optional(),
+  riskDetails: z.string().max(30_000).optional(),
+  targetDate: z.string().date().optional(),
+  customerCommitment: customerCommitmentSchema.optional(),
+  comments: z.string().max(30_000).optional()
+}).refine((value) => Object.keys(value).length > 0, 'At least one milestone field is required.')
+
+export const opportunityUpdateSchema = z.object({
+  comments: z.string().max(30_000)
 })
 
 export const evidenceSchema = z.object({
@@ -187,6 +214,10 @@ export const feedbackSchema = z.object({
 export type Account = z.infer<typeof accountSchema>
 export type Opportunity = z.infer<typeof opportunitySchema>
 export type Milestone = z.infer<typeof milestoneSchema>
+export type MilestoneStatus = z.infer<typeof milestoneStatusSchema>
+export type CustomerCommitment = z.infer<typeof customerCommitmentSchema>
+export type MilestoneUpdate = z.infer<typeof milestoneUpdateSchema>
+export type OpportunityUpdate = z.infer<typeof opportunityUpdateSchema>
 export type SourceHealth = z.infer<typeof sourceHealthSchema>
 export type AuthStatus = z.infer<typeof authStatusSchema>
 export type DesktopDataStatus = z.infer<typeof desktopDataStatusSchema>

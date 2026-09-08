@@ -125,6 +125,67 @@ test('sorts opportunities by close date, stage, and value across refreshes', asy
     await expect(firstOpportunity).toContainText('Resilient cloud foundation - ready to advance')
 })
 
+test('edits milestone fields and opportunity comments with save and cancel', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/')
+    await page.getByRole('button', { name: /Contoso Energy/ }).first().click()
+    await page.getByRole('region', { name: 'Opportunities blade' }).getByRole('button', { name: /Grid operations modernization/ }).click()
+
+    const editMilestone = page.getByRole('button', { name: 'Edit Customer outcome validation' })
+    const openMilestoneEditor = async (name: string) => {
+        await editMilestone.click()
+        await page.getByRole('menuitem', { name, exact: true }).click()
+    }
+
+    await openMilestoneEditor('Milestone Status')
+    const status = page.getByRole('combobox')
+    await expect(status.locator('option')).toHaveText([
+        'On Track',
+        'At Risk',
+        'Blocked',
+        'Completed',
+        'Cancelled',
+        'Lost to Competitor',
+        'Hygiene/Duplicate'
+    ])
+    await status.selectOption({ label: 'At Risk' })
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page.getByRole('treeitem', { name: /Customer outcome validation/ })).toContainText('At Risk')
+
+    await openMilestoneEditor('Risk/Blocker Details')
+    await expect(page.getByRole('textbox', { name: 'Risk/Blocker Details' })).toBeVisible()
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+
+    await openMilestoneEditor('Milestone Est Date')
+    await expect(page.locator('input[type="date"]')).toBeVisible()
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+
+    await openMilestoneEditor('Customer Commitment')
+    await expect(page.getByRole('combobox').locator('option')).toHaveText(['Uncommitted', 'Committed'])
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+
+    await openMilestoneEditor('Milestone Comments')
+    await expect(page.getByRole('textbox', { name: 'Milestone Comments' })).toBeVisible()
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+
+    await page.getByRole('button', { name: 'More opportunity actions' }).click()
+    await page.getByRole('menuitem', { name: 'Edit comments' }).click()
+    const comments = page.getByRole('textbox', { name: 'Comments' })
+    const originalComments = await comments.inputValue()
+    await comments.fill('Discard this draft')
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+
+    await page.getByRole('button', { name: 'More opportunity actions' }).click()
+    await page.getByRole('menuitem', { name: 'Edit comments' }).click()
+    await expect(comments).toHaveValue(originalComments)
+    await comments.fill('Executive sponsor aligned')
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+
+    await page.getByRole('button', { name: 'More opportunity actions' }).click()
+    await page.getByRole('menuitem', { name: 'Edit comments' }).click()
+    await expect(comments).toHaveValue('Executive sponsor aligned')
+})
+
 test('uses Fluent theme tokens and readable compact typography', async ({ page }) => {
     await page.goto('/?scoutTheme=dark')
 

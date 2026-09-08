@@ -4,7 +4,9 @@ import {
     contractVersion,
     mcemResponseSchema,
     milestoneSchema,
+    milestoneUpdateSchema,
     opportunitySchema,
+    opportunityUpdateSchema,
     type Account,
     type AgentCapability,
     type AgentTaskResponse,
@@ -15,7 +17,9 @@ import {
     type ExportResponseResult,
     type McemResponse,
     type Milestone,
-    type Opportunity
+    type MilestoneUpdate,
+    type Opportunity,
+    type OpportunityUpdate
 } from '../../../../packages/common/index.js'
 
 export interface RevampDataClient {
@@ -25,6 +29,8 @@ export interface RevampDataClient {
     listAccounts(): Promise<Account[]>
     listOpportunities(accountId: string): Promise<Opportunity[]>
     listMilestones(opportunityId: string): Promise<Milestone[]>
+    updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
+    updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
     runMcemCoach(accountId: string, opportunityId: string): Promise<McemResponse>
     runAgentTask(capability: AgentCapability, accountId: string, opportunityId: string, prompt: string): Promise<AgentTaskResponse>
     openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
@@ -60,6 +66,8 @@ export function createWebApiClient(fetcher: Fetcher = fetch): RevampDataClient {
         listAccounts: async () => accountSchema.array().parse(await apiRequest(fetcher, '/api/accounts')),
         listOpportunities: async (accountId) => opportunitySchema.array().parse(await apiRequest(fetcher, `/api/accounts/${encodeURIComponent(accountId)}/opportunities`)),
         listMilestones: async (opportunityId) => milestoneSchema.array().parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/milestones`)),
+        updateMilestone: async (opportunityId, milestoneId, update) => milestoneSchema.parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/milestones/${encodeURIComponent(milestoneId)}`, { method: 'PATCH', body: JSON.stringify(milestoneUpdateSchema.parse(update)) })),
+        updateOpportunity: async (opportunityId, update) => opportunitySchema.parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}`, { method: 'PATCH', body: JSON.stringify(opportunityUpdateSchema.parse(update)) })),
         runMcemCoach: async (accountId, opportunityId) => mcemResponseSchema.parse(await apiRequest(fetcher, '/api/mcem-coach', {
             method: 'POST',
             body: JSON.stringify({ contractVersion, accountId, opportunityId, prompt: 'How do we move this opportunity to the next MCEM stage?' })
@@ -118,6 +126,8 @@ interface DesktopBridge {
     listAccounts(): Promise<Account[]>
     listOpportunities(accountId: string): Promise<Opportunity[]>
     listMilestones(opportunityId: string): Promise<Milestone[]>
+    updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
+    updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
     runMcemCoach(request: { contractVersion: typeof contractVersion; accountId: string; opportunityId: string; prompt: string }): Promise<McemResponse>
     runAgentTask(request: { contractVersion: typeof contractVersion; capability: AgentCapability; accountId: string; opportunityId: string; prompt: string }): Promise<AgentTaskResponse>
     openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
@@ -219,6 +229,19 @@ function webClient(): RevampDataClient {
         listAccounts: async () => structuredClone(accounts),
         listOpportunities: async (accountId) => structuredClone(opportunities.filter((item) => item.accountId === accountId)),
         listMilestones: async (opportunityId) => structuredClone(milestones.filter((item) => item.opportunityId === opportunityId)),
+        updateMilestone: async (opportunityId, milestoneId, update) => {
+            const milestone = milestones.find((item) => item.opportunityId === opportunityId && item.id === milestoneId)
+            if (!milestone) throw new Error('Unknown sample milestone.')
+            Object.assign(milestone, update, update.customerCommitment !== undefined ? { commitment: update.customerCommitment } : {})
+            delete (milestone as Milestone & { customerCommitment?: string }).customerCommitment
+            return structuredClone(milestone)
+        },
+        updateOpportunity: async (opportunityId, update) => {
+            const opportunity = opportunities.find((item) => item.id === opportunityId)
+            if (!opportunity) throw new Error('Unknown sample opportunity.')
+            opportunity.comments = update.comments
+            return structuredClone(opportunity)
+        },
         runMcemCoach: async (_accountId, opportunityId) => {
             const opportunity = opportunities.find((item) => item.id === opportunityId)
             if (!opportunity) throw new Error('Unknown sample opportunity.')
@@ -254,6 +277,8 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         listAccounts: () => bridge.listAccounts(),
         listOpportunities: (accountId) => bridge.listOpportunities(accountId),
         listMilestones: (opportunityId) => bridge.listMilestones(opportunityId),
+        updateMilestone: (opportunityId, milestoneId, update) => bridge.updateMilestone(opportunityId, milestoneId, update),
+        updateOpportunity: (opportunityId, update) => bridge.updateOpportunity(opportunityId, update),
         runMcemCoach: (accountId, opportunityId) => bridge.runMcemCoach({ contractVersion, accountId, opportunityId, prompt: 'How do we move this opportunity to the next MCEM stage?' }),
         runAgentTask: (capability, accountId, opportunityId, prompt) => bridge.runAgentTask({ contractVersion, capability, accountId, opportunityId, prompt }),
         openEmailCompose: (request) => bridge.openEmailCompose(request),

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Account, AgentTaskRequest, AgentTaskResponse, AuthStatus, DesktopDataStatus, EmailComposeRequest, EmailComposeResult, ExportResponseRequest, ExportResponseResult, McemRequest, McemResponse, Milestone, Opportunity } from '../../../../packages/common/index.js'
+import type { Account, AgentTaskRequest, AgentTaskResponse, AuthStatus, DesktopDataStatus, EmailComposeRequest, EmailComposeResult, ExportResponseRequest, ExportResponseResult, McemRequest, McemResponse, Milestone, MilestoneUpdate, Opportunity, OpportunityUpdate } from '../../../../packages/common/index.js'
 
 export interface TlcDesktopApi {
   exitApplication(): Promise<void>
@@ -8,6 +8,8 @@ export interface TlcDesktopApi {
   listAccounts(): Promise<Account[]>
   listOpportunities(accountId: string): Promise<Opportunity[]>
   listMilestones(opportunityId: string): Promise<Milestone[]>
+  updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
+  updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
   runMcemCoach(request: McemRequest): Promise<McemResponse>
   runAgentTask(request: AgentTaskRequest): Promise<AgentTaskResponse>
   openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
@@ -22,6 +24,8 @@ const api: TlcDesktopApi = {
   listAccounts: () => ipcRenderer.invoke('tlc:list-accounts'),
   listOpportunities: (accountId) => ipcRenderer.invoke('tlc:list-opportunities', accountId),
   listMilestones: (opportunityId) => ipcRenderer.invoke('tlc:list-milestones', opportunityId),
+  updateMilestone: (opportunityId, milestoneId, update) => ipcRenderer.invoke('tlc:update-milestone', opportunityId, milestoneId, update),
+  updateOpportunity: (opportunityId, update) => ipcRenderer.invoke('tlc:update-opportunity', opportunityId, update),
   runMcemCoach: (request) => ipcRenderer.invoke('tlc:run-mcem-coach', request),
   runAgentTask: (request) => ipcRenderer.invoke('tlc:run-agent-task', request),
   openEmailCompose: (request) => ipcRenderer.invoke('tlc:open-email-compose', request),

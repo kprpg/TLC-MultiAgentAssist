@@ -10,14 +10,18 @@ import {
     mcemRequestSchema,
     mcemResponseSchema,
     milestoneSchema,
+    milestoneUpdateSchema,
     opportunitySchema,
+    opportunityUpdateSchema,
     type Account,
     type AgentTaskRequest,
     type AgentTaskResponse,
     type McemRequest,
     type McemResponse,
     type Milestone,
-    type Opportunity
+    type MilestoneUpdate,
+    type Opportunity,
+    type OpportunityUpdate
 } from '../../../packages/common/index.js'
 import { createOutlookDraftMessage } from '../../desktop/electron/main/outlook-compose.js'
 import { createResponseDocumentBuffer } from '../../desktop/electron/main/response-document.js'
@@ -29,6 +33,8 @@ export interface WebRuntime {
     listAccounts(): Promise<Account[]>
     listOpportunities(accountId: string): Promise<Opportunity[]>
     listMilestones(opportunityId: string): Promise<Milestone[]>
+    updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
+    updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
     runMcemCoach(request: McemRequest): Promise<McemResponse>
     runAgentTask(request: AgentTaskRequest): Promise<AgentTaskResponse>
 }
@@ -119,6 +125,23 @@ export function buildWebApiHandler(options: WebApiOptions) {
             if (request.method === 'GET' && milestonesMatch) {
                 const opportunityId = accountIdSchema.parse(decodeURIComponent(milestonesMatch[1]!))
                 sendJson(response, 200, milestoneSchema.array().parse(await runtime.listMilestones(opportunityId)))
+                return true
+            }
+
+            const milestoneUpdateMatch = /^\/api\/opportunities\/([^/]+)\/milestones\/([^/]+)$/.exec(url.pathname)
+            if (request.method === 'PATCH' && milestoneUpdateMatch) {
+                const opportunityId = accountIdSchema.parse(decodeURIComponent(milestoneUpdateMatch[1]!))
+                const milestoneId = accountIdSchema.parse(decodeURIComponent(milestoneUpdateMatch[2]!))
+                const update = milestoneUpdateSchema.parse(await readJsonBody(request))
+                sendJson(response, 200, milestoneSchema.parse(await runtime.updateMilestone(opportunityId, milestoneId, update)))
+                return true
+            }
+
+            const opportunityUpdateMatch = /^\/api\/opportunities\/([^/]+)$/.exec(url.pathname)
+            if (request.method === 'PATCH' && opportunityUpdateMatch) {
+                const opportunityId = accountIdSchema.parse(decodeURIComponent(opportunityUpdateMatch[1]!))
+                const update = opportunityUpdateSchema.parse(await readJsonBody(request))
+                sendJson(response, 200, opportunitySchema.parse(await runtime.updateOpportunity(opportunityId, update)))
                 return true
             }
 

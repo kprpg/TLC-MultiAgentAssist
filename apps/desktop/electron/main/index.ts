@@ -5,12 +5,12 @@ import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { z } from 'zod'
-import { agentTaskRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, mcemRequestSchema, type AuthStatus, type DesktopDataStatus, type PerformanceReporter } from '../../../../packages/common/index.js'
+import { agentTaskRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, mcemRequestSchema, milestoneUpdateSchema, opportunityUpdateSchema, type AuthStatus, type DesktopDataStatus, type PerformanceReporter } from '../../../../packages/common/index.js'
 import {
   loadFoundryEnvironment,
   type FoundryEnvironment
 } from '../../../../packages/common/configuration/foundry-environment.js'
-import { FixtureMsxConnector, LiveMsxConnector } from '../../../../packages/connectors/msx/index.js'
+import { FixtureMsxConnector, LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../../packages/connectors/msx/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../../packages/connectors/foundry/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
@@ -83,7 +83,7 @@ const mcemGuidancePath = app.isPackaged
 const mcemConnector = new LocalPdfMcemGuidanceConnector(mcemGuidancePath)
 const msxConnector = dataMode === 'sample'
   ? new FixtureMsxConnector()
-  : new LiveMsxConnector(tokenProvider, fetch, undefined, reportPerformance)
+  : new LiveMsxConnector(tokenProvider, fetch, undefined, reportPerformance, msxWriteMetadataFromEnvironment(process.env))
 const foundryOpenAIClient = runtimeEnvironment
   ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry)
   : undefined
@@ -163,7 +163,7 @@ function assertTrustedSender(event: IpcMainInvokeEvent): void {
   }
 }
 
-function registerReadOnlyIpc(): void {
+function registerIpc(): void {
   ipcMain.handle('tlc:exit-application', (event) => {
     assertTrustedSender(event)
     setImmediate(() => app.quit())
@@ -187,6 +187,14 @@ function registerReadOnlyIpc(): void {
   ipcMain.handle('tlc:list-milestones', (event, opportunityId: unknown) => {
     assertTrustedSender(event)
     return orchestrator.listMilestones(z.string().min(1).parse(opportunityId))
+  })
+  ipcMain.handle('tlc:update-milestone', (event, opportunityId: unknown, milestoneId: unknown, update: unknown) => {
+    assertTrustedSender(event)
+    return orchestrator.updateMilestone(z.string().min(1).parse(opportunityId), z.string().min(1).parse(milestoneId), milestoneUpdateSchema.parse(update))
+  })
+  ipcMain.handle('tlc:update-opportunity', (event, opportunityId: unknown, update: unknown) => {
+    assertTrustedSender(event)
+    return orchestrator.updateOpportunity(z.string().min(1).parse(opportunityId), opportunityUpdateSchema.parse(update))
   })
   ipcMain.handle('tlc:run-mcem-coach', (event, request: unknown) => {
     assertTrustedSender(event)
@@ -269,7 +277,7 @@ async function createWindow(): Promise<void> {
 }
 
 if (!startupBlocked) {
-  registerReadOnlyIpc()
+  registerIpc()
   void app.whenReady().then(createWindow)
 }
 

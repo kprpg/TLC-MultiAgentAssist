@@ -66,6 +66,16 @@ $env:TLC_FOUNDRY_ENV_FILE = 'C:\Users\you\.tlc\contoso-foundry.json'
 
 If `TLC_FOUNDRY_ENV_FILE` is not set, the app loads `config/foundry.environment.json`.
 
+Live milestone updates use verified default MSX values for On Track, At Risk, Blocked, Completed, Cancelled, Uncommitted, and Committed. Configure tenant-specific metadata before updating the remaining fields:
+
+```powershell
+$env:TLC_MSX_RISK_DETAILS_FIELD = 'your_verified_logical_field_name'
+$env:TLC_MSX_STATUS_LOST_TO_COMPETITOR = 'your_verified_integer_option_value'
+$env:TLC_MSX_STATUS_HYGIENE_DUPLICATE = 'your_verified_integer_option_value'
+```
+
+The app validates the field name and integer option values at startup. When a setting is absent, only the corresponding update is rejected; the app does not guess Dataverse metadata.
+
 ### Create the app registration
 
 In Microsoft Entra admin center:

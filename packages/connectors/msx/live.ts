@@ -1,4 +1,18 @@
-import { measurePerformance, type Account, type Milestone, type Opportunity, type PerformanceReporter } from '../../common/index.js'
+import {
+  customerCommitmentSchema,
+  measurePerformance,
+  milestoneStatusSchema,
+  milestoneUpdateSchema,
+  opportunityUpdateSchema,
+  type Account,
+  type CustomerCommitment,
+  type Milestone,
+  type MilestoneStatus,
+  type MilestoneUpdate,
+  type Opportunity,
+  type OpportunityUpdate,
+  type PerformanceReporter
+} from '../../common/index.js'
 import type { CriterionObservation, MsxConnector, OpportunityContext } from '../common/index.js'
 
 const defaultBaseUrl = 'https://microsoftsales.crm.dynamics.com/api/data/v9.2/'
@@ -36,6 +50,7 @@ interface OpportunityRow {
   msp_consumptionconsumedrecurring?: number
   msp_estcompletiondate?: string
   estimatedclosedate?: string
+  description?: string | null
   [key: string]: unknown
 }
 
@@ -47,7 +62,45 @@ interface MilestoneRow {
   msp_milestonestatus?: number
   msp_commitmentrecommendation?: number
   msp_monthlyuse?: number
+  msp_forecastcomments?: string | null
   [key: string]: unknown
+}
+
+const milestoneStatusCodes: Partial<Record<MilestoneStatus, number>> = {
+  'On Track': 861980000,
+  'At Risk': 861980001,
+  Blocked: 861980002,
+  Completed: 861980003,
+  Cancelled: 861980004
+}
+
+const customerCommitmentCodes: Record<CustomerCommitment, number> = {
+  Uncommitted: 861980000,
+  Committed: 861980003
+}
+
+export interface MsxWriteMetadata {
+  riskDetailsField?: string
+  milestoneStatusCodes?: Partial<Record<MilestoneStatus, number>>
+}
+
+export function msxWriteMetadataFromEnvironment(environment: NodeJS.ProcessEnv): MsxWriteMetadata {
+  const riskDetailsField = environment['TLC_MSX_RISK_DETAILS_FIELD']?.trim()
+  const configuredCodes: Partial<Record<MilestoneStatus, number>> = {}
+  for (const [status, variable] of [
+    ['Lost to Competitor', 'TLC_MSX_STATUS_LOST_TO_COMPETITOR'],
+    ['Hygiene/Duplicate', 'TLC_MSX_STATUS_HYGIENE_DUPLICATE']
+  ] as const) {
+    const rawValue = environment[variable]?.trim()
+    if (!rawValue) continue
+    const code = Number(rawValue)
+    if (!Number.isSafeInteger(code)) throw new Error(`${variable} must be an integer MSX option code.`)
+    configuredCodes[status] = code
+  }
+  return {
+    ...(riskDetailsField ? { riskDetailsField } : {}),
+    ...(Object.keys(configuredCodes).length > 0 ? { milestoneStatusCodes: configuredCodes } : {})
+  }
 }
 
 export class MsxRequestError extends Error {
@@ -70,9 +123,13 @@ export class LiveMsxConnector implements MsxConnector {
     private readonly tokenProvider: MsxAccessTokenProvider,
     private readonly fetchImplementation: typeof fetch = fetch,
     baseUrl = defaultBaseUrl,
-    private readonly performanceReporter?: PerformanceReporter
+    private readonly performanceReporter?: PerformanceReporter,
+    private readonly writeMetadata: MsxWriteMetadata = {}
   ) {
     this.baseUrl = new URL(baseUrl)
+    if (writeMetadata.riskDetailsField && !/^[A-Za-z][A-Za-z0-9_]*$/.test(writeMetadata.riskDetailsField)) {
+      throw new Error('The MSX risk details logical field name is invalid.')
+    }
   }
 
   async listAccounts(): Promise<Account[]> {
@@ -99,8 +156,52 @@ export class LiveMsxConnector implements MsxConnector {
       status: formattedValue(row, 'msp_milestonestatus') ?? 'Status not recorded',
       ...(row.msp_milestonedate ? { targetDate: row.msp_milestonedate.slice(0, 10) } : {}),
       ...(formattedValue(row, '_ownerid_value') ? { owner: formattedValue(row, '_ownerid_value') } : {}),
-      ...(formattedValue(row, 'msp_commitmentrecommendation') ? { commitment: formattedValue(row, 'msp_commitmentrecommendation') } : {})
+      ...(formattedValue(row, 'msp_commitmentrecommendation') ? { commitment: formattedValue(row, 'msp_commitmentrecommendation') } : {}),
+      ...(this.writeMetadata.riskDetailsField && typeof row[this.writeMetadata.riskDetailsField] === 'string'
+        ? { riskDetails: row[this.writeMetadata.riskDetailsField] as string }
+        : {}),
+      ...(typeof row.msp_forecastcomments === 'string' ? { comments: row.msp_forecastcomments } : {})
     }))
+  }
+
+  async updateMilestone(opportunityId: string, milestoneId: string, input: MilestoneUpdate): Promise<Milestone> {
+    const update = milestoneUpdateSchema.parse(input)
+    const statusCode = update.status
+      ? { ...milestoneStatusCodes, ...this.writeMetadata.milestoneStatusCodes }[milestoneStatusSchema.parse(update.status)]
+      : undefined
+    if (update.status && statusCode === undefined) {
+      throw new Error(`The MSX option code for milestone status "${update.status}" is not configured.`)
+    }
+    if (update.riskDetails !== undefined && !this.writeMetadata.riskDetailsField) {
+      throw new Error('The MSX logical field name for Risk/Blocker Details is not configured.')
+    }
+    await this.assertOpportunityAccess(opportunityId)
+    const milestones = await this.getMilestoneRows(opportunityId)
+    if (!milestones.some((milestone) => milestone.msp_engagementmilestoneid === milestoneId)) {
+      throw new Error('The milestone is not in the selected opportunity.')
+    }
+    await this.patch(`msp_engagementmilestones(${milestoneId})`, {
+      ...(statusCode !== undefined ? { msp_milestonestatus: statusCode } : {}),
+      ...(update.riskDetails !== undefined ? { [this.writeMetadata.riskDetailsField!]: update.riskDetails } : {}),
+      ...(update.targetDate ? { msp_milestonedate: update.targetDate } : {}),
+      ...(update.customerCommitment ? { msp_commitmentrecommendation: customerCommitmentCodes[customerCommitmentSchema.parse(update.customerCommitment)] } : {}),
+      ...(update.comments !== undefined ? { msp_forecastcomments: update.comments } : {})
+    })
+    this.milestonePromises.delete(opportunityId)
+    this.observationPromises.delete(opportunityId)
+    const updated = (await this.listMilestones(opportunityId)).find((milestone) => milestone.id === milestoneId)
+    if (!updated) throw new Error('MSX updated the milestone but it could not be reloaded.')
+    return updated
+  }
+
+  async updateOpportunity(opportunityId: string, input: OpportunityUpdate): Promise<Opportunity> {
+    const update = opportunityUpdateSchema.parse(input)
+    await this.assertOpportunityAccess(opportunityId)
+    await this.patch(`opportunities(${opportunityId})`, { description: update.comments })
+    this.portfolioPromise = undefined
+    const opportunity = (await this.getPortfolio()).opportunities.find((candidate) => candidate.id === opportunityId)
+    if (!opportunity) throw new Error('MSX updated the opportunity but it could not be reloaded.')
+    return structuredClone(opportunity)
   }
 
   async getOpportunityContext(opportunityId: string): Promise<OpportunityContext> {
@@ -132,6 +233,12 @@ export class LiveMsxConnector implements MsxConnector {
     this.milestonePromises.clear()
   }
 
+  private async assertOpportunityAccess(opportunityId: string): Promise<void> {
+    if (!(await this.getPortfolio()).opportunities.some((opportunity) => opportunity.id === opportunityId)) {
+      throw new Error('The opportunity is not in the signed-in user’s active MSX portfolio.')
+    }
+  }
+
   private getOpportunityObservations(opportunity: Opportunity): Promise<CriterionObservation[]> {
     let observations = this.observationPromises.get(opportunity.id)
     if (!observations) {
@@ -151,7 +258,7 @@ export class LiveMsxConnector implements MsxConnector {
     let milestones = this.milestonePromises.get(opportunityId)
     if (!milestones) {
       milestones = this.requestAll<MilestoneRow>('msp_engagementmilestones', {
-        '$select': 'msp_engagementmilestoneid,msp_name,_ownerid_value,msp_milestonedate,msp_milestonestatus,msp_commitmentrecommendation,msp_monthlyuse',
+        '$select': ['msp_engagementmilestoneid', 'msp_name', '_ownerid_value', 'msp_milestonedate', 'msp_milestonestatus', 'msp_commitmentrecommendation', 'msp_monthlyuse', 'msp_forecastcomments', this.writeMetadata.riskDetailsField].filter(Boolean).join(','),
         '$filter': `statecode eq 0 and _msp_opportunityid_value eq ${opportunityId}`,
         '$orderby': 'msp_milestonedate asc'
       }).catch((error: unknown) => {
@@ -185,7 +292,7 @@ export class LiveMsxConnector implements MsxConnector {
       'opportunities',
       'opportunityid',
       opportunityIds,
-      'opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate'
+      'opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description'
     ))
     const activeOpportunities = opportunityRows.filter((row) => row._parentaccountid_value)
     const accountIds = unique(
@@ -226,7 +333,8 @@ export class LiveMsxConnector implements MsxConnector {
       recordedStage,
       value: row.estimatedvalue || row.msp_consumptionconsumedrecurring || 0,
       currency: 'USD',
-      closeDate: closeDate?.slice(0, 10) ?? '1970-01-01'
+      closeDate: closeDate?.slice(0, 10) ?? '1970-01-01',
+      ...(typeof row.description === 'string' ? { comments: row.description } : {})
     }
   }
 
@@ -278,6 +386,25 @@ export class LiveMsxConnector implements MsxConnector {
       throw new MsxRequestError(`MSX request failed with status ${response.status}.`, response.status)
     }
     return await response.json() as T
+  }
+
+  private async patch(path: string, body: Record<string, unknown>): Promise<void> {
+    const url = new URL(path, this.baseUrl)
+    this.assertTrustedUrl(url)
+    const accessToken = await this.tokenProvider.getAccessToken()
+    const response = await this.fetchImplementation(url, {
+      method: 'PATCH',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'If-Match': '*'
+      },
+      body: JSON.stringify(body)
+    })
+    if (!response.ok) {
+      throw new MsxRequestError(`MSX update failed with status ${response.status}.`, response.status)
+    }
   }
 
   private assertTrustedUrl(url: URL): void {
