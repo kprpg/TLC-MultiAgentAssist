@@ -422,7 +422,7 @@ body.resizing-blade .blade {
 }
 
 .account-button {
-    grid-template-columns: 32px minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .account-button:hover,
@@ -437,19 +437,6 @@ body.resizing-blade .blade {
 .account-button.selected,
 .opportunity-button.selected {
     border-left: 3px solid var(--cp-accent);
-}
-
-.account-avatar {
-    display: grid;
-    width: 32px;
-    height: 32px;
-    place-items: center;
-    background: var(--cp-surface-soft);
-    border: 1px solid var(--cp-border);
-    border-radius: 4px;
-    color: var(--cp-accent);
-    font-size: 11px;
-    font-weight: 800;
 }
 
 .account-button strong,
@@ -480,6 +467,18 @@ body.resizing-blade .blade {
 .opportunity-button {
     grid-template-columns: minmax(0, 1fr) auto;
     min-height: 48px;
+}
+
+.opportunity-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 28px;
+    align-items: center;
+}
+
+.opportunity-actions {
+    min-width: 26px !important;
+    width: 26px;
+    height: 26px;
 }
 
 .opportunity-node {
@@ -585,9 +584,7 @@ body.resizing-blade .blade {
 }
 
 .opportunity-editor {
-    margin: 0 clamp(12px, 3vw, 32px);
-    padding-inline: 0;
-    background: transparent;
+    margin: 0 6px 7px;
 }
 
 .milestone-item strong {

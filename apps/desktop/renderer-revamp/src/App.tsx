@@ -191,6 +191,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [searchOpportunities, setSearchOpportunities] = useState<Opportunity[]>([])
   const [searchLoading, setSearchLoading] = useState(true)
   const [exiting, setExiting] = useState(false)
+  const [expandedOpportunityId, setExpandedOpportunityId] = useState<string | null>(null)
   const [milestoneEdit, setMilestoneEdit] = useState<MilestoneEdit | null>(null)
   const [opportunityCommentsOpen, setOpportunityCommentsOpen] = useState(false)
   const [opportunityComments, setOpportunityComments] = useState('')
@@ -264,6 +265,13 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     }
   }
 
+  function openOpportunityComments(nextOpportunity: Opportunity) {
+    if (opportunity?.id !== nextOpportunity.id) void selectOpportunity(nextOpportunity)
+    setOpportunityComments(nextOpportunity.comments ?? '')
+    setOpportunityCommentsOpen(true)
+    setError('')
+  }
+
   function toggleBlade(blade: Blade) {
     setCollapsed((current) => {
       const next = new Set(current)
@@ -281,6 +289,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setError('')
     setAccount(nextAccount)
     setOpportunity(null)
+    setExpandedOpportunityId(null)
     setMilestones([])
     setResult(null)
     setAgentResult(null)
@@ -303,6 +312,8 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       setOpportunities(searchOpportunities.filter((item) => item.accountId === nextAccount.id))
     }
     setOpportunity(nextOpportunity)
+    setExpandedOpportunityId(nextOpportunity.id)
+    setOpportunityCommentsOpen(false)
     setMilestones([])
     setResult(null)
     setAgentResult(null)
@@ -322,6 +333,14 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     } finally {
       setLoading(false)
     }
+  }
+
+  function toggleOpportunity(nextOpportunity: Opportunity) {
+    if (opportunity?.id === nextOpportunity.id) {
+      setExpandedOpportunityId((current) => current === nextOpportunity.id ? null : nextOpportunity.id)
+      return
+    }
+    void selectOpportunity(nextOpportunity)
   }
 
   function loadGuidance(nextCapability = capability) {
@@ -464,6 +483,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setAccount(null)
     setOpportunities([])
     setOpportunity(null)
+    setExpandedOpportunityId(null)
     setMilestones([])
     setResult(null)
     setAgentResult(null)
@@ -570,7 +590,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           <p className="blade-intro">Choose an account to open its active opportunities.</p>
           <div className="account-list">
             {accounts.map((item) => <button key={item.id} className={`account-button ${account?.id === item.id ? 'selected' : ''}`} onClick={() => void selectAccount(item)}>
-              <span className="account-avatar">{item.name.split(' ').map((word) => word[0]).join('')}</span>
               <span><strong>{item.name}</strong><small>{item.segment}</small></span>
               <ChevronRight20Regular />
             </button>)}
@@ -592,18 +611,29 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         {!collapsed.has('opportunities') && <div className="blade-body opportunity-tree" role="tree" aria-label={`${account.name} opportunities and milestones`}>
           {sortedOpportunities.map((item) => {
             const selected = opportunity?.id === item.id
-            return <div key={item.id} className={`opportunity-node ${selected ? 'expanded' : ''}`} role="treeitem" aria-expanded={selected} aria-selected={selected}>
-              <Tooltip
-                content={<div className="opportunity-tooltip-content"><b>{item.name}</b><span>Opportunity owner: {item.owner ?? 'Not assigned'}</span><span>Stage owner: {stageOwner(item.recordedStage)}</span><span>Recorded stage: {item.recordedStage}</span><span>Value: {formatMoney(item.value, item.currency)}</span><span>Close: {item.closeDate}</span></div>}
-                positioning="after"
-                relationship="description"
-              >
-                <button className={`opportunity-button ${selected ? 'selected' : ''}`} onClick={() => void selectOpportunity(item)}>
-                  <span className="opportunity-main"><strong>{item.name}</strong><small>{item.owner ?? 'Owner not assigned'} · Stage {item.recordedStage} · {formatMoney(item.value, item.currency)} · {item.closeDate}</small></span>
-                  {selected ? <ChevronDown20Regular /> : <ChevronRight20Regular />}
-                </button>
-              </Tooltip>
-              {selected && <div className="milestone-tree" role="group" aria-label={`${item.name} milestones`}>
+            const expanded = expandedOpportunityId === item.id
+            return <div key={item.id} className={`opportunity-node ${expanded ? 'expanded' : ''}`} role="treeitem" aria-expanded={expanded} aria-selected={selected}>
+              <div className="opportunity-row">
+                <Tooltip
+                  content={<div className="opportunity-tooltip-content"><b>{item.name}</b><span>Opportunity owner: {item.owner ?? 'Not assigned'}</span><span>Stage owner: {stageOwner(item.recordedStage)}</span><span>Recorded stage: {item.recordedStage}</span><span>Value: {formatMoney(item.value, item.currency)}</span><span>Close: {item.closeDate}</span></div>}
+                  positioning="above"
+                  relationship="description"
+                >
+                  <button className={`opportunity-button ${selected ? 'selected' : ''}`} onClick={() => toggleOpportunity(item)} onContextMenu={(event) => { event.preventDefault(); openOpportunityComments(item) }}>
+                    <span className="opportunity-main"><strong>{item.name}</strong><small>{item.owner ?? 'Owner not assigned'} · Stage {item.recordedStage} · {formatMoney(item.value, item.currency)} · {item.closeDate}</small></span>
+                    {expanded ? <ChevronDown20Regular /> : <ChevronRight20Regular />}
+                  </button>
+                </Tooltip>
+                <Menu positioning="below-end">
+                  <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button opportunity-actions" icon={<MoreHorizontal20Regular />} aria-label={`Edit ${item.name}`} title="Edit opportunity" /></MenuTrigger>
+                  <MenuPopover><MenuList><MenuItem onClick={() => openOpportunityComments(item)}>Opportunity Comments</MenuItem></MenuList></MenuPopover>
+                </Menu>
+              </div>
+              {selected && opportunityCommentsOpen && <div className="record-editor opportunity-editor" aria-label="Edit opportunity comments">
+                <Field label="Opportunity Comments"><Textarea resize="vertical" value={opportunityComments} onChange={(_, data) => setOpportunityComments(data.value)} /></Field>
+                <div className="record-editor-actions"><Button disabled={savingEdit} onClick={() => setOpportunityCommentsOpen(false)}>Cancel</Button><Button appearance="primary" disabled={savingEdit} onClick={() => void saveOpportunityComments()}>{savingEdit ? 'Saving...' : 'Save'}</Button></div>
+              </div>}
+              {expanded && <div className="milestone-tree" role="group" aria-label={`${item.name} milestones`}>
                 <div className="milestone-tree-header">
                   <span>Milestones</span>
                   <Button appearance="subtle" className="tree-refresh-button" disabled={loading} icon={<ArrowClockwise20Regular />} onClick={() => void refreshOpportunityContext()} aria-label="Refresh Milestones" title="Refresh milestones" />
@@ -659,15 +689,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           <header className="workbench-header">
             <button className="icon-button mobile-only" onClick={() => setMobileBlade('opportunities')} title="Back to opportunities" aria-label="Back to opportunities"><ChevronLeft20Regular /></button>
             <div><p className="eyebrow">{account?.name}</p><h1>{opportunity.name}</h1><span>{opportunity.owner ?? 'Owner not assigned'} · Stage {opportunity.recordedStage} · {formatMoney(opportunity.value, opportunity.currency)} · closes {opportunity.closeDate}</span></div>
-            <Menu positioning="below-end">
-              <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button" icon={<MoreHorizontal20Regular />} title="More opportunity actions" aria-label="More opportunity actions" /></MenuTrigger>
-              <MenuPopover><MenuList><MenuItem onClick={() => { setOpportunityComments(opportunity.comments ?? ''); setOpportunityCommentsOpen(true); setError('') }}>Edit comments</MenuItem></MenuList></MenuPopover>
-            </Menu>
           </header>
-          {opportunityCommentsOpen && <div className="record-editor opportunity-editor" aria-label="Edit opportunity comments">
-            <Field label="Comments"><Textarea resize="vertical" value={opportunityComments} onChange={(_, data) => setOpportunityComments(data.value)} /></Field>
-            <div className="record-editor-actions"><Button disabled={savingEdit} onClick={() => setOpportunityCommentsOpen(false)}>Cancel</Button><Button appearance="primary" disabled={savingEdit} onClick={() => void saveOpportunityComments()}>{savingEdit ? 'Saving...' : 'Save'}</Button></div>
-          </div>}
           <div className="center-tabs" role="tablist" aria-label="Opportunity view">
             <button role="tab" aria-selected={centerTab === 'msx'} onClick={() => setCenterTab('msx')}>MSX</button>
             <button role="tab" aria-selected={centerTab === 'guidance'} onClick={() => loadGuidance()}>Multi-Agent Guidance</button>
