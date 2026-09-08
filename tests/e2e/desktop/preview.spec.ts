@@ -11,6 +11,7 @@ test('launches the secure MCEM operational workbench', async () => {
     args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
     env: {
       ...process.env,
+      TLC_UI_MODE: 'legacy',
       TLC_DATA_MODE: 'sample'
     }
   })
@@ -62,7 +63,7 @@ test('launches the secure MCEM operational workbench', async () => {
       return { gap: listStyles.gap, paddingTop: contentStyles.paddingTop }
     })
     expect(topbarBox?.height).toBe(48)
-    expect(analysisStyles).toEqual({ paddingTop: '20px', paddingLeft: '18px' })
+    expect(analysisStyles).toEqual({ paddingTop: '20px', paddingLeft: '22px' })
     expect(actionStyles).toEqual({ gap: '8px', paddingTop: '10px' })
 
     const contextToggle = window.getByRole('button', { name: 'Toggle account context' })
