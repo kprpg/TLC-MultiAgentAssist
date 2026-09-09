@@ -184,17 +184,55 @@ describe('LiveMsxConnector', () => {
     expect(request.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(2)
   })
 
+  it('writes configured tenant stage codes and refuses unconfigured live stage writes', async () => {
+    let activeStage = 2
+    const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input))
+      if (init?.method === 'PATCH') {
+        expect(url.pathname).toMatch(/\/opportunities\(opp-1\)$/)
+        expect(new Headers(init.headers).get('If-Match')).toBe('*')
+        expect(JSON.parse(String(init.body))).toEqual({
+          msp_activesalesstage: 861980013,
+          description: 'Advanced from Stage 2 to Stage 3. Gates passed.'
+        })
+        activeStage = 3
+        return new Response(null, { status: 204 })
+      }
+      if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+      if (url.pathname.endsWith('/msp_dealteams')) return json({ value: [{ _msp_parentopportunityid_value: 'opp-1' }] })
+      if (url.pathname.endsWith('/opportunities')) return json({ value: [{ opportunityid: 'opp-1', _parentaccountid_value: 'account-1', name: 'Opportunity', msp_activesalesstage: activeStage, estimatedvalue: 100 }] })
+      if (url.pathname.endsWith('/accounts')) return json({ value: [{ accountid: 'account-1', name: 'Account' }] })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const connector = new LiveMsxConnector(
+      { getAccessToken: vi.fn().mockResolvedValue('secret-token') },
+      request as typeof fetch,
+      undefined,
+      undefined,
+      { stageCodes: { 3: 861980013 } }
+    )
+
+    await expect(connector.updateOpportunityStage('opp-1', 3, 'Advanced from Stage 2 to Stage 3. Gates passed.'))
+      .resolves.toEqual(expect.objectContaining({ id: 'opp-1', recordedStage: 3 }))
+    await expect(connector.updateOpportunityStage('opp-1', 4, 'Advance again.'))
+      .rejects.toThrow('TLC_MSX_STAGE_4')
+    expect(request.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1)
+  })
+
   it('exports and parses tenant-specific write metadata from the connector entry point', () => {
     expect(msxWriteMetadataFromEnvironment({
       TLC_MSX_RISK_DETAILS_FIELD: 'msp_verifiedriskdetails',
       TLC_MSX_STATUS_LOST_TO_COMPETITOR: '861980005',
-      TLC_MSX_STATUS_HYGIENE_DUPLICATE: '861980006'
+      TLC_MSX_STATUS_HYGIENE_DUPLICATE: '861980006',
+      TLC_MSX_STAGE_1: '861980011',
+      TLC_MSX_STAGE_5: '861980015'
     })).toEqual({
       riskDetailsField: 'msp_verifiedriskdetails',
       milestoneStatusCodes: {
         'Lost to Competitor': 861980005,
         'Hygiene/Duplicate': 861980006
-      }
+      },
+      stageCodes: { 1: 861980011, 5: 861980015 }
     })
   })
 })

@@ -87,6 +87,29 @@ describe('revamp live web data client', () => {
         }))
     })
 
+    it('posts governed stage transitions with the shared contract', async () => {
+        const result = {
+            opportunity: { id: 'opportunity-1', accountId: 'account-1', name: 'Pilot', recordedStage: 1, value: 100, currency: 'USD', closeDate: '2026-10-01' },
+            previousStage: 2,
+            targetStage: 1,
+            disposition: 'recycled',
+            auditNote: 'Recycled to Stage 1 because customer scope changed.'
+        }
+        const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(result), {
+            status: 200,
+            headers: { 'content-type': 'application/json' }
+        }))
+
+        await expect(createWebApiClient(fetcher).transitionOpportunityStage(
+            'account-1', 'opportunity-1', 1, 'Customer scope changed materially.'
+        )).resolves.toEqual(result)
+
+        expect(fetcher).toHaveBeenCalledWith('/api/mcem-stage-transition', expect.objectContaining({
+            method: 'POST',
+            body: JSON.stringify({ contractVersion, accountId: 'account-1', opportunityId: 'opportunity-1', targetStage: 1, reason: 'Customer scope changed materially.' })
+        }))
+    })
+
     it('dispatches the selected prompt without replacing it with generic guidance', async () => {
         const response = {
             contractVersion,

@@ -224,20 +224,23 @@ const observationsByOpportunity: Record<string, OpportunityContext['observations
 }
 
 export class FixtureMsxConnector implements MsxConnector {
+  private readonly opportunities = structuredClone(opportunities)
+  private readonly milestonesByOpportunity = structuredClone(milestonesByOpportunity)
+
   async listAccounts(): Promise<Account[]> {
     return structuredClone(accounts)
   }
 
   async listOpportunities(accountId: string): Promise<Opportunity[]> {
-    return structuredClone(opportunities.filter((opportunity) => opportunity.accountId === accountId))
+    return structuredClone(this.opportunities.filter((opportunity) => opportunity.accountId === accountId))
   }
 
   async listMilestones(opportunityId: string): Promise<Milestone[]> {
-    return structuredClone(milestonesByOpportunity[opportunityId] ?? [])
+    return structuredClone(this.milestonesByOpportunity[opportunityId] ?? [])
   }
 
   async updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone> {
-    const milestone = milestonesByOpportunity[opportunityId]?.find((candidate) => candidate.id === milestoneId)
+    const milestone = this.milestonesByOpportunity[opportunityId]?.find((candidate) => candidate.id === milestoneId)
     if (!milestone) throw new Error(`Unknown sample milestone: ${milestoneId}`)
     if (update.status !== undefined) milestone.status = update.status
     if (update.targetDate !== undefined) milestone.targetDate = update.targetDate
@@ -248,14 +251,22 @@ export class FixtureMsxConnector implements MsxConnector {
   }
 
   async updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity> {
-    const opportunity = opportunities.find((candidate) => candidate.id === opportunityId)
+    const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId)
     if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`)
     opportunity.comments = update.comments
     return structuredClone(opportunity)
   }
 
+  async updateOpportunityStage(opportunityId: string, targetStage: number, auditNote: string): Promise<Opportunity> {
+    const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId)
+    if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`)
+    opportunity.recordedStage = targetStage
+    opportunity.comments = [opportunity.comments, auditNote].filter(Boolean).join('\n\n')
+    return structuredClone(opportunity)
+  }
+
   async getOpportunityContext(opportunityId: string): Promise<OpportunityContext> {
-    const opportunity = opportunities.find((candidate) => candidate.id === opportunityId)
+    const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId)
     if (!opportunity) {
       throw new Error(`Unknown sample opportunity: ${opportunityId}`)
     }

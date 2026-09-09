@@ -2,6 +2,8 @@ import {
     accountSchema,
     agentTaskResponseSchema,
     contractVersion,
+    mcemStageTransitionRequestSchema,
+    mcemStageTransitionResultSchema,
     mcemResponseSchema,
     milestoneSchema,
     milestoneUpdateSchema,
@@ -16,6 +18,7 @@ import {
     type ExportResponseRequest,
     type ExportResponseResult,
     type McemResponse,
+    type McemStageTransitionResult,
     type Milestone,
     type MilestoneUpdate,
     type Opportunity,
@@ -31,6 +34,7 @@ export interface RevampDataClient {
     listMilestones(opportunityId: string): Promise<Milestone[]>
     updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
     updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
+    transitionOpportunityStage(accountId: string, opportunityId: string, targetStage: number, reason?: string): Promise<McemStageTransitionResult>
     runMcemCoach(accountId: string, opportunityId: string): Promise<McemResponse>
     runAgentTask(capability: AgentCapability, accountId: string, opportunityId: string, prompt: string): Promise<AgentTaskResponse>
     openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
@@ -68,6 +72,10 @@ export function createWebApiClient(fetcher: Fetcher = fetch): RevampDataClient {
         listMilestones: async (opportunityId) => milestoneSchema.array().parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/milestones`)),
         updateMilestone: async (opportunityId, milestoneId, update) => milestoneSchema.parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/milestones/${encodeURIComponent(milestoneId)}`, { method: 'PATCH', body: JSON.stringify(milestoneUpdateSchema.parse(update)) })),
         updateOpportunity: async (opportunityId, update) => opportunitySchema.parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}`, { method: 'PATCH', body: JSON.stringify(opportunityUpdateSchema.parse(update)) })),
+        transitionOpportunityStage: async (accountId, opportunityId, targetStage, reason) => mcemStageTransitionResultSchema.parse(await apiRequest(fetcher, '/api/mcem-stage-transition', {
+            method: 'POST',
+            body: JSON.stringify(mcemStageTransitionRequestSchema.parse({ contractVersion, accountId, opportunityId, targetStage, reason }))
+        })),
         runMcemCoach: async (accountId, opportunityId) => mcemResponseSchema.parse(await apiRequest(fetcher, '/api/mcem-coach', {
             method: 'POST',
             body: JSON.stringify({ contractVersion, accountId, opportunityId, prompt: 'How do we move this opportunity to the next MCEM stage?' })
@@ -128,6 +136,7 @@ interface DesktopBridge {
     listMilestones(opportunityId: string): Promise<Milestone[]>
     updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
     updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
+    transitionOpportunityStage(request: { contractVersion: typeof contractVersion; accountId: string; opportunityId: string; targetStage: number; reason?: string }): Promise<McemStageTransitionResult>
     runMcemCoach(request: { contractVersion: typeof contractVersion; accountId: string; opportunityId: string; prompt: string }): Promise<McemResponse>
     runAgentTask(request: { contractVersion: typeof contractVersion; capability: AgentCapability; accountId: string; opportunityId: string; prompt: string }): Promise<AgentTaskResponse>
     openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
@@ -243,6 +252,21 @@ function webClient(): RevampDataClient {
             opportunity.comments = update.comments
             return structuredClone(opportunity)
         },
+        transitionOpportunityStage: async (accountId, opportunityId, targetStage, reason) => {
+            const opportunity = opportunities.find((item) => item.id === opportunityId && item.accountId === accountId)
+            if (!opportunity) throw new Error('Unknown sample opportunity.')
+            if (Math.abs(targetStage - opportunity.recordedStage) !== 1) throw new Error('MCEM stage changes must move to an adjacent stage.')
+            const previousStage = opportunity.recordedStage
+            const evaluation = buildWebEvaluation(opportunity)
+            const advancing = targetStage > previousStage
+            const hasGaps = evaluation.criteria.some((criterion) => criterion.status !== 'met')
+            if ((!advancing || hasGaps) && !reason?.trim()) throw new Error(advancing ? 'An exception reason is required.' : 'A recycle reason is required.')
+            const disposition = advancing ? hasGaps ? 'override' : 'advanced' : 'recycled'
+            const auditNote = `[MCEM sample transition] Stage ${previousStage} -> Stage ${targetStage}; disposition: ${disposition}.${reason ? ` Reason: ${reason.trim()}` : ''}`
+            opportunity.recordedStage = targetStage
+            opportunity.comments = [opportunity.comments, auditNote].filter(Boolean).join('\n\n')
+            return mcemStageTransitionResultSchema.parse({ opportunity: structuredClone(opportunity), previousStage, targetStage, disposition, auditNote })
+        },
         runMcemCoach: async (_accountId, opportunityId) => {
             const opportunity = opportunities.find((item) => item.id === opportunityId)
             if (!opportunity) throw new Error('Unknown sample opportunity.')
@@ -280,6 +304,7 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         listMilestones: (opportunityId) => bridge.listMilestones(opportunityId),
         updateMilestone: (opportunityId, milestoneId, update) => bridge.updateMilestone(opportunityId, milestoneId, update),
         updateOpportunity: (opportunityId, update) => bridge.updateOpportunity(opportunityId, update),
+        transitionOpportunityStage: (accountId, opportunityId, targetStage, reason) => bridge.transitionOpportunityStage({ contractVersion, accountId, opportunityId, targetStage, reason }),
         runMcemCoach: (accountId, opportunityId) => bridge.runMcemCoach({ contractVersion, accountId, opportunityId, prompt: 'How do we move this opportunity to the next MCEM stage?' }),
         runAgentTask: (capability, accountId, opportunityId, prompt) => bridge.runAgentTask({ contractVersion, capability, accountId, opportunityId, prompt }),
         openEmailCompose: (request) => bridge.openEmailCompose(request),

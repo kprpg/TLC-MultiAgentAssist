@@ -10,6 +10,7 @@ electron.contextBridge.exposeInMainWorld("tlc", {
 	updateMilestone: (opportunityId, milestoneId, update) => electron.ipcRenderer.invoke("tlc:update-milestone", opportunityId, milestoneId, update),
 	updateOpportunity: (opportunityId, update) => electron.ipcRenderer.invoke("tlc:update-opportunity", opportunityId, update),
 	runMcemCoach: (request) => electron.ipcRenderer.invoke("tlc:run-mcem-coach", request),
+	transitionOpportunityStage: (request) => electron.ipcRenderer.invoke("tlc:transition-opportunity-stage", request),
 	runAgentTask: (request) => electron.ipcRenderer.invoke("tlc:run-agent-task", request),
 	openEmailCompose: (request) => electron.ipcRenderer.invoke("tlc:open-email-compose", request),
 	exportAgentResponse: (request) => electron.ipcRenderer.invoke("tlc:export-agent-response", request),
