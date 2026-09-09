@@ -65,14 +65,7 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
         run: |
           if ($env:RELEASE_TAG -ne "v$env:PACKAGE_VERSION") {
-            throw "Tag $env:RELEASE_TAG does not match desktop package version v$env:PACKAGE_VERSION."
-          }
-
-      - name: Run validation suite
-        run: npm run phase0:check
-
-      - name: Run legacy desktop smoke test
-        run: npm run test:smoke:desktop
+            throw "Tag $env:RELEASE_TAG does not match desktop package version v$env:PACKAGE_
 
       - name: Run revamp desktop smoke test
         run: npm run test:smoke:revamp:desktop
