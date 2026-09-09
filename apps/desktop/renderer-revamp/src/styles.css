@@ -507,6 +507,11 @@ body.resizing-blade .blade {
     text-transform: uppercase;
 }
 
+.milestone-tree-actions {
+    display: flex;
+    align-items: center;
+}
+
 .tree-refresh-button {
     min-width: 24px !important;
     width: 24px;

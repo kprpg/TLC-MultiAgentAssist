@@ -163,6 +163,7 @@ const milestones: Milestone[] = opportunities.flatMap((opportunity, index) => [{
     name: index % 2 === 0 ? 'Customer outcome validation' : 'Technical validation workshop',
     status: index % 3 === 0 ? 'On track' : 'In progress',
     targetDate: opportunity.closeDate,
+    estimatedMonthlyUsage: opportunity.value / 12,
     owner: opportunity.owner ?? 'Account team',
     commitment: index % 2 === 0 ? 'Committed' : 'Best case'
 }])
