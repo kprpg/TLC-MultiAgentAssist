@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import JSZip from 'jszip'
-import { createAppServiceZip, resolveNpmInvocation } from '../../../scripts/prepare-web-appservice-release.mjs'
+import {
+    createAppServiceZip,
+    createLinuxCanvasInstallArgs,
+    createProductionInstallArgs,
+    resolveNpmInvocation
+} from '../../../scripts/prepare-web-appservice-release.mjs'
 
 const temporaryDirectories: string[] = []
 
@@ -12,6 +17,33 @@ afterEach(async () => {
 })
 
 describe('App Service release package', () => {
+    it('installs production dependencies for local smoke validation', () => {
+        expect(createProductionInstallArgs('C:\\release')).toEqual([
+            'install',
+            '--omit=dev',
+            '--ignore-scripts',
+            '--package-lock=false',
+            '--prefix',
+            'C:\\release'
+        ])
+    })
+
+    it('adds the matching Linux x64 canvas binding to the App Service package', () => {
+        expect(createLinuxCanvasInstallArgs('C:\\release', {
+            '@napi-rs/canvas-linux-x64-gnu': '0.1.80'
+        })).toEqual([
+            'install',
+            '@napi-rs/canvas-linux-x64-gnu@0.1.80',
+            '--omit=dev',
+            '--ignore-scripts',
+            '--package-lock=false',
+            '--no-save',
+            '--force',
+            '--prefix',
+            'C:\\release'
+        ])
+    })
+
     it('runs npm through Node on Windows without a command shell', () => {
         expect(resolveNpmInvocation({
             platform: 'win32',
@@ -36,8 +68,8 @@ describe('App Service release package', () => {
         await createAppServiceZip(packageRoot, artifactPath)
 
         const archive = await JSZip.loadAsync(await readFile(artifactPath))
-        const files = Object.values(archive.files).filter((entry) => !entry.dir).map((entry) => entry.name).sort()
-        expect(files).toEqual([
+        const files = Object.values(archive.files).filter((entry) => !entry.dir)
+        expect(files.map((entry) => entry.name).sort()).toEqual([
             'apps/desktop/index.html',
             'package.json',
             'server.js'
@@ -45,7 +77,7 @@ describe('App Service release package', () => {
         expect(archive.file('package/server.js')).toBeNull()
     })
 
-    it('archives more files than the Windows open-file limit permits at once', async () => {
+    it('writes ZIP64 metadata for packages that may exceed the classic entry limit', async () => {
         const temporaryDirectory = await mkdtemp(join(tmpdir(), 'tlc-web-appservice-many-files-test-'))
         temporaryDirectories.push(temporaryDirectory)
         const packageRoot = join(temporaryDirectory, 'package')
@@ -56,7 +88,10 @@ describe('App Service release package', () => {
 
         await createAppServiceZip(packageRoot, artifactPath)
 
-        const archive = await JSZip.loadAsync(await readFile(artifactPath))
+        const artifact = await readFile(artifactPath)
+        expect(artifact.lastIndexOf(Buffer.from('PK\x06\x06', 'binary'))).toBeGreaterThan(-1)
+        expect(artifact.lastIndexOf(Buffer.from('PK\x06\x07', 'binary'))).toBeGreaterThan(-1)
+        const archive = await JSZip.loadAsync(artifact)
         const files = Object.values(archive.files).filter((entry) => !entry.dir)
         expect(files).toHaveLength(512)
     })
