@@ -1,29 +1,23 @@
 import { createWriteStream } from 'node:fs'
-import { mkdir, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative, resolve, sep } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import JSZip from 'jszip'
+import { ZipArchive } from 'archiver'
 import { packageWebRelease } from './package-web-release.mjs'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 export async function createAppServiceZip(packageRoot, artifactPath) {
-  const archive = new JSZip()
-  await addDirectory(archive, packageRoot, packageRoot)
   await mkdir(dirname(artifactPath), { recursive: true })
   await rm(artifactPath, { force: true })
-  await pipeline(
-    archive.generateNodeStream({
-      type: 'nodebuffer',
-      streamFiles: true,
-      compression: 'DEFLATE',
-      compressionOptions: { level: 9 }
-    }),
-    createWriteStream(artifactPath)
-  )
+  const archive = new ZipArchive({ forceZip64: true, zlib: { level: 9 } })
+  const completion = pipeline(archive, createWriteStream(artifactPath))
+  archive.directory(packageRoot, false)
+  await archive.finalize()
+  await completion
   return artifactPath
 }
 
@@ -39,7 +33,12 @@ async function prepareWebAppServiceRelease() {
     )
 
     const npm = resolveNpmInvocation()
-    await run(npm.command, [...npm.argsPrefix, 'install', '--omit=dev', '--ignore-scripts', '--package-lock=false', '--prefix', packageRoot])
+    await run(npm.command, [...npm.argsPrefix, ...createProductionInstallArgs(packageRoot)])
+    const canvasPackage = JSON.parse(await readFile(join(packageRoot, 'node_modules', '@napi-rs', 'canvas', 'package.json'), 'utf8'))
+    await run(npm.command, [
+      ...npm.argsPrefix,
+      ...createLinuxCanvasInstallArgs(packageRoot, canvasPackage.optionalDependencies)
+    ])
     await run(process.execPath, [join(repositoryRoot, 'scripts', 'smoke-web-release.mjs'), packageRoot])
     await createAppServiceZip(packageRoot, artifactPath)
     console.info(`App Service package created at ${artifactPath}`)
@@ -48,18 +47,32 @@ async function prepareWebAppServiceRelease() {
   }
 }
 
-async function addDirectory(archive, root, currentDirectory) {
-  const entries = await readdir(currentDirectory, { withFileTypes: true })
-  for (const entry of entries) {
-    const absolutePath = join(currentDirectory, entry.name)
-    const archivePath = relative(root, absolutePath).split(sep).join('/')
-    if (entry.isDirectory()) {
-      await addDirectory(archive, root, absolutePath)
-    } else if (entry.isFile() || entry.isSymbolicLink()) {
-      const metadata = await stat(absolutePath)
-      archive.file(archivePath, await readFile(absolutePath), { unixPermissions: metadata.mode })
-    }
-  }
+export function createProductionInstallArgs(packageRoot) {
+  return [
+    'install',
+    '--omit=dev',
+    '--ignore-scripts',
+    '--package-lock=false',
+    '--prefix',
+    packageRoot
+  ]
+}
+
+export function createLinuxCanvasInstallArgs(packageRoot, optionalDependencies) {
+  const packageName = '@napi-rs/canvas-linux-x64-gnu'
+  const version = optionalDependencies?.[packageName]
+  if (!version) throw new Error(`${packageName} is not declared by @napi-rs/canvas`)
+  return [
+    'install',
+    `${packageName}@${version}`,
+    '--omit=dev',
+    '--ignore-scripts',
+    '--package-lock=false',
+    '--no-save',
+    '--force',
+    '--prefix',
+    packageRoot
+  ]
 }
 
 function run(command, args) {
