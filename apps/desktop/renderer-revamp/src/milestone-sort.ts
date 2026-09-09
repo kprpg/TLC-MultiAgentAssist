@@ -1,6 +1,7 @@
 import type { Milestone } from '../../../../packages/common/index.js'
 
 export type MilestoneSort = 'targetDate' | 'estimatedMonthlyUsage' | 'commitment' | 'status'
+export type SortDirection = 'ascending' | 'descending'
 
 const statusPriority = new Map([
   'On Track',
@@ -12,12 +13,12 @@ const statusPriority = new Map([
   'Hygiene/Duplicate'
 ].map((status, index) => [status.toLocaleLowerCase(), index]))
 
-export function sortMilestones(milestones: readonly Milestone[], sortBy: MilestoneSort): Milestone[] {
+export function sortMilestones(milestones: readonly Milestone[], sortBy: MilestoneSort, direction?: SortDirection): Milestone[] {
   return [...milestones].sort((left, right) => {
     const difference = sortBy === 'targetDate'
-      ? compareOptionalDescending(left.targetDate, right.targetDate)
+      ? compareOptional(left.targetDate, right.targetDate, direction ?? 'ascending')
       : sortBy === 'estimatedMonthlyUsage'
-        ? compareOptionalDescending(left.estimatedMonthlyUsage, right.estimatedMonthlyUsage)
+        ? compareOptional(left.estimatedMonthlyUsage, right.estimatedMonthlyUsage, direction ?? 'descending')
         : sortBy === 'commitment'
           ? compareCommitment(left.commitment, right.commitment)
           : compareStatus(left.status, right.status)
@@ -26,12 +27,13 @@ export function sortMilestones(milestones: readonly Milestone[], sortBy: Milesto
   })
 }
 
-function compareOptionalDescending<T extends number | string>(left: T | undefined, right: T | undefined): number {
+function compareOptional<T extends number | string>(left: T | undefined, right: T | undefined, direction: SortDirection): number {
   if (left === undefined) return right === undefined ? 0 : 1
   if (right === undefined) return -1
-  return typeof left === 'number' && typeof right === 'number'
-    ? right - left
-    : String(right).localeCompare(String(left))
+  const difference = typeof left === 'number' && typeof right === 'number'
+    ? left - right
+    : String(left).localeCompare(String(right))
+  return direction === 'ascending' ? difference : -difference
 }
 
 function compareCommitment(left: string | undefined, right: string | undefined): number {
