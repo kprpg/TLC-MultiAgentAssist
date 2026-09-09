@@ -13,6 +13,7 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
 
     try {
         const window = await app.firstWindow()
+        await window.setViewportSize({ width: 1400, height: 768 })
         const pageErrors: Error[] = []
         window.on('pageerror', (error) => pageErrors.push(error))
         await app.evaluate(({ ipcMain }) => {
@@ -53,6 +54,40 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
         await expect(workbench).toContainText('Evidence supports')
         await expect(window.getByRole('complementary', { name: 'Next best actions blade' })).toBeVisible()
         await expect(window.getByRole('tab', { name: 'MSX' })).toHaveAttribute('aria-selected', 'true')
+
+        await window.getByRole('tab', { name: 'MCEM Stage Management' }).click()
+        const stageBoardViewport = window.locator('.mcem-board-view')
+        const horizontalScrollbar = window.getByRole('slider', { name: 'Scroll MCEM stages horizontally' })
+        const verticalScrollbar = window.getByRole('slider', { name: 'Scroll MCEM stages vertically' })
+        await expect(stageBoardViewport).toBeVisible()
+        await expect.poll(() => stageBoardViewport.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
+        await expect(horizontalScrollbar).toBeVisible()
+        await expect(verticalScrollbar).toBeVisible()
+        const [workbenchBox, viewportBox, horizontalBox, verticalBox] = await Promise.all([
+            workbench.boundingBox(),
+            stageBoardViewport.boundingBox(),
+            horizontalScrollbar.boundingBox(),
+            verticalScrollbar.boundingBox()
+        ])
+        expect(workbenchBox).not.toBeNull()
+        expect(viewportBox).not.toBeNull()
+        expect(horizontalBox).not.toBeNull()
+        expect(verticalBox).not.toBeNull()
+        expect(horizontalBox!.y + horizontalBox!.height).toBeLessThanOrEqual(workbenchBox!.y + workbenchBox!.height)
+        expect(verticalBox!.x + verticalBox!.width).toBeLessThanOrEqual(workbenchBox!.x + workbenchBox!.width)
+        await expect.poll(() => horizontalScrollbar.evaluate((element) => Number((element as HTMLInputElement).max))).toBeGreaterThan(0)
+        await horizontalScrollbar.focus()
+        await horizontalScrollbar.press('End')
+        await expect.poll(() => stageBoardViewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
+        await expect(window.getByLabel('Stage 5: Manage & Optimize')).toBeVisible()
+        await stageBoardViewport.locator('.mcem-board').evaluate((element, viewportHeight) => {
+            ; (element as HTMLElement).style.minHeight = `${viewportHeight + 400}px`
+        }, viewportBox!.height)
+        await expect.poll(() => verticalScrollbar.evaluate((element) => Number((element as HTMLInputElement).max))).toBeGreaterThan(0)
+        await verticalScrollbar.focus()
+        await verticalScrollbar.press('End')
+        await expect.poll(() => stageBoardViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+        await window.getByRole('tab', { name: 'MSX' }).click()
 
         await window.getByRole('button', { name: 'Collapse Accounts blade header' }).click()
         await expect(window.getByRole('button', { name: 'Expand Accounts', exact: true })).toBeVisible()

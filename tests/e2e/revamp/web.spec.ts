@@ -246,7 +246,22 @@ test('governs adjacent MCEM board advances, exceptions, and recycle moves', asyn
     await expect(board.locator('.mcem-card.selected')).toContainText('Customer data platform - ready to advance')
 
     const boardScroller = page.locator('.mcem-board-view')
+    const centerPane = page.locator('.center-pane')
+    const horizontalScrollbar = page.getByRole('slider', { name: 'Scroll MCEM stages horizontally' })
+    const verticalScrollbar = page.getByRole('slider', { name: 'Scroll MCEM stages vertically' })
     await expect.poll(() => boardScroller.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
+    await expect(horizontalScrollbar).toBeVisible()
+    await expect(verticalScrollbar).toBeVisible()
+    const [centerPaneBox, horizontalBox, verticalBox] = await Promise.all([
+        centerPane.boundingBox(),
+        horizontalScrollbar.boundingBox(),
+        verticalScrollbar.boundingBox()
+    ])
+    expect(centerPaneBox).not.toBeNull()
+    expect(horizontalBox).not.toBeNull()
+    expect(verticalBox).not.toBeNull()
+    expect(horizontalBox!.y + horizontalBox!.height).toBeLessThanOrEqual(centerPaneBox!.y + centerPaneBox!.height)
+    expect(verticalBox!.x + verticalBox!.width).toBeLessThanOrEqual(centerPaneBox!.x + centerPaneBox!.width)
     await boardScroller.evaluate((element) => element.scrollTo({ left: element.scrollWidth }))
     await expect(board.getByLabel('Stage 5: Manage & Optimize')).toBeInViewport()
     await boardScroller.evaluate((element) => element.scrollTo({ left: 0 }))

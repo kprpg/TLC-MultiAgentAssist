@@ -756,13 +756,80 @@ body.resizing-blade .blade {
     padding: 10px 14px 20px;
 }
 
-.mcem-board-view {
+.mcem-board-shell {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 28px;
+    grid-template-rows: minmax(0, 1fr) 28px;
+    min-width: 0;
     min-height: 0;
-    flex: 1 1 auto;
+    flex: 1 1 0;
+    overflow: hidden;
+}
+
+.mcem-board-view {
+    grid-column: 1;
+    grid-row: 1;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
     overflow: auto;
     padding: 12px;
     background: var(--cp-bg);
-    scrollbar-gutter: stable;
+}
+
+.mcem-board-view::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+
+.mcem-horizontal-scrollbar,
+.mcem-vertical-scrollbar,
+.mcem-scrollbar-corner {
+    background: var(--cp-surface);
+}
+
+.mcem-horizontal-scrollbar {
+    grid-column: 1;
+    grid-row: 2;
+    padding: 5px 12px 6px;
+    border-top: 1px solid var(--cp-border);
+}
+
+.mcem-horizontal-scrollbar input,
+.mcem-vertical-scrollbar input {
+    display: block;
+    margin: 0;
+    accent-color: var(--cp-accent);
+}
+
+.mcem-horizontal-scrollbar input {
+    width: 100%;
+    height: 17px;
+    cursor: ew-resize;
+}
+
+.mcem-vertical-scrollbar {
+    display: grid;
+    grid-column: 2;
+    grid-row: 1;
+    place-items: center;
+    padding: 12px 5px;
+    border-left: 1px solid var(--cp-border);
+}
+
+.mcem-vertical-scrollbar input {
+    width: 17px;
+    height: 100%;
+    cursor: ns-resize;
+    direction: rtl;
+    writing-mode: vertical-lr;
+}
+
+.mcem-scrollbar-corner {
+    grid-column: 2;
+    grid-row: 2;
+    border-top: 1px solid var(--cp-border);
+    border-left: 1px solid var(--cp-border);
 }
 
 .mcem-board {

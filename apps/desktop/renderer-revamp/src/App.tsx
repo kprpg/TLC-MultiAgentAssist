@@ -218,9 +218,29 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [draggedOpportunity, setDraggedOpportunity] = useState<{ id: string; stage: number } | null>(null)
   const [dragTargetStage, setDragTargetStage] = useState<number | null>(null)
   const [boardSelectedOpportunityId, setBoardSelectedOpportunityId] = useState<string | null>(null)
+  const [boardScroll, setBoardScroll] = useState({ left: 0, top: 0, maxLeft: 0, maxTop: 0 })
   const boardDragRef = useRef<BoardDrag | null>(null)
+  const boardViewportRef = useRef<HTMLDivElement | null>(null)
   const sortedOpportunities = sortOpportunities(opportunities, opportunitySort, opportunitySortDirection)
   const sortedMilestones = sortMilestones(milestones, milestoneSort, milestoneSortDirection)
+
+  useEffect(() => {
+    if (centerTab !== 'stages') return
+    const viewport = boardViewportRef.current
+    if (!viewport) return
+    const updateScrollState = () => setBoardScroll({
+      left: Math.round(viewport.scrollLeft),
+      top: Math.round(viewport.scrollTop),
+      maxLeft: Math.max(0, Math.round(viewport.scrollWidth - viewport.clientWidth)),
+      maxTop: Math.max(0, Math.round(viewport.scrollHeight - viewport.clientHeight))
+    })
+    const resizeObserver = new ResizeObserver(updateScrollState)
+    resizeObserver.observe(viewport)
+    const board = viewport.querySelector('.mcem-board')
+    if (board) resizeObserver.observe(board)
+    updateScrollState()
+    return () => resizeObserver.disconnect()
+  }, [centerTab, account?.id])
 
   function chooseOpportunitySort(nextSort: OpportunitySort) {
     if (nextSort === opportunitySort) {
@@ -869,9 +889,15 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
               </DialogActions></DialogBody></DialogSurface>
             </Dialog>
           </div>}
-          {!loading && centerTab === 'stages' && <div className="mcem-board-view">
-            {boardLoading && <div className="loading-state">Evaluating stage gates for this account…</div>}
-            <div className="mcem-board" aria-label={`MCEM stages for ${account?.name}`}>
+          {!loading && centerTab === 'stages' && <div className="mcem-board-shell">
+            <div ref={boardViewportRef} className="mcem-board-view" onScroll={(event) => setBoardScroll({
+              left: Math.round(event.currentTarget.scrollLeft),
+              top: Math.round(event.currentTarget.scrollTop),
+              maxLeft: Math.max(0, Math.round(event.currentTarget.scrollWidth - event.currentTarget.clientWidth)),
+              maxTop: Math.max(0, Math.round(event.currentTarget.scrollHeight - event.currentTarget.clientHeight))
+            })}>
+              {boardLoading && <div className="loading-state">Evaluating stage gates for this account…</div>}
+              <div className="mcem-board" aria-label={`MCEM stages for ${account?.name}`}>
               {mcemStages.map((stage) => <section
                 key={stage.id}
                 className={`mcem-column ${dragTargetStage === stage.id ? 'drop-target' : ''}`}
@@ -919,8 +945,42 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                     </article>
                   })}
                 </div>
-              </section>)}
+                </section>)}
+              </div>
             </div>
+            <div className="mcem-horizontal-scrollbar">
+              <input
+                type="range"
+                aria-label="Scroll MCEM stages horizontally"
+                min="0"
+                max={Math.max(1, boardScroll.maxLeft)}
+                step="1"
+                value={Math.min(boardScroll.left, boardScroll.maxLeft)}
+                disabled={boardScroll.maxLeft === 0}
+                onChange={(event) => {
+                  const position = Number(event.currentTarget.value)
+                  if (boardViewportRef.current) boardViewportRef.current.scrollLeft = position
+                  setBoardScroll((current) => ({ ...current, left: position }))
+                }}
+              />
+            </div>
+            <div className="mcem-vertical-scrollbar">
+              <input
+                type="range"
+                aria-label="Scroll MCEM stages vertically"
+                min="0"
+                max={Math.max(1, boardScroll.maxTop)}
+                step="1"
+                value={Math.min(boardScroll.top, boardScroll.maxTop)}
+                disabled={boardScroll.maxTop === 0}
+                onChange={(event) => {
+                  const position = Number(event.currentTarget.value)
+                  if (boardViewportRef.current) boardViewportRef.current.scrollTop = position
+                  setBoardScroll((current) => ({ ...current, top: position }))
+                }}
+              />
+            </div>
+            <span className="mcem-scrollbar-corner" aria-hidden="true" />
             <Dialog open={pendingStageMove !== null} onOpenChange={(_, data) => { if (!data.open && !stageMoveSaving) setPendingStageMove(null) }}>
               <DialogSurface><DialogBody><DialogTitle>Confirm MCEM stage change</DialogTitle><DialogContent className="stage-move-dialog">
                 {pendingStageMove && <>
