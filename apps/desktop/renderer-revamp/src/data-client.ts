@@ -304,7 +304,7 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         listMilestones: (opportunityId) => bridge.listMilestones(opportunityId),
         updateMilestone: (opportunityId, milestoneId, update) => bridge.updateMilestone(opportunityId, milestoneId, update),
         updateOpportunity: (opportunityId, update) => bridge.updateOpportunity(opportunityId, update),
-        transitionOpportunityStage: (accountId, opportunityId, targetStage, reason) => bridge.transitionOpportunityStage({ contractVersion, accountId, opportunityId, targetStage, reason }),
+        transitionOpportunityStage: (accountId, opportunityId, targetStage, reason) => bridge.transitionOpportunityStage({ contractVersion, accountId, opportunityId, targetStage, ...(reason === undefined ? {} : { reason }) }),
         runMcemCoach: (accountId, opportunityId) => bridge.runMcemCoach({ contractVersion, accountId, opportunityId, prompt: 'How do we move this opportunity to the next MCEM stage?' }),
         runAgentTask: (capability, accountId, opportunityId, prompt) => bridge.runAgentTask({ contractVersion, capability, accountId, opportunityId, prompt }),
         openEmailCompose: (request) => bridge.openEmailCompose(request),

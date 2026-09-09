@@ -10,10 +10,10 @@ const opportunities: Opportunity[] = [
 
 describe('opportunity sorting', () => {
   it.each([
-    ['closeDate', ['two', 'three', 'one']],
+    ['closeDate', ['one', 'three', 'two']],
     ['stage', ['two', 'one', 'three']],
     ['value', ['three', 'one', 'two']]
-  ] as const)('sorts by %s descending', (sortBy, expectedIds) => {
+  ] as const)('sorts by %s in its default order', (sortBy, expectedIds) => {
     expect(sortOpportunities(opportunities, sortBy).map((item) => item.id)).toEqual(expectedIds)
   })
 
@@ -21,5 +21,12 @@ describe('opportunity sorting', () => {
     sortOpportunities(opportunities, 'value')
 
     expect(opportunities.map((item) => item.id)).toEqual(['one', 'two', 'three'])
+  })
+
+  it.each([
+    ['closeDate', 'descending', ['two', 'three', 'one']],
+    ['value', 'ascending', ['two', 'one', 'three']]
+  ] as const)('reverses %s when its direction is toggled', (sortBy, direction, expectedIds) => {
+    expect(sortOpportunities(opportunities, sortBy, direction).map((item) => item.id)).toEqual(expectedIds)
   })
 })

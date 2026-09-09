@@ -113,7 +113,11 @@ test('sorts opportunities by close date, stage, and value across refreshes', asy
     const blade = page.getByRole('region', { name: 'Opportunities blade' })
     const firstOpportunity = blade.locator('.opportunity-node').first()
 
-    await expect(firstOpportunity).toContainText('Resilient cloud foundation - ready to advance')
+    await expect(firstOpportunity).toContainText('Grid operations modernization')
+
+    await blade.getByRole('button', { name: 'Sort opportunities' }).click()
+    await page.getByRole('menuitemradio', { name: 'Close Date' }).click()
+    await expect(firstOpportunity).toContainText('Resilient cloud foundation')
 
     await blade.getByRole('button', { name: 'Sort opportunities' }).click()
     await page.getByRole('menuitemradio', { name: 'Stage' }).click()
@@ -125,11 +129,15 @@ test('sorts opportunities by close date, stage, and value across refreshes', asy
 
     await blade.getByRole('button', { name: 'Refresh Opportunities' }).click()
     await expect(firstOpportunity).toContainText('Grid operations modernization')
-    await expect(blade.getByRole('button', { name: 'Sort opportunities' })).toHaveAttribute('title', 'Sort opportunities by Value')
+    await expect(blade.getByRole('button', { name: 'Sort opportunities' })).toHaveAttribute('title', 'Sort opportunities by Value (descending)')
+
+    await blade.getByRole('button', { name: 'Sort opportunities' }).click()
+    await page.getByRole('menuitemradio', { name: '$ Value', exact: true }).click()
+    await expect(firstOpportunity).toContainText('Cloud security readiness')
 
     await blade.getByRole('button', { name: 'Sort opportunities' }).click()
     await page.getByRole('menuitemradio', { name: 'Close Date' }).click()
-    await expect(firstOpportunity).toContainText('Resilient cloud foundation - ready to advance')
+    await expect(firstOpportunity).toContainText('Grid operations modernization')
 })
 
 test('offers milestone sorting beside the milestone refresh control', async ({ page }) => {
@@ -151,6 +159,16 @@ test('offers milestone sorting beside the milestone refresh control', async ({ p
     await expect(page.getByRole('menuitemradio', { name: 'Est. Change in Monthly Usage ($ Value)', exact: true })).toBeVisible()
     await expect(page.getByRole('menuitemradio', { name: 'Customer Commitment' })).toBeVisible()
     await expect(page.getByRole('menuitemradio', { name: 'Milestone Status' })).toBeVisible()
+    await page.getByRole('menuitemradio', { name: 'Milestone Est. Date' }).click()
+    await expect(sortButton).toHaveAttribute('title', 'Sort milestones by Milestone Est. Date (descending)')
+
+    await sortButton.click()
+    await page.getByRole('menuitemradio', { name: 'Est. Change in Monthly Usage ($ Value)', exact: true }).click()
+    await expect(sortButton).toHaveAttribute('title', 'Sort milestones by Est. Change in Monthly Usage (descending)')
+
+    await sortButton.click()
+    await page.getByRole('menuitemradio', { name: 'Est. Change in Monthly Usage ($ Value)', exact: true }).click()
+    await expect(sortButton).toHaveAttribute('title', 'Sort milestones by Est. Change in Monthly Usage (ascending)')
 })
 
 test('edits milestone fields and opportunity comments with save and cancel', async ({ page }) => {
@@ -226,6 +244,29 @@ test('governs adjacent MCEM board advances, exceptions, and recycle moves', asyn
     await expect(board.getByLabel('Stage 1: Listen & Consult')).toBeVisible()
     await expect(board.getByLabel('Stage 5: Manage & Optimize')).toBeVisible()
     await expect(board.locator('.mcem-card.selected')).toContainText('Customer data platform - ready to advance')
+
+    const boardScroller = page.locator('.mcem-board-view')
+    await expect.poll(() => boardScroller.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
+    await boardScroller.evaluate((element) => element.scrollTo({ left: element.scrollWidth }))
+    await expect(board.getByLabel('Stage 5: Manage & Optimize')).toBeInViewport()
+    await boardScroller.evaluate((element) => element.scrollTo({ left: 0 }))
+
+    const selectedCard = board.locator('.mcem-card.selected')
+    const previousStage = board.getByLabel('Stage 1: Listen & Consult')
+    const [cardBox, previousStageBox] = await Promise.all([selectedCard.boundingBox(), previousStage.boundingBox()])
+    expect(cardBox).not.toBeNull()
+    expect(previousStageBox).not.toBeNull()
+    await page.mouse.move(cardBox!.x + cardBox!.width / 2, cardBox!.y + 18)
+    await page.mouse.down()
+    await page.mouse.move(previousStageBox!.x + previousStageBox!.width / 2, previousStageBox!.y + 120, { steps: 8 })
+    await page.mouse.up()
+    await expect(page.getByRole('dialog')).toContainText('Stage 2 → Stage 1')
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(board.getByLabel('Stage 2: Inspire & Design')).toContainText('Customer data platform - ready to advance')
+
+    await board.locator('.mcem-card').filter({ hasText: 'AI-assisted customer service' }).click()
+    await expect(page.getByRole('tab', { name: 'MCEM Stage Management' })).toHaveAttribute('aria-selected', 'true')
+    await expect(board.locator('.mcem-card.selected')).toContainText('AI-assisted customer service')
 
     await board.getByRole('button', { name: 'Move Customer data platform - ready to advance to next stage' }).click()
     await expect(page.getByRole('dialog')).toContainText('Stage 2 → Stage 3')

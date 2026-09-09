@@ -33,7 +33,7 @@ import { addMsxOpportunityLink, contractVersion } from '../../../../packages/com
 import { createDataClient, stageOwner, type RevampDataClient } from './data-client.js'
 import { suggestedPrompts } from './prompt-catalog.js'
 import { formatResponseMarkdown } from './response-markdown.js'
-import { sortOpportunities, type OpportunitySort } from './opportunity-sort.js'
+import { sortOpportunities, type OpportunitySort, type SortDirection } from './opportunity-sort.js'
 import { sortMilestones, type MilestoneSort } from './milestone-sort.js'
 
 type Shell = 'desktop' | 'web'
@@ -47,6 +47,7 @@ type BladeWidths = Record<Blade, number>
 type MilestoneField = 'status' | 'riskDetails' | 'targetDate' | 'customerCommitment' | 'comments'
 type MilestoneEdit = { milestoneId: string; field: MilestoneField; value: string }
 type PendingStageMove = { opportunity: Opportunity; targetStage: number; evaluation: McemResponse }
+type BoardDrag = { pointerId: number; opportunityId: string; sourceStage: number; startX: number; startY: number; targetStage: number | null; dragging: boolean }
 
 const mcemStages = [
   { id: 1, name: 'Listen & Consult', role: 'Account Executive' },
@@ -177,8 +178,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [opportunitySort, setOpportunitySort] = useState<OpportunitySort>('closeDate')
+  const [opportunitySortDirection, setOpportunitySortDirection] = useState<SortDirection>('ascending')
   const [milestones, setMilestones] = useState<Milestone[]>([])
   const [milestoneSort, setMilestoneSort] = useState<MilestoneSort>('targetDate')
+  const [milestoneSortDirection, setMilestoneSortDirection] = useState<SortDirection>('ascending')
   const [account, setAccount] = useState<Account | null>(null)
   const [opportunity, setOpportunity] = useState<Opportunity | null>(null)
   const [result, setResult] = useState<McemResponse | null>(null)
@@ -212,8 +215,34 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [pendingStageMove, setPendingStageMove] = useState<PendingStageMove | null>(null)
   const [stageMoveReason, setStageMoveReason] = useState('')
   const [stageMoveSaving, setStageMoveSaving] = useState(false)
-  const sortedOpportunities = sortOpportunities(opportunities, opportunitySort)
-  const sortedMilestones = sortMilestones(milestones, milestoneSort)
+  const [draggedOpportunity, setDraggedOpportunity] = useState<{ id: string; stage: number } | null>(null)
+  const [dragTargetStage, setDragTargetStage] = useState<number | null>(null)
+  const [boardSelectedOpportunityId, setBoardSelectedOpportunityId] = useState<string | null>(null)
+  const boardDragRef = useRef<BoardDrag | null>(null)
+  const sortedOpportunities = sortOpportunities(opportunities, opportunitySort, opportunitySortDirection)
+  const sortedMilestones = sortMilestones(milestones, milestoneSort, milestoneSortDirection)
+
+  function chooseOpportunitySort(nextSort: OpportunitySort) {
+    if (nextSort === opportunitySort) {
+      if (nextSort === 'closeDate' || nextSort === 'value') {
+        setOpportunitySortDirection((current) => current === 'ascending' ? 'descending' : 'ascending')
+      }
+      return
+    }
+    setOpportunitySort(nextSort)
+    setOpportunitySortDirection(nextSort === 'closeDate' ? 'ascending' : 'descending')
+  }
+
+  function chooseMilestoneSort(nextSort: MilestoneSort) {
+    if (nextSort === milestoneSort) {
+      if (nextSort === 'targetDate' || nextSort === 'estimatedMonthlyUsage') {
+        setMilestoneSortDirection((current) => current === 'ascending' ? 'descending' : 'ascending')
+      }
+      return
+    }
+    setMilestoneSort(nextSort)
+    setMilestoneSortDirection(nextSort === 'targetDate' ? 'ascending' : 'descending')
+  }
 
   useEffect(() => {
     void client.listAccounts().then(async (items) => {
@@ -373,6 +402,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   async function loadStageBoard(boardOpportunities = opportunities) {
     if (!account) return
     setCenterTab('stages')
+    setBoardSelectedOpportunityId(opportunity?.id ?? null)
     setMobileBlade('center')
     setBoardLoading(true)
     setError('')
@@ -384,6 +414,20 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     } finally {
       setBoardLoading(false)
     }
+  }
+
+  function finishBoardDrag(event: React.PointerEvent<HTMLElement>, cancelled = false) {
+    const drag = boardDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    boardDragRef.current = null
+    setDraggedOpportunity(null)
+    setDragTargetStage(null)
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+
+    const item = opportunities.find((candidate) => candidate.id === drag.opportunityId)
+    if (!item || cancelled) return
+    if (drag.dragging && drag.targetStage !== null) void proposeStageMove(item, drag.targetStage)
+    else if (!drag.dragging) setBoardSelectedOpportunityId(item.id)
   }
 
   async function proposeStageMove(item: Opportunity, targetStage: number) {
@@ -668,12 +712,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       </section>
 
       {account && <section className={`blade opportunity-blade ${collapsed.has('opportunities') ? 'collapsed' : ''} ${mobileBlade === 'opportunities' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('opportunities') ? undefined : bladeWidths.opportunities }} aria-label="Opportunities blade">
-        <BladeHeader title="Opportunities" subtitle={account.name} collapsed={collapsed.has('opportunities')} refreshing={loading} actions={<Menu checkedValues={{ opportunitySort: [opportunitySort] }} onCheckedValueChange={(_, data) => setOpportunitySort(data.checkedItems[0] as OpportunitySort)} positioning="below-end">
-          <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button" icon={<ArrowSort20Regular />} aria-label="Sort opportunities" title={`Sort opportunities by ${opportunitySort === 'closeDate' ? 'Close Date' : opportunitySort === 'stage' ? 'Stage' : 'Value'}`} /></MenuTrigger>
+        <BladeHeader title="Opportunities" subtitle={account.name} collapsed={collapsed.has('opportunities')} refreshing={loading} actions={<Menu checkedValues={{ opportunitySort: [opportunitySort] }} positioning="below-end">
+          <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button" icon={<ArrowSort20Regular />} aria-label="Sort opportunities" title={`Sort opportunities by ${opportunitySort === 'closeDate' ? 'Close Date' : opportunitySort === 'stage' ? 'Stage' : 'Value'} (${opportunitySortDirection})`} /></MenuTrigger>
           <MenuPopover><MenuList aria-label="Sort opportunities by">
-            <MenuItemRadio name="opportunitySort" value="closeDate">Close Date</MenuItemRadio>
-            <MenuItemRadio name="opportunitySort" value="stage">Stage</MenuItemRadio>
-            <MenuItemRadio name="opportunitySort" value="value">$ Value</MenuItemRadio>
+            <MenuItemRadio name="opportunitySort" value="closeDate" onClick={() => chooseOpportunitySort('closeDate')}>Close Date</MenuItemRadio>
+            <MenuItemRadio name="opportunitySort" value="stage" onClick={() => chooseOpportunitySort('stage')}>Stage</MenuItemRadio>
+            <MenuItemRadio name="opportunitySort" value="value" onClick={() => chooseOpportunitySort('value')}>$ Value</MenuItemRadio>
           </MenuList></MenuPopover>
         </Menu>} onRefresh={() => void refreshOpportunities()} onToggle={() => toggleBlade('opportunities')} onClose={closeOpportunities} />
         {!collapsed.has('opportunities') && <div className="blade-body opportunity-tree" role="tree" aria-label={`${account.name} opportunities and milestones`}>
@@ -705,13 +749,13 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                 <div className="milestone-tree-header">
                   <span>Milestones</span>
                   <div className="milestone-tree-actions">
-                    <Menu checkedValues={{ milestoneSort: [milestoneSort] }} onCheckedValueChange={(_, data) => setMilestoneSort(data.checkedItems[0] as MilestoneSort)} positioning="below-end">
-                      <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="tree-refresh-button" icon={<ArrowSort20Regular />} aria-label="Sort milestones" title="Sort milestones" /></MenuTrigger>
+                    <Menu checkedValues={{ milestoneSort: [milestoneSort] }} positioning="below-end">
+                      <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="tree-refresh-button" icon={<ArrowSort20Regular />} aria-label="Sort milestones" title={`Sort milestones by ${milestoneSort === 'targetDate' ? 'Milestone Est. Date' : milestoneSort === 'estimatedMonthlyUsage' ? 'Est. Change in Monthly Usage' : milestoneSort === 'commitment' ? 'Customer Commitment' : 'Milestone Status'} (${milestoneSortDirection})`} /></MenuTrigger>
                       <MenuPopover><MenuList aria-label="Sort milestones by">
-                        <MenuItemRadio name="milestoneSort" value="targetDate">Milestone Est. Date</MenuItemRadio>
-                        <MenuItemRadio name="milestoneSort" value="estimatedMonthlyUsage">Est. Change in Monthly Usage ($ Value)</MenuItemRadio>
-                        <MenuItemRadio name="milestoneSort" value="commitment">Customer Commitment</MenuItemRadio>
-                        <MenuItemRadio name="milestoneSort" value="status">Milestone Status</MenuItemRadio>
+                        <MenuItemRadio name="milestoneSort" value="targetDate" onClick={() => chooseMilestoneSort('targetDate')}>Milestone Est. Date</MenuItemRadio>
+                        <MenuItemRadio name="milestoneSort" value="estimatedMonthlyUsage" onClick={() => chooseMilestoneSort('estimatedMonthlyUsage')}>Est. Change in Monthly Usage ($ Value)</MenuItemRadio>
+                        <MenuItemRadio name="milestoneSort" value="commitment" onClick={() => chooseMilestoneSort('commitment')}>Customer Commitment</MenuItemRadio>
+                        <MenuItemRadio name="milestoneSort" value="status" onClick={() => chooseMilestoneSort('status')}>Milestone Status</MenuItemRadio>
                       </MenuList></MenuPopover>
                     </Menu>
                     <Button appearance="subtle" className="tree-refresh-button" disabled={loading} icon={<ArrowClockwise20Regular />} onClick={() => void refreshOpportunityContext()} aria-label="Refresh Milestones" title="Refresh milestones" />
@@ -751,7 +795,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         {!collapsed.has('opportunities') && <BladeResizeHandle blade="opportunities" label="Opportunities blade" edge="end" width={bladeWidths.opportunities} onResize={(width) => resizeBlade('opportunities', width)} />}
       </section>}
 
-      <section className={`center-pane ${mobileBlade === 'center' ? 'mobile-active' : ''}`} aria-label="Opportunity workbench">
+      <section className={`center-pane ${mobileBlade === 'center' ? 'mobile-active' : ''} ${opportunity && centerTab === 'stages' ? 'stage-board-active' : ''}`} aria-label="Opportunity workbench">
         {!opportunity && <div className="landing-state">
           <span className="landing-icon">{account ? <Building20Regular /> : <Apps20Regular />}</span>
           <p className="eyebrow">{account ? 'ACCOUNT SELECTED' : 'MY ACCOUNT PORTFOLIO'}</p>
@@ -830,10 +874,9 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
             <div className="mcem-board" aria-label={`MCEM stages for ${account?.name}`}>
               {mcemStages.map((stage) => <section
                 key={stage.id}
-                className="mcem-column"
+                className={`mcem-column ${dragTargetStage === stage.id ? 'drop-target' : ''}`}
                 aria-label={`Stage ${stage.id}: ${stage.name}`}
-                onDragOver={(event) => { const sourceStage = Number(event.dataTransfer.types.includes('application/x-mcem-stage') && event.dataTransfer.getData('application/x-mcem-stage')); if (Math.abs(stage.id - sourceStage) === 1) event.preventDefault() }}
-                onDrop={(event) => { const id = event.dataTransfer.getData('text/plain'); const item = opportunities.find((candidate) => candidate.id === id); if (item) void proposeStageMove(item, stage.id) }}
+                data-stage={stage.id}
               >
                 <header><span>Stage {stage.id}</span><strong>{stage.name}</strong><small>{stage.role}</small></header>
                 <div className="mcem-column-cards">
@@ -843,10 +886,28 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                     const total = evaluation?.criteria.length ?? 0
                     return <article
                       key={item.id}
-                      className={`mcem-card ${opportunity?.id === item.id ? 'selected' : ''}`}
-                      draggable
-                      onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.id); event.dataTransfer.setData('application/x-mcem-stage', String(item.recordedStage)); event.dataTransfer.effectAllowed = 'move' }}
-                      onClick={() => void selectOpportunity(item)}
+                      className={`mcem-card ${boardSelectedOpportunityId === item.id ? 'selected' : ''} ${draggedOpportunity?.id === item.id ? 'dragging' : ''}`}
+                      tabIndex={0}
+                      aria-label={item.name}
+                      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setBoardSelectedOpportunityId(item.id) } }}
+                      onPointerDown={(event) => {
+                        if (event.button !== 0 || (event.target as HTMLElement).closest('button')) return
+                        boardDragRef.current = { pointerId: event.pointerId, opportunityId: item.id, sourceStage: item.recordedStage, startX: event.clientX, startY: event.clientY, targetStage: null, dragging: false }
+                        event.currentTarget.setPointerCapture(event.pointerId)
+                      }}
+                      onPointerMove={(event) => {
+                        const drag = boardDragRef.current
+                        if (!drag || drag.pointerId !== event.pointerId) return
+                        if (!drag.dragging && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 6) return
+                        if (!drag.dragging) { drag.dragging = true; setDraggedOpportunity({ id: drag.opportunityId, stage: drag.sourceStage }) }
+                        const column = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-stage]')
+                        const targetStage = Number(column?.dataset.stage)
+                        drag.targetStage = Math.abs(targetStage - drag.sourceStage) === 1 ? targetStage : null
+                        setDragTargetStage(drag.targetStage)
+                        event.preventDefault()
+                      }}
+                      onPointerUp={(event) => finishBoardDrag(event)}
+                      onPointerCancel={(event) => finishBoardDrag(event, true)}
                     >
                       <strong>{item.name}</strong>
                       <span><Person20Regular />{item.owner ?? 'Unassigned'}</span>

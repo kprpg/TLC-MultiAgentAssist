@@ -623,6 +623,12 @@ body.resizing-blade .blade {
     background: var(--cp-bg);
 }
 
+.center-pane.stage-board-active {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
 .landing-state {
     display: flex;
     min-height: 100%;
@@ -752,10 +758,11 @@ body.resizing-blade .blade {
 
 .mcem-board-view {
     min-height: 0;
-    height: 100%;
+    flex: 1 1 auto;
     overflow: auto;
     padding: 12px;
     background: var(--cp-bg);
+    scrollbar-gutter: stable;
 }
 
 .mcem-board {
@@ -771,6 +778,11 @@ body.resizing-blade .blade {
     min-width: 0;
     background: var(--cp-surface-soft);
     border: 1px solid var(--cp-border);
+}
+
+.mcem-column.drop-target {
+    border-color: var(--cp-accent);
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--cp-accent) 28%, transparent);
 }
 
 .mcem-column>header {
@@ -818,7 +830,14 @@ body.resizing-blade .blade {
     border: 1px solid var(--cp-border-strong);
     border-left: 3px solid transparent;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-    cursor: pointer;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+.mcem-card.dragging {
+    opacity: 0.65;
+    cursor: grabbing;
 }
 
 .mcem-card:hover {

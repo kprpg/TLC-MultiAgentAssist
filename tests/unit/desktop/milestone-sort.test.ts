@@ -11,7 +11,7 @@ const milestones: Milestone[] = [
 
 describe('milestone sorting', () => {
   it.each([
-    ['targetDate', ['two', 'three', 'one', 'missing']],
+    ['targetDate', ['one', 'three', 'two', 'missing']],
     ['estimatedMonthlyUsage', ['three', 'one', 'two', 'missing']],
     ['commitment', ['two', 'one', 'three', 'missing']],
     ['status', ['two', 'one', 'three', 'missing']]
@@ -23,5 +23,12 @@ describe('milestone sorting', () => {
     sortMilestones(milestones, 'targetDate')
 
     expect(milestones.map((item) => item.id)).toEqual(['one', 'two', 'three', 'missing'])
+  })
+
+  it.each([
+    ['targetDate', 'descending', ['two', 'three', 'one', 'missing']],
+    ['estimatedMonthlyUsage', 'ascending', ['two', 'one', 'three', 'missing']]
+  ] as const)('reverses %s while keeping missing values last', (sortBy, direction, expectedIds) => {
+    expect(sortMilestones(milestones, sortBy, direction).map((item) => item.id)).toEqual(expectedIds)
   })
 })
