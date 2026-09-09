@@ -37,7 +37,7 @@ import { sortOpportunities, type OpportunitySort } from './opportunity-sort.js'
 import { sortMilestones, type MilestoneSort } from './milestone-sort.js'
 
 type Shell = 'desktop' | 'web'
-type CenterTab = 'msx' | 'guidance'
+type CenterTab = 'msx' | 'guidance' | 'stages'
 type Blade = 'accounts' | 'opportunities' | 'actions'
 type SearchResult =
   | { type: 'account'; account: Account }
@@ -46,6 +46,15 @@ type SearchResult =
 type BladeWidths = Record<Blade, number>
 type MilestoneField = 'status' | 'riskDetails' | 'targetDate' | 'customerCommitment' | 'comments'
 type MilestoneEdit = { milestoneId: string; field: MilestoneField; value: string }
+type PendingStageMove = { opportunity: Opportunity; targetStage: number; evaluation: McemResponse }
+
+const mcemStages = [
+  { id: 1, name: 'Listen & Consult', role: 'Account Executive' },
+  { id: 2, name: 'Inspire & Design', role: 'Specialist / SSP' },
+  { id: 3, name: 'Empower & Achieve', role: 'Solution Engineer' },
+  { id: 4, name: 'Realize Value', role: 'Cloud Solution Architect' },
+  { id: 5, name: 'Manage & Optimize', role: 'CSAM' }
+] as const
 
 const bladeWidthStorageKey = 'tlc.blade-widths.v1'
 const defaultBladeWidths: BladeWidths = { accounts: 230, opportunities: 320, actions: 310 }
@@ -198,6 +207,11 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [opportunityCommentsOpen, setOpportunityCommentsOpen] = useState(false)
   const [opportunityComments, setOpportunityComments] = useState('')
   const [savingEdit, setSavingEdit] = useState(false)
+  const [boardEvaluations, setBoardEvaluations] = useState<Record<string, McemResponse>>({})
+  const [boardLoading, setBoardLoading] = useState(false)
+  const [pendingStageMove, setPendingStageMove] = useState<PendingStageMove | null>(null)
+  const [stageMoveReason, setStageMoveReason] = useState('')
+  const [stageMoveSaving, setStageMoveSaving] = useState(false)
   const sortedOpportunities = sortOpportunities(opportunities, opportunitySort)
   const sortedMilestones = sortMilestones(milestones, milestoneSort)
 
@@ -354,6 +368,57 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setAgentResult(null)
     setShareMessage('')
     setMobileBlade('center')
+  }
+
+  async function loadStageBoard(boardOpportunities = opportunities) {
+    if (!account) return
+    setCenterTab('stages')
+    setMobileBlade('center')
+    setBoardLoading(true)
+    setError('')
+    try {
+      const evaluations = await Promise.all(boardOpportunities.map(async (item) => [item.id, await client.runMcemCoach(account.id, item.id)] as const))
+      setBoardEvaluations(Object.fromEntries(evaluations))
+    } catch (cause) {
+      handleError(cause)
+    } finally {
+      setBoardLoading(false)
+    }
+  }
+
+  async function proposeStageMove(item: Opportunity, targetStage: number) {
+    if (!account || Math.abs(targetStage - item.recordedStage) !== 1) return
+    setError('')
+    try {
+      const evaluation = await client.runMcemCoach(account.id, item.id)
+      setBoardEvaluations((current) => ({ ...current, [item.id]: evaluation }))
+      setStageMoveReason('')
+      setPendingStageMove({ opportunity: item, targetStage, evaluation })
+    } catch (cause) {
+      handleError(cause)
+    }
+  }
+
+  async function confirmStageMove() {
+    if (!account || !pendingStageMove) return
+    const requiresReason = pendingStageMove.targetStage < pendingStageMove.opportunity.recordedStage
+      || pendingStageMove.evaluation.criteria.some((criterion) => criterion.status !== 'met')
+    if (requiresReason && stageMoveReason.trim().length < 10) return
+    setStageMoveSaving(true)
+    setError('')
+    try {
+      const transition = await client.transitionOpportunityStage(account.id, pendingStageMove.opportunity.id, pendingStageMove.targetStage, stageMoveReason.trim() || undefined)
+      const updatedOpportunities = opportunities.map((item) => item.id === transition.opportunity.id ? transition.opportunity : item)
+      setOpportunities(updatedOpportunities)
+      if (opportunity?.id === transition.opportunity.id) setOpportunity(transition.opportunity)
+      setPendingStageMove(null)
+      setBoardEvaluations((current) => { const next = { ...current }; delete next[transition.opportunity.id]; return next })
+      void loadStageBoard(updatedOpportunities)
+    } catch (cause) {
+      handleError(cause)
+    } finally {
+      setStageMoveSaving(false)
+    }
   }
 
   async function runAgentPrompt(selectedPrompt = taskPrompt, selectedCapability = capability) {
@@ -707,6 +772,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           <div className="center-tabs" role="tablist" aria-label="Opportunity view">
             <button role="tab" aria-selected={centerTab === 'msx'} onClick={() => setCenterTab('msx')}>MSX</button>
             <button role="tab" aria-selected={centerTab === 'guidance'} onClick={() => loadGuidance()}>Multi-Agent Guidance</button>
+            <button role="tab" aria-selected={centerTab === 'stages'} onClick={() => void loadStageBoard()}>MCEM Stage Management</button>
           </div>
           {loading && <div className="loading-state">Loading grounded context…</div>}
           {error && <div className="error-state">{error}</div>}
@@ -756,6 +822,57 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
               </DialogContent><DialogActions>
                 <Button onClick={() => setEmailDialogOpen(false)}>Cancel</Button>
                 <Button appearance="primary" icon={<Mail20Regular />} disabled={shareStatus === 'running' || !emailRecipients.trim() || !emailSubject.trim()} onClick={() => void openEmailCompose()}>{shareStatus === 'running' ? (client.mode === 'desktop' ? 'Opening...' : 'Preparing...') : (client.mode === 'desktop' ? 'Open Email' : 'Download Draft')}</Button>
+              </DialogActions></DialogBody></DialogSurface>
+            </Dialog>
+          </div>}
+          {!loading && centerTab === 'stages' && <div className="mcem-board-view">
+            {boardLoading && <div className="loading-state">Evaluating stage gates for this account…</div>}
+            <div className="mcem-board" aria-label={`MCEM stages for ${account?.name}`}>
+              {mcemStages.map((stage) => <section
+                key={stage.id}
+                className="mcem-column"
+                aria-label={`Stage ${stage.id}: ${stage.name}`}
+                onDragOver={(event) => { const sourceStage = Number(event.dataTransfer.types.includes('application/x-mcem-stage') && event.dataTransfer.getData('application/x-mcem-stage')); if (Math.abs(stage.id - sourceStage) === 1) event.preventDefault() }}
+                onDrop={(event) => { const id = event.dataTransfer.getData('text/plain'); const item = opportunities.find((candidate) => candidate.id === id); if (item) void proposeStageMove(item, stage.id) }}
+              >
+                <header><span>Stage {stage.id}</span><strong>{stage.name}</strong><small>{stage.role}</small></header>
+                <div className="mcem-column-cards">
+                  {opportunities.filter((item) => item.recordedStage === stage.id).map((item) => {
+                    const evaluation = boardEvaluations[item.id]
+                    const met = evaluation?.criteria.filter((criterion) => criterion.status === 'met').length ?? 0
+                    const total = evaluation?.criteria.length ?? 0
+                    return <article
+                      key={item.id}
+                      className={`mcem-card ${opportunity?.id === item.id ? 'selected' : ''}`}
+                      draggable
+                      onDragStart={(event) => { event.dataTransfer.setData('text/plain', item.id); event.dataTransfer.setData('application/x-mcem-stage', String(item.recordedStage)); event.dataTransfer.effectAllowed = 'move' }}
+                      onClick={() => void selectOpportunity(item)}
+                    >
+                      <strong>{item.name}</strong>
+                      <span><Person20Regular />{item.owner ?? 'Unassigned'}</span>
+                      <span className={total > 0 && met === total ? 'gates-met' : 'gates-open'}>{total ? `${met}/${total} exit criteria met` : 'Evaluating exit criteria'}</span>
+                      <div className="mcem-card-actions">
+                        <Button size="small" appearance="subtle" disabled={stage.id === 1} icon={<ChevronLeft20Regular />} aria-label={`Move ${item.name} to previous stage`} onClick={(event) => { event.stopPropagation(); void proposeStageMove(item, stage.id - 1) }} />
+                        <Button size="small" appearance="subtle" disabled={stage.id === 5} icon={<ChevronRight20Regular />} aria-label={`Move ${item.name} to next stage`} onClick={(event) => { event.stopPropagation(); void proposeStageMove(item, stage.id + 1) }} />
+                      </div>
+                    </article>
+                  })}
+                </div>
+              </section>)}
+            </div>
+            <Dialog open={pendingStageMove !== null} onOpenChange={(_, data) => { if (!data.open && !stageMoveSaving) setPendingStageMove(null) }}>
+              <DialogSurface><DialogBody><DialogTitle>Confirm MCEM stage change</DialogTitle><DialogContent className="stage-move-dialog">
+                {pendingStageMove && <>
+                  <p><strong>{pendingStageMove.opportunity.name}</strong></p>
+                  <p>Stage {pendingStageMove.opportunity.recordedStage} → Stage {pendingStageMove.targetStage}</p>
+                  {pendingStageMove.evaluation.criteria.some((criterion) => criterion.status !== 'met') && pendingStageMove.targetStage > pendingStageMove.opportunity.recordedStage && <MessageBar intent="warning">Some exit criteria are incomplete. This move will be recorded as an exception.</MessageBar>}
+                  {pendingStageMove.targetStage < pendingStageMove.opportunity.recordedStage && <MessageBar intent="warning">This move recycles the opportunity to a previous stage.</MessageBar>}
+                  <div className="stage-gate-list">{pendingStageMove.evaluation.criteria.map((criterion) => <span key={criterion.id} className={criterion.status}>{criterion.label}: {criterion.status}</span>)}</div>
+                  {(pendingStageMove.targetStage < pendingStageMove.opportunity.recordedStage || pendingStageMove.evaluation.criteria.some((criterion) => criterion.status !== 'met')) && <Field label="Reason" hint="Required; at least 10 characters."><Textarea value={stageMoveReason} onChange={(_, data) => setStageMoveReason(data.value)} /></Field>}
+                </>}
+              </DialogContent><DialogActions>
+                <Button disabled={stageMoveSaving} onClick={() => setPendingStageMove(null)}>Cancel</Button>
+                <Button appearance="primary" disabled={stageMoveSaving || (!!pendingStageMove && (pendingStageMove.targetStage < pendingStageMove.opportunity.recordedStage || pendingStageMove.evaluation.criteria.some((criterion) => criterion.status !== 'met')) && stageMoveReason.trim().length < 10)} onClick={() => void confirmStageMove()}>{stageMoveSaving ? 'Moving…' : 'Confirm move'}</Button>
               </DialogActions></DialogBody></DialogSurface>
             </Dialog>
           </div>}

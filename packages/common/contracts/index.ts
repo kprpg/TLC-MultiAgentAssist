@@ -87,6 +87,22 @@ export const opportunityUpdateSchema = z.object({
   comments: z.string().max(30_000)
 })
 
+export const mcemStageTransitionRequestSchema = z.object({
+  contractVersion: z.literal(contractVersion),
+  accountId: z.string().min(1),
+  opportunityId: z.string().min(1),
+  targetStage: z.number().int().min(1).max(5),
+  reason: z.string().trim().min(10).max(1_000).optional()
+}).strict()
+
+export const mcemStageTransitionResultSchema = z.object({
+  opportunity: opportunitySchema,
+  previousStage: z.number().int().min(1).max(5),
+  targetStage: z.number().int().min(1).max(5),
+  disposition: z.enum(['advanced', 'override', 'recycled']),
+  auditNote: z.string().min(1)
+}).strict()
+
 export const evidenceSchema = z.object({
   id: z.string().min(1),
   source: z.enum(['msx', 'mcem']),
@@ -219,6 +235,8 @@ export type MilestoneStatus = z.infer<typeof milestoneStatusSchema>
 export type CustomerCommitment = z.infer<typeof customerCommitmentSchema>
 export type MilestoneUpdate = z.infer<typeof milestoneUpdateSchema>
 export type OpportunityUpdate = z.infer<typeof opportunityUpdateSchema>
+export type McemStageTransitionRequest = z.infer<typeof mcemStageTransitionRequestSchema>
+export type McemStageTransitionResult = z.infer<typeof mcemStageTransitionResultSchema>
 export type SourceHealth = z.infer<typeof sourceHealthSchema>
 export type AuthStatus = z.infer<typeof authStatusSchema>
 export type DesktopDataStatus = z.infer<typeof desktopDataStatusSchema>

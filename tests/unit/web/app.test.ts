@@ -175,6 +175,30 @@ describe('hosted web API', () => {
         expect(webRuntime.updateMilestone).not.toHaveBeenCalled()
     })
 
+    it('validates and forwards governed MCEM stage transitions', async () => {
+        const webRuntime = runtime()
+        const transition = {
+            opportunity: { id: 'opportunity-1', accountId: 'account-1', name: 'Pilot', recordedStage: 3, value: 100, currency: 'USD', closeDate: '2026-10-01' },
+            previousStage: 2,
+            targetStage: 3,
+            disposition: 'advanced' as const,
+            auditNote: 'Advanced from Stage 2 to Stage 3 after all gates passed.'
+        }
+        vi.mocked(webRuntime.transitionOpportunityStage).mockResolvedValue(transition)
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => webRuntime }))
+        const request = { contractVersion, accountId: 'account-1', opportunityId: 'opportunity-1', targetStage: 3 }
+
+        const response = await fetch(`${baseUrl}/api/mcem-stage-transition`, {
+            method: 'POST',
+            headers: { ...authenticationHeaders, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+            body: JSON.stringify(request)
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual(transition)
+        expect(webRuntime.transitionOpportunityStage).toHaveBeenCalledWith(request)
+    })
+
     it('rejects malformed contract requests without invoking the orchestrator', async () => {
         const webRuntime = runtime()
         const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => webRuntime }))
@@ -273,6 +297,7 @@ function runtime(): WebRuntime {
         listMilestones: vi.fn(async () => []),
         updateMilestone: vi.fn(),
         updateOpportunity: vi.fn(),
+        transitionOpportunityStage: vi.fn(),
         runMcemCoach: vi.fn(),
         runAgentTask: vi.fn()
     }

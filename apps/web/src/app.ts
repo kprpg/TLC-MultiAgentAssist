@@ -9,6 +9,8 @@ import {
     exportResponseRequestSchema,
     mcemRequestSchema,
     mcemResponseSchema,
+    mcemStageTransitionRequestSchema,
+    mcemStageTransitionResultSchema,
     milestoneSchema,
     milestoneUpdateSchema,
     opportunitySchema,
@@ -18,6 +20,8 @@ import {
     type AgentTaskResponse,
     type McemRequest,
     type McemResponse,
+    type McemStageTransitionRequest,
+    type McemStageTransitionResult,
     type Milestone,
     type MilestoneUpdate,
     type Opportunity,
@@ -35,6 +39,7 @@ export interface WebRuntime {
     listMilestones(opportunityId: string): Promise<Milestone[]>
     updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
     updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
+    transitionOpportunityStage(request: McemStageTransitionRequest): Promise<McemStageTransitionResult>
     runMcemCoach(request: McemRequest): Promise<McemResponse>
     runAgentTask(request: AgentTaskRequest): Promise<AgentTaskResponse>
 }
@@ -148,6 +153,12 @@ export function buildWebApiHandler(options: WebApiOptions) {
             if (request.method === 'POST' && url.pathname === '/api/mcem-coach') {
                 const input = mcemRequestSchema.parse(await readJsonBody(request))
                 sendJson(response, 200, mcemResponseSchema.parse(await runtime.runMcemCoach(input)))
+                return true
+            }
+
+            if (request.method === 'POST' && url.pathname === '/api/mcem-stage-transition') {
+                const input = mcemStageTransitionRequestSchema.parse(await readJsonBody(request))
+                sendJson(response, 200, mcemStageTransitionResultSchema.parse(await runtime.transitionOpportunityStage(input)))
                 return true
             }
 

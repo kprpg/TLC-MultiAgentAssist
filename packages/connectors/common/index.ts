@@ -38,6 +38,7 @@ export interface MsxConnector {
   listMilestones(opportunityId: string): Promise<Milestone[]>
   updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
   updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
+  updateOpportunityStage(opportunityId: string, targetStage: number, auditNote: string): Promise<Opportunity>
   getOpportunityContext(opportunityId: string): Promise<OpportunityContext>
 }
 

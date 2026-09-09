@@ -215,6 +215,38 @@ test('edits milestone fields and opportunity comments with save and cancel', asy
     await expect(comments).toHaveValue('Executive sponsor aligned')
 })
 
+test('governs adjacent MCEM board advances, exceptions, and recycle moves', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/')
+    await page.getByRole('button', { name: /Fabrikam Retail/ }).first().click()
+    await page.getByRole('region', { name: 'Opportunities blade' }).getByRole('button', { name: /^Customer data platform - ready to advance / }).click()
+    await page.getByRole('tab', { name: 'MCEM Stage Management' }).click()
+
+    const board = page.getByLabel('MCEM stages for Fabrikam Retail')
+    await expect(board.getByLabel('Stage 1: Listen & Consult')).toBeVisible()
+    await expect(board.getByLabel('Stage 5: Manage & Optimize')).toBeVisible()
+    await expect(board.locator('.mcem-card.selected')).toContainText('Customer data platform - ready to advance')
+
+    await board.getByRole('button', { name: 'Move Customer data platform - ready to advance to next stage' }).click()
+    await expect(page.getByRole('dialog')).toContainText('Stage 2 → Stage 3')
+    await page.getByRole('button', { name: 'Confirm move' }).click()
+    await expect(board.getByLabel('Stage 3: Empower & Achieve')).toContainText('Customer data platform - ready to advance')
+
+    await board.getByRole('button', { name: 'Move Customer data platform - ready to advance to previous stage' }).click()
+    await expect(page.getByText('This move recycles the opportunity to a previous stage.')).toBeVisible()
+    const recycleReason = page.getByRole('textbox', { name: 'Reason' })
+    await expect(page.getByRole('button', { name: 'Confirm move' })).toBeDisabled()
+    await recycleReason.fill('Customer scope requires renewed discovery.')
+    await page.getByRole('button', { name: 'Confirm move' }).click()
+    await expect(board.getByLabel('Stage 2: Inspire & Design')).toContainText('Customer data platform - ready to advance')
+
+    await board.getByRole('button', { name: 'Move AI-assisted customer service to next stage' }).click()
+    await expect(page.getByText('Some exit criteria are incomplete. This move will be recorded as an exception.')).toBeVisible()
+    await page.getByRole('textbox', { name: 'Reason' }).fill('Executive approved proceeding with tracked gaps.')
+    await page.getByRole('button', { name: 'Confirm move' }).click()
+    await expect(board.getByLabel('Stage 3: Empower & Achieve')).toContainText('AI-assisted customer service')
+})
+
 test('uses Fluent theme tokens and readable compact typography', async ({ page }) => {
     await page.goto('/?scoutTheme=dark')
 

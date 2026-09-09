@@ -3,6 +3,8 @@ import {
   addMsxOpportunityLink,
   agentTaskRequestSchema,
   contractVersion,
+  mcemStageTransitionRequestSchema,
+  mcemStageTransitionResultSchema,
   mcemRequestSchema,
   type Account,
   type AgentCapability,
@@ -10,6 +12,8 @@ import {
   type AgentTaskResponse,
   type McemRequest,
   type McemResponse,
+  type McemStageTransitionRequest,
+  type McemStageTransitionResult,
   type Milestone,
   type MilestoneUpdate,
   type Opportunity,
@@ -78,6 +82,38 @@ export class ThinSliceOrchestrator {
 
   updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity> {
     return this.msx.updateOpportunity(opportunityId, update)
+  }
+
+  async transitionOpportunityStage(input: McemStageTransitionRequest): Promise<McemStageTransitionResult> {
+    const request = mcemStageTransitionRequestSchema.parse(input)
+    const context = await this.msx.getOpportunityContext(request.opportunityId)
+    if (context.account.id !== request.accountId) {
+      throw new Error('The selected opportunity does not belong to the selected account.')
+    }
+    const previousStage = context.opportunity.recordedStage
+    if (Math.abs(request.targetStage - previousStage) !== 1) {
+      throw new Error('MCEM stage changes must move to an adjacent stage.')
+    }
+
+    const guidance = await this.mcem.getStageGuidance(previousStage)
+    const evaluation = evaluateMcemProgress(context, guidance)
+    const unmetCriteria = evaluation.criteria.filter((criterion) => criterion.status !== 'met')
+    const advancing = request.targetStage > previousStage
+    const requiresReason = !advancing || unmetCriteria.length > 0
+    if (requiresReason && !request.reason) {
+      throw new Error(advancing
+        ? 'An exception reason is required because the current-stage exit criteria are incomplete.'
+        : 'A recycle reason is required when moving an opportunity to a previous stage.')
+    }
+
+    const disposition = advancing ? unmetCriteria.length === 0 ? 'advanced' : 'override' : 'recycled'
+    const timestamp = new Date().toISOString()
+    const detail = unmetCriteria.length > 0
+      ? ` Unmet criteria: ${unmetCriteria.map((criterion) => `${criterion.label} (${criterion.status})`).join('; ')}.`
+      : ''
+    const auditNote = `[MCEM stage transition ${timestamp}] Stage ${previousStage} -> Stage ${request.targetStage}; disposition: ${disposition}.${detail}${request.reason ? ` Reason: ${request.reason}` : ''}`
+    const opportunity = await this.msx.updateOpportunityStage(request.opportunityId, request.targetStage, auditNote)
+    return mcemStageTransitionResultSchema.parse({ opportunity, previousStage, targetStage: request.targetStage, disposition, auditNote })
   }
 
   async runMcemCoach(input: McemRequest): Promise<McemResponse> {

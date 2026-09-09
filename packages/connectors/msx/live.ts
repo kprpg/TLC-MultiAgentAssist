@@ -82,11 +82,13 @@ const customerCommitmentCodes: Record<CustomerCommitment, number> = {
 export interface MsxWriteMetadata {
   riskDetailsField?: string
   milestoneStatusCodes?: Partial<Record<MilestoneStatus, number>>
+  stageCodes?: Partial<Record<1 | 2 | 3 | 4 | 5, number>>
 }
 
 export function msxWriteMetadataFromEnvironment(environment: NodeJS.ProcessEnv): MsxWriteMetadata {
   const riskDetailsField = environment['TLC_MSX_RISK_DETAILS_FIELD']?.trim()
   const configuredCodes: Partial<Record<MilestoneStatus, number>> = {}
+  const stageCodes: Partial<Record<1 | 2 | 3 | 4 | 5, number>> = {}
   for (const [status, variable] of [
     ['Lost to Competitor', 'TLC_MSX_STATUS_LOST_TO_COMPETITOR'],
     ['Hygiene/Duplicate', 'TLC_MSX_STATUS_HYGIENE_DUPLICATE']
@@ -97,9 +99,18 @@ export function msxWriteMetadataFromEnvironment(environment: NodeJS.ProcessEnv):
     if (!Number.isSafeInteger(code)) throw new Error(`${variable} must be an integer MSX option code.`)
     configuredCodes[status] = code
   }
+  for (const stage of [1, 2, 3, 4, 5] as const) {
+    const variable = `TLC_MSX_STAGE_${stage}`
+    const rawValue = environment[variable]?.trim()
+    if (!rawValue) continue
+    const code = Number(rawValue)
+    if (!Number.isSafeInteger(code)) throw new Error(`${variable} must be an integer MSX option code.`)
+    stageCodes[stage] = code
+  }
   return {
     ...(riskDetailsField ? { riskDetailsField } : {}),
-    ...(Object.keys(configuredCodes).length > 0 ? { milestoneStatusCodes: configuredCodes } : {})
+    ...(Object.keys(configuredCodes).length > 0 ? { milestoneStatusCodes: configuredCodes } : {}),
+    ...(Object.keys(stageCodes).length > 0 ? { stageCodes } : {})
   }
 }
 
@@ -202,6 +213,29 @@ export class LiveMsxConnector implements MsxConnector {
     this.portfolioPromise = undefined
     const opportunity = (await this.getPortfolio()).opportunities.find((candidate) => candidate.id === opportunityId)
     if (!opportunity) throw new Error('MSX updated the opportunity but it could not be reloaded.')
+    return structuredClone(opportunity)
+  }
+
+  async updateOpportunityStage(opportunityId: string, targetStage: number, auditNote: string): Promise<Opportunity> {
+    if (!Number.isInteger(targetStage) || targetStage < 1 || targetStage > 5) {
+      throw new Error('The target MCEM stage must be between 1 and 5.')
+    }
+    const stageCode = this.writeMetadata.stageCodes?.[targetStage as 1 | 2 | 3 | 4 | 5]
+    if (stageCode === undefined) {
+      throw new Error(`Live MSX stage ${targetStage} writes require TLC_MSX_STAGE_${targetStage} to contain the tenant option code.`)
+    }
+    await this.assertOpportunityAccess(opportunityId)
+    const current = (await this.getPortfolio()).opportunities.find((candidate) => candidate.id === opportunityId)
+    if (!current) throw new Error('The opportunity is not in the signed-in user’s active MSX portfolio.')
+    const description = [current.comments, auditNote].filter(Boolean).join('\n\n')
+    await this.patch(`opportunities(${opportunityId})`, {
+      msp_activesalesstage: stageCode,
+      description
+    })
+    this.portfolioPromise = undefined
+    this.observationPromises.delete(opportunityId)
+    const opportunity = (await this.getPortfolio()).opportunities.find((candidate) => candidate.id === opportunityId)
+    if (!opportunity) throw new Error('MSX updated the stage but the opportunity could not be reloaded.')
     return structuredClone(opportunity)
   }
 

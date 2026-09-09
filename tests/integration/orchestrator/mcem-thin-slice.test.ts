@@ -76,6 +76,55 @@ describe('MCEM Coach thin slice', () => {
     ])
   })
 
+  it('advances an adjacent opportunity when every exit criterion is met', async () => {
+    const orchestrator = new ThinSliceOrchestrator(new FixtureMsxConnector(), mcemConnector())
+
+    const result = await orchestrator.transitionOpportunityStage({
+      contractVersion,
+      accountId: 'account-contoso',
+      opportunityId: 'opp-resilient-cloud-foundation',
+      targetStage: 2
+    })
+
+    expect(result).toMatchObject({ previousStage: 1, targetStage: 2, disposition: 'advanced' })
+    expect(result.opportunity.recordedStage).toBe(2)
+    expect(result.auditNote).toContain('Stage 1 -> Stage 2')
+  })
+
+  it('requires a reason for an unmet-gate override and records the exception', async () => {
+    const orchestrator = new ThinSliceOrchestrator(new FixtureMsxConnector(), mcemConnector())
+    const request = {
+      contractVersion,
+      accountId: 'account-contoso',
+      opportunityId: 'opp-grid-modernization',
+      targetStage: 4
+    } as const
+
+    await expect(orchestrator.transitionOpportunityStage(request)).rejects.toThrow('exception reason')
+    const result = await orchestrator.transitionOpportunityStage({ ...request, reason: 'Executive-approved timing exception.' })
+    expect(result.disposition).toBe('override')
+    expect(result.auditNote).toContain('Unmet criteria:')
+  })
+
+  it('requires a recycle reason and rejects non-adjacent moves', async () => {
+    const orchestrator = new ThinSliceOrchestrator(new FixtureMsxConnector(), mcemConnector())
+
+    await expect(orchestrator.transitionOpportunityStage({
+      contractVersion,
+      accountId: 'account-contoso',
+      opportunityId: 'opp-grid-modernization',
+      targetStage: 2
+    })).rejects.toThrow('recycle reason')
+
+    await expect(orchestrator.transitionOpportunityStage({
+      contractVersion,
+      accountId: 'account-contoso',
+      opportunityId: 'opp-grid-modernization',
+      targetStage: 1,
+      reason: 'Customer scope changed substantially.'
+    })).rejects.toThrow('adjacent stage')
+  })
+
   it('builds the automatic diagnostic locally without invoking a task agent', async () => {
     const invoke = vi.fn()
     const orchestrator = new ThinSliceOrchestrator(

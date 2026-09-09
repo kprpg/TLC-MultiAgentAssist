@@ -54,7 +54,7 @@ z.object({
 	name: z.string().min(1),
 	segment: z.string().min(1)
 });
-z.object({
+var opportunitySchema = z.object({
 	id: z.string().min(1),
 	accountId: z.string().min(1),
 	name: z.string().min(1),
@@ -95,6 +95,24 @@ var milestoneUpdateSchema = z.object({
 	comments: z.string().max(3e4).optional()
 }).refine((value) => Object.keys(value).length > 0, "At least one milestone field is required.");
 var opportunityUpdateSchema = z.object({ comments: z.string().max(3e4) });
+var mcemStageTransitionRequestSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	accountId: z.string().min(1),
+	opportunityId: z.string().min(1),
+	targetStage: z.number().int().min(1).max(5),
+	reason: z.string().trim().min(10).max(1e3).optional()
+}).strict();
+var mcemStageTransitionResultSchema = z.object({
+	opportunity: opportunitySchema,
+	previousStage: z.number().int().min(1).max(5),
+	targetStage: z.number().int().min(1).max(5),
+	disposition: z.enum([
+		"advanced",
+		"override",
+		"recycled"
+	]),
+	auditNote: z.string().min(1)
+}).strict();
 var evidenceSchema = z.object({
 	id: z.string().min(1),
 	source: z.enum(["msx", "mcem"]),
@@ -355,6 +373,7 @@ var customerCommitmentCodes = {
 function msxWriteMetadataFromEnvironment(environment) {
 	const riskDetailsField = environment["TLC_MSX_RISK_DETAILS_FIELD"]?.trim();
 	const configuredCodes = {};
+	const stageCodes = {};
 	for (const [status, variable] of [["Lost to Competitor", "TLC_MSX_STATUS_LOST_TO_COMPETITOR"], ["Hygiene/Duplicate", "TLC_MSX_STATUS_HYGIENE_DUPLICATE"]]) {
 		const rawValue = environment[variable]?.trim();
 		if (!rawValue) continue;
@@ -362,9 +381,24 @@ function msxWriteMetadataFromEnvironment(environment) {
 		if (!Number.isSafeInteger(code)) throw new Error(`${variable} must be an integer MSX option code.`);
 		configuredCodes[status] = code;
 	}
+	for (const stage of [
+		1,
+		2,
+		3,
+		4,
+		5
+	]) {
+		const variable = `TLC_MSX_STAGE_${stage}`;
+		const rawValue = environment[variable]?.trim();
+		if (!rawValue) continue;
+		const code = Number(rawValue);
+		if (!Number.isSafeInteger(code)) throw new Error(`${variable} must be an integer MSX option code.`);
+		stageCodes[stage] = code;
+	}
 	return {
 		...riskDetailsField ? { riskDetailsField } : {},
-		...Object.keys(configuredCodes).length > 0 ? { milestoneStatusCodes: configuredCodes } : {}
+		...Object.keys(configuredCodes).length > 0 ? { milestoneStatusCodes: configuredCodes } : {},
+		...Object.keys(stageCodes).length > 0 ? { stageCodes } : {}
 	};
 }
 var MsxRequestError = class extends Error {
@@ -440,6 +474,24 @@ var LiveMsxConnector = class {
 		this.portfolioPromise = void 0;
 		const opportunity = (await this.getPortfolio()).opportunities.find((candidate) => candidate.id === opportunityId);
 		if (!opportunity) throw new Error("MSX updated the opportunity but it could not be reloaded.");
+		return structuredClone(opportunity);
+	}
+	async updateOpportunityStage(opportunityId, targetStage, auditNote) {
+		if (!Number.isInteger(targetStage) || targetStage < 1 || targetStage > 5) throw new Error("The target MCEM stage must be between 1 and 5.");
+		const stageCode = this.writeMetadata.stageCodes?.[targetStage];
+		if (stageCode === void 0) throw new Error(`Live MSX stage ${targetStage} writes require TLC_MSX_STAGE_${targetStage} to contain the tenant option code.`);
+		await this.assertOpportunityAccess(opportunityId);
+		const current = (await this.getPortfolio()).opportunities.find((candidate) => candidate.id === opportunityId);
+		if (!current) throw new Error("The opportunity is not in the signed-in user’s active MSX portfolio.");
+		const description = [current.comments, auditNote].filter(Boolean).join("\n\n");
+		await this.patch(`opportunities(${opportunityId})`, {
+			msp_activesalesstage: stageCode,
+			description
+		});
+		this.portfolioPromise = void 0;
+		this.observationPromises.delete(opportunityId);
+		const opportunity = (await this.getPortfolio()).opportunities.find((candidate) => candidate.id === opportunityId);
+		if (!opportunity) throw new Error("MSX updated the stage but the opportunity could not be reloaded.");
 		return structuredClone(opportunity);
 	}
 	async getOpportunityContext(opportunityId) {
@@ -1120,17 +1172,19 @@ var observationsByOpportunity = {
 	]
 };
 var FixtureMsxConnector = class {
+	opportunities = structuredClone(opportunities);
+	milestonesByOpportunity = structuredClone(milestonesByOpportunity);
 	async listAccounts() {
 		return structuredClone(accounts);
 	}
 	async listOpportunities(accountId) {
-		return structuredClone(opportunities.filter((opportunity) => opportunity.accountId === accountId));
+		return structuredClone(this.opportunities.filter((opportunity) => opportunity.accountId === accountId));
 	}
 	async listMilestones(opportunityId) {
-		return structuredClone(milestonesByOpportunity[opportunityId] ?? []);
+		return structuredClone(this.milestonesByOpportunity[opportunityId] ?? []);
 	}
 	async updateMilestone(opportunityId, milestoneId, update) {
-		const milestone = milestonesByOpportunity[opportunityId]?.find((candidate) => candidate.id === milestoneId);
+		const milestone = this.milestonesByOpportunity[opportunityId]?.find((candidate) => candidate.id === milestoneId);
 		if (!milestone) throw new Error(`Unknown sample milestone: ${milestoneId}`);
 		if (update.status !== void 0) milestone.status = update.status;
 		if (update.targetDate !== void 0) milestone.targetDate = update.targetDate;
@@ -1140,13 +1194,20 @@ var FixtureMsxConnector = class {
 		return structuredClone(milestone);
 	}
 	async updateOpportunity(opportunityId, update) {
-		const opportunity = opportunities.find((candidate) => candidate.id === opportunityId);
+		const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId);
 		if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`);
 		opportunity.comments = update.comments;
 		return structuredClone(opportunity);
 	}
+	async updateOpportunityStage(opportunityId, targetStage, auditNote) {
+		const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId);
+		if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`);
+		opportunity.recordedStage = targetStage;
+		opportunity.comments = [opportunity.comments, auditNote].filter(Boolean).join("\n\n");
+		return structuredClone(opportunity);
+	}
 	async getOpportunityContext(opportunityId) {
-		const opportunity = opportunities.find((candidate) => candidate.id === opportunityId);
+		const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId);
 		if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`);
 		const account = accounts.find((candidate) => candidate.id === opportunity.accountId);
 		if (!account) throw new Error(`Missing account for sample opportunity: ${opportunityId}`);
@@ -1167,72 +1228,192 @@ var FixtureMsxConnector = class {
 };
 //#endregion
 //#region packages/connectors/sharepoint/local-pdf.ts
-var stageOneCriteria = [
-	{
-		id: "budget",
-		label: "Budget availability",
-		ownerRole: "Specialist / SSP",
-		actionWhenMissing: "Validate available funding or the process and timing required to request it.",
-		rationale: "The MCEM Overview requires budget, outcomes, approval, and timing before an opportunity is qualified."
-	},
-	{
-		id: "customer-outcome",
-		label: "Customer outcomes",
-		ownerRole: "ATS",
-		actionWhenMissing: "Identify the expected outcomes, returns, KPIs, or capabilities and their priority for the customer.",
-		rationale: "Customer outcomes connect the opportunity to measurable business priorities."
-	},
-	{
-		id: "approval",
-		label: "Approval process",
-		ownerRole: "Account Executive",
-		actionWhenMissing: "Identify the stakeholders, decision makers, sponsor, and approval path.",
-		rationale: "Qualification requires a known approval process and sponsorship."
-	},
-	{
-		id: "timing",
-		label: "Decision and implementation timing",
-		ownerRole: "Specialist / SSP",
-		actionWhenMissing: "Confirm funding, decision, purchase, and implementation timing plus any compelling event.",
-		rationale: "Qualification requires a credible timeline and reason to act."
-	}
-];
-var lifecycleCriteria = [
-	{
-		id: "customer-outcome",
-		label: "Measurable customer outcome",
-		ownerRole: "ATS",
-		actionWhenMissing: "Agree the planned outcome, milestone, measurement, and customer review rhythm.",
-		rationale: "The MCEM Overview says teams should measure progress against planned outcomes and milestones."
-	},
-	{
-		id: "decision-team",
-		label: "Customer and v-team alignment",
-		ownerRole: "Account Executive",
-		actionWhenMissing: "Align the relevant customer stakeholders and Microsoft v-team roles around the opportunity.",
-		rationale: "Continuous customer planning coordinates execution across customer stakeholders, ATU, STU, CSU, partners, and executives."
-	},
-	{
-		id: "technical-validation",
-		label: "Outcome and exit-criteria evidence",
-		ownerRole: "Solution Engineer (SE)",
-		actionWhenMissing: "Define the evidence needed to demonstrate the current stage outcomes and exit criteria.",
-		rationale: "MCEM stage progression is driven by achieved outcomes and exit criteria, not completed activities."
-	},
-	{
-		id: "business-case",
-		label: "Business-priority alignment",
-		ownerRole: "Specialist / SSP",
-		actionWhenMissing: "Connect the opportunity to the customer priority, expected return, and available budget.",
-		rationale: "MCEM aligns customer needs, business outcomes, and solutions throughout the lifecycle."
-	},
-	{
-		id: "next-step",
-		label: "Governed next step",
-		ownerRole: "CSA / CSAM",
-		actionWhenMissing: "Agree a dated next step that advances an outcome or exit criterion with named owners.",
-		rationale: "Customer planning requires coordinated execution and adjustment as needs and priorities evolve."
-	}
+var stageCriteria = {
+	1: [
+		{
+			id: "budget",
+			label: "Budget availability",
+			ownerRole: "Specialist / SSP",
+			actionWhenMissing: "Validate available funding or the process and timing required to request it.",
+			rationale: "The MCEM Overview requires budget, outcomes, approval, and timing before an opportunity is qualified."
+		},
+		{
+			id: "customer-outcome",
+			label: "Customer outcomes",
+			ownerRole: "ATS",
+			actionWhenMissing: "Identify the expected outcomes, returns, KPIs, or capabilities and their priority for the customer.",
+			rationale: "Customer outcomes connect the opportunity to measurable business priorities."
+		},
+		{
+			id: "approval",
+			label: "Approval process",
+			ownerRole: "Account Executive",
+			actionWhenMissing: "Identify the stakeholders, decision makers, sponsor, and approval path.",
+			rationale: "Qualification requires a known approval process and sponsorship."
+		},
+		{
+			id: "timing",
+			label: "Decision and implementation timing",
+			ownerRole: "Specialist / SSP",
+			actionWhenMissing: "Confirm funding, decision, purchase, and implementation timing plus any compelling event.",
+			rationale: "Qualification requires a credible timeline and reason to act."
+		}
+	],
+	2: [
+		{
+			id: "customer-outcome",
+			label: "Customer value is quantified",
+			ownerRole: "ATS",
+			actionWhenMissing: "Quantify the customer outcomes, value hypothesis, and measures of success.",
+			rationale: "Stage 2 must establish a credible customer value case before execution begins."
+		},
+		{
+			id: "decision-team",
+			label: "Customer and Microsoft teams are aligned",
+			ownerRole: "Account Executive",
+			actionWhenMissing: "Confirm sponsors, decision makers, technical stakeholders, and Microsoft owners.",
+			rationale: "The design must have an aligned decision team and accountable v-team."
+		},
+		{
+			id: "technical-validation",
+			label: "Solution and technical fit are credible",
+			ownerRole: "Solution Engineer (SE)",
+			actionWhenMissing: "Validate solution fit, technical feasibility, risks, and the evidence plan.",
+			rationale: "Technical fit and a credible validation route are required to progress."
+		},
+		{
+			id: "business-case",
+			label: "Business case and execution plans are credible",
+			ownerRole: "Specialist / SSP",
+			actionWhenMissing: "Document the business case, commercial path, success plan, and required resources.",
+			rationale: "The customer and account team need a credible plan to achieve the stated value."
+		},
+		{
+			id: "next-step",
+			label: "Delivery route is agreed",
+			ownerRole: "CSA / CSAM",
+			actionWhenMissing: "Name the delivery route, owners, next commitment, and target date.",
+			rationale: "Progression requires a practical delivery path, not only a solution concept."
+		}
+	],
+	3: [
+		{
+			id: "customer-outcome",
+			label: "Customer agreement is documented",
+			ownerRole: "ATS",
+			actionWhenMissing: "Capture customer agreement on scope, outcomes, measures, and implementation intent.",
+			rationale: "Stage 3 closes only when customer agreement is explicit."
+		},
+		{
+			id: "decision-team",
+			label: "Committed pipeline is confirmed",
+			ownerRole: "Account Executive",
+			actionWhenMissing: "Confirm commercial commitment, pipeline state, accountable owners, and dates.",
+			rationale: "The opportunity must be commercially committed before handoff."
+		},
+		{
+			id: "technical-validation",
+			label: "Technical close is complete",
+			ownerRole: "Solution Engineer (SE)",
+			actionWhenMissing: "Close technical validation, risks, architecture decisions, and acceptance criteria.",
+			rationale: "All material technical questions must be closed or explicitly accepted."
+		},
+		{
+			id: "business-case",
+			label: "Value and delivery commitments are approved",
+			ownerRole: "Specialist / SSP",
+			actionWhenMissing: "Confirm the approved value case, funding, delivery scope, and commitments.",
+			rationale: "Execution must be backed by an approved customer and commercial commitment."
+		},
+		{
+			id: "next-step",
+			label: "CSU handoff is accepted",
+			ownerRole: "CSA / CSAM",
+			actionWhenMissing: "Complete and obtain acceptance of the delivery handoff, owners, dependencies, and first milestones.",
+			rationale: "The receiving delivery team must accept an actionable handoff."
+		}
+	],
+	4: [
+		{
+			id: "customer-outcome",
+			label: "Measurable business value is demonstrated",
+			ownerRole: "CSAM",
+			actionWhenMissing: "Measure realized outcomes against the customer-approved baseline and targets.",
+			rationale: "Stage 4 must demonstrate customer value, not merely deployment completion."
+		},
+		{
+			id: "decision-team",
+			label: "Adoption owners and governance are active",
+			ownerRole: "CSAM",
+			actionWhenMissing: "Activate customer adoption owners and a recurring value governance rhythm.",
+			rationale: "Scaling requires active customer ownership and governance."
+		},
+		{
+			id: "technical-validation",
+			label: "Production solution is healthy and scalable",
+			ownerRole: "Cloud Solution Architect",
+			actionWhenMissing: "Validate production health, capacity, reliability, security, and scale readiness.",
+			rationale: "The implemented solution must be able to sustain and expand realized value."
+		},
+		{
+			id: "business-case",
+			label: "Scale case is validated",
+			ownerRole: "Specialist / SSP",
+			actionWhenMissing: "Validate the economic case and customer commitment for broader adoption or consumption.",
+			rationale: "Scale must be justified by measurable outcomes and a credible economic case."
+		},
+		{
+			id: "next-step",
+			label: "Optimization plan is agreed",
+			ownerRole: "CSAM",
+			actionWhenMissing: "Agree the next adoption, optimization, and value-realization milestones.",
+			rationale: "Stage 5 begins with an owned plan to manage and optimize value."
+		}
+	],
+	5: [
+		{
+			id: "customer-outcome",
+			label: "Value realization remains measurable",
+			ownerRole: "CSAM",
+			actionWhenMissing: "Refresh outcome measures, baselines, and the customer value review.",
+			rationale: "Manage and Optimize continuously measures realized business value."
+		},
+		{
+			id: "decision-team",
+			label: "Customer governance remains engaged",
+			ownerRole: "CSAM",
+			actionWhenMissing: "Re-engage accountable customer stakeholders and Microsoft owners.",
+			rationale: "Sustained value depends on active customer governance."
+		},
+		{
+			id: "technical-validation",
+			label: "Service health and optimization are managed",
+			ownerRole: "Cloud Solution Architect",
+			actionWhenMissing: "Review operational health, optimization opportunities, and technical risks.",
+			rationale: "The deployed capability must remain healthy, efficient, and fit for evolving needs."
+		},
+		{
+			id: "business-case",
+			label: "Expansion signals are value-backed",
+			ownerRole: "Specialist / SSP",
+			actionWhenMissing: "Tie any expansion signal to a new customer question, workload, and measurable value.",
+			rationale: "Expansion should create a new qualified opportunity rather than silently extending Stage 5."
+		},
+		{
+			id: "next-step",
+			label: "Next lifecycle action is explicit",
+			ownerRole: "Account Executive",
+			actionWhenMissing: "Remain in Stage 5, recycle to Stage 4 for a value-health gap, or qualify a new opportunity at Stage 1 or 2.",
+			rationale: "Stage 5 has no automatic Stage 6; the next lifecycle action must be explicit."
+		}
+	]
+};
+var stageTitles = [
+	"Listen & Consult",
+	"Inspire & Design",
+	"Empower & Achieve",
+	"Realize Value",
+	"Manage & Optimize"
 ];
 var LocalPdfMcemGuidanceConnector = class {
 	sourcePromise;
@@ -1243,14 +1424,14 @@ var LocalPdfMcemGuidanceConnector = class {
 		const source = await (this.sourcePromise ??= this.loadSource());
 		return {
 			stage,
-			title: `MCEM Stage ${stage} overview guidance`,
+			title: `MCEM Stage ${stage}: ${stageTitles[stage - 1] ?? "Guidance"}`,
 			version: source.version,
 			effectiveDate: source.effectiveDate,
-			criteria: structuredClone(stage === 1 ? stageOneCriteria : lifecycleCriteria),
+			criteria: structuredClone(stageCriteria[stage] ?? []),
 			sourceHealth: {
 				source: "mcem",
 				state: "partial",
-				detail: "Local snapshot: docs/knowledge/MCEM Overview.pdf. No live SharePoint request was made; detailed stage guidance remains outside this overview.",
+				detail: "Stage gates use the supplied MCEM Stage Gates and Role Matrix; docs/knowledge/MCEM Overview.pdf validates the local guidance source. No live SharePoint request was made.",
 				checkedAt: source.checkedAt
 			}
 		};
@@ -1407,6 +1588,28 @@ var ThinSliceOrchestrator = class {
 	}
 	updateOpportunity(opportunityId, update) {
 		return this.msx.updateOpportunity(opportunityId, update);
+	}
+	async transitionOpportunityStage(input) {
+		const request = mcemStageTransitionRequestSchema.parse(input);
+		const context = await this.msx.getOpportunityContext(request.opportunityId);
+		if (context.account.id !== request.accountId) throw new Error("The selected opportunity does not belong to the selected account.");
+		const previousStage = context.opportunity.recordedStage;
+		if (Math.abs(request.targetStage - previousStage) !== 1) throw new Error("MCEM stage changes must move to an adjacent stage.");
+		const unmetCriteria = evaluateMcemProgress(context, await this.mcem.getStageGuidance(previousStage)).criteria.filter((criterion) => criterion.status !== "met");
+		const advancing = request.targetStage > previousStage;
+		if ((!advancing || unmetCriteria.length > 0) && !request.reason) throw new Error(advancing ? "An exception reason is required because the current-stage exit criteria are incomplete." : "A recycle reason is required when moving an opportunity to a previous stage.");
+		const disposition = advancing ? unmetCriteria.length === 0 ? "advanced" : "override" : "recycled";
+		const timestamp = (/* @__PURE__ */ new Date()).toISOString();
+		const detail = unmetCriteria.length > 0 ? ` Unmet criteria: ${unmetCriteria.map((criterion) => `${criterion.label} (${criterion.status})`).join("; ")}.` : "";
+		const auditNote = `[MCEM stage transition ${timestamp}] Stage ${previousStage} -> Stage ${request.targetStage}; disposition: ${disposition}.${detail}${request.reason ? ` Reason: ${request.reason}` : ""}`;
+		const opportunity = await this.msx.updateOpportunityStage(request.opportunityId, request.targetStage, auditNote);
+		return mcemStageTransitionResultSchema.parse({
+			opportunity,
+			previousStage,
+			targetStage: request.targetStage,
+			disposition,
+			auditNote
+		});
 	}
 	async runMcemCoach(input) {
 		const request = mcemRequestSchema.parse(input);
@@ -2143,6 +2346,10 @@ function registerIpc() {
 	ipcMain.handle("tlc:run-mcem-coach", (event, request) => {
 		assertTrustedSender(event);
 		return orchestrator.runMcemCoach(mcemRequestSchema.parse(request));
+	});
+	ipcMain.handle("tlc:transition-opportunity-stage", (event, request) => {
+		assertTrustedSender(event);
+		return orchestrator.transitionOpportunityStage(mcemStageTransitionRequestSchema.parse(request));
 	});
 	ipcMain.handle("tlc:run-agent-task", (event, request) => {
 		assertTrustedSender(event);

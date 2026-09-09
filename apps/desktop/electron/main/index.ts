@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { z } from 'zod'
-import { agentTaskRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, mcemRequestSchema, milestoneUpdateSchema, opportunityUpdateSchema, type AuthStatus, type DesktopDataStatus, type PerformanceReporter } from '../../../../packages/common/index.js'
+import { agentTaskRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, mcemRequestSchema, mcemStageTransitionRequestSchema, milestoneUpdateSchema, opportunityUpdateSchema, type AuthStatus, type DesktopDataStatus, type PerformanceReporter } from '../../../../packages/common/index.js'
 import {
   loadFoundryEnvironment,
   type FoundryEnvironment
@@ -199,6 +199,10 @@ function registerIpc(): void {
   ipcMain.handle('tlc:run-mcem-coach', (event, request: unknown) => {
     assertTrustedSender(event)
     return orchestrator.runMcemCoach(mcemRequestSchema.parse(request))
+  })
+  ipcMain.handle('tlc:transition-opportunity-stage', (event, request: unknown) => {
+    assertTrustedSender(event)
+    return orchestrator.transitionOpportunityStage(mcemStageTransitionRequestSchema.parse(request))
   })
   ipcMain.handle('tlc:run-agent-task', (event, request: unknown) => {
     assertTrustedSender(event)
