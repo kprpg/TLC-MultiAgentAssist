@@ -67,9 +67,6 @@ jobs:
           if ($env:RELEASE_TAG -ne "v$env:PACKAGE_VERSION") {
             throw "Tag $env:RELEASE_TAG does not match desktop package version v$env:PACKAGE_
 
-      - name: Run legacy desktop smoke test
-        run: npm run test:smoke:desktop
-
       - name: Run revamp desktop smoke test
         run: npm run test:smoke:revamp:desktop
 
