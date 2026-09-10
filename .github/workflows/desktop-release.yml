@@ -94,8 +94,23 @@ jobs:
             throw "No release artifacts were found."
           }
 
-          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
-            gh release create $env:RELEASE_TAG $artifacts --target $env:GITHUB_SHA --generate-notes --title "TLC MultiAgent Assist Desktop v$env:PACKAGE_VERSION (build $env:GITHUB_RUN_NUMBER)" --latest
-          } else {
-            gh release create $env:RELEASE_TAG $artifacts --verify-tag --generate-notes --title "TLC MultiAgent Assist Desktop $env:RELEASE_TAG" --latest
+          $maxAttempts = 5
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') {
+              gh release create $env:RELEASE_TAG $artifacts --target $env:GITHUB_SHA --generate-notes --title "TLC MultiAgent Assist Desktop v$env:PACKAGE_VERSION (build $env:GITHUB_RUN_NUMBER)" --latest
+            } else {
+              gh release create $env:RELEASE_TAG $artifacts --verify-tag --generate-notes --title "TLC MultiAgent Assist Desktop $env:RELEASE_TAG" --latest
+            }
+
+            if ($LASTEXITCODE -eq 0) {
+              break
+            }
+
+            if ($attempt -eq $maxAttempts) {
+              throw "Failed to publish GitHub release after $maxAttempts attempts (last exit code $LASTEXITCODE)."
+            }
+
+            $delay = [Math]::Min(60, [Math]::Pow(2, $attempt))
+            Write-Host "gh release create failed (exit code $LASTEXITCODE). Retrying in $delay seconds (attempt $attempt of $maxAttempts)..."
+            Start-Sleep -Seconds $delay
           }
