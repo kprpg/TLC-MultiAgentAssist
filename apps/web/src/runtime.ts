@@ -1,7 +1,7 @@
 import { AzureCliCredential, ManagedIdentityCredential } from '@azure/identity'
 import { resolve } from 'node:path'
 import type { AgentCapability } from '../../../packages/common/index.js'
-import { resolveFoundryEnvironmentPath, loadFoundryEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
+import { loadFoundryEnvironmentFromEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
 import { LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../packages/connectors/foundry/index.js'
@@ -16,7 +16,7 @@ export interface HostedRuntimeOptions {
 export async function createHostedRuntimeFactory(options: HostedRuntimeOptions = {}) {
     const environment = options.environment ?? process.env
     const workingDirectory = options.workingDirectory ?? process.cwd()
-    const foundryEnvironment = await loadFoundryEnvironment(resolveFoundryEnvironmentPath(environment, workingDirectory))
+    const foundryEnvironment = await loadFoundryEnvironmentFromEnvironment(environment, workingDirectory)
     const managedIdentityClientId = environment['AZURE_CLIENT_ID']?.trim()
     const foundryCredential = environment['WEBSITE_SITE_NAME']
         ? managedIdentityClientId

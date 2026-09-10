@@ -13,7 +13,7 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 export async function createAppServiceZip(packageRoot, artifactPath) {
   await mkdir(dirname(artifactPath), { recursive: true })
   await rm(artifactPath, { force: true })
-  const archive = new ZipArchive({ forceZip64: true, zlib: { level: 9 } })
+  const archive = new ZipArchive({ forceZip64: true, zlib: { level: 1 } })
   const completion = pipeline(archive, createWriteStream(artifactPath))
   archive.directory(packageRoot, false)
   await archive.finalize()
@@ -40,6 +40,7 @@ async function prepareWebAppServiceRelease() {
       ...createLinuxCanvasInstallArgs(packageRoot, canvasPackage.optionalDependencies)
     ])
     await run(process.execPath, [join(repositoryRoot, 'scripts', 'smoke-web-release.mjs'), packageRoot])
+    console.info(`Creating App Service package at ${artifactPath}...`)
     await createAppServiceZip(packageRoot, artifactPath)
     console.info(`App Service package created at ${artifactPath}`)
   } finally {

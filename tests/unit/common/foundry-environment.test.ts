@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   foundryEnvironmentSchema,
   loadFoundryEnvironment,
+  loadFoundryEnvironmentFromEnvironment,
   resolveFoundryEnvironmentPath
 } from '../../../packages/common/configuration/foundry-environment.js'
 
@@ -64,6 +65,14 @@ describe('Foundry environment configuration', () => {
     await writeFile(filePath, JSON.stringify(validEnvironment), 'utf8')
 
     await expect(loadFoundryEnvironment(filePath)).resolves.toEqual(validEnvironment)
+  })
+
+  it('loads hosted Foundry settings from Base64-encoded JSON without a deployed file', async () => {
+    const encodedEnvironment = Buffer.from(JSON.stringify(validEnvironment), 'utf8').toString('base64')
+
+    await expect(loadFoundryEnvironmentFromEnvironment({
+      TLC_FOUNDRY_ENV_BASE64: encodedEnvironment
+    }, 'C:\\missing-release-root')).resolves.toEqual(validEnvironment)
   })
 
   it('requires app registration details for interactive browser authentication', () => {

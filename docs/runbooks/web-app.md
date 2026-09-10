@@ -50,6 +50,34 @@ npm run test:smoke:web-release
 
 The web release workflow performs these checks in isolation and publishes an Azure App Service ZIP for tags such as `web-v0.1.0`. The ZIP includes production dependencies, the built host and renderer, the MCEM guidance document, and the safe Foundry configuration example. It never includes `config/foundry.environment.json`.
 
+## App Service Deployment
+
+The PowerShell deployment wrapper builds and smoke-tests the release, validates the completed ZIP, verifies the Azure target, deploys it, and checks `/api/health`:
+
+```powershell
+npm run web:deploy
+```
+
+The default target is the production `tlc` app in `myDemoRg`. PowerShell confirmation is required before upload. Use `-WhatIf` to preview the deployment or package without contacting Azure:
+
+```powershell
+pwsh -NoProfile -File scripts/deploy-web-appservice.ps1 -WhatIf
+pwsh -NoProfile -File scripts/deploy-web-appservice.ps1 -PackageOnly
+```
+
+To deploy an already-built package or target a slot:
+
+```powershell
+pwsh -NoProfile -File scripts/deploy-web-appservice.ps1 -SkipBuild
+pwsh -NoProfile -File scripts/deploy-web-appservice.ps1 -Slot sample
+```
+
+The configured subscription belongs to tenant `72f988bf-86f1-41af-91ab-2d7cd011db47`. A different `-TenantId` is rejected before deployment. Before uploading, the script validates `config/foundry.environment.json`, rejects credential-like fields, and stores its Base64-encoded non-secret metadata in the `TLC_FOUNDRY_ENV_BASE64` App Service setting. The reusable ZIP still excludes the live file. Use `-FoundryEnvironmentPath` to select another environment file.
+
+The wrapper sets `WEBSITE_RUN_FROM_PACKAGE=1`, so App Service mounts the immutable ZIP rather than extracting it and re-zipping the large `node_modules` tree. It also disables Azure CLI deployment-status tracking because a transient gateway or polling failure can produce exit code 1 after OneDeploy accepts the package. If that happens, the wrapper reconciles the newly accepted deployment record before running the bounded `/api/health` check. The script does not alter authentication, identities, networking, or deployment slots.
+
+`azd up` is not used for this existing app. This repository has no `azure.yaml`, infrastructure definitions, or azd environment, and `azd up` combines provisioning with deployment. Adopting azd requires a separately reviewed infrastructure plan that safely represents the existing App Service before azd is allowed to own it.
+
 After a build, the host can also be started directly with `npm start`. Set `TLC_WEB_MODE` first when a mode other than the environment-derived default is required.
 
 ## Local Startup
@@ -96,7 +124,9 @@ Optional settings:
 | `HOST`                              | HTTP listener address                    | `127.0.0.1` locally; `0.0.0.0` in App Service |
 | `TLC_WEB_MODE`                      | `sample`, `azure-cli`, or `easy-auth`    | `sample` locally; `easy-auth` in App Service  |
 | `TLC_WEB_STATIC_ROOT`               | Built renderer directory                 | `apps/desktop/dist/revamp`                    |
+| `TLC_FOUNDRY_ENV_BASE64`            | Base64-encoded hosted Foundry JSON       | unset                                         |
 | `TLC_FOUNDRY_ENV_FILE`              | Foundry environment JSON                 | `config/foundry.environment.json`             |
+| `WEBSITE_RUN_FROM_PACKAGE`          | Mount the deployment ZIP as `wwwroot`    | wrapper sets `1`                              |
 | `TLC_MCEM_GUIDANCE_PATH`            | MCEM guidance PDF                        | `docs/knowledge/MCEM Overview.pdf`            |
 | `TLC_MSX_RISK_DETAILS_FIELD`        | Verified Risk/Blocker logical field name | unset; corresponding update is rejected       |
 | `TLC_MSX_STATUS_LOST_TO_COMPETITOR` | Verified integer option value            | unset; corresponding update is rejected       |
