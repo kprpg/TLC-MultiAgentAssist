@@ -71,6 +71,25 @@ export const foundryEnvironmentSchema = z.object({
 
 export type FoundryEnvironment = z.infer<typeof foundryEnvironmentSchema>
 
+export async function loadFoundryEnvironmentFromEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+  workingDirectory = process.cwd()
+): Promise<FoundryEnvironment> {
+  const encodedEnvironment = environment['TLC_FOUNDRY_ENV_BASE64']?.trim()
+  if (!encodedEnvironment) {
+    return loadFoundryEnvironment(resolveFoundryEnvironmentPath(environment, workingDirectory))
+  }
+
+  let candidate: unknown
+  try {
+    candidate = JSON.parse(Buffer.from(encodedEnvironment, 'base64').toString('utf8'))
+  } catch (cause) {
+    throw new Error('TLC_FOUNDRY_ENV_BASE64 is not valid Base64-encoded JSON.', { cause })
+  }
+
+  return foundryEnvironmentSchema.parse(candidate)
+}
+
 export function resolveFoundryEnvironmentPath(
   environment: NodeJS.ProcessEnv = process.env,
   workingDirectory = process.cwd()

@@ -25,6 +25,7 @@
     "web:build": "npm run ui:revamp:build && npm --workspace @tlc/web run build",
     "web:package": "npm run web:build && node scripts/package-web-release.mjs",
     "web:release": "npm run web:build && node scripts/prepare-web-appservice-release.mjs",
+    "web:deploy": "pwsh -NoProfile -File scripts/deploy-web-appservice.ps1",
     "test:smoke:web-release": "node scripts/smoke-web-release.mjs",
     "start": "node apps/web/dist/server.js",
     "web:start": "npm run web:build && cross-env TLC_WEB_MODE=sample node apps/web/dist/server.js",
