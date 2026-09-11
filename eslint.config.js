@@ -17,5 +17,14 @@ export default defineConfig(
     rules: {
       'no-console': 'off'
     }
+  },
+  {
+    files: ['scripts/capture-user-guide-screenshots.mjs'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        ...globals.browser
+      }
+    }
   }
 )
