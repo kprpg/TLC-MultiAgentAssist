@@ -287,7 +287,7 @@ function report(reporter, operation, startedAt, outcome) {
 //#endregion
 //#region packages/common/configuration/foundry-environment.ts
 var windowsAbsolutePathPattern = /^[a-zA-Z]:[\\/]/;
-var templatePlaceholderIds = new Set([
+var templatePlaceholderIds = /* @__PURE__ */ new Set([
 	"11111111-1111-4111-8111-111111111111",
 	"22222222-2222-4222-8222-222222222222",
 	"33333333-3333-4333-8333-333333333333"
@@ -402,6 +402,7 @@ function msxWriteMetadataFromEnvironment(environment) {
 	};
 }
 var MsxRequestError = class extends Error {
+	status;
 	constructor(message, status) {
 		super(message);
 		this.status = status;
@@ -409,6 +410,10 @@ var MsxRequestError = class extends Error {
 	}
 };
 var LiveMsxConnector = class {
+	tokenProvider;
+	fetchImplementation;
+	performanceReporter;
+	writeMetadata;
 	baseUrl;
 	portfolioPromise;
 	observationPromises = /* @__PURE__ */ new Map();
@@ -1416,6 +1421,7 @@ var stageTitles = [
 	"Manage & Optimize"
 ];
 var LocalPdfMcemGuidanceConnector = class {
+	pdfPath;
 	sourcePromise;
 	constructor(pdfPath) {
 		this.pdfPath = pdfPath;
@@ -1460,6 +1466,7 @@ function createFoundryOpenAIClient(projectEndpoint, credential) {
 	return new AIProjectClient(projectEndpoint, credential).getOpenAIClient();
 }
 var FoundryPromptAgent = class {
+	options;
 	openAIClient;
 	constructor(options) {
 		this.options = options;
@@ -1568,6 +1575,10 @@ function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
 //#endregion
 //#region packages/orchestrator/index.ts
 var ThinSliceOrchestrator = class {
+	msx;
+	mcem;
+	taskAgents;
+	performanceReporter;
 	constructor(msx, mcem, taskAgents = {}, performanceReporter) {
 		this.msx = msx;
 		this.mcem = mcem;
@@ -1654,7 +1665,7 @@ var ThinSliceOrchestrator = class {
 };
 //#endregion
 //#region apps/desktop/electron/main/azure-cli-token-provider.ts
-var refreshBufferMs = 300 * 1e3;
+var refreshBufferMs = 3e5;
 var AzureCliMsxTokenProvider = class {
 	cachedToken;
 	corpId;
@@ -1720,14 +1731,16 @@ async function prepareFoundryEnvironmentFile(options) {
 	const configuredPath = environment["TLC_FOUNDRY_ENV_FILE"]?.trim();
 	if (!options.isPackaged || configuredPath) return {
 		filePath: resolveFoundryEnvironmentPath(environment, workingDirectory),
-		created: false
+		created: false,
+		requiresConfiguration: false
 	};
 	const filePath = join(options.userDataPath, "foundry.environment.json");
 	try {
 		await stat(filePath);
 		return {
 			filePath,
-			created: false
+			created: false,
+			requiresConfiguration: false
 		};
 	} catch (error) {
 		if (error.code !== "ENOENT") throw error;
@@ -1736,7 +1749,8 @@ async function prepareFoundryEnvironmentFile(options) {
 	await copyFile(options.templatePath, filePath);
 	return {
 		filePath,
-		created: true
+		created: true,
+		requiresConfiguration: options.requiresConfigurationOnCreate ?? true
 	};
 }
 //#endregion
@@ -2068,8 +2082,9 @@ function blockToDocument(node, listLevel = 0) {
 		})];
 		case "list": return node.children.flatMap((item) => item.children.flatMap((child) => {
 			if (child.type === "list") return blockToDocument(child, Math.min(listLevel + 1, 5));
+			const children = child.type === "paragraph" ? inlineChildren(child.children) : [new TextRun(textContent(child))];
 			return [new Paragraph({
-				children: child.type === "paragraph" ? inlineChildren(child.children) : [new TextRun(textContent(child))],
+				children,
 				numbering: {
 					reference: node.ordered ? numberingReference : bulletReference,
 					level: listLevel
@@ -2201,23 +2216,25 @@ Was this ${capability.replaceAll("-", " ")} guidance actionable?`;
 }
 //#endregion
 //#region apps/desktop/electron/main/index.ts
-var desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+var currentDirectory = dirname(fileURLToPath(import.meta.url));
+var desktopRoot = resolve(currentDirectory, "../..");
 var rendererFile = process.env["TLC_UI_MODE"] === "legacy" ? resolve(desktopRoot, "dist/renderer/index.html") : resolve(desktopRoot, "dist/revamp/desktop.html");
 var preloadFile = resolve(desktopRoot, "dist-electron/preload/index.cjs");
 var developmentUrl = process.env["VITE_DEV_SERVER_URL"];
 var allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString();
 var dataMode = process.env["TLC_DATA_MODE"] === "sample" ? "sample" : "live";
-var preparedEnvironment = dataMode === "live" ? await prepareFoundryEnvironmentFile({
+var preparedEnvironment = app.isPackaged || dataMode === "live" ? await prepareFoundryEnvironmentFile({
 	isPackaged: app.isPackaged,
 	userDataPath: app.getPath("userData"),
-	templatePath: resolve(process.resourcesPath, "config/foundry.environment.example.json")
+	templatePath: resolve(process.resourcesPath, "config/foundry.environment.default.json"),
+	requiresConfigurationOnCreate: false
 }) : void 0;
 var runtimeEnvironment;
 var startupBlocked = false;
-if (preparedEnvironment?.created) {
+if (dataMode === "live" && preparedEnvironment?.requiresConfiguration) {
 	startupBlocked = true;
 	await openConfigurationAndExit(preparedEnvironment.filePath, "Your configuration file has been created. Set the Foundry project, agent names, tenant, client ID, and authentication mode, then reopen the application.");
-} else if (preparedEnvironment) try {
+} else if (dataMode === "live" && preparedEnvironment) try {
 	runtimeEnvironment = await loadFoundryEnvironment(preparedEnvironment.filePath);
 } catch (error) {
 	startupBlocked = true;

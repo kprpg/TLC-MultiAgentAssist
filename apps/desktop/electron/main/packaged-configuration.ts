@@ -8,11 +8,13 @@ interface PackagedConfigurationOptions {
   isPackaged: boolean
   userDataPath: string
   templatePath: string
+  requiresConfigurationOnCreate?: boolean
 }
 
 export interface PreparedFoundryEnvironment {
   filePath: string
   created: boolean
+  requiresConfiguration: boolean
 }
 
 export async function prepareFoundryEnvironmentFile(
@@ -25,19 +27,24 @@ export async function prepareFoundryEnvironmentFile(
   if (!options.isPackaged || configuredPath) {
     return {
       filePath: resolveFoundryEnvironmentPath(environment, workingDirectory),
-      created: false
+      created: false,
+      requiresConfiguration: false
     }
   }
 
   const filePath = join(options.userDataPath, 'foundry.environment.json')
   try {
     await stat(filePath)
-    return { filePath, created: false }
+    return { filePath, created: false, requiresConfiguration: false }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
 
   await mkdir(dirname(filePath), { recursive: true })
   await copyFile(options.templatePath, filePath)
-  return { filePath, created: true }
+  return {
+    filePath,
+    created: true,
+    requiresConfiguration: options.requiresConfigurationOnCreate ?? true
+  }
 }
