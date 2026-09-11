@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "environment": "shared",
+  "authentication": {
+    "mode": "interactive-browser",
+    "expectedUserDomain": "@microsoft.com",
+    "foundryTenantId": "173eb3fc-9ba1-437f-99a1-89d5e53b91d1",
+    "appRegistration": {
+      "tenantId": "72f988bf-86f1-41af-91ab-2d7cd011db47",
+      "clientId": "d4a694ba-9ed0-4467-9c06-f7dfe41ceb8c",
+      "redirectUri": "http://localhost"
+    },
+    "scopes": {
+      "foundry": [
+        "https://ai.azure.com/.default"
+      ],
+      "msx": [
+        "https://microsoftsales.crm.dynamics.com/.default"
+      ],
+      "graph": [
+        "https://graph.microsoft.com/.default"
+      ]
+    }
+  },
+  "foundry": {
+    "projectEndpoint": "https://multiagentacctteam.services.ai.azure.com/api/projects/multiagentacctteam",
+    "requestTimeoutMs": 120000,
+    "agents": {
+      "mcemCoach": {
+        "name": "tlc-mcem-coach",
+        "type": "prompt",
+        "protocol": "responses"
+      },
+      "riskSolutionPlay": {
+        "name": "tlc-risk-solution-play",
+        "type": "prompt",
+        "protocol": "responses"
+      },
+      "pursuitExecutive": {
+        "name": "tlc-pursuit-executive",
+        "type": "prompt",
+        "protocol": "responses"
+      },
+      "accountPulse": {
+        "name": "tlc-account-pulse",
+        "type": "prompt",
+        "protocol": "responses"
+      }
+    }
+  }
+}

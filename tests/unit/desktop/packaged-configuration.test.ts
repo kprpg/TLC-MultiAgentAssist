@@ -19,7 +19,8 @@ describe('prepareFoundryEnvironmentFile', () => {
     })
     expect(first).toEqual({
       filePath: join(userDataPath, 'foundry.environment.json'),
-      created: true
+      created: true,
+      requiresConfiguration: true
     })
     await expect(readFile(first.filePath, 'utf8')).resolves.toBe('{"environment":"template"}')
 
@@ -31,7 +32,30 @@ describe('prepareFoundryEnvironmentFile', () => {
       templatePath
     })
     expect(second.created).toBe(false)
+    expect(second.requiresConfiguration).toBe(false)
     await expect(readFile(second.filePath, 'utf8')).resolves.toBe('{"environment":"customized"}')
+  })
+
+  it('seeds a usable product default without requiring first-launch configuration', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tlc-config-'))
+    const templatePath = join(root, 'default.json')
+    const userDataPath = join(root, 'user-data')
+    await writeFile(templatePath, '{"environment":"production"}', 'utf8')
+
+    const prepared = await prepareFoundryEnvironmentFile({
+      environment: {},
+      isPackaged: true,
+      userDataPath,
+      templatePath,
+      requiresConfigurationOnCreate: false
+    })
+
+    expect(prepared).toEqual({
+      filePath: join(userDataPath, 'foundry.environment.json'),
+      created: true,
+      requiresConfiguration: false
+    })
+    await expect(readFile(prepared.filePath, 'utf8')).resolves.toBe('{"environment":"production"}')
   })
 
   it('preserves an explicit environment file override', async () => {
@@ -44,6 +68,6 @@ describe('prepareFoundryEnvironmentFile', () => {
       isPackaged: true,
       userDataPath: join(root, 'user-data'),
       templatePath: join(root, 'template.json')
-    })).resolves.toEqual({ filePath: configuredPath, created: false })
+    })).resolves.toEqual({ filePath: configuredPath, created: false, requiresConfiguration: false })
   })
 })

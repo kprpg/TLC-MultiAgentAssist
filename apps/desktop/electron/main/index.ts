@@ -31,23 +31,24 @@ const developmentUrl = process.env['VITE_DEV_SERVER_URL']
 const allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString()
 const dataMode = process.env['TLC_DATA_MODE'] === 'sample' ? 'sample' : 'live'
 
-const preparedEnvironment = dataMode === 'live'
+const preparedEnvironment = app.isPackaged || dataMode === 'live'
   ? await prepareFoundryEnvironmentFile({
     isPackaged: app.isPackaged,
     userDataPath: app.getPath('userData'),
-    templatePath: resolve(process.resourcesPath, 'config/foundry.environment.example.json')
+    templatePath: resolve(process.resourcesPath, 'config/foundry.environment.default.json'),
+    requiresConfigurationOnCreate: false
   })
   : undefined
 let runtimeEnvironment: FoundryEnvironment | undefined
 let startupBlocked = false
 
-if (preparedEnvironment?.created) {
+if (dataMode === 'live' && preparedEnvironment?.requiresConfiguration) {
   startupBlocked = true
   await openConfigurationAndExit(
     preparedEnvironment.filePath,
     'Your configuration file has been created. Set the Foundry project, agent names, tenant, client ID, and authentication mode, then reopen the application.'
   )
-} else if (preparedEnvironment) {
+} else if (dataMode === 'live' && preparedEnvironment) {
   try {
     runtimeEnvironment = await loadFoundryEnvironment(preparedEnvironment.filePath)
   } catch (error) {

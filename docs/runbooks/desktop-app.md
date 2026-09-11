@@ -4,7 +4,7 @@
 
 Open the repository's [latest release page](https://github.com/kprpg/TLC-MultiAgentAssist/releases/latest) and download either the Windows x64 installer (`.exe`) or portable archive (`.zip`).
 
-On first launch, the packaged app creates `%APPDATA%\@tlc\desktop\foundry.environment.json` from the bundled template and opens it for editing. Configure the fields described below, save the file, and restart the app. Upgrades preserve this per-user file.
+On first launch, the packaged app creates `%APPDATA%\@tlc\desktop\foundry.environment.json` from the bundled shared default and continues to the application. Sign in with an authorized corporate identity when prompted. Upgrades preserve the per-user file, including any custom connection settings.
 
 The release is currently unsigned, so Windows may display a SmartScreen warning. Verify that the download came from this repository's GitHub Releases page before running it.
 
@@ -21,7 +21,7 @@ Live mode additionally requires:
 - Access to MSX and the configured Microsoft Foundry project
 - The four deployed Foundry agents named in the environment file
 - Azure CLI and an authenticated corporate session when using `azure-cli` mode
-- A Microsoft Entra public-client app registration when using `interactive-browser` mode
+- A Microsoft Entra public-client app registration when replacing the bundled interactive-browser configuration
 
 Check the installed versions:
 
@@ -38,7 +38,7 @@ From the repository root:
 npm install
 ```
 
-### Configure your environment
+### Configure a development or custom environment
 
 Create your private environment file from the committed example:
 
@@ -57,6 +57,8 @@ Edit `config/foundry.environment.json` with your own values:
 - `authentication.expectedUserDomain`: the domain allowed by the local identity check.
 
 The private file is ignored by Git. The app validates it before creating credentials or connectors. Never add client secrets, access tokens, API keys, or credential-bearing connection strings; Electron uses a public-client sign-in and cannot safely hold a client secret.
+
+Packaged releases instead seed the checked-in `config/foundry.environment.default.json`. This file contains only approved public-client and Foundry routing metadata. It must never contain secrets. Edit the per-user copy or set `TLC_FOUNDRY_ENV_FILE` to use another Foundry environment.
 
 To keep the file elsewhere or maintain multiple environments, set its path before launch:
 

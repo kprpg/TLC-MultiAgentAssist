@@ -1,6 +1,6 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -56,6 +56,34 @@ describe('Foundry environment configuration', () => {
     await expect(loadFoundryEnvironment(filePath)).rejects.toThrow(
       'Replace the template UUID with the Azure resource value.'
     )
+  })
+
+  it('ships a valid non-secret shared default for interactive browser authentication', async () => {
+    const filePath = fileURLToPath(new URL('../../../config/foundry.environment.default.json', import.meta.url))
+    const content = await readFile(filePath, 'utf8')
+
+    await expect(loadFoundryEnvironment(filePath)).resolves.toMatchObject({
+      environment: 'shared',
+      authentication: { mode: 'interactive-browser' },
+      foundry: {
+        projectEndpoint: 'https://multiagentacctteam.services.ai.azure.com/api/projects/multiagentacctteam'
+      }
+    })
+    expect(content).not.toMatch(/clientSecret|apiKey|connectionString|accessToken/i)
+  })
+
+  it('packages the shared default without packaging the private developer environment', async () => {
+    const packageJson = JSON.parse(await readFile(resolve('apps/desktop/package.json'), 'utf8')) as {
+      build: { extraResources: Array<{ from: string, to: string }> }
+    }
+
+    expect(packageJson.build.extraResources).toContainEqual({
+      from: '../../config/foundry.environment.default.json',
+      to: 'config/foundry.environment.default.json'
+    })
+    expect(packageJson.build.extraResources).not.toContainEqual(expect.objectContaining({
+      from: '../../config/foundry.environment.json'
+    }))
   })
 
   it('loads developer-specific Foundry and app registration settings', async () => {

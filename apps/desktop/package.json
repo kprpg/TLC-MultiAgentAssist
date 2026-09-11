@@ -34,8 +34,8 @@
     ],
     "extraResources": [
       {
-        "from": "../../config/foundry.environment.example.json",
-        "to": "config/foundry.environment.example.json"
+        "from": "../../config/foundry.environment.default.json",
+        "to": "config/foundry.environment.default.json"
       },
       {
         "from": "../../docs/knowledge/MCEM Overview.pdf",
