@@ -20,6 +20,7 @@ import { createRuntimeCredentials } from './runtime-credentials.js'
 import { createOutlookDraftMessage } from './outlook-compose.js'
 import { createResponseDocumentBuffer } from './response-document.js'
 import { buildSampleAgentResponse } from './sample-agent-response.js'
+import { openConfigurationAndExit } from './startup-dialog.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -45,6 +46,9 @@ let startupBlocked = false
 if (dataMode === 'live' && preparedEnvironment?.requiresConfiguration) {
   startupBlocked = true
   await openConfigurationAndExit(
+    app,
+    dialog,
+    shell,
     preparedEnvironment.filePath,
     'Your configuration file has been created. Set the Foundry project, agent names, tenant, client ID, and authentication mode, then reopen the application.'
   )
@@ -54,6 +58,9 @@ if (dataMode === 'live' && preparedEnvironment?.requiresConfiguration) {
   } catch (error) {
     startupBlocked = true
     await openConfigurationAndExit(
+      app,
+      dialog,
+      shell,
       preparedEnvironment.filePath,
       `The configuration could not be loaded. Correct it, then reopen the application.\n\n${error instanceof Error ? error.message : String(error)}`
     )
@@ -120,24 +127,6 @@ const orchestrator = new ThinSliceOrchestrator(
   taskAgents,
   reportPerformance
 )
-
-async function openConfigurationAndExit(filePath: string, detail: string): Promise<void> {
-  const result = await dialog.showMessageBox({
-    type: 'info',
-    title: 'TLC MultiAgent Assist setup',
-    message: 'Configure your environment before starting TLC MultiAgent Assist.',
-    detail: `${detail}\n\nConfiguration file:\n${filePath}`,
-    buttons: ['Open configuration', 'Exit'],
-    defaultId: 0,
-    cancelId: 1,
-    noLink: true
-  })
-  if (result.response === 0) {
-    const openError = await shell.openPath(filePath)
-    if (openError) shell.showItemInFolder(filePath)
-  }
-  app.quit()
-}
 
 async function getDataStatus(): Promise<DesktopDataStatus> {
   if (dataMode === 'sample') {

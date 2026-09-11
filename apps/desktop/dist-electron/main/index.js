@@ -2215,6 +2215,24 @@ ${missingInformation} External signals are unavailable in sample mode.
 Was this ${capability.replaceAll("-", " ")} guidance actionable?`;
 }
 //#endregion
+//#region apps/desktop/electron/main/startup-dialog.ts
+async function openConfigurationAndExit(application, dialog, shell, filePath, detail) {
+	await application.whenReady();
+	if ((await dialog.showMessageBox({
+		type: "info",
+		title: "TLC MultiAgent Assist setup",
+		message: "Configure your environment before starting TLC MultiAgent Assist.",
+		detail: `${detail}\n\nConfiguration file:\n${filePath}`,
+		buttons: ["Open configuration", "Exit"],
+		defaultId: 0,
+		cancelId: 1,
+		noLink: true
+	})).response === 0) {
+		if (await shell.openPath(filePath)) shell.showItemInFolder(filePath);
+	}
+	application.quit();
+}
+//#endregion
 //#region apps/desktop/electron/main/index.ts
 var currentDirectory = dirname(fileURLToPath(import.meta.url));
 var desktopRoot = resolve(currentDirectory, "../..");
@@ -2233,12 +2251,12 @@ var runtimeEnvironment;
 var startupBlocked = false;
 if (dataMode === "live" && preparedEnvironment?.requiresConfiguration) {
 	startupBlocked = true;
-	await openConfigurationAndExit(preparedEnvironment.filePath, "Your configuration file has been created. Set the Foundry project, agent names, tenant, client ID, and authentication mode, then reopen the application.");
+	await openConfigurationAndExit(app, dialog, shell, preparedEnvironment.filePath, "Your configuration file has been created. Set the Foundry project, agent names, tenant, client ID, and authentication mode, then reopen the application.");
 } else if (dataMode === "live" && preparedEnvironment) try {
 	runtimeEnvironment = await loadFoundryEnvironment(preparedEnvironment.filePath);
 } catch (error) {
 	startupBlocked = true;
-	await openConfigurationAndExit(preparedEnvironment.filePath, `The configuration could not be loaded. Correct it, then reopen the application.\n\n${error instanceof Error ? error.message : String(error)}`);
+	await openConfigurationAndExit(app, dialog, shell, preparedEnvironment.filePath, `The configuration could not be loaded. Correct it, then reopen the application.\n\n${error instanceof Error ? error.message : String(error)}`);
 }
 var authentication = runtimeEnvironment?.authentication;
 var fallbackCredential = new AzureCliCredential({ processTimeoutInMs: 3e4 });
@@ -2288,21 +2306,6 @@ var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object
 		})
 	}];
 })), reportPerformance);
-async function openConfigurationAndExit(filePath, detail) {
-	if ((await dialog.showMessageBox({
-		type: "info",
-		title: "TLC MultiAgent Assist setup",
-		message: "Configure your environment before starting TLC MultiAgent Assist.",
-		detail: `${detail}\n\nConfiguration file:\n${filePath}`,
-		buttons: ["Open configuration", "Exit"],
-		defaultId: 0,
-		cancelId: 1,
-		noLink: true
-	})).response === 0) {
-		if (await shell.openPath(filePath)) shell.showItemInFolder(filePath);
-	}
-	app.quit();
-}
 async function getDataStatus() {
 	if (dataMode === "sample") return {
 		mode: "sample",
