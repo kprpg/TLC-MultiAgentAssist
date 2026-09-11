@@ -30,6 +30,7 @@ For interactive sign-in, configure a public-client Microsoft Entra app registrat
 
 See the runbooks for complete prerequisites, build commands, startup modes, and authentication details:
 
+- [End-user guide](docs/user-guide/USER-GUIDE.md)
 - [End-user frequently asked questions](docs/FAQ.md)
 - [Desktop setup and troubleshooting](docs/runbooks/desktop-app.md)
 - [Web setup and hosting](docs/runbooks/web-app.md)

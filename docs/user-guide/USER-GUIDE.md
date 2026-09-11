@@ -272,7 +272,14 @@ Example seen in the screenshot in [§5](#5-milestones--drilling-down-inside-an-o
 
 ## 10. Search
 
-The search box in the command bar (top center) filters *both* accounts and opportunities as you type. Results are grouped by type; selecting a hit opens the associated account and, for opportunity hits, immediately opens that opportunity’s detail view.
+Use the search box in the command bar (top center) to find accounts and opportunities across your entire portfolio, including opportunities outside the account currently open.
+
+- Search matches partial account or opportunity names and is not case-sensitive.
+- Results identify whether each match is an account or opportunity. Opportunity results also show the associated account and current stage.
+- Select a result to open its account. Selecting an opportunity also opens that opportunity’s detail view.
+- Press **Enter** to open the first result without leaving the keyboard.
+
+The results update as you type. While portfolio data is loading, the results panel shows a loading message; if nothing matches, it confirms that no accounts or opportunities were found.
 
 ---
 
