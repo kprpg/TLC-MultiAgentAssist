@@ -7,6 +7,8 @@
 
 TLC MultiAgent Assist is a Windows desktop application that acts as an account assistant that combines live MSX opportunity context with contextual guidance provided on the opportunity to advance them forward
 
+[Technology stack](TechStack.md)
+
 ## Download
 
 ### [Download the latest release](https://github.com/kprpg/TLC-MultiAgentAssist/releases/latest)
