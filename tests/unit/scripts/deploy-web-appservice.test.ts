@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import JSZip from 'jszip'
@@ -64,7 +64,7 @@ describe('App Service deployment script', () => {
             '-PackageOnly',
             '-ArtifactPath', artifactPath
         ])).rejects.toMatchObject({
-            stderr: expect.stringContaining("missing required root entry 'package.json'")
+            stderr: expect.stringMatching(/missing[\s\S]*required root entry 'package\.json'/)
         })
     })
 
@@ -76,7 +76,7 @@ describe('App Service deployment script', () => {
         const temporaryDirectory = temporaryDirectories.at(-1)!
         const azLogPath = join(temporaryDirectory, 'az-arguments.log')
         const foundryEnvironmentPath = join(repositoryRoot, 'config', 'foundry.environment.default.json')
-        await writeFile(join(temporaryDirectory, 'az.cmd'), mockAzureCli(azLogPath), 'utf8')
+        await installAzureCliMock(temporaryDirectory, azLogPath)
 
         await executeFile('pwsh', [
             '-NoProfile',
@@ -87,7 +87,10 @@ describe('App Service deployment script', () => {
             '-ArtifactPath', artifactPath,
             '-FoundryEnvironmentPath', foundryEnvironmentPath
         ], {
-            env: { ...process.env, PATH: `${temporaryDirectory};${process.env['PATH']}` }
+            env: {
+                ...process.env,
+                PATH: [temporaryDirectory, process.env.PATH ?? ''].filter(Boolean).join(delimiter)
+            }
         })
 
         const azArguments = await readFile(azLogPath, 'utf8')
@@ -105,7 +108,7 @@ describe('App Service deployment script', () => {
         const temporaryDirectory = temporaryDirectories.at(-1)!
         const azLogPath = join(temporaryDirectory, 'az-arguments.log')
         const foundryEnvironmentPath = join(repositoryRoot, 'config', 'foundry.environment.default.json')
-        await writeFile(join(temporaryDirectory, 'az.cmd'), mockAzureCli(azLogPath, true), 'utf8')
+        await installAzureCliMock(temporaryDirectory, azLogPath, true)
 
         const result = await executeFile('pwsh', [
             '-NoProfile',
@@ -116,7 +119,10 @@ describe('App Service deployment script', () => {
             '-ArtifactPath', artifactPath,
             '-FoundryEnvironmentPath', foundryEnvironmentPath
         ], {
-            env: { ...process.env, PATH: `${temporaryDirectory};${process.env['PATH']}` }
+            env: {
+                ...process.env,
+                PATH: [temporaryDirectory, process.env.PATH ?? ''].filter(Boolean).join(delimiter)
+            }
         })
 
         expect(`${result.stdout}${result.stderr}`).toContain('App Service completed accepted deployment')
@@ -124,7 +130,18 @@ describe('App Service deployment script', () => {
     })
 })
 
-function mockAzureCli(logPath: string, failDeployment = false) {
+async function installAzureCliMock(temporaryDirectory: string, logPath: string, failDeployment = false) {
+    if (process.platform === 'win32') {
+        await writeFile(join(temporaryDirectory, 'az.cmd'), mockAzureCliForWindows(logPath, failDeployment), 'utf8')
+        return
+    }
+
+    const azPath = join(temporaryDirectory, 'az')
+    await writeFile(azPath, mockAzureCliForPosix(logPath, failDeployment), 'utf8')
+    await chmod(azPath, 0o755)
+}
+
+function mockAzureCliForWindows(logPath: string, failDeployment = false) {
     const deploymentStatePath = `${logPath}.deployment-state`
     const deployResponse = failDeployment
         ? `type nul >"${deploymentStatePath}" && echo Simulated gateway failure 1>&2 && exit /b 1`
@@ -144,6 +161,28 @@ exit /b 0
 :deployment_list
 ${deploymentListResponse}
 exit /b 0
+`
+}
+
+function mockAzureCliForPosix(logPath: string, failDeployment = false) {
+    const deploymentStatePath = `${logPath}.deployment-state`
+    const deployResponse = failDeployment
+        ? `: >"${deploymentStatePath}" && echo "Simulated gateway failure" 1>&2 && exit 1`
+        : 'echo "{}" && exit 0'
+    const deploymentListResponse = failDeployment
+        ? `if [ -f "${deploymentStatePath}" ]; then echo '[{"id":"accepted-deployment","status":4,"status_text":""}]'; else echo '[]'; fi`
+        : "echo '[]'"
+
+    return `#!/usr/bin/env bash
+set -euo pipefail
+echo "$*" >>"${logPath}"
+[[ "$*" == *"account show"* ]] && echo '{"tenantId":"72f988bf-86f1-41af-91ab-2d7cd011db47"}' && exit 0
+[[ "$*" == *"appservice plan show"* ]] && echo '{"name":"ASP-myDemoRg-94e3"}' && exit 0
+[[ "$*" == *"webapp show"* ]] && echo '{"defaultHostName":"tlc-frfwf5g4g8edhcc0.westus3-01.azurewebsites.net","kind":"app,linux"}' && exit 0
+[[ "$*" == *"webapp log deployment list"* ]] && { ${deploymentListResponse}; exit 0; }
+[[ "$*" == *"webapp deploy"* ]] && { ${deployResponse}; }
+echo '{}'
+exit 0
 `
 }
 
