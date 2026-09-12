@@ -75,7 +75,7 @@ describe('App Service deployment script', () => {
         })
         const temporaryDirectory = temporaryDirectories.at(-1)!
         const azLogPath = join(temporaryDirectory, 'az-arguments.log')
-        const foundryEnvironmentPath = join(repositoryRoot, 'config', 'foundry.environment.json')
+        const foundryEnvironmentPath = join(repositoryRoot, 'config', 'foundry.environment.default.json')
         await writeFile(join(temporaryDirectory, 'az.cmd'), mockAzureCli(azLogPath), 'utf8')
 
         await executeFile('pwsh', [
@@ -104,7 +104,7 @@ describe('App Service deployment script', () => {
         })
         const temporaryDirectory = temporaryDirectories.at(-1)!
         const azLogPath = join(temporaryDirectory, 'az-arguments.log')
-        const foundryEnvironmentPath = join(repositoryRoot, 'config', 'foundry.environment.json')
+        const foundryEnvironmentPath = join(repositoryRoot, 'config', 'foundry.environment.default.json')
         await writeFile(join(temporaryDirectory, 'az.cmd'), mockAzureCli(azLogPath, true), 'utf8')
 
         const result = await executeFile('pwsh', [

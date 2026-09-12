@@ -1,0 +1,6 @@
+# Keep Foundry agent instruction artifacts checked out with LF line endings so
+# they stay byte-for-byte identical to the inline `definition.instructions`
+# value in each foundry-agent.json manifest. The foundry-agent-manifests test
+# compares the two exactly, which would otherwise fail on Windows runners where
+# core.autocrlf converts the artifacts to CRLF on checkout.
+packages/agents/*/prompts/instructions.md text eol=lf
