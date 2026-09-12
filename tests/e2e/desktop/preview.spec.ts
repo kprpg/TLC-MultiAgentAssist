@@ -55,15 +55,21 @@ test('launches the secure MCEM operational workbench', async () => {
     const topbarBox = await window.locator('.topbar').boundingBox()
     const analysisStyles = await window.locator('.analysis-pane').evaluate((element) => {
       const styles = getComputedStyle(element)
-      return { paddingTop: styles.paddingTop, paddingLeft: styles.paddingLeft }
+      return {
+        paddingTop: styles.paddingTop,
+        paddingLeft: styles.paddingLeft,
+        isNarrowLayout: globalThis.matchMedia('(max-width: 1220px)').matches
+      }
     })
     const actionStyles = await window.locator('.action-list').evaluate((element) => {
       const listStyles = getComputedStyle(element)
       const contentStyles = getComputedStyle(element.querySelector('.action-content')!)
       return { gap: listStyles.gap, paddingTop: contentStyles.paddingTop }
     })
+    const expectedAnalysisPaddingLeft = analysisStyles.isNarrowLayout ? '18px' : '22px'
     expect(topbarBox?.height).toBe(48)
-    expect(analysisStyles).toEqual({ paddingTop: '20px', paddingLeft: '22px' })
+    expect(analysisStyles.paddingTop).toBe('20px')
+    expect(analysisStyles.paddingLeft).toBe(expectedAnalysisPaddingLeft)
     expect(actionStyles).toEqual({ gap: '8px', paddingTop: '10px' })
 
     const contextToggle = window.getByRole('button', { name: 'Toggle account context' })
