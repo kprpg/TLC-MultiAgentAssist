@@ -9,6 +9,7 @@ This guide walks through every user-visible feature. All screenshots come from t
 ## Table of contents
 
 1. [Launching the app and signing in](#1-launching-the-app-and-signing-in)
+   1. [Run the desktop app with sample data](#11-run-the-desktop-app-with-sample-data)
 2. [The workspace at a glance](#2-the-workspace-at-a-glance)
 3. [Accounts blade — selecting an account](#3-accounts-blade--selecting-an-account)
 4. [Opportunities blade — reviewing your book of work](#4-opportunities-blade--reviewing-your-book-of-work)
@@ -38,6 +39,39 @@ This guide walks through every user-visible feature. All screenshots come from t
 - **Desktop (Electron)** — launch **TLC Multi-Agent Assist** from the Start Menu. The app uses the Azure CLI token cached on your machine (`az login` in advance).
 
 After sign-in you land on the empty workspace with your account portfolio in the left blade. No account is opened until you select one.
+
+### 1.1 Run the desktop app with sample data
+
+> **Use sample mode to explore the application without signing in or connecting to MSX, Foundry, Azure, or Microsoft Entra ID.** Close any running instance of TLC Multi-Agent Assist first.
+
+From **Windows Command Prompt** (`cmd.exe`) at the repository root, run:
+
+```cmd
+set "TLC_DATA_MODE=sample" && ".\release\win-unpacked\TLC MultiAgent Assist.exe"
+```
+
+After downloading the Windows `.exe` from the GitHub Release page and installing it, replace `<UserName>` with your Windows user name, open **Windows Command Prompt** (`cmd.exe`), and run:
+
+```cmd
+set "TLC_DATA_MODE=sample" && "C:\Users\<UserName>\AppData\Local\Programs\TLC MultiAgent Assist\TLC MultiAgent Assist.exe"
+```
+
+If you downloaded the portable ZIP, extract it, open Command Prompt in the extracted folder, and run:
+
+```cmd
+set "TLC_DATA_MODE=sample" && "TLC MultiAgent Assist.exe"
+```
+
+Keep the quotes around `TLC_DATA_MODE=sample`. In Command Prompt, an unquoted command such as `set TLC_DATA_MODE=sample && ...` stores a trailing space in the value and causes the app to start in live mode.
+
+For PowerShell, run:
+
+```powershell
+$env:TLC_DATA_MODE = 'sample'
+& "$env:LOCALAPPDATA\Programs\TLC MultiAgent Assist\TLC MultiAgent Assist.exe"
+```
+
+Sample mode loads bundled sanitized data. It should open the workspace directly without displaying a login dialog.
 
 ![Landing view with an empty workbench and the account portfolio call-to-action](./media/01-landing.png)
 

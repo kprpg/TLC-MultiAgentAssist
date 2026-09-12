@@ -20,6 +20,37 @@ On the release page, choose one of the Windows x64 files under **Assets**:
 
 Windows may show a SmartScreen warning until release artifacts are code-signed. Confirm that the publisher and download source match this repository before continuing.
 
+## Run with Sample Data
+
+> **Explore the desktop app without signing in or connecting to MSX, Foundry, Azure, or Microsoft Entra ID.** Close any running instance of TLC MultiAgent Assist before starting sample mode.
+
+From **Windows Command Prompt** (`cmd.exe`) at the repository root, run:
+
+```cmd
+set "TLC_DATA_MODE=sample" && ".\release\win-unpacked\TLC MultiAgent Assist.exe"
+```
+
+After downloading the `.exe` from the GitHub Release page and installing it, replace `<UserName>` with your Windows user name and run this command from **Windows Command Prompt** (`cmd.exe`):
+
+```cmd
+set "TLC_DATA_MODE=sample" && "C:\Users\<UserName>\AppData\Local\Programs\TLC MultiAgent Assist\TLC MultiAgent Assist.exe"
+```
+
+For the portable ZIP, extract it, open Command Prompt in the extracted folder, and run:
+
+```cmd
+set "TLC_DATA_MODE=sample" && "TLC MultiAgent Assist.exe"
+```
+
+The quotes around `TLC_DATA_MODE=sample` are required. Without them, a space before `&&` becomes part of the value and the app starts in live mode. In sample mode, the app loads bundled sanitized data and does not display a login dialog.
+
+PowerShell users can launch the installed app with:
+
+```powershell
+$env:TLC_DATA_MODE = 'sample'
+& "$env:LOCALAPPDATA\Programs\TLC MultiAgent Assist\TLC MultiAgent Assist.exe"
+```
+
 ## First Run
 
 1. Start TLC MultiAgent Assist. The app creates your private configuration file and opens it in your default JSON editor.
