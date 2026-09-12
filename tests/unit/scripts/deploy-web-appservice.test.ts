@@ -10,6 +10,7 @@ const executeFile = promisify(execFile)
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const scriptPath = join(repositoryRoot, 'scripts', 'deploy-web-appservice.ps1')
 const temporaryDirectories: string[] = []
+const powershellScriptTimeoutMs = 20_000
 
 afterEach(async () => {
     await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
@@ -32,7 +33,7 @@ describe('App Service deployment script', () => {
 
         expect(result.stdout).toContain('Validated App Service package')
         expect(result.stdout).toContain('Azure was not contacted')
-    })
+    }, powershellScriptTimeoutMs)
 
     it('rejects an archive without a central directory', async () => {
         const temporaryDirectory = await mkdtemp(join(tmpdir(), 'tlc-deploy-script-test-'))
@@ -49,7 +50,7 @@ describe('App Service deployment script', () => {
         ])).rejects.toMatchObject({
             stderr: expect.stringContaining('App Service package validation failed')
         })
-    })
+    }, powershellScriptTimeoutMs)
 
     it('rejects a package without required root files', async () => {
         const artifactPath = await createArtifact(async (zip) => {
@@ -66,7 +67,7 @@ describe('App Service deployment script', () => {
         ])).rejects.toMatchObject({
             stderr: expect.stringMatching(/missing[\s\S]*required root entry 'package\.json'/)
         })
-    })
+    }, powershellScriptTimeoutMs)
 
     it('uses independent health validation instead of Azure CLI deployment tracking', async () => {
         const artifactPath = await createArtifact(async (zip) => {
@@ -98,7 +99,7 @@ describe('App Service deployment script', () => {
         expect(azArguments).toContain('--settings TLC_FOUNDRY_ENV_BASE64=')
         expect(azArguments).toContain('WEBSITE_RUN_FROM_PACKAGE=1')
         expect(azArguments).toContain('--track-status false')
-    })
+    }, powershellScriptTimeoutMs)
 
     it('reconciles an Azure CLI failure when App Service accepted the deployment', async () => {
         const artifactPath = await createArtifact(async (zip) => {
@@ -127,7 +128,7 @@ describe('App Service deployment script', () => {
 
         expect(`${result.stdout}${result.stderr}`).toContain('App Service completed accepted deployment')
         expect(result.stdout).toContain('Deployment completed')
-    })
+    }, powershellScriptTimeoutMs)
 })
 
 async function installAzureCliMock(temporaryDirectory: string, logPath: string, failDeployment = false) {
