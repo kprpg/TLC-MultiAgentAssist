@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { z } from 'zod'
-import { agentTaskRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, mcemRequestSchema, mcemStageTransitionRequestSchema, milestoneUpdateSchema, opportunityUpdateSchema, type AuthStatus, type DesktopDataStatus, type PerformanceReporter } from '../../../../packages/common/index.js'
+import { agentTaskRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, mcemRequestSchema, mcemStageTransitionRequestSchema, milestoneUpdateSchema, opportunityUpdateSchema, type AuthStatus, type DesktopDataStatus, type McpServer, type PerformanceReporter } from '../../../../packages/common/index.js'
 import {
   loadFoundryEnvironment,
   type FoundryEnvironment
@@ -14,6 +14,7 @@ import { FixtureMsxConnector, LiveMsxConnector, msxWriteMetadataFromEnvironment 
 import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../../packages/connectors/foundry/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
+import { createConfiguredWorkflowHost, createSampleWorkflowHost } from '../../../../packages/orchestrator/workflows/index.js'
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
 import { prepareFoundryEnvironmentFile } from './packaged-configuration.js'
 import { createRuntimeCredentials } from './runtime-credentials.js'
@@ -21,6 +22,7 @@ import { createOutlookDraftMessage } from './outlook-compose.js'
 import { createResponseDocumentBuffer } from './response-document.js'
 import { buildSampleAgentResponse } from './sample-agent-response.js'
 import { openConfigurationAndExit } from './startup-dialog.js'
+import { createWorkflowIpcHandlers } from './workflow-ipc.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -127,6 +129,36 @@ const orchestrator = new ThinSliceOrchestrator(
   taskAgents,
   reportPerformance
 )
+const configurationRoot = app.isPackaged ? resolve(process.resourcesPath, 'config') : resolve(desktopRoot, '../../config')
+const [mcpRegistry, mcpPolicy, dataverseEntityMap] = await Promise.all([
+  loadMcpServerRegistry(resolve(configurationRoot, 'mcp.servers.json')),
+  loadMcpToolPolicy(resolve(configurationRoot, 'mcp.tool-policy.json')),
+  loadDataverseEntityMap(resolve(configurationRoot, 'dataverse.entity-map.json'))
+])
+let delegatedScope: Promise<{ delegatedUserAccountIds: string[]; delegatedUserOpportunityIds: string[] }> | undefined
+const configuredWorkflowHost = dataMode === 'sample' ? undefined : createConfiguredWorkflowHost({
+  registry: mcpRegistry,
+  policy: mcpPolicy,
+  entityMap: dataverseEntityMap,
+  getAccessToken: async (server: McpServer) => {
+    const token = await credentials.msx.getToken(server.authentication.scopes)
+    if (!token) throw new Error('A delegated MCP access token is unavailable.')
+    return token.token
+  },
+  resolveDelegatedScope: () => {
+    delegatedScope ??= resolveMsxScope()
+    return delegatedScope
+  }
+})
+
+async function resolveMsxScope() {
+  const accounts = await msxConnector.listAccounts()
+  const opportunities = (await Promise.all(accounts.map(({ id }) => msxConnector.listOpportunities(id)))).flat()
+  return {
+    delegatedUserAccountIds: accounts.map(({ id }) => id),
+    delegatedUserOpportunityIds: opportunities.map(({ id }) => id)
+  }
+}
 
 async function getDataStatus(): Promise<DesktopDataStatus> {
   if (dataMode === 'sample') {
@@ -154,6 +186,12 @@ function assertTrustedSender(event: IpcMainInvokeEvent): void {
 }
 
 function registerIpc(): void {
+  for (const [channel, handler] of Object.entries(createWorkflowIpcHandlers(workflowHost))) {
+    ipcMain.handle(channel, (event, request: unknown) => {
+      assertTrustedSender(event)
+      return handler(request)
+    })
+  }
   ipcMain.handle('tlc:exit-application', (event) => {
     assertTrustedSender(event)
     setImmediate(() => app.quit())
@@ -282,3 +320,8 @@ app.on('window-all-closed', () => {
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) void createWindow()
 })
+
+app.on('before-quit', () => {
+  void configuredWorkflowHost?.dispose()
+})
+const workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost()

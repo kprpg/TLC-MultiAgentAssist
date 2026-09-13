@@ -49,3 +49,11 @@ function readMicrosoftCorpId(accessToken: string, expectedUserDomain: string): s
     }
     return corpId
 }
+
+export function createSampleAuthentication() {
+    return (): AuthenticatedRequest => ({
+        accessToken: 'sample-mode',
+        clientPrincipal: 'sample-user',
+        userEmail: 'sample.user@example.com'
+    })
+}

@@ -1,8 +1,92 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createWebApiClient } from '../../../apps/desktop/renderer-revamp/src/data-client.js'
+import { createDataClient, createWebApiClient } from '../../../apps/desktop/renderer-revamp/src/data-client.js'
 import { contractVersion } from '../../../packages/common/index.js'
 
 describe('revamp live web data client', () => {
+    it('uses the shared guidance envelope over the desktop IPC bridge', async () => {
+        const handoff = {
+            contractVersion,
+            workflowId: 'WF-003',
+            resultRef: 'result-1',
+            capability: 'mcem-coach',
+            scope: { kind: 'opportunity', accountId: 'account-1', opportunityId: 'opportunity-1' },
+            prompt: 'Review the stage mismatch using evidence call-1.',
+            context: { cardTitle: 'Stage mismatch', facts: [], evidenceIds: ['call-1'] }
+        }
+        const invokeWorkflow = vi.fn().mockResolvedValue(handoff)
+        vi.stubGlobal('window', { tlc: { invokeWorkflow } })
+
+        await expect(createDataClient('desktop').prepareWorkflowGuidance(
+            '11111111-1111-4111-8111-111111111111', 'queue-1', 'mcem-coach'
+        )).resolves.toEqual(handoff)
+        expect(invokeWorkflow).toHaveBeenCalledWith('guidance', {
+            contractVersion,
+            runId: '11111111-1111-4111-8111-111111111111',
+            queueItemId: 'queue-1',
+            capability: 'mcem-coach'
+        })
+        vi.unstubAllGlobals()
+    })
+
+    it('uses the shared workflow envelopes for every lifecycle route', async () => {
+        const runId = '11111111-1111-4111-8111-111111111111'
+        const correlationId = '22222222-2222-4222-8222-222222222222'
+        const definition = {
+            contractVersion, id: 'WF-001', name: 'Pipeline review', version: '1.0.0', scope: 'portfolio',
+            personaTargets: ['AE'], category: 'portfolio-hygiene', executionMode: 'deterministic',
+            connectorPlan: [{ connector: 'dataverse-mcp', operation: 'read_query', required: true }],
+            inputSchemaRef: 'wf-001.input.v1', outputSchemaRef: 'wf-001.output.v1',
+            sla: { targetMs: 1_000, timeoutMs: 5_000 }, auth: { requiresDelegatedUser: true, allowedWrite: false },
+            ui: { cardStyle: 'record-table', resultPriority: 'high', showInQuickLaunch: true }
+        }
+        const run = {
+            contractVersion, runId, workflowId: 'WF-001', status: 'queued', scope: { kind: 'portfolio' },
+            connectorCalls: [], telemetry: { correlationId, cacheHit: false }
+        }
+        const guidance = {
+            contractVersion,
+            workflowId: 'WF-003',
+            resultRef: 'result-1',
+            capability: 'mcem-coach',
+            scope: { kind: 'opportunity', accountId: 'account-1', opportunityId: 'opportunity-1' },
+            prompt: 'Review the stage mismatch using evidence call-1.',
+            context: {
+                cardTitle: 'Stage mismatch',
+                queueItemId: 'queue-1',
+                queueItemTitle: 'Resolve stage mismatch',
+                facts: [{ label: 'Priority', value: 'P0' }],
+                evidenceIds: ['call-1']
+            }
+        }
+        const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+            const path = String(input)
+            const payload = path.endsWith('/list') ? [definition]
+                : path.endsWith('/get') ? { run }
+                    : path.endsWith('/history') ? [run]
+                        : path.endsWith('/guidance') ? guidance
+                            : run
+            return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
+        })
+        const client = createWebApiClient(fetcher)
+        const startRequest = { contractVersion, workflowId: 'WF-001', scope: { kind: 'portfolio' as const }, input: {}, correlationId }
+
+        await client.listWorkflowDefinitions('portfolio')
+        await client.startWorkflow(startRequest)
+        await client.getWorkflowRun(runId)
+        await client.cancelWorkflowRun(runId)
+        await client.listWorkflowRuns({ kind: 'portfolio' }, 10)
+        await expect(client.prepareWorkflowGuidance(runId, 'queue-1', 'mcem-coach')).resolves.toEqual(guidance)
+
+        expect(fetcher.mock.calls.map(([path, init]) => [path, init?.body])).toEqual([
+            ['/api/workflows/list', JSON.stringify({ contractVersion, scope: 'portfolio' })],
+            ['/api/workflows/start', JSON.stringify(startRequest)],
+            ['/api/workflows/get', JSON.stringify({ contractVersion, runId })],
+            ['/api/workflows/cancel', JSON.stringify({ contractVersion, runId })],
+            ['/api/workflows/history', JSON.stringify({ contractVersion, scope: { kind: 'portfolio' }, limit: 10 })],
+            ['/api/workflows/guidance', JSON.stringify({ contractVersion, runId, queueItemId: 'queue-1', capability: 'mcem-coach' })]
+        ])
+    })
+
     it('downloads the rich email draft returned by the web host', async () => {
         const click = vi.fn()
         const anchor = { href: '', download: '', click }

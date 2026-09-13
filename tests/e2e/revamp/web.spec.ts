@@ -1,4 +1,189 @@
 import { expect, test } from '@playwright/test'
+import { workflowDefinitions, workflowGuidanceDefinition, workflowGuidanceOutput, workflowOutput, workflowRun } from './workflow-fixtures.js'
+
+test('sends an opportunity-scoped workflow exception to existing guidance', async ({ page }) => {
+    const completedRun = workflowRun('WF-003', 'completed', 'complete')
+    const prompt = 'Review WF-003 result using Evidence IDs: tool-call-1. Cite only these IDs.'
+    await page.route('**/api/workflows/*', async (route) => {
+        const operation = new URL(route.request().url()).pathname.split('/').at(-1)
+        if (operation === 'list') await route.fulfill({ json: [workflowGuidanceDefinition] })
+        else if (operation === 'history') await route.fulfill({ json: [completedRun] })
+        else if (operation === 'guidance') await route.fulfill({ json: {
+            contractVersion: '1.0', workflowId: 'WF-003', resultRef: 'result:WF-003', capability: 'mcem-coach',
+            scope: { kind: 'opportunity', accountId: 'account-contoso', opportunityId: 'opp-grid-modernization' },
+            prompt,
+            context: { cardTitle: 'Stage mismatches', queueItemId: 'queue-stage-1', queueItemTitle: 'Resolve Grid operations modernization stage mismatch', facts: [{ label: 'Priority', value: 'P0' }], evidenceIds: ['tool-call-1'] }
+        } })
+        else await route.fulfill({ json: { run: completedRun, output: workflowGuidanceOutput() } })
+    })
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Workflows' }).click()
+    const launcher = page.getByRole('region', { name: 'Workflow Launcher' })
+    await launcher.getByRole('button', { name: /Stage mismatch review/ }).click()
+    await launcher.getByRole('button', { name: 'Send to Guidance' }).click()
+
+    await expect(page.getByRole('tab', { name: 'Multi-Agent Guidance' })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('.agent-response')).toContainText('MCEM Coach')
+    await expect(page.locator('.agent-response')).toContainText('Grid operations modernization')
+    await expect(page.locator('.agent-response')).toContainText(prompt)
+})
+
+test('reviews recent workflow runs with typed results and activity detail', async ({ page }) => {
+    const completedRun = {
+        ...workflowRun('WF-001', 'completed', 'complete'),
+        connectorCalls: [{ connector: 'dataverse-mcp' as const, operation: 'read_query', status: 'success' as const, durationMs: 840, recordCount: 1, truncated: true }],
+        telemetry: { correlationId: '22222222-2222-4222-8222-222222222222', firstResultMs: 620, cacheHit: false }
+    }
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.route('**/api/workflows/*', async (route) => {
+        const operation = new URL(route.request().url()).pathname.split('/').at(-1)
+        if (operation === 'list') await route.fulfill({ json: workflowDefinitions })
+        else if (operation === 'history') await route.fulfill({ json: [completedRun] })
+        else await route.fulfill({ json: { run: completedRun, output: workflowOutput() } })
+    })
+
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Workflows' }).click()
+    const launcher = page.getByRole('region', { name: 'Workflow Launcher' })
+    await expect(launcher.getByRole('heading', { name: 'Recent runs' })).toBeVisible()
+    const recentRun = launcher.getByRole('button', { name: /Stale opportunity sweep/ })
+    await recentRun.focus()
+    await recentRun.press('Enter')
+    await expect(launcher.getByRole('table', { name: 'Stale opportunities' })).toContainText('Northwind renewal')
+    await expect(launcher.getByRole('region', { name: 'Operational queue' })).toContainText('Review Northwind renewal')
+    await recentRun.evaluate((element) => (element as HTMLElement).blur())
+    const workflowWorkspace = launcher.locator('.workflow-workspace')
+    const localeDependentText = [workflowWorkspace.locator('.workflow-run-list button > span'), workflowWorkspace.locator('.workflow-results > header > span')]
+    await expect(workflowWorkspace).toHaveScreenshot('workflow-runs-desktop.png', { animations: 'disabled', mask: localeDependentText })
+    await launcher.getByRole('button', { name: 'Activity details' }).click()
+    await expect(page.getByRole('dialog', { name: 'Workflow activity' })).toContainText('840 ms')
+    await expect(page.getByRole('dialog', { name: 'Workflow activity' })).toContainText('1 record')
+    await expect(page.getByRole('dialog', { name: 'Workflow activity' })).toContainText('truncated')
+    await page.getByRole('button', { name: 'Close' }).click()
+    await page.setViewportSize({ width: 390, height: 844 })
+    expect(await launcher.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+    await expect(workflowWorkspace).toHaveScreenshot('workflow-runs-mobile.png', { animations: 'disabled', mask: localeDependentText })
+})
+
+for (const resultCase of [
+    { kind: 'metric-strip' as const, expected: 'Coverage82%' },
+    { kind: 'timeline' as const, expected: 'Commitment became overdue' },
+    { kind: 'action-list' as const, expected: 'Contact the account owner' },
+    { kind: 'exception-list' as const, expected: 'No accountable owner is assigned.' }
+]) {
+    test(`renders the ${resultCase.kind} workflow result`, async ({ page }) => {
+        const completedRun = workflowRun('WF-001', 'completed', 'complete')
+        await page.route('**/api/workflows/*', async (route) => {
+            const operation = new URL(route.request().url()).pathname.split('/').at(-1)
+            if (operation === 'list') await route.fulfill({ json: workflowDefinitions })
+            else if (operation === 'history') await route.fulfill({ json: [completedRun] })
+            else await route.fulfill({ json: { run: completedRun, output: workflowOutput('WF-001', resultCase.kind) } })
+        })
+
+        await page.goto('/')
+        await page.getByRole('button', { name: 'Workflows' }).click()
+        const launcher = page.getByRole('region', { name: 'Workflow Launcher' })
+        await launcher.getByRole('button', { name: /Stale opportunity sweep/ }).click()
+        await expect(launcher.getByRole('region', { name: 'Workflow results' })).toContainText(resultCase.expected)
+    })
+}
+
+test('reports recent workflow loading and failure states', async ({ page }) => {
+    await page.route('**/api/workflows/*', async (route) => {
+        const operation = new URL(route.request().url()).pathname.split('/').at(-1)
+        if (operation === 'list') await route.fulfill({ json: workflowDefinitions })
+        else if (operation === 'history') {
+            await new Promise((resolve) => setTimeout(resolve, 250))
+            await route.fulfill({ status: 503, json: { error: 'Workflow history is temporarily unavailable.' } })
+        }
+    })
+
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Workflows' }).click()
+    const launcher = page.getByRole('region', { name: 'Workflow Launcher' })
+    await expect(launcher.getByText('Loading recent workflow runs')).toBeVisible()
+    await expect(launcher.getByText('Workflow history is temporarily unavailable.')).toBeVisible()
+})
+
+test('launches scoped workflows and renders cancellation and outcome states', async ({ page }) => {
+    let latestWorkflowId = 'WF-001'
+    let completeFirstWorkflow = false
+    const startRequests: Array<Record<string, unknown>> = []
+    await page.route('**/api/workflows/*', async (route) => {
+        const operation = new URL(route.request().url()).pathname.split('/').at(-1)
+        const request = route.request().postDataJSON() as { workflowId?: string; scope?: string }
+        if (operation === 'list') {
+            await route.fulfill({ json: request.scope === 'portfolio' ? workflowDefinitions : [] })
+            return
+        }
+        if (operation === 'history') {
+            await route.fulfill({ json: [] })
+            return
+        }
+        if (operation === 'start') {
+            latestWorkflowId = request.workflowId ?? 'WF-001'
+            startRequests.push(request as Record<string, unknown>)
+            await route.fulfill({ json: workflowRun(latestWorkflowId, 'running') })
+            return
+        }
+        if (operation === 'cancel') {
+            await route.fulfill({ json: workflowRun(latestWorkflowId, 'cancelled') })
+            return
+        }
+        const state = latestWorkflowId === 'WF-002' ? 'partial' : latestWorkflowId === 'WF-005' ? 'unauthorized' : 'complete'
+        if (latestWorkflowId === 'WF-001' && !completeFirstWorkflow) {
+            await route.fulfill({ json: { run: workflowRun(latestWorkflowId, 'running') } })
+            return
+        }
+        await route.fulfill({ json: { run: workflowRun(latestWorkflowId, 'completed', state) } })
+    })
+
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/')
+    await page.getByRole('button', { name: /Fabrikam Retail/ }).first().click()
+    await page.getByRole('button', { name: 'Workflows' }).click()
+    const launcher = page.getByRole('region', { name: 'Workflow Launcher' })
+    await expect(launcher.getByRole('heading', { name: 'Workflow Launcher' })).toBeVisible()
+    await expect(launcher.getByText('No runs in this scope.')).toBeVisible()
+    await expect(launcher.locator('.workflow-card')).toHaveCount(4)
+    await expect(launcher.getByLabel('Current workflow scope')).toContainText('Portfolio')
+
+    await launcher.getByLabel('Filter workflows by persona').selectOption('Manager')
+    await expect(launcher.locator('.workflow-card')).toHaveCount(3)
+    await launcher.getByLabel('Filter workflows by source').selectOption('msx-mcp')
+    await expect(launcher.locator('.workflow-card')).toHaveCount(2)
+    await launcher.getByLabel('Filter workflows by persona').selectOption('all')
+    await launcher.getByLabel('Filter workflows by source').selectOption('all')
+
+    await launcher.getByRole('button', { name: 'Account', exact: true }).click()
+    await expect(launcher.getByText('No workflows match this scope and filter set.')).toBeVisible()
+    await expect(launcher.getByLabel('Current workflow scope')).toContainText('Fabrikam Retail')
+    await launcher.getByRole('button', { name: 'Portfolio', exact: true }).click()
+
+    const staleSweep = launcher.locator('.workflow-card').filter({ hasText: 'Stale opportunity sweep' })
+    await staleSweep.getByRole('button', { name: 'Parameters' }).click()
+    await expect(staleSweep.getByRole('spinbutton', { name: 'Stale after days' })).toHaveValue('30')
+    await staleSweep.getByRole('button', { name: 'Run workflow' }).click()
+    await expect(launcher.getByRole('status')).toContainText('running')
+    expect(startRequests[0]?.input).toMatchObject({ staleAfterDays: 30 })
+    await launcher.getByRole('button', { name: 'Cancel run' }).click()
+    await expect(launcher.getByRole('status')).toContainText('Workflow run cancelled.')
+
+    completeFirstWorkflow = true
+    await staleSweep.getByRole('button', { name: 'Run workflow' }).click()
+    await expect(launcher.getByRole('status')).toContainText('Workflow completed with all required sources.')
+
+    await launcher.locator('.workflow-card').filter({ hasText: 'Overdue milestone triage' }).getByRole('button', { name: 'Run workflow' }).click()
+    await expect(launcher.getByRole('status')).toContainText('Workflow completed with partial source coverage.')
+
+    await launcher.locator('.workflow-card').filter({ hasText: 'Weekly governance exceptions' }).getByRole('button', { name: 'Run workflow' }).click()
+    await expect(launcher.getByRole('status')).toContainText('Your delegated access does not include a required source or scope.')
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(page.getByRole('navigation', { name: 'Mobile workspace navigation' }).getByText('Workflows')).toBeVisible()
+    await expect(launcher.locator('.workflow-card').first()).toBeVisible()
+    expect(await launcher.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+})
 
 test('runs the static web rendering with hierarchical blades', async ({ page }) => {
     const pageErrors: Error[] = []

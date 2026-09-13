@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Field, FluentProvider, Input, Menu, MenuItem, MenuItemRadio, MenuList, MenuPopover, MenuTrigger, MessageBar, Spinner, Textarea, Tooltip, webDarkTheme, webLightTheme } from '@fluentui/react-components'
+import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, DrawerBody, DrawerHeader, DrawerHeaderTitle, Field, FluentProvider, Input, Menu, MenuItem, MenuItemRadio, MenuList, MenuPopover, MenuTrigger, MessageBar, OverlayDrawer, Spinner, Textarea, Tooltip, webDarkTheme, webLightTheme } from '@fluentui/react-components'
 import {
   Apps20Regular,
   ArrowDownload20Regular,
@@ -28,15 +28,18 @@ import {
   Sparkle20Regular,
   Warning20Filled
 } from '@fluentui/react-icons'
-import type { Account, AgentCapability, AgentTaskResponse, CustomerCommitment, McemResponse, Milestone, MilestoneStatus, MilestoneUpdate, Opportunity } from '../../../../packages/common/index.js'
+import type { Account, AgentCapability, AgentTaskResponse, CustomerCommitment, McemResponse, Milestone, MilestoneStatus, MilestoneUpdate, Opportunity, ScopeRef, WorkflowDefinition, WorkflowRun } from '../../../../packages/common/index.js'
 import { addMsxOpportunityLink, contractVersion } from '../../../../packages/common/index.js'
+import type { InitialWorkflowOutput } from '../../../../packages/orchestrator/workflows/index.js'
 import { createDataClient, stageOwner, type RevampDataClient } from './data-client.js'
 import { suggestedPrompts } from './prompt-catalog.js'
 import { formatResponseMarkdown } from './response-markdown.js'
 import { sortOpportunities, type OpportunitySort, type SortDirection } from './opportunity-sort.js'
 import { sortMilestones, type MilestoneSort } from './milestone-sort.js'
+import { workflowGuidanceCapability } from './workflow-guidance.js'
 
 type Shell = 'desktop' | 'web'
+type WorkspaceView = 'accounts' | 'workflows'
 type CenterTab = 'msx' | 'guidance' | 'stages'
 type Blade = 'accounts' | 'opportunities' | 'actions'
 type SearchResult =
@@ -175,6 +178,7 @@ function BladeResizeHandle({ blade, label, edge, width, onResize }: { blade: Bla
 }
 
 function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>('accounts')
   const [accounts, setAccounts] = useState<Account[]>([])
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [opportunitySort, setOpportunitySort] = useState<OpportunitySort>('closeDate')
@@ -219,6 +223,24 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [dragTargetStage, setDragTargetStage] = useState<number | null>(null)
   const [boardSelectedOpportunityId, setBoardSelectedOpportunityId] = useState<string | null>(null)
   const [boardScroll, setBoardScroll] = useState({ left: 0, top: 0, maxLeft: 0, maxTop: 0 })
+  const [workflowDefinitions, setWorkflowDefinitions] = useState<WorkflowDefinition[]>([])
+  const [workflowLoading, setWorkflowLoading] = useState(false)
+  const [workflowError, setWorkflowError] = useState('')
+  const [workflowScopeKind, setWorkflowScopeKind] = useState<ScopeRef['kind']>('portfolio')
+  const [workflowPersona, setWorkflowPersona] = useState('all')
+  const [workflowSource, setWorkflowSource] = useState('all')
+  const [workflowCadence, setWorkflowCadence] = useState('all')
+  const [workflowMode, setWorkflowMode] = useState('all')
+  const [expandedWorkflowId, setExpandedWorkflowId] = useState<string | null>(null)
+  const [workflowAsOf, setWorkflowAsOf] = useState(() => new Date().toISOString().slice(0, 10))
+  const [workflowParameters, setWorkflowParameters] = useState<Record<string, number>>({})
+  const [activeWorkflowRun, setActiveWorkflowRun] = useState<WorkflowRun | null>(null)
+  const [workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([])
+  const [workflowRunsLoading, setWorkflowRunsLoading] = useState(false)
+  const [selectedWorkflowRun, setSelectedWorkflowRun] = useState<WorkflowRun | null>(null)
+  const [selectedWorkflowOutput, setSelectedWorkflowOutput] = useState<InitialWorkflowOutput | null>(null)
+  const [workflowActivityOpen, setWorkflowActivityOpen] = useState(false)
+  const [workflowGuidanceLoading, setWorkflowGuidanceLoading] = useState<string | null>(null)
   const boardDragRef = useRef<BoardDrag | null>(null)
   const boardViewportRef = useRef<HTMLDivElement | null>(null)
   const sortedOpportunities = sortOpportunities(opportunities, opportunitySort, opportunitySortDirection)
@@ -241,6 +263,148 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     updateScrollState()
     return () => resizeObserver.disconnect()
   }, [centerTab, account?.id])
+
+  useEffect(() => {
+    if (workspaceView !== 'workflows') return
+    let current = true
+    setWorkflowLoading(true)
+    setWorkflowError('')
+    void client.listWorkflowDefinitions(workflowScopeKind).then((definitions) => {
+      if (current) setWorkflowDefinitions(definitions)
+    }).catch((cause: unknown) => {
+      if (current) setWorkflowError(cause instanceof Error ? cause.message : 'Workflow definitions could not be loaded.')
+    }).finally(() => {
+      if (current) setWorkflowLoading(false)
+    })
+    return () => { current = false }
+  }, [client, workspaceView, workflowScopeKind])
+
+  useEffect(() => {
+    if (workspaceView !== 'workflows') return
+    const scope = workflowScope()
+    if (!scope) {
+      setWorkflowRuns([])
+      return
+    }
+    let current = true
+    setWorkflowRunsLoading(true)
+    void client.listWorkflowRuns(scope, 12).then((runs) => {
+      if (current) setWorkflowRuns(runs)
+    }).catch((cause: unknown) => {
+      if (current) setWorkflowError(cause instanceof Error ? cause.message : 'Recent workflow runs could not be loaded.')
+    }).finally(() => {
+      if (current) setWorkflowRunsLoading(false)
+    })
+    return () => { current = false }
+  }, [client, workspaceView, workflowScopeKind, account?.id, opportunity?.id])
+
+  const workflowPersonas = [...new Set(workflowDefinitions.flatMap((definition) => definition.personaTargets))].sort()
+  const workflowSources = [...new Set(workflowDefinitions.flatMap((definition) => definition.connectorPlan.map((step) => step.connector)))].sort()
+  const filteredWorkflowDefinitions = workflowDefinitions.filter((definition) =>
+    (workflowPersona === 'all' || definition.personaTargets.includes(workflowPersona)) &&
+    (workflowSource === 'all' || definition.connectorPlan.some((step) => step.connector === workflowSource)) &&
+    (workflowCadence === 'all' || workflowCadence === 'on-demand') &&
+    (workflowMode === 'all' || definition.executionMode === workflowMode)
+  )
+
+  function workflowScope(): ScopeRef | null {
+    if (workflowScopeKind === 'portfolio') return { kind: 'portfolio' }
+    if (!account) return null
+    if (workflowScopeKind === 'account') return { kind: 'account', accountId: account.id }
+    if (!opportunity) return null
+    return { kind: 'opportunity', accountId: account.id, opportunityId: opportunity.id }
+  }
+
+  function workflowInput(workflowId: string): Record<string, string | number> {
+    const input: Record<string, string | number> = { asOf: workflowAsOf }
+    const parameter = workflowParameters[workflowId]
+    if (workflowId === 'WF-001') input.staleAfterDays = parameter ?? 30
+    if (workflowId === 'WF-005') input.lookbackDays = parameter ?? 7
+    if (workflowId === 'WF-009') input.maximumActiveItems = parameter ?? 20
+    if (workflowId === 'WF-010') input.followUpAfterDays = parameter ?? 14
+    return input
+  }
+
+  async function runWorkflow(definition: WorkflowDefinition) {
+    const scope = workflowScope()
+    if (!scope) return
+    setWorkflowError('')
+    try {
+      let run = await client.startWorkflow({ contractVersion, workflowId: definition.id, scope, input: workflowInput(definition.id) })
+      let output: InitialWorkflowOutput | undefined
+      setActiveWorkflowRun(run)
+      while (run.status === 'queued' || run.status === 'running') {
+        await new Promise((resolve) => window.setTimeout(resolve, 150))
+        const view = await client.getWorkflowRun(run.runId)
+        run = view.run
+        output = view.output
+        setActiveWorkflowRun(run)
+      }
+      setSelectedWorkflowRun(run)
+      setSelectedWorkflowOutput(output ?? null)
+      setWorkflowRuns(await client.listWorkflowRuns(scope, 12))
+    } catch (cause) {
+      setWorkflowError(cause instanceof Error ? cause.message : 'The workflow could not be run.')
+    }
+  }
+
+  async function cancelWorkflow() {
+    if (!activeWorkflowRun || (activeWorkflowRun.status !== 'queued' && activeWorkflowRun.status !== 'running')) return
+    try {
+      const run = await client.cancelWorkflowRun(activeWorkflowRun.runId)
+      setActiveWorkflowRun(run)
+      setSelectedWorkflowRun(run)
+      setSelectedWorkflowOutput(null)
+      setWorkflowRuns(await client.listWorkflowRuns(workflowScope() ?? undefined, 12))
+    } catch (cause) {
+      setWorkflowError(cause instanceof Error ? cause.message : 'The workflow could not be cancelled.')
+    }
+  }
+
+  async function selectWorkflowRun(run: WorkflowRun) {
+    setWorkflowError('')
+    try {
+      const view = await client.getWorkflowRun(run.runId)
+      setSelectedWorkflowRun(view.run)
+      setSelectedWorkflowOutput(view.output ?? null)
+    } catch (cause) {
+      setWorkflowError(cause instanceof Error ? cause.message : 'Workflow run details could not be loaded.')
+    }
+  }
+
+  async function sendWorkflowToGuidance(queueItemId: string) {
+    if (!selectedWorkflowRun || !selectedWorkflowOutput) return
+    const nextCapability = workflowGuidanceCapability(selectedWorkflowOutput.workflowId)
+    if (!nextCapability) return
+    setWorkflowGuidanceLoading(queueItemId)
+    setWorkflowError('')
+    try {
+      const handoff = await client.prepareWorkflowGuidance(selectedWorkflowRun.runId, queueItemId, nextCapability)
+      const response = await client.runAgentTask(
+        handoff.capability,
+        handoff.scope.accountId,
+        handoff.scope.opportunityId,
+        handoff.prompt
+      )
+      const nextAccount = accounts.find(({ id }) => id === handoff.scope.accountId)
+      const nextOpportunity = searchOpportunities.find(({ id }) => id === handoff.scope.opportunityId)
+      if (nextAccount) {
+        setAccount(nextAccount)
+        setOpportunities(searchOpportunities.filter(({ accountId }) => accountId === nextAccount.id))
+      }
+      if (nextOpportunity) setOpportunity(nextOpportunity)
+      setCapability(handoff.capability)
+      setAgentResult(response)
+      setTaskPrompt(handoff.prompt)
+      setCenterTab('guidance')
+      setWorkspaceView('accounts')
+      setMobileBlade('center')
+    } catch (cause) {
+      setWorkflowError(cause instanceof Error ? cause.message : 'The workflow result could not be sent to Guidance.')
+    } finally {
+      setWorkflowGuidanceLoading(null)
+    }
+  }
 
   function chooseOpportunitySort(nextSort: OpportunitySort) {
     if (nextSort === opportunitySort) {
@@ -710,12 +874,14 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
     <main className="workspace">
       <nav className="icon-rail" aria-label="Primary navigation">
-        <button className="rail-button active" title="Home" aria-label="Home"><Home20Regular /></button>
-        <button className="rail-button" title="Accounts" aria-label="Accounts"><Building20Regular /></button>
+        <button className={`rail-button ${workspaceView === 'accounts' ? 'active' : ''}`} title="Home" aria-label="Home" onClick={() => setWorkspaceView('accounts')}><Home20Regular /></button>
+        <button className={`rail-button ${workspaceView === 'accounts' ? 'active' : ''}`} title="Accounts" aria-label="Accounts" onClick={() => setWorkspaceView('accounts')}><Building20Regular /></button>
         <button className="rail-button" title="Opportunities" aria-label="Opportunities"><List20Regular /></button>
         <button className="rail-button" title="Guidance" aria-label="Guidance"><Sparkle20Regular /></button>
+        <button className={`rail-button ${workspaceView === 'workflows' ? 'active' : ''}`} title="Workflows" aria-label="Workflows" onClick={() => setWorkspaceView('workflows')}><ClipboardTaskListLtr20Regular /></button>
       </nav>
 
+      {workspaceView === 'accounts' && <>
       <section className={`blade account-blade ${collapsed.has('accounts') ? 'collapsed' : ''} ${mobileBlade === 'accounts' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('accounts') ? undefined : bladeWidths.accounts }} aria-label="Accounts blade">
         <BladeHeader title="Accounts" subtitle={`${accounts.length} customer accounts`} collapsed={collapsed.has('accounts')} refreshing={loading || searchLoading} onRefresh={() => void refreshAccounts()} onToggle={() => toggleBlade('accounts')} />
         {!collapsed.has('accounts') && <div className="blade-body">
@@ -1011,15 +1177,138 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         </div>}
         {collapsed.has('actions') && <button className="collapsed-symbol" onClick={() => toggleBlade('actions')} aria-label="Expand Next best actions"><PanelRight20Regular /></button>}
       </aside>}
+      </>}
+
+      {workspaceView === 'workflows' && <section className="workflow-launcher" aria-label="Workflow Launcher">
+        <header className="workflow-launcher-header">
+          <div><p className="eyebrow">NAMED PLAYS</p><h1>Workflow Launcher</h1><p>Run governed, scope-aware checks against trusted account data.</p></div>
+          <div className="scope-path" aria-label="Current workflow scope">
+            <span className={workflowScopeKind === 'portfolio' ? 'active' : ''}>Portfolio</span><ChevronRight20Regular />
+            <span className={workflowScopeKind === 'account' ? 'active' : ''}>{account?.name ?? 'Account'}</span><ChevronRight20Regular />
+            <span className={workflowScopeKind === 'opportunity' ? 'active' : ''}>{opportunity?.name ?? 'Opportunity'}</span>
+          </div>
+        </header>
+
+        <div className="workflow-toolbar">
+          <div className="scope-switcher" role="group" aria-label="Workflow scope">
+            <button className={workflowScopeKind === 'portfolio' ? 'active' : ''} onClick={() => setWorkflowScopeKind('portfolio')}>Portfolio</button>
+            <button className={workflowScopeKind === 'account' ? 'active' : ''} disabled={!account} onClick={() => setWorkflowScopeKind('account')}>Account</button>
+            <button className={workflowScopeKind === 'opportunity' ? 'active' : ''} disabled={!opportunity} onClick={() => setWorkflowScopeKind('opportunity')}>Opportunity</button>
+          </div>
+          <label>Persona<select aria-label="Filter workflows by persona" value={workflowPersona} onChange={(event) => setWorkflowPersona(event.target.value)}><option value="all">All personas</option>{workflowPersonas.map((persona) => <option key={persona}>{persona}</option>)}</select></label>
+          <label>Source<select aria-label="Filter workflows by source" value={workflowSource} onChange={(event) => setWorkflowSource(event.target.value)}><option value="all">All sources</option>{workflowSources.map((source) => <option key={source}>{source}</option>)}</select></label>
+          <label>Cadence<select aria-label="Filter workflows by cadence" value={workflowCadence} onChange={(event) => setWorkflowCadence(event.target.value)}><option value="all">All cadences</option><option value="on-demand">On demand</option></select></label>
+          <label>Mode<select aria-label="Filter workflows by mode" value={workflowMode} onChange={(event) => setWorkflowMode(event.target.value)}><option value="all">All modes</option><option value="deterministic">Deterministic</option><option value="composite">Composite</option><option value="agentic">Agentic</option></select></label>
+        </div>
+
+        <div className="workflow-workspace">
+        <div className="workflow-main">
+        {activeWorkflowRun && <div className={`workflow-run-state ${activeWorkflowRun.state ?? activeWorkflowRun.status}`} role="status">
+          <div><strong>{activeWorkflowRun.workflowId}</strong><span>{activeWorkflowRun.state ?? activeWorkflowRun.status}</span></div>
+          <p>{activeWorkflowRun.state === 'complete' && 'Workflow completed with all required sources.'}{activeWorkflowRun.state === 'partial' && 'Workflow completed with partial source coverage.'}{activeWorkflowRun.state === 'unauthorized' && 'Your delegated access does not include a required source or scope.'}{activeWorkflowRun.status === 'cancelled' && 'Workflow run cancelled.'}{(activeWorkflowRun.status === 'queued' || activeWorkflowRun.status === 'running') && 'Workflow is running against the selected scope.'}</p>
+          {(activeWorkflowRun.status === 'queued' || activeWorkflowRun.status === 'running') && <Button onClick={() => void cancelWorkflow()}>Cancel run</Button>}
+        </div>}
+        {workflowError && <MessageBar intent="error">{workflowError}</MessageBar>}
+        {workflowLoading && <Spinner label="Loading workflow definitions" />}
+        {!workflowLoading && filteredWorkflowDefinitions.length === 0 && <div className="empty-state compact">No workflows match this scope and filter set.</div>}
+
+        {selectedWorkflowOutput && <WorkflowResult
+          output={selectedWorkflowOutput}
+          guidanceLoading={workflowGuidanceLoading}
+          onSendGuidance={workflowGuidanceCapability(selectedWorkflowOutput.workflowId) ? sendWorkflowToGuidance : undefined}
+        />}
+
+        <div className="workflow-grid">
+          {filteredWorkflowDefinitions.map((definition) => {
+            const expanded = expandedWorkflowId === definition.id
+            const parameter = definition.id === 'WF-001' ? { label: 'Stale after days', defaultValue: 30, min: 1, max: 365 }
+              : definition.id === 'WF-005' ? { label: 'Lookback days', defaultValue: 7, min: 1, max: 90 }
+                : definition.id === 'WF-009' ? { label: 'Maximum active items', defaultValue: 20, min: 1, max: 100 }
+                  : definition.id === 'WF-010' ? { label: 'Follow up after days', defaultValue: 14, min: 1, max: 90 }
+                    : null
+            return <article className="workflow-card" key={definition.id}>
+              <header><span>{definition.id}</span><strong>{definition.name}</strong></header>
+              <p>{definition.personaTargets.join(' · ')}</p>
+              <dl><div><dt>Source</dt><dd>{definition.connectorPlan.map((step) => step.connector.replace('-mcp', '')).join(' + ')}</dd></div><div><dt>Mode</dt><dd>{definition.executionMode}</dd></div><div><dt>Cadence</dt><dd>On demand</dd></div></dl>
+              {expanded && <div className="workflow-parameters">
+                <Field label="As of"><Input type="date" value={workflowAsOf} onChange={(_, data) => setWorkflowAsOf(data.value)} /></Field>
+                {parameter && <Field label={parameter.label}><Input type="number" min={parameter.min} max={parameter.max} value={String(workflowParameters[definition.id] ?? parameter.defaultValue)} onChange={(_, data) => setWorkflowParameters((current) => ({ ...current, [definition.id]: Number(data.value) }))} /></Field>}
+              </div>}
+              <footer>
+                <Button appearance="subtle" aria-expanded={expanded} onClick={() => setExpandedWorkflowId(expanded ? null : definition.id)}>{expanded ? 'Hide parameters' : 'Parameters'}</Button>
+                <Button appearance="primary" disabled={!workflowScope() || activeWorkflowRun?.status === 'queued' || activeWorkflowRun?.status === 'running'} onClick={() => void runWorkflow(definition)}>Run workflow</Button>
+              </footer>
+            </article>
+          })}
+        </div>
+        </div>
+
+        <aside className="workflow-runs" aria-label="Recent workflow runs">
+          <header><div><p className="eyebrow">HISTORY</p><h2>Recent runs</h2></div><span>{workflowRuns.length}/12</span></header>
+          {workflowRunsLoading && <Spinner label="Loading recent workflow runs" size="tiny" />}
+          {!workflowRunsLoading && workflowRuns.length === 0 && <div className="empty-state compact">No runs in this scope.</div>}
+          <div className="workflow-run-list">
+            {workflowRuns.map((run) => {
+              const definition = workflowDefinitions.find((item) => item.id === run.workflowId)
+              return <button key={run.runId} className={selectedWorkflowRun?.runId === run.runId ? 'selected' : ''} onClick={() => void selectWorkflowRun(run)}>
+                <strong>{definition?.name ?? run.workflowId}</strong>
+                <span><b>{run.state ?? run.status}</b>{run.completedAt ? new Date(run.completedAt).toLocaleString() : 'In progress'}</span>
+              </button>
+            })}
+          </div>
+          {selectedWorkflowRun && <Button appearance="subtle" onClick={() => setWorkflowActivityOpen(true)}>Activity details</Button>}
+        </aside>
+        </div>
+
+        <OverlayDrawer aria-label="Workflow activity" open={workflowActivityOpen} position="end" size="medium" onOpenChange={(_, data) => setWorkflowActivityOpen(data.open)}>
+          <DrawerHeader><DrawerHeaderTitle action={<Button appearance="subtle" aria-label="Close" icon={<Dismiss20Regular />} onClick={() => setWorkflowActivityOpen(false)} />}>Workflow activity</DrawerHeaderTitle></DrawerHeader>
+          <DrawerBody>
+            {selectedWorkflowRun && <div className="workflow-activity">
+              <dl><div><dt>Correlation</dt><dd>{selectedWorkflowRun.telemetry.correlationId}</dd></div><div><dt>First result</dt><dd>{selectedWorkflowRun.telemetry.firstResultMs === undefined ? 'Not recorded' : `${selectedWorkflowRun.telemetry.firstResultMs} ms`}</dd></div><div><dt>Cache</dt><dd>{selectedWorkflowRun.telemetry.cacheHit ? 'Hit' : 'Miss'}</dd></div></dl>
+              <h3>Connector calls</h3>
+              {selectedWorkflowRun.connectorCalls.length === 0 && <p>No connector calls recorded.</p>}
+              {selectedWorkflowRun.connectorCalls.map((call, index) => <article key={`${call.connector}-${call.operation}-${index}`}>
+                <div><strong>{call.connector}</strong><span>{call.status}</span></div>
+                <p>{call.operation.replaceAll('_', ' ')} · {call.durationMs} ms · {call.recordCount} {call.recordCount === 1 ? 'record' : 'records'}{call.truncated ? ' · truncated' : ''}</p>
+              </article>)}
+            </div>}
+          </DrawerBody>
+        </OverlayDrawer>
+      </section>}
     </main>
 
-    {opportunity && <nav className="mobile-nav" aria-label="Mobile workspace navigation">
+    {workspaceView === 'accounts' && opportunity && <nav className="mobile-nav" aria-label="Mobile workspace navigation">
       <button className={mobileBlade === 'accounts' ? 'active' : ''} onClick={() => setMobileBlade('accounts')}><Building20Regular /><span>Accounts</span></button>
       <button className={mobileBlade === 'opportunities' ? 'active' : ''} onClick={() => setMobileBlade('opportunities')}><List20Regular /><span>Opportunities</span></button>
       <button className={mobileBlade === 'center' ? 'active' : ''} onClick={() => setMobileBlade('center')}><Lightbulb20Regular /><span>Analysis</span></button>
       <button className={mobileBlade === 'actions' ? 'active' : ''} onClick={() => { setActionsOpen(true); setMobileBlade('actions') }}><PanelRight20Regular /><span>Actions</span></button>
     </nav>}
+    {workspaceView === 'workflows' && <nav className="mobile-nav workflow-mobile-nav" aria-label="Mobile workspace navigation">
+      <button onClick={() => setWorkspaceView('accounts')}><Building20Regular /><span>Accounts</span></button>
+      <button className="active"><ClipboardTaskListLtr20Regular /><span>Workflows</span></button>
+    </nav>}
   </div>
+}
+
+function WorkflowResult({
+  output,
+  guidanceLoading,
+  onSendGuidance
+}: {
+  output: InitialWorkflowOutput
+  guidanceLoading: string | null
+  onSendGuidance?: (queueItemId: string) => void
+}) {
+  const card = output.card
+  return <section className="workflow-results" aria-label="Workflow results">
+    <header><div><p className="eyebrow">RESULT</p><h2>{card.title}</h2></div><span>{new Date(output.generatedAt).toLocaleString()}</span></header>
+    {card.kind === 'metric-strip' && <dl className="workflow-metrics">{card.metrics.map((metric) => <div key={metric.label}><dt>{metric.label}</dt><dd>{metric.value}</dd></div>)}</dl>}
+    {card.kind === 'record-table' && <div className="workflow-table-wrap"><table aria-label={card.title}><thead><tr>{card.columns.map((column) => <th key={column} scope="col">{column}</th>)}</tr></thead><tbody>{card.rows.map((row, index) => <tr key={index}>{card.columns.map((column) => <td key={column}>{String(row[column] ?? '')}</td>)}</tr>)}</tbody></table></div>}
+    {card.kind === 'timeline' && <ol className="workflow-timeline">{card.events.map((event) => <li key={`${event.at}-${event.label}`}><time dateTime={event.at}>{new Date(event.at).toLocaleString()}</time><span>{event.label}</span></li>)}</ol>}
+    {card.kind === 'action-list' && <ul className="workflow-actions">{card.actions.map((action) => <li key={action.id}><span className={`priority ${action.priority.toLowerCase()}`}>{action.priority}</span><strong>{action.label}</strong></li>)}</ul>}
+    {card.kind === 'exception-list' && <ul className="workflow-actions">{card.exceptions.map((exception) => <li key={exception.id}><span className={`priority ${exception.priority.toLowerCase()}`}>{exception.priority}</span><div><strong>{exception.title}</strong><p>{exception.detail}</p></div></li>)}</ul>}
+    <section className="workflow-queue" aria-label="Operational queue"><h3>Operational queue <span>{output.queueItems.length}</span></h3>{output.queueItems.length === 0 ? <p>No queued follow-up.</p> : output.queueItems.map((item) => <article key={item.id}><span className={`priority ${item.priority.toLowerCase()}`}>{item.priority}</span><div><strong>{item.title}</strong><p>{item.owner ?? 'Unassigned'}{item.dueDate ? ` · Due ${item.dueDate}` : ''}</p></div>{onSendGuidance && item.accountId && item.opportunityId && <Button appearance="subtle" icon={<Sparkle20Regular />} disabled={guidanceLoading !== null} onClick={() => onSendGuidance(item.id)}>{guidanceLoading === item.id ? 'Sending…' : 'Send to Guidance'}</Button>}</article>)}</section>
+  </section>
 }
 
 export function RevampApp() {

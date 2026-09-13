@@ -1,4 +1,8 @@
 import { z } from 'zod'
+import { workflowAgentCapabilityValues } from './workflows.js'
+
+export * from './mcp.js'
+export * from './workflows.js'
 
 export const contractVersion = '1.0' as const
 
@@ -13,7 +17,7 @@ export const sourceStateSchema = z.enum([
 ])
 
 export const sourceHealthSchema = z.object({
-  source: z.enum(['msx', 'mcem', 'seismic', 'linkedin']),
+  source: z.enum(['msx', 'mcem', 'seismic', 'linkedin', 'dataverse-mcp', 'msx-mcp']),
   state: sourceStateSchema,
   detail: z.string().min(1),
   checkedAt: z.string().datetime()
@@ -105,7 +109,7 @@ export const mcemStageTransitionResultSchema = z.object({
 
 export const evidenceSchema = z.object({
   id: z.string().min(1),
-  source: z.enum(['msx', 'mcem']),
+  source: z.enum(['msx', 'mcem', 'dataverse-mcp', 'msx-mcp']),
   recordId: z.string().min(1),
   title: z.string().min(1),
   url: z.string().url().optional(),
@@ -151,12 +155,7 @@ export const mcemRequestSchema = z.object({
   prompt: z.string().min(3).max(1000)
 })
 
-export const agentCapabilitySchema = z.enum([
-  'account-pulse',
-  'mcem-coach',
-  'pursuit-executive',
-  'risk-solution-play'
-])
+export const agentCapabilitySchema = z.enum(workflowAgentCapabilityValues)
 
 export const agentTaskRequestSchema = z.object({
   contractVersion: z.literal(contractVersion),

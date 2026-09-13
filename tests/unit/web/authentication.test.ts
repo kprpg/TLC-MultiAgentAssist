@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { assertLoopbackHost, createAzureCliAuthentication } from '../../../apps/web/src/authentication.js'
+import { assertLoopbackHost, createAzureCliAuthentication, createSampleAuthentication } from '../../../apps/web/src/authentication.js'
 
 describe('local web authentication', () => {
     it('acquires an MSX token and validates the signed-in corporate identity', async () => {
@@ -30,6 +30,14 @@ describe('local web authentication', () => {
     it('prevents local live mode from binding beyond the loopback interface', () => {
         expect(() => assertLoopbackHost('127.0.0.1')).not.toThrow()
         expect(() => assertLoopbackHost('0.0.0.0')).toThrow('must bind to a loopback host')
+    })
+
+    it('provides a non-secret local identity for sample API routes', () => {
+        expect(createSampleAuthentication()()).toEqual({
+            accessToken: 'sample-mode',
+            clientPrincipal: 'sample-user',
+            userEmail: 'sample.user@example.com'
+        })
     })
 })
 
