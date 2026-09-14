@@ -17,7 +17,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "build": "npm run typecheck",
-    "desktop:build": "node node_modules/vite/bin/vite.js build --config apps/desktop/vite.main.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.preload.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.revamp.config.ts",
+    "desktop:icon": "node scripts/generate-desktop-icon.mjs",
+    "desktop:build": "npm run desktop:icon && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.main.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.preload.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.revamp.config.ts",
     "desktop:package": "npm run desktop:build && node scripts/package-desktop-release.mjs",
     "desktop:start": "npm run desktop:build && node node_modules/electron/cli.js apps/desktop",
     "ui:revamp:build": "node node_modules/vite/bin/vite.js build --config apps/desktop/vite.revamp.config.ts",
@@ -57,6 +58,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@napi-rs/canvas": "^0.1.80",
     "@playwright/test": "1.62.1",
     "@types/node": "^26.2.0",
     "@types/react": "19.2.18",
