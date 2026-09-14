@@ -30,6 +30,7 @@
       "dist-electron/**/*",
       "dist/renderer/**/*",
       "dist/revamp/**/*",
+      "build/icon.png",
       "package.json"
     ],
     "extraResources": [
@@ -43,6 +44,7 @@
       }
     ],
     "win": {
+      "icon": "build/icon.png",
       "target": [
         {
           "target": "nsis",

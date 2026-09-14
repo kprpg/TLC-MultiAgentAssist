@@ -2238,6 +2238,7 @@ var currentDirectory = dirname(fileURLToPath(import.meta.url));
 var desktopRoot = resolve(currentDirectory, "../..");
 var rendererFile = process.env["TLC_UI_MODE"] === "legacy" ? resolve(desktopRoot, "dist/renderer/index.html") : resolve(desktopRoot, "dist/revamp/desktop.html");
 var preloadFile = resolve(desktopRoot, "dist-electron/preload/index.cjs");
+var appIcon = resolve(desktopRoot, "build/icon.png");
 var developmentUrl = process.env["VITE_DEV_SERVER_URL"];
 var allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString();
 var dataMode = process.env["TLC_DATA_MODE"] === "sample" ? "sample" : "live";
@@ -2424,6 +2425,7 @@ async function createWindow() {
 		minHeight: 720,
 		backgroundColor: "#f5f7fa",
 		title: "TLC Account Team Intelligence",
+		icon: appIcon,
 		autoHideMenuBar: true,
 		webPreferences: {
 			preload: preloadFile,

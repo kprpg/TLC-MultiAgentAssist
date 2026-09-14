@@ -28,6 +28,7 @@ const rendererFile = process.env['TLC_UI_MODE'] === 'legacy'
   ? resolve(desktopRoot, 'dist/renderer/index.html')
   : resolve(desktopRoot, 'dist/revamp/desktop.html')
 const preloadFile = resolve(desktopRoot, 'dist-electron/preload/index.cjs')
+const appIcon = resolve(desktopRoot, 'build/icon.png')
 const developmentUrl = process.env['VITE_DEV_SERVER_URL']
 const allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString()
 const dataMode = process.env['TLC_DATA_MODE'] === 'sample' ? 'sample' : 'live'
@@ -245,6 +246,7 @@ async function createWindow(): Promise<void> {
     minHeight: 720,
     backgroundColor: '#f5f7fa',
     title: 'TLC Account Team Intelligence',
+    icon: appIcon,
     autoHideMenuBar: true,
     webPreferences: {
       preload: preloadFile,
