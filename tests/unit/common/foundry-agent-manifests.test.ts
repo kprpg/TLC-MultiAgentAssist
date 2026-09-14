@@ -69,6 +69,8 @@ const environmentAgentBindingsSchema = z.object({
   })
 })
 
+const normalizeLineEndings = (value: string) => value.replace(/\r\n/g, '\n')
+
 describe('Foundry agent manifests', () => {
   it('keeps all prompt-agent source names aligned with the checked-in environment sample', async () => {
     const environmentContent = await readFile(resolve('config/foundry.environment.example.json'), 'utf8')
@@ -94,7 +96,9 @@ describe('Foundry agent manifests', () => {
         readFile(resolve(packageRoot, manifest.artifacts.readme), 'utf8'),
         readFile(resolve(packageRoot, manifest.artifacts.goldenScenarios), 'utf8')
       ])
-      expect(manifest.definition.instructions).toBe(instructions.trim())
+      expect(normalizeLineEndings(manifest.definition.instructions)).toBe(
+        normalizeLineEndings(instructions.trim())
+      )
       for (const requirement of [...sharedInstructionRequirements, ...uniqueRequirements]) {
         expect(instructions.toLowerCase()).toContain(requirement.toLowerCase())
       }

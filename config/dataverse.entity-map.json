@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 1,
+  "environmentLabel": "microsoftsales",
+  "refreshedAt": "2026-09-12T00:00:00.000Z",
+  "entities": [
+    {
+      "canonical": "account",
+      "logicalName": "account",
+      "entitySetName": "accounts",
+      "primaryIdAttribute": "accountid",
+      "primaryNameAttribute": "name",
+      "label": "Account",
+      "scope": "account",
+      "userScopePredicate": "accountid in {delegatedUserAccountIds}",
+      "attributes": [
+        { "canonical": "id", "logicalName": "accountid", "label": "Account ID", "dataType": "uniqueidentifier", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "name", "logicalName": "name", "label": "Account name", "dataType": "string", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "segment", "logicalName": "msp_segment", "label": "Segment", "dataType": "optionset", "sensitivity": "internal", "includeInPrompt": true }
+      ]
+    },
+    {
+      "canonical": "opportunity",
+      "logicalName": "opportunity",
+      "entitySetName": "opportunities",
+      "primaryIdAttribute": "opportunityid",
+      "primaryNameAttribute": "name",
+      "label": "Opportunity",
+      "scope": "opportunity",
+      "userScopePredicate": "opportunityid in {delegatedUserOpportunityIds}",
+      "attributes": [
+        { "canonical": "id", "logicalName": "opportunityid", "label": "Opportunity ID", "dataType": "uniqueidentifier", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "accountId", "logicalName": "_parentaccountid_value", "label": "Account ID", "dataType": "lookup", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "name", "logicalName": "name", "label": "Opportunity name", "dataType": "string", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "ownerId", "logicalName": "_ownerid_value", "label": "Owner ID", "dataType": "lookup", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "closeDate", "logicalName": "estimatedclosedate", "label": "Close date", "dataType": "date", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "estimatedValue", "logicalName": "estimatedvalue", "label": "Estimated value", "dataType": "money", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "comments", "logicalName": "description", "label": "Comments", "dataType": "string", "sensitivity": "restricted", "includeInPrompt": false }
+      ]
+    },
+    {
+      "canonical": "engagementMilestone",
+      "logicalName": "msp_engagementmilestone",
+      "entitySetName": "msp_engagementmilestones",
+      "primaryIdAttribute": "msp_engagementmilestoneid",
+      "primaryNameAttribute": "msp_name",
+      "label": "Engagement milestone",
+      "scope": "opportunity",
+      "userScopePredicate": "msp_opportunityid in {delegatedUserOpportunityIds}",
+      "attributes": [
+        { "canonical": "id", "logicalName": "msp_engagementmilestoneid", "label": "Milestone ID", "dataType": "uniqueidentifier", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "opportunityId", "logicalName": "_msp_opportunityid_value", "label": "Opportunity ID", "dataType": "lookup", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "name", "logicalName": "msp_name", "label": "Milestone name", "dataType": "string", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "status", "logicalName": "statuscode", "label": "Status", "dataType": "optionset", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "targetDate", "logicalName": "msp_targetdate", "label": "Target date", "dataType": "date", "sensitivity": "internal", "includeInPrompt": true }
+      ]
+    },
+    {
+      "canonical": "activity",
+      "logicalName": "activitypointer",
+      "entitySetName": "activitypointers",
+      "primaryIdAttribute": "activityid",
+      "primaryNameAttribute": "subject",
+      "label": "Activity",
+      "scope": "opportunity",
+      "userScopePredicate": "regardingobjectid in {delegatedUserOpportunityIds}",
+      "attributes": [
+        { "canonical": "id", "logicalName": "activityid", "label": "Activity ID", "dataType": "uniqueidentifier", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "opportunityId", "logicalName": "_regardingobjectid_value", "label": "Opportunity ID", "dataType": "lookup", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "subject", "logicalName": "subject", "label": "Subject", "dataType": "string", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "ownerId", "logicalName": "_ownerid_value", "label": "Owner ID", "dataType": "lookup", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "dueDate", "logicalName": "scheduledend", "label": "Due date", "dataType": "date", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "status", "logicalName": "statuscode", "label": "Status", "dataType": "optionset", "sensitivity": "internal", "includeInPrompt": true }
+      ]
+    },
+    {
+      "canonical": "systemUser",
+      "logicalName": "systemuser",
+      "entitySetName": "systemusers",
+      "primaryIdAttribute": "systemuserid",
+      "primaryNameAttribute": "fullname",
+      "label": "System user",
+      "scope": "reference",
+      "attributes": [
+        { "canonical": "id", "logicalName": "systemuserid", "label": "User ID", "dataType": "uniqueidentifier", "sensitivity": "internal", "includeInPrompt": false },
+        { "canonical": "displayName", "logicalName": "fullname", "label": "Display name", "dataType": "string", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "email", "logicalName": "internalemailaddress", "label": "Email", "dataType": "string", "sensitivity": "restricted", "includeInPrompt": false }
+      ]
+    }
+  ]
+}

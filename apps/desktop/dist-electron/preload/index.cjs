@@ -14,7 +14,8 @@ electron.contextBridge.exposeInMainWorld("tlc", {
 	runAgentTask: (request) => electron.ipcRenderer.invoke("tlc:run-agent-task", request),
 	openEmailCompose: (request) => electron.ipcRenderer.invoke("tlc:open-email-compose", request),
 	exportAgentResponse: (request) => electron.ipcRenderer.invoke("tlc:export-agent-response", request),
-	openEvidence: (url) => electron.ipcRenderer.invoke("tlc:open-evidence", url)
+	openEvidence: (url) => electron.ipcRenderer.invoke("tlc:open-evidence", url),
+	invokeWorkflow: (operation, request) => electron.ipcRenderer.invoke(`tlc:workflow-${operation}`, request)
 });
 //#endregion
 

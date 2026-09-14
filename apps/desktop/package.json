@@ -9,6 +9,7 @@
   "dependencies": {
     "@azure/ai-projects": "^2.5.0",
     "@azure/identity": "^4.13.2",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "docx": "^9.7.1",
     "pdf-parse": "^2.4.5",
     "react-markdown": "^10.1.0",
@@ -37,6 +38,18 @@
       {
         "from": "../../config/foundry.environment.default.json",
         "to": "config/foundry.environment.default.json"
+      },
+      {
+        "from": "../../config/mcp.servers.json",
+        "to": "config/mcp.servers.json"
+      },
+      {
+        "from": "../../config/mcp.tool-policy.json",
+        "to": "config/mcp.tool-policy.json"
+      },
+      {
+        "from": "../../config/dataverse.entity-map.json",
+        "to": "config/dataverse.entity-map.json"
       },
       {
         "from": "../../docs/knowledge/MCEM Overview.pdf",

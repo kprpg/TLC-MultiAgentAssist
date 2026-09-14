@@ -11,6 +11,17 @@ afterEach(async () => {
 })
 
 describe('desktop release package', () => {
+  it('includes the MCP runtime configuration as packaged resources', async () => {
+    const packageJson = JSON.parse(await readFile(join(process.cwd(), 'apps/desktop/package.json'), 'utf8'))
+
+    expect(packageJson.dependencies).toHaveProperty('@modelcontextprotocol/sdk', '1.29.0')
+    expect(packageJson.build.extraResources).toEqual(expect.arrayContaining([
+      { from: '../../config/mcp.servers.json', to: 'config/mcp.servers.json' },
+      { from: '../../config/mcp.tool-policy.json', to: 'config/mcp.tool-policy.json' },
+      { from: '../../config/dataverse.entity-map.json', to: 'config/dataverse.entity-map.json' }
+    ]))
+  })
+
   it('publishes release artifacts without copying unpacked staging files', async () => {
     const temporaryDirectory = await mkdtemp(join(tmpdir(), 'tlc-desktop-release-test-'))
     temporaryDirectories.push(temporaryDirectory)

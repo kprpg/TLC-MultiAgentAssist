@@ -9,6 +9,13 @@ import {
     milestoneUpdateSchema,
     opportunitySchema,
     opportunityUpdateSchema,
+    workflowDefinitionSchema,
+    workflowGuidanceHandoffSchema,
+    workflowRunSchema,
+    type ScopeRef,
+    type WorkflowDefinition,
+    type WorkflowGuidanceHandoff,
+    type WorkflowRun,
     type Account,
     type AgentCapability,
     type AgentTaskResponse,
@@ -24,6 +31,12 @@ import {
     type Opportunity,
     type OpportunityUpdate
 } from '../../../../packages/common/index.js'
+import {
+    workflowRunViewSchema,
+    type StartWorkflowHostRequest,
+    type WorkflowHostOperation,
+    type WorkflowRunView
+} from '../../../../packages/orchestrator/workflows/index.js'
 
 export interface RevampDataClient {
     readonly mode: 'desktop' | 'web-live' | 'web-sample'
@@ -40,6 +53,12 @@ export interface RevampDataClient {
     openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
     exportAgentResponse(request: ExportResponseRequest): Promise<ExportResponseResult>
     openEvidence(url: string): Promise<void>
+    listWorkflowDefinitions(scope?: ScopeRef['kind']): Promise<WorkflowDefinition[]>
+    startWorkflow(request: StartWorkflowHostRequest): Promise<WorkflowRun>
+    getWorkflowRun(runId: string): Promise<WorkflowRunView>
+    cancelWorkflowRun(runId: string): Promise<WorkflowRun>
+    listWorkflowRuns(scope?: ScopeRef, limit?: number): Promise<WorkflowRun[]>
+    prepareWorkflowGuidance(runId: string, queueItemId: string, capability: AgentCapability): Promise<WorkflowGuidanceHandoff>
 }
 
 type Fetcher = typeof fetch
@@ -60,6 +79,11 @@ async function apiRequest(fetcher: Fetcher, path: string, init?: RequestInit): P
 }
 
 export function createWebApiClient(fetcher: Fetcher = fetch): RevampDataClient {
+    const invokeWorkflow = (operation: WorkflowHostOperation, request: unknown) => apiRequest(
+        fetcher,
+        `/api/workflows/${operation}`,
+        { method: 'POST', body: JSON.stringify(request) }
+    )
     return {
         mode: 'web-live',
         exitApplication: async () => { await apiRequest(fetcher, '/api/exit', { method: 'POST' }) },
@@ -124,7 +148,19 @@ export function createWebApiClient(fetcher: Fetcher = fetch): RevampDataClient {
             URL.revokeObjectURL(downloadUrl)
             return { state: 'saved', filePath: anchor.download }
         },
-        openEvidence: async (url) => { window.open(url, '_blank', 'noopener,noreferrer') }
+        openEvidence: async (url) => { window.open(url, '_blank', 'noopener,noreferrer') },
+        listWorkflowDefinitions: async (scope) => workflowDefinitionSchema.array().parse(await invokeWorkflow('list', { contractVersion, ...(scope ? { scope } : {}) })),
+        startWorkflow: async (request) => workflowRunSchema.parse(await invokeWorkflow('start', request)),
+        getWorkflowRun: async (runId) => workflowRunViewSchema.parse(await invokeWorkflow('get', { contractVersion, runId })),
+        cancelWorkflowRun: async (runId) => workflowRunSchema.parse(await invokeWorkflow('cancel', { contractVersion, runId })),
+        listWorkflowRuns: async (scope, limit) => workflowRunSchema.array().parse(await invokeWorkflow('history', {
+            contractVersion,
+            ...(scope ? { scope } : {}),
+            ...(limit === undefined ? {} : { limit })
+        })),
+        prepareWorkflowGuidance: async (runId, queueItemId, capability) => workflowGuidanceHandoffSchema.parse(await invokeWorkflow('guidance', {
+            contractVersion, runId, queueItemId, capability
+        }))
     }
 }
 
@@ -142,6 +178,7 @@ interface DesktopBridge {
     openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
     exportAgentResponse(request: ExportResponseRequest): Promise<ExportResponseResult>
     openEvidence(url: string): Promise<void>
+    invokeWorkflow(operation: WorkflowHostOperation, request: unknown): Promise<unknown>
 }
 
 declare global {
@@ -290,7 +327,13 @@ function webClient(): RevampDataClient {
         },
         openEmailCompose: createWebApiClient().openEmailCompose,
         exportAgentResponse: createWebApiClient().exportAgentResponse,
-        openEvidence: createWebApiClient().openEvidence
+        openEvidence: createWebApiClient().openEvidence,
+        listWorkflowDefinitions: createWebApiClient().listWorkflowDefinitions,
+        startWorkflow: createWebApiClient().startWorkflow,
+        getWorkflowRun: createWebApiClient().getWorkflowRun,
+        cancelWorkflowRun: createWebApiClient().cancelWorkflowRun,
+        listWorkflowRuns: createWebApiClient().listWorkflowRuns,
+        prepareWorkflowGuidance: createWebApiClient().prepareWorkflowGuidance
     }
 }
 
@@ -309,7 +352,19 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         runAgentTask: (capability, accountId, opportunityId, prompt) => bridge.runAgentTask({ contractVersion, capability, accountId, opportunityId, prompt }),
         openEmailCompose: (request) => bridge.openEmailCompose(request),
         exportAgentResponse: (request) => bridge.exportAgentResponse(request),
-        openEvidence: (url) => bridge.openEvidence(url)
+        openEvidence: (url) => bridge.openEvidence(url),
+        listWorkflowDefinitions: async (scope) => workflowDefinitionSchema.array().parse(await bridge.invokeWorkflow('list', { contractVersion, ...(scope ? { scope } : {}) })),
+        startWorkflow: async (request) => workflowRunSchema.parse(await bridge.invokeWorkflow('start', request)),
+        getWorkflowRun: async (runId) => workflowRunViewSchema.parse(await bridge.invokeWorkflow('get', { contractVersion, runId })),
+        cancelWorkflowRun: async (runId) => workflowRunSchema.parse(await bridge.invokeWorkflow('cancel', { contractVersion, runId })),
+        listWorkflowRuns: async (scope, limit) => workflowRunSchema.array().parse(await bridge.invokeWorkflow('history', {
+            contractVersion,
+            ...(scope ? { scope } : {}),
+            ...(limit === undefined ? {} : { limit })
+        })),
+        prepareWorkflowGuidance: async (runId, queueItemId, capability) => workflowGuidanceHandoffSchema.parse(await bridge.invokeWorkflow('guidance', {
+            contractVersion, runId, queueItemId, capability
+        }))
     }
 }
 

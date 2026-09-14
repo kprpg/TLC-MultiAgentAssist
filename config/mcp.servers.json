@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "servers": [
+    {
+      "id": "msx",
+      "displayName": "MSX MCP",
+      "enabled": false,
+      "execution": "local-client",
+      "serverUrl": "https://msx-mcp.invalid/api/mcp",
+      "serverLabel": "msx_sales",
+      "authentication": {
+        "kind": "entra-delegated",
+        "scopes": ["https://microsoftsales.crm.dynamics.com/.default"]
+      },
+      "limits": {
+        "connectTimeoutMs": 10000,
+        "callTimeoutMs": 30000,
+        "maxConcurrentCalls": 4,
+        "maxToolCallsPerRequest": 6,
+        "maxRowsPerCall": 500,
+        "maxResultBytes": 512000
+      },
+      "retry": {
+        "maxAttempts": 3,
+        "initialDelayMs": 250,
+        "backoffMultiplier": 2,
+        "retryOnStatus": [429, 503, 504]
+      },
+      "circuitBreaker": {
+        "failureThreshold": 5,
+        "openDurationMs": 60000
+      }
+    },
+    {
+      "id": "dataverse",
+      "displayName": "Dataverse MCP",
+      "enabled": false,
+      "execution": "local-client",
+      "serverUrl": "https://dataverse-mcp.invalid/api/mcp",
+      "serverLabel": "dataverse_broad",
+      "authentication": {
+        "kind": "entra-delegated",
+        "scopes": ["https://microsoftsales.crm.dynamics.com/.default"]
+      },
+      "limits": {
+        "connectTimeoutMs": 15000,
+        "callTimeoutMs": 60000,
+        "maxConcurrentCalls": 2,
+        "maxToolCallsPerRequest": 8,
+        "maxRowsPerCall": 2000,
+        "maxResultBytes": 1000000
+      },
+      "retry": {
+        "maxAttempts": 2,
+        "initialDelayMs": 500,
+        "backoffMultiplier": 2,
+        "retryOnStatus": [429, 503]
+      },
+      "circuitBreaker": {
+        "failureThreshold": 3,
+        "openDurationMs": 120000
+      }
+    }
+  ]
+}

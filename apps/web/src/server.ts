@@ -1,10 +1,11 @@
 import { createServer } from 'node:http'
 import { resolve } from 'node:path'
 import { buildWebApiHandler } from './app.js'
-import { assertLoopbackHost, createAzureCliAuthentication } from './authentication.js'
+import { assertLoopbackHost, createAzureCliAuthentication, createSampleAuthentication } from './authentication.js'
 import { buildStaticHandler, setSecurityHeaders } from './hosting.js'
 import { listenWebServer } from './listener.js'
-import { createHostedRuntimeFactory } from './runtime.js'
+import { createHostedRuntimeFactory, createHostedWorkflowHostResolver } from './runtime.js'
+import { createSampleWorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 
 const port = parsePort(process.env['PORT'])
 const mode = resolveWebHostMode(process.env)
@@ -14,10 +15,16 @@ const staticRoot = resolve(process.env['TLC_WEB_STATIC_ROOT']?.trim() || 'apps/d
 const createRuntime = mode === 'sample'
     ? () => { throw new Error('Live APIs are disabled in sample mode.') }
     : await createHostedRuntimeFactory()
+const sampleWorkflowHost = mode === 'sample' ? createSampleWorkflowHost() : undefined
+const resolveWorkflowHost = sampleWorkflowHost ? () => sampleWorkflowHost : await createHostedWorkflowHostResolver()
+const authenticate = mode === 'sample'
+    ? createSampleAuthentication()
+    : mode === 'azure-cli' ? createAzureCliAuthentication() : undefined
 const serveStatic = buildStaticHandler(staticRoot, mode === 'sample' ? 'sample' : 'live')
 const handleApi = buildWebApiHandler({
     createRuntime,
-    ...(mode === 'azure-cli' ? { authenticate: createAzureCliAuthentication() } : {}),
+    resolveWorkflowHost,
+    ...(authenticate ? { authenticate } : {}),
     ...(mode !== 'easy-auth' ? { shutdown: closeLocalServer } : {}),
     onError: (error, correlationId) => {
         console.error(`[web-api] ${correlationId}`, error instanceof Error ? error.message : error)
