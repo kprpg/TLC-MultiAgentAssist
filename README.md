@@ -7,18 +7,22 @@
 
 TLC MultiAgent Assist is a Windows desktop application that acts as an account assistant that combines live MSX opportunity context with contextual guidance provided on the opportunity to advance them forward
 
+[**Install the Windows desktop app**](docs/user-guide/DESKTOP-INSTALL.md) | [Download the latest release](https://github.com/kprpg/TLC-MultiAgentAssist/releases/latest)
+
 [Technology stack](TechStack.md)
 
-## Download
+## Install the Desktop App
 
-### [Download the latest release](https://github.com/kprpg/TLC-MultiAgentAssist/releases/latest)
+1. Open the [latest release](https://github.com/kprpg/TLC-MultiAgentAssist/releases/latest) and expand **Assets**.
+2. Download one of the Windows x64 files:
+   - `TLC-MultiAgent-Assist-<version>-Windows-x64.exe` - recommended installer with Start menu and desktop shortcuts.
+   - `TLC-MultiAgent-Assist-<version>-Windows-x64.zip` - portable build for users without installation access.
+3. If Microsoft Edge warns that the file is not commonly downloaded, open **Downloads**, select **More actions** (**...**) beside the file, then select **Keep** and **Keep anyway**. Continue only if the file came from this repository's GitHub Releases page.
+4. Open the download folder, right-click the `.exe`, select **Properties**, select **Unblock** if it is available, and then select **Apply**.
+5. Double-click the installer. Choose **Only for me** for a per-user installation or **Anyone who uses this computer** for an all-users installation, then select **Next**.
+6. When setup completes, leave **Run TLC MultiAgent Assist** selected and choose **Finish**.
 
-On the release page, choose one of the Windows x64 files under **Assets**:
-
-- `TLC-MultiAgent-Assist-<version>-Windows-x64.exe` installs the app and adds Start menu and desktop shortcuts.
-- `TLC-MultiAgent-Assist-<version>-Windows-x64.zip` is the portable build for users without install access.
-
-Windows may show a SmartScreen warning until release artifacts are code-signed. Confirm that the publisher and download source match this repository before continuing.
+For the portable ZIP, unblock it if prompted, select **Extract All**, and run `TLC MultiAgent Assist.exe` from the extracted folder. See the [complete desktop installation guide](docs/user-guide/DESKTOP-INSTALL.md) for detailed instructions and troubleshooting links.
 
 ## Run with Sample Data
 
@@ -53,13 +57,12 @@ $env:TLC_DATA_MODE = 'sample'
 
 ## First Run
 
-1. Start TLC MultiAgent Assist. The app creates your private configuration file and opens it in your default JSON editor.
-2. Replace the placeholder Foundry project endpoint, agent names, tenant ID, client ID, authentication mode, and scopes.
-3. Save the file and reopen the app.
+1. Start TLC MultiAgent Assist.
+2. Sign in with your authorized corporate identity when prompted.
 
-The configuration is stored at `%APPDATA%\@tlc\desktop\foundry.environment.json`. It is not bundled into future upgrades and must never contain client secrets, access tokens, API keys, or credential-bearing connection strings.
+Packaged releases include the default Foundry project and agent configuration, so no endpoint setup is required for normal use.
 
-For interactive sign-in, configure a public-client Microsoft Entra app registration and set `authentication.mode` to `interactive-browser`. The default `azure-cli` mode requires the Azure CLI and an authenticated `az login` session.
+To use your own Foundry project instead, edit `%APPDATA%\@tlc\desktop\foundry.environment.json` and replace the `foundry.projectEndpoint` and `foundry.agents` values. This per-user file overrides the bundled defaults and is preserved during upgrades. It must never contain client secrets, access tokens, API keys, or credential-bearing connection strings.
 
 See the runbooks for complete prerequisites, build commands, startup modes, and authentication details:
 
