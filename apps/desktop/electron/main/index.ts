@@ -151,6 +151,7 @@ const configuredWorkflowHost = dataMode === 'sample' ? undefined : createConfigu
     return delegatedScope
   }
 })
+const workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost()
 
 async function resolveMsxScope() {
   const accounts = await msxConnector.listAccounts()
@@ -326,4 +327,3 @@ app.on('activate', () => {
 app.on('before-quit', () => {
   void configuredWorkflowHost?.dispose()
 })
-const workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost()

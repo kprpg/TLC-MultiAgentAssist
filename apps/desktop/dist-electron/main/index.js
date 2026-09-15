@@ -5112,6 +5112,7 @@ var configuredWorkflowHost = dataMode === "sample" ? void 0 : createConfiguredWo
 		return delegatedScope;
 	}
 });
+var workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost();
 async function resolveMsxScope() {
 	const accounts = await msxConnector.listAccounts();
 	const opportunities = (await Promise.all(accounts.map(({ id }) => msxConnector.listOpportunities(id)))).flat();
@@ -5275,7 +5276,6 @@ app.on("activate", () => {
 app.on("before-quit", () => {
 	configuredWorkflowHost?.dispose();
 });
-var workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost();
 //#endregion
 export {};
 
