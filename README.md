@@ -81,7 +81,7 @@ Copy-Item config/foundry.environment.example.json config/foundry.environment.jso
 npm run desktop:start
 ```
 
-Packaged desktop releases seed the non-secret shared Foundry configuration automatically and use interactive browser sign-in. The private developer file above remains ignored and can override the shared default.
+Packaged desktop releases seed the non-secret shared Foundry configuration automatically and use Azure CLI sign-in (run `az login` first). The private developer file above remains ignored and can override the shared default.
 
 Web with sample data:
 

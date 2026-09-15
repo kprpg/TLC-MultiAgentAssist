@@ -20,8 +20,8 @@ Live mode additionally requires:
 
 - Access to MSX and the configured Microsoft Foundry project
 - The four deployed Foundry agents named in the environment file
-- Azure CLI and an authenticated corporate session when using `azure-cli` mode
-- A Microsoft Entra public-client app registration when replacing the bundled interactive-browser configuration
+- Azure CLI and an authenticated corporate session for the bundled `azure-cli` mode (run `az login`)
+- A Microsoft Entra public-client app registration only when switching to `interactive-browser` mode instead of the bundled Azure CLI configuration
 
 Check the installed versions:
 
