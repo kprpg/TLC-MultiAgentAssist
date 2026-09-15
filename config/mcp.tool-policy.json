@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "defaultDeny": true,
+  "entries": [
+    {
+      "serverId": "dataverse",
+      "tool": "read_query",
+      "riskClass": "read",
+      "enabled": false,
+      "approval": "none",
+      "allowedCapabilities": ["account-pulse", "mcem-coach", "pursuit-executive", "risk-solution-play"],
+      "allowedScopes": ["opportunity", "account", "portfolio"],
+      "maxRows": 500,
+      "redactFields": [],
+      "rateLimitPerMinute": 30,
+      "notes": "Read-only broad query path; disabled until the guarded query adapter is complete."
+    },
+    {
+      "serverId": "msx",
+      "tool": "get_opportunity_360",
+      "riskClass": "read",
+      "enabled": false,
+      "approval": "none",
+      "allowedCapabilities": ["account-pulse", "mcem-coach", "pursuit-executive", "risk-solution-play"],
+      "allowedScopes": ["opportunity"],
+      "maxRows": 500,
+      "redactFields": [],
+      "rateLimitPerMinute": 60,
+      "notes": "Curated read path; disabled until connector parity tests pass."
+    },
+    {
+      "serverId": "msx",
+      "tool": "get_account_360",
+      "riskClass": "read",
+      "enabled": false,
+      "approval": "none",
+      "allowedCapabilities": ["account-pulse", "pursuit-executive"],
+      "allowedScopes": ["account"],
+      "maxRows": 500,
+      "redactFields": [],
+      "rateLimitPerMinute": 60,
+      "notes": "Curated account read path; disabled until connector parity tests pass."
+    },
+    {
+      "serverId": "msx",
+      "tool": "list_pipeline",
+      "riskClass": "read",
+      "enabled": false,
+      "approval": "none",
+      "allowedCapabilities": ["account-pulse", "pursuit-executive", "risk-solution-play"],
+      "allowedScopes": ["portfolio", "account"],
+      "maxRows": 500,
+      "redactFields": [],
+      "rateLimitPerMinute": 60,
+      "notes": "Curated pipeline read path; disabled until connector parity tests pass."
+    },
+    {
+      "serverId": "msx",
+      "tool": "get_stakeholder_map",
+      "riskClass": "read",
+      "enabled": false,
+      "approval": "none",
+      "allowedCapabilities": ["account-pulse", "pursuit-executive", "risk-solution-play"],
+      "allowedScopes": ["account", "opportunity"],
+      "maxRows": 500,
+      "redactFields": [],
+      "rateLimitPerMinute": 60,
+      "notes": "Curated stakeholder read path; disabled until connector parity tests pass."
+    },
+    {
+      "serverId": "msx",
+      "tool": "list_activities",
+      "riskClass": "read",
+      "enabled": false,
+      "approval": "none",
+      "allowedCapabilities": ["account-pulse", "pursuit-executive", "risk-solution-play"],
+      "allowedScopes": ["portfolio", "account", "opportunity"],
+      "maxRows": 500,
+      "redactFields": [],
+      "rateLimitPerMinute": 60,
+      "notes": "Curated activity read path; disabled until connector parity tests pass."
+    },
+    {
+      "serverId": "msx",
+      "tool": "get_forecast_snapshot",
+      "riskClass": "read",
+      "enabled": false,
+      "approval": "none",
+      "allowedCapabilities": ["account-pulse", "pursuit-executive"],
+      "allowedScopes": ["portfolio", "account"],
+      "maxRows": 500,
+      "redactFields": [],
+      "rateLimitPerMinute": 60,
+      "notes": "Curated forecast read path; disabled until connector parity tests pass."
+    },
+    {
+      "serverId": "msx",
+      "tool": "update_milestone",
+      "riskClass": "write",
+      "enabled": false,
+      "approval": "confirm-with-reason",
+      "allowedCapabilities": ["mcem-coach"],
+      "allowedScopes": ["opportunity"],
+      "redactFields": [],
+      "rateLimitPerMinute": 10,
+      "notes": "Reserved for the separately authorized governed-write phase."
+    },
+    {
+      "serverId": "dataverse",
+      "tool": "delete_record",
+      "riskClass": "forbidden",
+      "enabled": false,
+      "approval": "confirm-with-reason",
+      "allowedCapabilities": ["account-pulse"],
+      "allowedScopes": ["opportunity", "account", "portfolio"],
+      "redactFields": [],
+      "notes": "Permanently blocked destructive operation."
+    }
+  ]
+}

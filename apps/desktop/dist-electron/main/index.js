@@ -7,10 +7,341 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
 import { PDFParse } from "pdf-parse";
 import { AIProjectClient } from "@azure/ai-projects";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { AlignmentType, Document, ExternalHyperlink, HeadingLevel, LevelFormat, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
+var workflowAgentCapabilityValues = [
+	"account-pulse",
+	"mcem-coach",
+	"pursuit-executive",
+	"risk-solution-play"
+];
+var workflowAgentCapabilitySchema = z.enum(workflowAgentCapabilityValues);
+var scopeRefSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("portfolio") }).strict(),
+	z.object({
+		kind: z.literal("account"),
+		accountId: z.string().min(1)
+	}).strict(),
+	z.object({
+		kind: z.literal("opportunity"),
+		accountId: z.string().min(1),
+		opportunityId: z.string().min(1)
+	}).strict()
+]);
+var workflowExecutionModeSchema = z.enum([
+	"deterministic",
+	"composite",
+	"agentic"
+]);
+var workflowOutcomeStateSchema = z.enum([
+	"complete",
+	"partial",
+	"unauthorized"
+]);
+var workflowRunStatusSchema = z.enum([
+	"queued",
+	"running",
+	"completed",
+	"failed",
+	"cancelled"
+]);
+var workflowConnectorStepSchema = z.object({
+	connector: z.enum(["dataverse-mcp", "msx-mcp"]),
+	operation: z.string().regex(/^[a-z][a-z0-9_]*$/),
+	required: z.boolean()
+}).strict();
+var workflowDefinitionSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	id: z.string().regex(/^WF-[0-9]{3}$/),
+	name: z.string().min(1).max(120),
+	version: z.string().regex(/^\d+\.\d+\.\d+$/),
+	scope: z.enum([
+		"portfolio",
+		"account",
+		"opportunity"
+	]),
+	personaTargets: z.array(z.string().min(1)).min(1),
+	category: z.string().regex(/^[a-z][a-z0-9-]*$/),
+	executionMode: workflowExecutionModeSchema,
+	connectorPlan: z.array(workflowConnectorStepSchema).min(1).max(6),
+	inputSchemaRef: z.string().min(1),
+	outputSchemaRef: z.string().min(1),
+	sla: z.object({
+		targetMs: z.number().int().min(1),
+		timeoutMs: z.number().int().min(1)
+	}).strict().refine((sla) => sla.timeoutMs >= sla.targetMs, "Workflow timeout must not be less than its target."),
+	auth: z.object({
+		requiresDelegatedUser: z.literal(true),
+		allowedWrite: z.boolean()
+	}).strict(),
+	ui: z.object({
+		cardStyle: z.enum([
+			"exception-list",
+			"metric-strip",
+			"record-table",
+			"timeline",
+			"action-list"
+		]),
+		resultPriority: z.enum([
+			"high",
+			"medium",
+			"low"
+		]),
+		showInQuickLaunch: z.boolean()
+	}).strict()
+}).strict();
+var workflowConnectorCallSchema = z.object({
+	connector: z.enum(["dataverse-mcp", "msx-mcp"]),
+	operation: z.string().regex(/^[a-z][a-z0-9_]*$/),
+	status: z.enum([
+		"success",
+		"partial",
+		"unauthorized",
+		"failed",
+		"cancelled"
+	]),
+	durationMs: z.number().int().nonnegative(),
+	recordCount: z.number().int().nonnegative(),
+	truncated: z.boolean()
+}).strict();
+var workflowRunSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	runId: z.string().uuid(),
+	workflowId: z.string().regex(/^WF-[0-9]{3}$/),
+	status: workflowRunStatusSchema,
+	state: workflowOutcomeStateSchema.optional(),
+	scope: scopeRefSchema,
+	startedAt: z.string().datetime().optional(),
+	completedAt: z.string().datetime().optional(),
+	connectorCalls: z.array(workflowConnectorCallSchema),
+	resultRef: z.string().min(1).optional(),
+	telemetry: z.object({
+		correlationId: z.string().uuid(),
+		firstResultMs: z.number().int().nonnegative().optional(),
+		cacheHit: z.boolean()
+	}).strict()
+}).strict().superRefine((run, context) => {
+	if (run.status === "queued" && (run.startedAt || run.completedAt || run.state)) context.addIssue({
+		code: "custom",
+		path: ["status"],
+		message: "Queued runs cannot have execution results."
+	});
+	if (run.status === "running" && (!run.startedAt || run.completedAt || run.state)) context.addIssue({
+		code: "custom",
+		path: ["status"],
+		message: "Running runs require startedAt and cannot be complete."
+	});
+	if (run.status === "completed" && (!run.startedAt || !run.completedAt || !run.state || !run.resultRef)) context.addIssue({
+		code: "custom",
+		path: ["status"],
+		message: "Completed runs require timestamps, outcome state, and a result."
+	});
+	if ((run.status === "failed" || run.status === "cancelled") && (!run.startedAt || !run.completedAt || run.state)) context.addIssue({
+		code: "custom",
+		path: ["status"],
+		message: "Terminal runs require timestamps and no outcome state."
+	});
+});
+var workflowStatusTransitions = {
+	queued: ["running", "cancelled"],
+	running: [
+		"completed",
+		"failed",
+		"cancelled"
+	],
+	completed: [],
+	failed: [],
+	cancelled: []
+};
+function isWorkflowRunTransitionAllowed(from, to) {
+	return workflowStatusTransitions[from].includes(to);
+}
+var cardBaseSchema = z.object({
+	title: z.string().min(1),
+	evidenceIds: z.array(z.string().min(1))
+});
+var workflowResultCardSchema = z.discriminatedUnion("kind", [
+	cardBaseSchema.extend({
+		kind: z.literal("exception-list"),
+		exceptions: z.array(z.object({
+			id: z.string().min(1),
+			title: z.string().min(1),
+			priority: z.enum([
+				"P0",
+				"P1",
+				"P2"
+			]),
+			detail: z.string().min(1),
+			evidenceIds: z.array(z.string().min(1))
+		}).strict())
+	}).strict(),
+	cardBaseSchema.extend({
+		kind: z.literal("metric-strip"),
+		metrics: z.array(z.object({
+			label: z.string().min(1),
+			value: z.union([z.string(), z.number()])
+		}).strict()).min(1)
+	}).strict(),
+	cardBaseSchema.extend({
+		kind: z.literal("record-table"),
+		columns: z.array(z.string().min(1)).min(1),
+		rows: z.array(z.record(z.string(), z.union([
+			z.string(),
+			z.number(),
+			z.boolean(),
+			z.null()
+		])))
+	}).strict(),
+	cardBaseSchema.extend({
+		kind: z.literal("timeline"),
+		events: z.array(z.object({
+			at: z.string().datetime(),
+			label: z.string().min(1)
+		}).strict())
+	}).strict(),
+	cardBaseSchema.extend({
+		kind: z.literal("action-list"),
+		actions: z.array(z.object({
+			id: z.string().min(1),
+			label: z.string().min(1),
+			priority: z.enum([
+				"P0",
+				"P1",
+				"P2"
+			])
+		}).strict())
+	}).strict()
+]);
+var mcpEvidenceLineageSchema = z.object({
+	connector: z.enum(["dataverse-mcp", "msx-mcp"]),
+	operation: z.string().regex(/^[a-z][a-z0-9_]*$/),
+	queryTemplateId: z.string().min(1).optional(),
+	toolCallId: z.string().min(1)
+}).strict();
+var changeSetItemSchema = z.object({
+	itemId: z.string().uuid(),
+	entity: z.string().min(1),
+	recordId: z.string().min(1),
+	field: z.string().min(1),
+	before: z.unknown(),
+	after: z.unknown(),
+	rationale: z.string().min(1),
+	evidenceIds: z.array(z.string().min(1)).min(1)
+}).strict().refine((item) => !Object.is(item.before, item.after), "A change-set item must change its value.");
+z.object({
+	contractVersion: z.literal("1.0"),
+	changeSetId: z.string().uuid(),
+	proposedByCorrelationId: z.string().uuid(),
+	scope: scopeRefSchema,
+	proposedAt: z.string().datetime(),
+	expiresAt: z.string().datetime(),
+	items: z.array(changeSetItemSchema).min(1)
+}).strict().refine((proposal) => proposal.expiresAt > proposal.proposedAt, "Change-set expiry must follow proposal time.");
+z.object({
+	contractVersion: z.literal("1.0"),
+	changeSetId: z.string().uuid(),
+	approvedItemIds: z.array(z.string().uuid()).min(1),
+	approvedAt: z.string().datetime(),
+	reason: z.string().trim().min(3).max(1e3)
+}).strict();
+z.object({
+	contractVersion: z.literal("1.0"),
+	changeSetId: z.string().uuid(),
+	state: z.enum([
+		"applied",
+		"conflict",
+		"failed"
+	]),
+	auditNote: z.string().min(1),
+	itemResults: z.array(z.object({
+		itemId: z.string().uuid(),
+		state: z.enum([
+			"applied",
+			"conflict",
+			"failed"
+		]),
+		detail: z.string().min(1)
+	}).strict()).min(1)
+}).strict();
+z.object({
+	contractVersion: z.literal("1.0"),
+	capability: workflowAgentCapabilitySchema,
+	scope: scopeRefSchema,
+	prompt: z.string().min(3).max(1e3)
+}).strict();
+var workflowGuidanceFactSchema = z.object({
+	label: z.string().trim().min(1).max(80),
+	value: z.string().trim().min(1).max(500)
+}).strict();
+var workflowGuidanceHandoffSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	workflowId: z.string().regex(/^WF-[0-9]{3}$/),
+	resultRef: z.string().min(1).max(200),
+	capability: workflowAgentCapabilitySchema,
+	scope: z.object({
+		kind: z.literal("opportunity"),
+		accountId: z.string().min(1).max(200),
+		opportunityId: z.string().min(1).max(200)
+	}).strict(),
+	prompt: z.string().trim().min(3).max(1e3),
+	context: z.object({
+		cardTitle: z.string().trim().min(1).max(120),
+		queueItemId: z.string().min(1).max(200).optional(),
+		queueItemTitle: z.string().trim().min(1).max(240).optional(),
+		facts: z.array(workflowGuidanceFactSchema).max(20),
+		evidenceIds: z.array(z.string().min(1).max(200)).min(1).max(20)
+	}).strict()
+}).strict();
+//#endregion
+//#region packages/common/contracts/mcp.ts
+var canonicalFieldSchema = z.string().regex(/^[a-z][a-zA-Z0-9]*$/);
+var guardedQueryValueSchema = z.union([
+	z.string(),
+	z.number(),
+	z.boolean(),
+	z.array(z.union([z.string(), z.number()])).min(1).max(50)
+]);
+var guardedQueryFilterSchema = z.object({
+	field: canonicalFieldSchema,
+	operator: z.enum([
+		"eq",
+		"ne",
+		"gt",
+		"ge",
+		"lt",
+		"le",
+		"contains",
+		"startswith",
+		"in",
+		"on-or-after",
+		"on-or-before"
+	]),
+	value: guardedQueryValueSchema
+}).strict();
+var guardedQueryOrderSchema = z.object({
+	field: canonicalFieldSchema,
+	direction: z.enum(["asc", "desc"])
+}).strict();
+var guardedQueryExpandSchema = z.object({
+	relationship: canonicalFieldSchema,
+	select: z.array(canonicalFieldSchema).min(1).max(12).refine(isUnique, "Expanded select fields must be unique.")
+}).strict();
+var guardedQueryRequestSchema = z.object({
+	entity: canonicalFieldSchema,
+	select: z.array(canonicalFieldSchema).min(1).max(40).refine(isUnique, "Select fields must be unique."),
+	filter: z.array(guardedQueryFilterSchema).max(12).default([]),
+	orderBy: z.array(guardedQueryOrderSchema).max(3).default([]).refine((orders) => isUnique(orders.map((order) => order.field)), "Order fields must be unique."),
+	top: z.number().int().min(1).max(2e3).default(200),
+	expand: z.array(guardedQueryExpandSchema).max(3).default([]).refine((expands) => isUnique(expands.map((expand) => expand.relationship)), "Expanded relationships must be unique.")
+}).strict();
+function isUnique(values) {
+	return new Set(values).size === values.length;
+}
 var dataModeSchema = z.enum(["sample", "live"]);
 var sourceStateSchema = z.enum([
 	"sample",
@@ -25,7 +356,9 @@ var sourceHealthSchema = z.object({
 		"msx",
 		"mcem",
 		"seismic",
-		"linkedin"
+		"linkedin",
+		"dataverse-mcp",
+		"msx-mcp"
 	]),
 	state: sourceStateSchema,
 	detail: z.string().min(1),
@@ -49,7 +382,7 @@ z.object({
 	mode: dataModeSchema,
 	auth: authStatusSchema
 });
-z.object({
+var accountSchema = z.object({
 	id: z.string().min(1),
 	name: z.string().min(1),
 	segment: z.string().min(1)
@@ -65,7 +398,7 @@ var opportunitySchema = z.object({
 	closeDate: z.string().date(),
 	comments: z.string().optional()
 });
-z.object({
+var milestoneSchema = z.object({
 	id: z.string().min(1),
 	opportunityId: z.string().min(1),
 	name: z.string().min(1),
@@ -115,7 +448,12 @@ var mcemStageTransitionResultSchema = z.object({
 }).strict();
 var evidenceSchema = z.object({
 	id: z.string().min(1),
-	source: z.enum(["msx", "mcem"]),
+	source: z.enum([
+		"msx",
+		"mcem",
+		"dataverse-mcp",
+		"msx-mcp"
+	]),
 	recordId: z.string().min(1),
 	title: z.string().min(1),
 	url: z.string().url().optional(),
@@ -166,12 +504,7 @@ var mcemRequestSchema = z.object({
 	opportunityId: z.string().min(1),
 	prompt: z.string().min(3).max(1e3)
 });
-var agentCapabilitySchema = z.enum([
-	"account-pulse",
-	"mcem-coach",
-	"pursuit-executive",
-	"risk-solution-play"
-]);
+var agentCapabilitySchema = z.enum(workflowAgentCapabilityValues);
 var agentTaskRequestSchema = z.object({
 	contractVersion: z.literal("1.0"),
 	capability: agentCapabilitySchema,
@@ -246,6 +579,259 @@ z.object({
 	]),
 	comment: z.string().max(500).optional()
 });
+//#endregion
+//#region packages/common/configuration/dataverse-entity-map.ts
+var canonicalNameSchema = z.string().regex(/^[a-z][a-zA-Z0-9]*$/);
+var logicalNameSchema = z.string().regex(/^[a-z][a-z0-9_]*$/);
+var attributeLogicalNameSchema = z.string().regex(/^_?[a-z][a-z0-9_]*$/);
+var dataverseAttributeMappingSchema = z.object({
+	canonical: canonicalNameSchema,
+	logicalName: attributeLogicalNameSchema,
+	label: z.string().min(1),
+	dataType: z.enum([
+		"string",
+		"number",
+		"boolean",
+		"date",
+		"datetime",
+		"money",
+		"lookup",
+		"optionset",
+		"uniqueidentifier"
+	]),
+	optionSet: z.record(z.string(), z.number().int()).optional(),
+	sensitivity: z.enum([
+		"public",
+		"internal",
+		"restricted"
+	]),
+	includeInPrompt: z.boolean(),
+	format: z.string().min(1).optional()
+}).strict().superRefine((attribute, context) => {
+	if (attribute.sensitivity === "restricted" && attribute.includeInPrompt) context.addIssue({
+		code: "custom",
+		path: ["includeInPrompt"],
+		message: "Restricted attributes cannot be included in model prompts."
+	});
+});
+var dataverseEntityMappingSchema = z.object({
+	canonical: canonicalNameSchema,
+	logicalName: logicalNameSchema,
+	entitySetName: logicalNameSchema,
+	primaryIdAttribute: logicalNameSchema,
+	primaryNameAttribute: logicalNameSchema,
+	label: z.string().min(1),
+	scope: z.enum([
+		"opportunity",
+		"account",
+		"portfolio",
+		"reference"
+	]),
+	deepLinkTemplate: z.string().url().optional(),
+	userScopePredicate: z.string().min(1).optional(),
+	attributes: z.array(dataverseAttributeMappingSchema).min(1)
+}).strict().superRefine((entity, context) => {
+	if (entity.scope !== "reference" && !entity.userScopePredicate) context.addIssue({
+		code: "custom",
+		path: ["userScopePredicate"],
+		message: "Non-reference entities require a delegated-user scope predicate."
+	});
+	addDuplicateIssue(entity.attributes.map((attribute) => attribute.canonical), ["attributes"], "canonical names", context);
+	addDuplicateIssue(entity.attributes.map((attribute) => attribute.logicalName), ["attributes"], "logical names", context);
+});
+var dataverseEntityMapSchema = z.object({
+	schemaVersion: z.literal(1),
+	environmentLabel: z.string().min(1),
+	refreshedAt: z.string().datetime(),
+	entities: z.array(dataverseEntityMappingSchema).min(1)
+}).strict().superRefine((mapping, context) => {
+	addDuplicateIssue(mapping.entities.map((entity) => entity.canonical), ["entities"], "canonical names", context);
+	addDuplicateIssue(mapping.entities.map((entity) => entity.logicalName), ["entities"], "logical names", context);
+});
+function addDuplicateIssue(values, path, label, context) {
+	if (new Set(values).size !== values.length) context.addIssue({
+		code: "custom",
+		path,
+		message: `Dataverse mapping ${label} must be unique.`
+	});
+}
+async function loadDataverseEntityMap(filePath) {
+	let content;
+	try {
+		content = await readFile(filePath, "utf8");
+	} catch (cause) {
+		throw new Error(`Unable to read Dataverse entity map: ${filePath}`, { cause });
+	}
+	let candidate;
+	try {
+		candidate = JSON.parse(content);
+	} catch (cause) {
+		throw new Error(`Dataverse entity map is not valid JSON: ${filePath}`, { cause });
+	}
+	return dataverseEntityMapSchema.parse(candidate);
+}
+//#endregion
+//#region packages/common/configuration/mcp-servers.ts
+var mcpServerIdSchema = z.enum(["dataverse", "msx"]);
+var mcpServerSchema = z.object({
+	id: mcpServerIdSchema,
+	connectionId: z.string().regex(/^[a-z][a-z0-9_-]*$/).optional(),
+	displayName: z.string().min(1),
+	enabled: z.boolean(),
+	execution: z.literal("local-client"),
+	serverUrl: z.string().url().refine((value) => new URL(value).protocol === "https:", { message: "MCP server URLs must use HTTPS." }),
+	serverLabel: z.string().regex(/^[a-z][a-z0-9_]*$/),
+	authentication: z.object({
+		kind: z.literal("entra-delegated"),
+		scopes: z.array(z.string().min(1)).min(1)
+	}).strict(),
+	limits: z.object({
+		connectTimeoutMs: z.number().int().min(1e3).max(6e4),
+		callTimeoutMs: z.number().int().min(1e3).max(12e4),
+		maxConcurrentCalls: z.number().int().min(1).max(8),
+		maxToolCallsPerRequest: z.number().int().min(1).max(12),
+		maxRowsPerCall: z.number().int().min(1).max(5e3),
+		maxResultBytes: z.number().int().min(1024).max(2e6)
+	}).strict(),
+	retry: z.object({
+		maxAttempts: z.number().int().min(1).max(4),
+		initialDelayMs: z.number().int().min(50).max(5e3),
+		backoffMultiplier: z.number().min(1).max(4),
+		retryOnStatus: z.array(z.number().int().min(400).max(599)).default([
+			429,
+			500,
+			502,
+			503,
+			504
+		])
+	}).strict(),
+	circuitBreaker: z.object({
+		failureThreshold: z.number().int().min(1).max(20),
+		openDurationMs: z.number().int().min(1e3).max(6e5)
+	}).strict()
+}).strict();
+var mcpServerRegistrySchema = z.object({
+	schemaVersion: z.literal(1),
+	servers: z.array(mcpServerSchema).min(1)
+}).strict().superRefine((registry, context) => {
+	const ids = registry.servers.map((server) => server.id);
+	if (new Set(ids).size !== ids.length) context.addIssue({
+		code: "custom",
+		path: ["servers"],
+		message: "MCP server ids must be unique."
+	});
+	const connections = /* @__PURE__ */ new Map();
+	for (const [index, server] of registry.servers.entries()) {
+		const connectionId = server.connectionId ?? server.id;
+		const fingerprint = JSON.stringify({
+			serverUrl: server.serverUrl,
+			authentication: server.authentication,
+			limits: server.limits,
+			retry: server.retry,
+			circuitBreaker: server.circuitBreaker
+		});
+		const existing = connections.get(connectionId);
+		if (existing !== void 0 && existing !== fingerprint) context.addIssue({
+			code: "custom",
+			path: [
+				"servers",
+				index,
+				"connectionId"
+			],
+			message: "MCP servers sharing a connectionId must use identical connection settings."
+		});
+		else connections.set(connectionId, fingerprint);
+	}
+});
+async function loadMcpServerRegistry(filePath) {
+	return mcpServerRegistrySchema.parse(await readJson(filePath, "MCP server registry"));
+}
+async function readJson(filePath, label) {
+	let content;
+	try {
+		content = await readFile(filePath, "utf8");
+	} catch (cause) {
+		throw new Error(`Unable to read ${label}: ${filePath}`, { cause });
+	}
+	try {
+		return JSON.parse(content);
+	} catch (cause) {
+		throw new Error(`${label} is not valid JSON: ${filePath}`, { cause });
+	}
+}
+//#endregion
+//#region packages/common/configuration/mcp-tool-policy.ts
+var toolRiskClassSchema = z.enum([
+	"explore",
+	"read",
+	"write",
+	"forbidden"
+]);
+var mcpScopeKindSchema = z.enum([
+	"opportunity",
+	"account",
+	"portfolio"
+]);
+var mcpToolPolicyEntrySchema = z.object({
+	serverId: mcpServerIdSchema,
+	tool: z.string().regex(/^[a-z][a-z0-9_]*$/),
+	riskClass: toolRiskClassSchema,
+	enabled: z.boolean(),
+	approval: z.enum([
+		"none",
+		"confirm",
+		"confirm-with-reason"
+	]),
+	allowedCapabilities: z.array(agentCapabilitySchema).min(1),
+	allowedScopes: z.array(mcpScopeKindSchema).min(1),
+	maxRows: z.number().int().min(1).max(5e3).optional(),
+	redactFields: z.array(z.string().min(1)).default([]),
+	rateLimitPerMinute: z.number().int().min(1).max(120).optional(),
+	notes: z.string().max(500).optional()
+}).strict().superRefine((entry, context) => {
+	if (entry.riskClass === "write" && entry.approval === "none") context.addIssue({
+		code: "custom",
+		path: ["approval"],
+		message: "Write tools must require approval."
+	});
+	if (entry.riskClass === "forbidden" && entry.enabled) context.addIssue({
+		code: "custom",
+		path: ["enabled"],
+		message: "Forbidden tools cannot be enabled."
+	});
+	if (/^(delete|drop|truncate)(_|$)/i.test(entry.tool) && entry.enabled) context.addIssue({
+		code: "custom",
+		path: ["enabled"],
+		message: "Destructive tools cannot be enabled."
+	});
+});
+var mcpToolPolicySchema = z.object({
+	schemaVersion: z.literal(1),
+	defaultDeny: z.literal(true),
+	entries: z.array(mcpToolPolicyEntrySchema)
+}).strict().superRefine((policy, context) => {
+	const keys = policy.entries.map((entry) => `${entry.serverId}:${entry.tool}`);
+	if (new Set(keys).size !== keys.length) context.addIssue({
+		code: "custom",
+		path: ["entries"],
+		message: "MCP tool policy entries must be unique by server and tool."
+	});
+});
+async function loadMcpToolPolicy(filePath) {
+	let content;
+	try {
+		content = await readFile(filePath, "utf8");
+	} catch (cause) {
+		throw new Error(`Unable to read MCP tool policy: ${filePath}`, { cause });
+	}
+	let candidate;
+	try {
+		candidate = JSON.parse(content);
+	} catch (cause) {
+		throw new Error(`MCP tool policy is not valid JSON: ${filePath}`, { cause });
+	}
+	return mcpToolPolicySchema.parse(candidate);
+}
 //#endregion
 //#region packages/common/sharing/opportunity-link.ts
 function addMsxOpportunityLink(content, opportunityId) {
@@ -1573,6 +2159,2191 @@ function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
 	});
 }
 //#endregion
+//#region packages/orchestrator/policies/mcp-tool-authorization.ts
+var McpToolAuthorizationError = class extends Error {
+	code;
+	constructor(code, message) {
+		super(message);
+		this.code = code;
+		this.name = "McpToolAuthorizationError";
+	}
+};
+var destructiveToolName = /^(delete|drop|truncate)(_|$)/i;
+function authorizeMcpTool(policy, request) {
+	if (destructiveToolName.test(request.tool)) throw new McpToolAuthorizationError("tool_denied", "Destructive MCP tools are forbidden.");
+	const entry = policy.entries.find((candidate) => candidate.serverId === request.serverId && candidate.tool === request.tool);
+	if (!entry || !entry.enabled || entry.riskClass === "forbidden") throw new McpToolAuthorizationError("tool_denied", "MCP tool invocation is not allowed.");
+	if (!entry.allowedCapabilities.includes(request.capability)) throw new McpToolAuthorizationError("capability_denied", "Agent capability is not allowed to invoke this MCP tool.");
+	if (!entry.allowedScopes.includes(request.scope)) throw new McpToolAuthorizationError("scope_denied", "Request scope is not allowed for this MCP tool.");
+	if (entry.riskClass === "write" || entry.approval !== "none") {
+		if (!request.approval?.confirmed) throw new McpToolAuthorizationError("approval_required", "MCP tool invocation requires user approval.");
+		if (entry.approval === "confirm-with-reason" && !request.approval.reason?.trim()) throw new McpToolAuthorizationError("approval_required", "MCP tool invocation requires an approval reason.");
+	}
+	return entry;
+}
+//#endregion
+//#region packages/orchestrator/progress/run-history.ts
+var WorkflowRunHistory = class {
+	runs = /* @__PURE__ */ new Map();
+	capacity;
+	onEvicted;
+	constructor(options = {}) {
+		this.capacity = options.capacity ?? 100;
+		if (!Number.isInteger(this.capacity) || this.capacity < 1) throw new Error("Workflow run history capacity must be a positive integer.");
+		this.onEvicted = options.onEvicted;
+	}
+	set(run) {
+		const validated = workflowRunSchema.parse(run);
+		if (!this.runs.has(validated.runId) && this.runs.size >= this.capacity) {
+			const oldestRunId = this.runs.keys().next().value;
+			if (oldestRunId) {
+				const evicted = this.runs.get(oldestRunId);
+				this.runs.delete(oldestRunId);
+				if (evicted) this.onEvicted?.(structuredClone(evicted));
+			}
+		}
+		this.runs.set(validated.runId, structuredClone(validated));
+	}
+	get(runId) {
+		const run = this.runs.get(runId);
+		return run ? structuredClone(run) : void 0;
+	}
+	list(scope, limit = this.capacity) {
+		if (!Number.isInteger(limit) || limit < 1) throw new Error("Workflow run history limit must be a positive integer.");
+		return [...this.runs.values()].filter((run) => scope === void 0 || sameScope(run.scope, scope)).reverse().slice(0, limit).map((run) => structuredClone(run));
+	}
+};
+function sameScope(left, right) {
+	if (left.kind !== right.kind) return false;
+	if (left.kind === "portfolio" && right.kind === "portfolio") return true;
+	if (left.kind === "account" && right.kind === "account") return left.accountId === right.accountId;
+	return left.kind === "opportunity" && right.kind === "opportunity" && left.accountId === right.accountId && left.opportunityId === right.opportunityId;
+}
+//#endregion
+//#region packages/orchestrator/routing/mcp-tool-broker.ts
+var recordArrayKeys = /* @__PURE__ */ new Set([
+	"items",
+	"records",
+	"rows",
+	"value"
+]);
+var McpToolBroker = class {
+	registry;
+	policy;
+	invokeTool;
+	now;
+	maxJournalEntries;
+	journal = [];
+	rateWindows = /* @__PURE__ */ new Map();
+	requestCallCounts = /* @__PURE__ */ new Map();
+	constructor(options) {
+		this.registry = mcpServerRegistrySchema.parse(options.registry);
+		this.policy = mcpToolPolicySchema.parse(options.policy);
+		this.invokeTool = options.invokeTool;
+		this.now = options.now ?? Date.now;
+		this.maxJournalEntries = options.maxJournalEntries ?? 1e3;
+		if (!Number.isInteger(this.maxJournalEntries) || this.maxJournalEntries < 1) throw new Error("MCP invocation journal capacity must be a positive integer.");
+	}
+	async execute(request) {
+		const startedAt = this.now();
+		let recordCount = 0;
+		let truncated = false;
+		let outcome = "failed";
+		let failureCode;
+		try {
+			const server = this.registry.servers.find((candidate) => candidate.id === request.serverId);
+			if (!server?.enabled) throw new McpToolAuthorizationError("tool_denied", "MCP server invocation is not allowed.");
+			const entry = authorizeMcpTool(this.policy, request);
+			this.consumeRequestBudget(request.correlationId, server.limits.maxToolCallsPerRequest);
+			this.consumeRateBudget(request.serverId, request.tool, entry.rateLimitPerMinute);
+			const rawResult = await this.invokeTool(request.serverId, request.tool, request.arguments, request.signal);
+			const stats = {
+				recordCount: 0,
+				truncated: false
+			};
+			const maxRows = Math.min(entry.maxRows ?? server.limits.maxRowsPerCall, server.limits.maxRowsPerCall);
+			const data = sanitizeValue(rawResult, new Set(entry.redactFields.map((field) => field.toLowerCase())), maxRows, stats);
+			recordCount = stats.recordCount;
+			truncated = stats.truncated;
+			outcome = "success";
+			return {
+				kind: "untrusted-mcp-data",
+				data,
+				recordCount,
+				truncated
+			};
+		} catch (error) {
+			outcome = error instanceof McpToolAuthorizationError ? "denied" : "failed";
+			failureCode = getFailureCode(error);
+			throw error;
+		} finally {
+			this.appendJournal({
+				correlationId: request.correlationId,
+				serverId: request.serverId,
+				tool: request.tool,
+				capability: request.capability,
+				scope: request.scope,
+				outcome,
+				durationMs: Math.max(0, this.now() - startedAt),
+				recordCount,
+				truncated,
+				occurredAt: new Date(this.now()).toISOString(),
+				...failureCode ? { failureCode } : {}
+			});
+		}
+	}
+	completeRequest(correlationId) {
+		this.requestCallCounts.delete(correlationId);
+	}
+	getJournal() {
+		return this.journal.map((entry) => ({ ...entry }));
+	}
+	consumeRequestBudget(correlationId, maximum) {
+		const nextCount = (this.requestCallCounts.get(correlationId) ?? 0) + 1;
+		if (nextCount > maximum) throw new McpToolAuthorizationError("tool_denied", "MCP tool-call limit exceeded for this request.");
+		this.requestCallCounts.set(correlationId, nextCount);
+	}
+	consumeRateBudget(serverId, tool, maximum) {
+		if (maximum === void 0) return;
+		const key = `${serverId}:${tool}`;
+		const cutoff = this.now() - 6e4;
+		const timestamps = (this.rateWindows.get(key) ?? []).filter((timestamp) => timestamp > cutoff);
+		if (timestamps.length >= maximum) throw new McpToolAuthorizationError("tool_denied", "MCP tool rate limit exceeded.");
+		timestamps.push(this.now());
+		this.rateWindows.set(key, timestamps);
+	}
+	appendJournal(entry) {
+		this.journal.push(entry);
+		if (this.journal.length > this.maxJournalEntries) this.journal.splice(0, this.journal.length - this.maxJournalEntries);
+	}
+};
+function sanitizeValue(value, redactedFields, maxRows, stats, key) {
+	if (typeof value === "string") {
+		const parsed = tryParseJson(value);
+		return parsed === void 0 ? value : JSON.stringify(sanitizeValue(parsed, redactedFields, maxRows, stats));
+	}
+	if (Array.isArray(value)) {
+		const isRecordArray = key === void 0 || recordArrayKeys.has(key.toLowerCase());
+		if (isRecordArray) {
+			stats.recordCount = Math.max(stats.recordCount, value.length);
+			stats.truncated ||= value.length > maxRows;
+		}
+		return (isRecordArray ? value.slice(0, maxRows) : value).map((item) => sanitizeValue(item, redactedFields, maxRows, stats));
+	}
+	if (value === null || typeof value !== "object") return value;
+	return Object.fromEntries(Object.entries(value).map(([field, fieldValue]) => [field, redactedFields.has(field.toLowerCase()) ? "[REDACTED]" : sanitizeValue(fieldValue, redactedFields, maxRows, stats, field)]));
+}
+function tryParseJson(value) {
+	const trimmed = value.trim();
+	if ((!trimmed.startsWith("{") || !trimmed.endsWith("}")) && (!trimmed.startsWith("[") || !trimmed.endsWith("]"))) return void 0;
+	try {
+		return JSON.parse(trimmed);
+	} catch {
+		return;
+	}
+}
+function getFailureCode(error) {
+	if (typeof error === "object" && error !== null && "code" in error && typeof error.code === "string") return error.code;
+	return "unknown";
+}
+//#endregion
+//#region packages/orchestrator/workflows/cohort.ts
+var initialWorkflowIds = [
+	"WF-001",
+	"WF-002",
+	"WF-003",
+	"WF-005",
+	"WF-006",
+	"WF-007",
+	"WF-009",
+	"WF-010",
+	"WF-012"
+];
+var asOfSchema = z.string().date();
+var initialWorkflowInputSchemas = {
+	"WF-001": z.object({
+		asOf: asOfSchema,
+		staleAfterDays: z.number().int().min(1).max(365).default(30)
+	}).strict(),
+	"WF-002": z.object({ asOf: asOfSchema }).strict(),
+	"WF-003": z.object({ asOf: asOfSchema }).strict(),
+	"WF-005": z.object({
+		asOf: asOfSchema,
+		lookbackDays: z.number().int().min(1).max(90).default(7)
+	}).strict(),
+	"WF-006": z.object({ asOf: asOfSchema }).strict(),
+	"WF-007": z.object({
+		asOf: asOfSchema,
+		meetingWindowDays: z.number().int().min(1).max(90).default(14)
+	}).strict(),
+	"WF-009": z.object({
+		asOf: asOfSchema,
+		maximumActiveItems: z.number().int().min(1).max(100).default(20)
+	}).strict(),
+	"WF-010": z.object({
+		asOf: asOfSchema,
+		followUpAfterDays: z.number().int().min(1).max(90).default(14)
+	}).strict(),
+	"WF-012": z.object({ asOf: asOfSchema }).strict()
+};
+var workflowQueueItemSchema = z.object({
+	id: z.string().min(1),
+	workflowId: z.enum(initialWorkflowIds),
+	priority: z.enum([
+		"P0",
+		"P1",
+		"P2"
+	]),
+	title: z.string().min(1),
+	owner: z.string().min(1).optional(),
+	accountId: z.string().min(1).optional(),
+	opportunityId: z.string().min(1).optional(),
+	dueDate: z.string().date().optional(),
+	evidenceIds: z.array(z.string().min(1)),
+	status: z.literal("new")
+}).strict();
+var initialWorkflowOutputSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	workflowId: z.enum(initialWorkflowIds),
+	generatedAt: z.string().datetime(),
+	scope: scopeRefSchema,
+	card: workflowResultCardSchema,
+	queueItems: z.array(workflowQueueItemSchema),
+	lineage: z.array(mcpEvidenceLineageSchema).min(1),
+	sourceHealth: z.array(sourceHealthSchema).min(1)
+}).strict();
+function parseInitialWorkflowInput(workflowId, input) {
+	return initialWorkflowInputSchemas[workflowId].parse(input);
+}
+var initialWorkflowDefinitions = Object.freeze([
+	createDefinition("WF-001", "Stale opportunity sweep", ["AE", "Manager"], "portfolio-hygiene", "record-table", [{
+		connector: "dataverse-mcp",
+		operation: "read_query",
+		required: true
+	}, {
+		connector: "msx-mcp",
+		operation: "list_pipeline",
+		required: false
+	}]),
+	createDefinition("WF-002", "Overdue milestone triage", ["Specialist", "SE"], "portfolio-hygiene", "action-list", [{
+		connector: "dataverse-mcp",
+		operation: "read_query",
+		required: true
+	}, {
+		connector: "msx-mcp",
+		operation: "list_pipeline",
+		required: false
+	}]),
+	createDefinition("WF-003", "Stage-evidence mismatch queue", ["Specialist", "ATS"], "stage-governance", "exception-list", [{
+		connector: "dataverse-mcp",
+		operation: "read_query",
+		required: true
+	}, {
+		connector: "msx-mcp",
+		operation: "list_pipeline",
+		required: false
+	}]),
+	createDefinition("WF-005", "Weekly governance exceptions", ["Manager"], "governance", "exception-list", [{
+		connector: "dataverse-mcp",
+		operation: "read_query",
+		required: true
+	}, {
+		connector: "msx-mcp",
+		operation: "list_pipeline",
+		required: false
+	}]),
+	createDefinition("WF-006", "Commit-risk conflict list", ["Manager", "CSAM"], "forecast-readiness", "record-table", [{
+		connector: "dataverse-mcp",
+		operation: "read_query",
+		required: true
+	}, {
+		connector: "msx-mcp",
+		operation: "get_forecast_snapshot",
+		required: false
+	}]),
+	createDefinition("WF-007", "Next-meeting prep pack", ["AE", "ATS"], "meeting-preparation", "record-table", [{
+		connector: "dataverse-mcp",
+		operation: "read_query",
+		required: true
+	}, {
+		connector: "msx-mcp",
+		operation: "list_pipeline",
+		required: false
+	}]),
+	createDefinition("WF-009", "Owner workload imbalance", ["Manager"], "ownership", "metric-strip", [{
+		connector: "dataverse-mcp",
+		operation: "read_query",
+		required: true
+	}]),
+	createDefinition("WF-010", "Activity follow-up debt", ["Seller", "SE"], "activity-compliance", "action-list", [{
+		connector: "dataverse-mcp",
+		operation: "read_query",
+		required: true
+	}]),
+	createDefinition("WF-012", "Stage exit evidence packet", ["Specialist", "SE"], "stage-governance", "action-list", [{
+		connector: "dataverse-mcp",
+		operation: "read_query",
+		required: true
+	}, {
+		connector: "msx-mcp",
+		operation: "list_pipeline",
+		required: false
+	}])
+].map((definition) => workflowDefinitionSchema.parse(definition)));
+function createDefinition(id, name, personaTargets, category, cardStyle, connectorPlan, executionMode = connectorPlan.length > 1 ? "composite" : "deterministic") {
+	return {
+		contractVersion: "1.0",
+		id,
+		name,
+		version: "1.0.0",
+		scope: "portfolio",
+		personaTargets,
+		category,
+		executionMode,
+		connectorPlan,
+		inputSchemaRef: `workflow-input-${id.toLowerCase()}.v1`,
+		outputSchemaRef: `workflow-output-${id.toLowerCase()}.v1`,
+		sla: {
+			targetMs: 4e3,
+			timeoutMs: 12e3
+		},
+		auth: {
+			requiresDelegatedUser: true,
+			allowedWrite: false
+		},
+		ui: {
+			cardStyle,
+			resultPriority: "high",
+			showInQuickLaunch: true
+		}
+	};
+}
+//#endregion
+//#region packages/orchestrator/workflows/cohort-executor.ts
+var InitialWorkflowConnectorExecutor = class {
+	dataverse;
+	msx;
+	resolveDelegatedScope;
+	constructor(dataverse, msx, resolveDelegatedScope) {
+		this.dataverse = dataverse;
+		this.msx = msx;
+		this.resolveDelegatedScope = resolveDelegatedScope;
+	}
+	async execute(step, context) {
+		const workflowId = requireInitialWorkflowId(context.workflowId);
+		const input = parseInitialWorkflowInput(workflowId, context.input);
+		if (step.connector === "dataverse-mcp") {
+			const result = await this.dataverse.query(buildInitialWorkflowQuery(workflowId, input), {
+				correlationId: context.correlationId,
+				capability: "account-pulse",
+				scope: context.scope,
+				delegatedScope: await this.resolveDelegatedScope(context.scope),
+				signal: context.signal
+			});
+			return {
+				state: result.state,
+				data: result.records,
+				rowCount: result.recordCount,
+				truncated: result.truncated,
+				lineage: result.lineage,
+				sourceHealth: result.sourceHealth
+			};
+		}
+		const msxContext = {
+			correlationId: context.correlationId,
+			capability: "account-pulse",
+			signal: context.signal
+		};
+		return fromMsxResult(step.operation === "get_forecast_snapshot" ? await this.msx.getForecastSnapshot({}, msxContext) : await this.msx.listPipeline({}, msxContext));
+	}
+};
+var InitialWorkflowResultAssembler = class {
+	assemble(context) {
+		const workflowId = requireInitialWorkflowId(context.definition.id);
+		const input = parseInitialWorkflowInput(workflowId, context.input);
+		const ordered = [...reconcileRecords(rows(context.steps.find(({ connector }) => connector === "dataverse-mcp")?.data), rows(context.steps.find(({ connector }) => connector === "msx-mcp")?.data))].sort(compareRecords);
+		const lineage = context.steps.flatMap((step) => step.lineage ? [step.lineage] : []);
+		const sourceHealth = context.steps.flatMap((step) => step.sourceHealth ? [step.sourceHealth] : []);
+		const evidenceIds = lineage.map(({ toolCallId }) => toolCallId);
+		const queueItems = buildQueueItems(workflowId, ordered, input, evidenceIds);
+		return initialWorkflowOutputSchema.parse({
+			contractVersion: "1.0",
+			workflowId,
+			generatedAt: context.generatedAt,
+			scope: context.scope,
+			card: buildCard(workflowId, context.definition.name, ordered, queueItems, evidenceIds),
+			queueItems,
+			lineage,
+			sourceHealth
+		});
+	}
+};
+function buildInitialWorkflowQuery(workflowId, input) {
+	switch (workflowId) {
+		case "WF-001": return {
+			entity: "opportunity",
+			select: [
+				"id",
+				"accountId",
+				"name",
+				"closeDate"
+			],
+			filter: [{
+				field: "closeDate",
+				operator: "on-or-before",
+				value: subtractDays(input.asOf, input.staleAfterDays ?? 30)
+			}],
+			orderBy: [{
+				field: "closeDate",
+				direction: "asc"
+			}],
+			top: 500,
+			expand: []
+		};
+		case "WF-002": return milestoneQuery(input.asOf, [{
+			field: "status",
+			operator: "ne",
+			value: "Completed"
+		}]);
+		case "WF-003": return milestoneQuery(input.asOf, [{
+			field: "status",
+			operator: "ne",
+			value: "Completed"
+		}]);
+		case "WF-005": return milestoneQuery(input.asOf, [{
+			field: "status",
+			operator: "in",
+			value: ["At Risk", "Blocked"]
+		}]);
+		case "WF-006": return {
+			entity: "opportunity",
+			select: [
+				"id",
+				"accountId",
+				"name",
+				"closeDate"
+			],
+			filter: [],
+			orderBy: [{
+				field: "closeDate",
+				direction: "asc"
+			}],
+			top: 500,
+			expand: []
+		};
+		case "WF-007": return {
+			entity: "activity",
+			select: [
+				"id",
+				"opportunityId",
+				"subject",
+				"ownerId",
+				"dueDate",
+				"status"
+			],
+			filter: [{
+				field: "dueDate",
+				operator: "on-or-after",
+				value: input.asOf
+			}, {
+				field: "dueDate",
+				operator: "on-or-before",
+				value: addDays(input.asOf, input.meetingWindowDays ?? 14)
+			}],
+			orderBy: [{
+				field: "dueDate",
+				direction: "asc"
+			}],
+			top: 500,
+			expand: []
+		};
+		case "WF-009": return {
+			entity: "opportunity",
+			select: [
+				"id",
+				"accountId",
+				"name",
+				"ownerId",
+				"closeDate"
+			],
+			filter: [],
+			orderBy: [{
+				field: "ownerId",
+				direction: "asc"
+			}, {
+				field: "closeDate",
+				direction: "asc"
+			}],
+			top: 500,
+			expand: []
+		};
+		case "WF-010": return {
+			entity: "activity",
+			select: [
+				"id",
+				"opportunityId",
+				"subject",
+				"ownerId",
+				"dueDate",
+				"status"
+			],
+			filter: [{
+				field: "dueDate",
+				operator: "on-or-before",
+				value: subtractDays(input.asOf, input.followUpAfterDays ?? 14)
+			}, {
+				field: "status",
+				operator: "ne",
+				value: "Completed"
+			}],
+			orderBy: [{
+				field: "dueDate",
+				direction: "asc"
+			}],
+			top: 500,
+			expand: []
+		};
+		case "WF-012": return milestoneQuery(input.asOf, []);
+	}
+}
+function milestoneQuery(asOf, extraFilters) {
+	return {
+		entity: "engagementMilestone",
+		select: [
+			"id",
+			"opportunityId",
+			"name",
+			"status",
+			"targetDate"
+		],
+		filter: [{
+			field: "targetDate",
+			operator: "on-or-before",
+			value: asOf
+		}, ...extraFilters],
+		orderBy: [{
+			field: "targetDate",
+			direction: "asc"
+		}],
+		top: 500,
+		expand: []
+	};
+}
+function buildCard(workflowId, title, records, queueItems, evidenceIds) {
+	if (workflowId === "WF-003" || workflowId === "WF-005") return {
+		kind: "exception-list",
+		title,
+		evidenceIds,
+		exceptions: queueItems.map((item) => ({
+			id: item.id,
+			title: item.title,
+			priority: item.priority,
+			detail: `${workflowId === "WF-003" ? "Recorded stage and available evidence require review" : "Status requires governance review"}${item.dueDate ? `; due ${item.dueDate}` : ""}.`,
+			evidenceIds: item.evidenceIds
+		}))
+	};
+	if (workflowId === "WF-002" || workflowId === "WF-010" || workflowId === "WF-012") return {
+		kind: "action-list",
+		title,
+		evidenceIds,
+		actions: queueItems.map((item) => ({
+			id: item.id,
+			label: item.title,
+			priority: item.priority
+		}))
+	};
+	if (workflowId === "WF-009") return {
+		kind: "metric-strip",
+		title,
+		evidenceIds,
+		metrics: [{
+			label: "Overloaded owners",
+			value: queueItems.length
+		}, {
+			label: "Active opportunities",
+			value: records.length
+		}]
+	};
+	const columns = workflowId === "WF-007" ? [
+		"id",
+		"opportunityId",
+		"subject",
+		"ownerId",
+		"dueDate",
+		"status"
+	] : workflowId === "WF-001" ? [
+		"id",
+		"accountId",
+		"name",
+		"closeDate"
+	] : [
+		"id",
+		"accountId",
+		"name",
+		"closeDate"
+	];
+	return {
+		kind: "record-table",
+		title,
+		evidenceIds,
+		columns,
+		rows: records.map((record) => primitiveRow(record, columns))
+	};
+}
+function buildQueueItems(workflowId, records, input, evidenceIds) {
+	if (workflowId === "WF-009") {
+		const threshold = input.maximumActiveItems ?? 20;
+		const counts = /* @__PURE__ */ new Map();
+		for (const record of records) {
+			const owner = text(record.ownerId) ?? "Unassigned";
+			counts.set(owner, (counts.get(owner) ?? 0) + 1);
+		}
+		return [...counts.entries()].filter(([, count]) => count > threshold).sort(([left], [right]) => left.localeCompare(right)).map(([owner, count]) => ({
+			id: `${workflowId}:${owner}`,
+			workflowId,
+			priority: count > threshold * 2 ? "P0" : "P1",
+			title: `${owner} owns ${count} active opportunities`,
+			owner,
+			evidenceIds,
+			status: "new"
+		}));
+	}
+	return records.map((record, index) => {
+		const recordId = text(record.id) ?? `${index + 1}`;
+		const dueDate = date(record.targetDate) ?? date(record.dueDate) ?? date(record.closeDate);
+		return {
+			id: `${workflowId}:${recordId}`,
+			workflowId,
+			priority: workflowId === "WF-003" && Number(record.recordedStage ?? 0) >= 4 || workflowId === "WF-005" && record.status === "Blocked" ? "P0" : "P1",
+			title: queueTitle(workflowId, record),
+			...text(record.ownerId) ? { owner: text(record.ownerId) } : {},
+			...text(record.accountId) ? { accountId: text(record.accountId) } : {},
+			...text(record.opportunityId) ? { opportunityId: text(record.opportunityId) } : {},
+			...dueDate ? { dueDate } : {},
+			evidenceIds,
+			status: "new"
+		};
+	});
+}
+function queueTitle(workflowId, record) {
+	const label = text(record.name) ?? text(record.subject) ?? text(record.id) ?? "Untitled record";
+	return `${{
+		"WF-001": "Review stale opportunity",
+		"WF-002": "Triage overdue milestone",
+		"WF-003": "Review stage evidence",
+		"WF-005": "Review governance exception",
+		"WF-006": "Review commit risk",
+		"WF-007": "Prepare for next meeting",
+		"WF-010": "Complete overdue follow-up",
+		"WF-012": "Assemble stage exit evidence"
+	}[workflowId]}: ${label}`;
+}
+function fromMsxResult(result) {
+	return {
+		state: result.state,
+		data: result.data,
+		rowCount: result.rowCount,
+		truncated: result.truncated,
+		...result.lineage ? { lineage: result.lineage } : {},
+		sourceHealth: result.sourceHealth
+	};
+}
+function requireInitialWorkflowId(value) {
+	if (!initialWorkflowIds.some((id) => id === value)) throw new Error(`Unsupported initial workflow: ${value}`);
+	return value;
+}
+function rows(value) {
+	return Array.isArray(value) ? value.filter((record) => typeof record === "object" && record !== null && !Array.isArray(record)) : [];
+}
+var curatedOpportunityFields = [
+	"owner",
+	"recordedStage",
+	"value",
+	"currency",
+	"closeDate",
+	"comments",
+	"forecastCategory",
+	"probability"
+];
+function reconcileRecords(dataverseRecords, msxRecords) {
+	const base = deduplicate(dataverseRecords, (record) => text(record.id));
+	const enrichment = new Map(deduplicate(msxRecords, (record) => text(record.id)).map((record) => [text(record.id), record]));
+	return base.map((record) => {
+		const matchId = text(record.opportunityId) ?? text(record.id);
+		const curated = matchId ? enrichment.get(matchId) : void 0;
+		if (!curated) return record;
+		const merged = { ...record };
+		for (const field of curatedOpportunityFields) {
+			const value = curated[field];
+			if (value !== void 0 && value !== null && value !== "") merged[field] = value;
+		}
+		if (!text(merged.ownerId) && text(curated.owner)) merged.ownerId = curated.owner;
+		if (!text(merged.accountId) && text(curated.accountId)) merged.accountId = curated.accountId;
+		return merged;
+	});
+}
+function deduplicate(records, keyOf) {
+	const unique = /* @__PURE__ */ new Map();
+	for (const record of [...records].sort((left, right) => stableRecord(left).localeCompare(stableRecord(right)))) {
+		const key = keyOf(record);
+		if (key && !unique.has(key)) unique.set(key, record);
+	}
+	return [...unique.values()];
+}
+function stableRecord(record) {
+	return JSON.stringify(Object.fromEntries(Object.entries(record).sort(([left], [right]) => left.localeCompare(right))));
+}
+function compareRecords(left, right) {
+	for (const field of [
+		"targetDate",
+		"dueDate",
+		"closeDate",
+		"id"
+	]) {
+		const comparison = String(left[field] ?? "").localeCompare(String(right[field] ?? ""));
+		if (comparison !== 0) return comparison;
+	}
+	return 0;
+}
+function primitiveRow(record, columns) {
+	return Object.fromEntries(columns.map((column) => {
+		const value = record[column];
+		return [column, typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? value : null];
+	}));
+}
+function text(value) {
+	return typeof value === "string" && value.length > 0 ? value : void 0;
+}
+function date(value) {
+	return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : void 0;
+}
+function subtractDays(value, days) {
+	const result = /* @__PURE__ */ new Date(`${value}T00:00:00.000Z`);
+	result.setUTCDate(result.getUTCDate() - days);
+	return result.toISOString().slice(0, 10);
+}
+function addDays(value, days) {
+	const result = /* @__PURE__ */ new Date(`${value}T00:00:00.000Z`);
+	result.setUTCDate(result.getUTCDate() + days);
+	return result.toISOString().slice(0, 10);
+}
+//#endregion
+//#region packages/connectors/dataverse-mcp/query-guard.ts
+var DataverseQueryGuardError = class extends Error {
+	code;
+	constructor(code, message) {
+		super(message);
+		this.code = code;
+		this.name = "DataverseQueryGuardError";
+	}
+};
+function translateDataverseQuery(entityMapInput, queryInput, delegatedScope, maximumRows) {
+	const entityMap = dataverseEntityMapSchema.parse(entityMapInput);
+	const query = guardedQueryRequestSchema.parse(queryInput);
+	if (!Number.isInteger(maximumRows) || maximumRows < 1) throw new Error("Dataverse maximum row count must be a positive integer.");
+	const entity = entityMap.entities.find((candidate) => candidate.canonical === query.entity);
+	if (!entity) throw new DataverseQueryGuardError("entity_denied", "Dataverse entity is not allowlisted.");
+	if (query.expand.length > 0) throw new DataverseQueryGuardError("relationship_denied", "Dataverse relationship expansion is not allowlisted by the semantic map.");
+	const attributes = new Map(entity.attributes.map((attribute) => [attribute.canonical, attribute]));
+	const resolveAttribute = (canonical) => {
+		const attribute = attributes.get(canonical);
+		if (!attribute) throw new DataverseQueryGuardError("field_denied", "Dataverse field is not allowlisted.");
+		return attribute;
+	};
+	const userScopePredicate = entity.userScopePredicate === void 0 ? void 0 : renderScopePredicate(entity.userScopePredicate, delegatedScope);
+	return {
+		entitySetName: entity.entitySetName,
+		select: query.select.map((field) => resolveAttribute(field).logicalName),
+		filter: query.filter.map((filter) => ({
+			field: resolveAttribute(filter.field).logicalName,
+			operator: normalizeOperator(filter.operator),
+			value: filter.value
+		})),
+		orderBy: query.orderBy.map((order) => ({
+			field: resolveAttribute(order.field).logicalName,
+			direction: order.direction
+		})),
+		top: Math.min(query.top, maximumRows),
+		expand: [],
+		...userScopePredicate ? { userScopePredicate } : {}
+	};
+}
+function renderScopePredicate(template, scope) {
+	const replacements = {
+		delegatedUserAccountIds: scope.delegatedUserAccountIds,
+		delegatedUserOpportunityIds: scope.delegatedUserOpportunityIds
+	};
+	let rendered = template;
+	const placeholders = [...template.matchAll(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g)];
+	if (placeholders.length === 0) throw new DataverseQueryGuardError("scope_required", "Dataverse scope predicate has no delegated-user placeholder.");
+	for (const match of placeholders) {
+		const name = match[1];
+		const values = name === void 0 ? void 0 : replacements[name];
+		if (!values || values.length === 0 || values.some((value) => !isSafeIdentifier(value))) throw new DataverseQueryGuardError("scope_required", "Delegated Dataverse scope is missing or invalid.");
+		rendered = rendered.replaceAll(`{${name}}`, `(${values.join(",")})`);
+	}
+	if (/[{}]/.test(rendered)) throw new DataverseQueryGuardError("scope_required", "Dataverse scope predicate contains an unknown placeholder.");
+	return rendered;
+}
+function isSafeIdentifier(value) {
+	return /^[a-zA-Z0-9][a-zA-Z0-9-]{0,127}$/.test(value);
+}
+function normalizeOperator(operator) {
+	if (operator === "on-or-after") return "ge";
+	if (operator === "on-or-before") return "le";
+	return operator;
+}
+//#endregion
+//#region packages/connectors/dataverse-mcp/adapter.ts
+var DataverseMcpReadAdapter = class {
+	options;
+	maximumRows;
+	now;
+	createToolCallId;
+	constructor(options) {
+		this.options = options;
+		this.maximumRows = options.maximumRows ?? 500;
+		this.now = options.now ?? (() => /* @__PURE__ */ new Date());
+		this.createToolCallId = options.createToolCallId ?? randomUUID;
+	}
+	async query(query, context) {
+		const arguments_ = translateDataverseQuery(this.options.entityMap, query, context.delegatedScope, this.maximumRows);
+		const checkedAt = this.now().toISOString();
+		const lineage = {
+			connector: "dataverse-mcp",
+			operation: "read_query",
+			toolCallId: this.createToolCallId()
+		};
+		try {
+			const result = await this.options.broker.execute({
+				correlationId: context.correlationId,
+				serverId: "dataverse",
+				tool: "read_query",
+				capability: context.capability,
+				scope: context.scope.kind,
+				arguments: arguments_,
+				...context.signal ? { signal: context.signal } : {}
+			});
+			if (result.kind !== "untrusted-mcp-data") throw new DataverseMcpAdapterError("malformed_response", "Dataverse MCP result was not marked as untrusted data.");
+			const rows = extractRows(result.data);
+			const records = mapRowsToCanonical(this.options.entityMap, query, rows);
+			const truncated = result.truncated || records.length < result.recordCount;
+			return {
+				state: truncated ? "partial" : "complete",
+				records,
+				recordCount: result.recordCount,
+				truncated,
+				sourceHealth: {
+					source: "dataverse-mcp",
+					state: truncated ? "partial" : "live",
+					detail: truncated ? "Dataverse MCP returned a row-limited delegated result." : "Dataverse MCP returned delegated user-scoped data.",
+					checkedAt
+				},
+				lineage
+			};
+		} catch (error) {
+			const code = errorCode(error);
+			if (code === "aborted" || error instanceof Error && error.name === "AbortError") throw error;
+			if (isUnauthorizedCode(code)) return failureResult("unauthorized", "unauthorized", "Dataverse MCP delegated authorization is unavailable.", checkedAt, lineage);
+			if (error instanceof DataverseMcpAdapterError) throw error;
+			return failureResult("partial", "unavailable", "Dataverse MCP data is temporarily unavailable.", checkedAt, lineage);
+		}
+	}
+};
+var DataverseMcpAdapterError = class extends Error {
+	code;
+	constructor(code, message) {
+		super(message);
+		this.code = code;
+		this.name = "DataverseMcpAdapterError";
+	}
+};
+function extractRows(value) {
+	if (typeof value === "string") return extractRows(parseJson(value));
+	if (Array.isArray(value)) return requireRows(value);
+	if (!isRecord$1(value)) throw new DataverseMcpAdapterError("malformed_response", "Dataverse MCP result has no record collection.");
+	for (const key of [
+		"rows",
+		"records",
+		"items",
+		"value"
+	]) if (key in value) return requireRows(value[key]);
+	if (Array.isArray(value.content)) {
+		const textBlock = value.content.find((block) => isRecord$1(block) && block.type === "text" && typeof block.text === "string");
+		if (isRecord$1(textBlock) && typeof textBlock.text === "string") return extractRows(textBlock.text);
+	}
+	throw new DataverseMcpAdapterError("malformed_response", "Dataverse MCP result has no record collection.");
+}
+function requireRows(value) {
+	if (!Array.isArray(value) || value.some((row) => !isRecord$1(row))) throw new DataverseMcpAdapterError("malformed_response", "Dataverse MCP records are malformed.");
+	return value;
+}
+function mapRowsToCanonical(entityMap, query, rows) {
+	const entity = entityMap.entities.find((candidate) => candidate.canonical === query.entity);
+	if (!entity) throw new DataverseMcpAdapterError("malformed_response", "Dataverse entity mapping disappeared after translation.");
+	const selected = query.select.map((canonical) => {
+		const attribute = entity.attributes.find((candidate) => candidate.canonical === canonical);
+		if (!attribute) throw new DataverseMcpAdapterError("malformed_response", "Dataverse field mapping disappeared after translation.");
+		return attribute;
+	});
+	return rows.map((row) => Object.fromEntries(selected.map((attribute) => [attribute.canonical, row[attribute.logicalName] ?? null])));
+}
+function failureResult(state, sourceState, detail, checkedAt, lineage) {
+	return {
+		state,
+		records: [],
+		recordCount: 0,
+		truncated: false,
+		sourceHealth: {
+			source: "dataverse-mcp",
+			state: sourceState,
+			detail,
+			checkedAt
+		},
+		lineage
+	};
+}
+function parseJson(value) {
+	try {
+		return JSON.parse(value);
+	} catch {
+		throw new DataverseMcpAdapterError("malformed_response", "Dataverse MCP text content is not valid JSON.");
+	}
+}
+function isRecord$1(value) {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function errorCode(error) {
+	return isRecord$1(error) && typeof error.code === "string" ? error.code : void 0;
+}
+function isUnauthorizedCode(code) {
+	return code === "unauthorized" || code === "tool_denied" || code === "capability_denied" || code === "scope_denied" || code === "approval_required";
+}
+//#endregion
+//#region packages/connectors/mcp/index.ts
+var McpTransportError = class extends Error {
+	code;
+	status;
+	retryAfterMs;
+	constructor(code, message, status, retryAfterMs) {
+		super(message);
+		this.code = code;
+		this.status = status;
+		this.retryAfterMs = retryAfterMs;
+		this.name = "McpTransportError";
+	}
+};
+var defaultTimeoutMs = 3e4;
+var defaultMaxResponseBytes = 2097152;
+var defaultMaxRetryAfterMs = 5e3;
+function requirePositiveInteger(value, name) {
+	if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError(`${name} must be a positive integer.`);
+	return value;
+}
+function parseRetryAfter(value, now = Date.now()) {
+	if (!value) return 0;
+	const seconds = Number(value);
+	if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1e3);
+	const retryAt = Date.parse(value);
+	return Number.isFinite(retryAt) ? Math.max(0, retryAt - now) : 0;
+}
+async function waitForRetry(delayMs, signal) {
+	if (delayMs === 0) return;
+	await new Promise((resolve, reject) => {
+		const timer = setTimeout(resolve, delayMs);
+		const abort = () => {
+			clearTimeout(timer);
+			reject(new DOMException("The operation was aborted.", "AbortError"));
+		};
+		if (signal?.aborted) {
+			abort();
+			return;
+		}
+		signal?.addEventListener("abort", abort, { once: true });
+	});
+}
+function capResponse(response, maxResponseBytes) {
+	const declaredLength = response.headers.get("content-length");
+	if (declaredLength && Number(declaredLength) > maxResponseBytes) {
+		response.body?.cancel();
+		throw new McpTransportError("response_too_large", "MCP response exceeded the configured byte limit.");
+	}
+	if (!response.body) return response;
+	const reader = response.body.getReader();
+	let receivedBytes = 0;
+	const body = new ReadableStream({
+		async pull(controller) {
+			const chunk = await reader.read();
+			if (chunk.done) {
+				controller.close();
+				return;
+			}
+			receivedBytes += chunk.value.byteLength;
+			if (receivedBytes > maxResponseBytes) {
+				await reader.cancel();
+				controller.error(new McpTransportError("response_too_large", "MCP response exceeded the configured byte limit."));
+				return;
+			}
+			controller.enqueue(chunk.value);
+		},
+		async cancel(reason) {
+			await reader.cancel(reason);
+		}
+	});
+	return new Response(body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers: response.headers
+	});
+}
+function normalizeError(error, signal) {
+	if (error instanceof McpTransportError) return error;
+	if (signal?.aborted || error instanceof Error && error.name === "AbortError") return new McpTransportError("aborted", "MCP request was cancelled.");
+	if (error instanceof McpError && error.code === ErrorCode.RequestTimeout) return new McpTransportError("timeout", "MCP request timed out.");
+	if (error instanceof StreamableHTTPError) {
+		if (error.code === 401 || error.code === 403) return new McpTransportError("unauthorized", "MCP server rejected delegated authorization.");
+		if (error.code === 429) return new McpTransportError("rate_limited", "MCP server rate limit was exceeded.");
+	}
+	if (error instanceof SyntaxError || error instanceof McpError) return new McpTransportError("malformed_response", "MCP server returned an invalid protocol response.");
+	return new McpTransportError("transport", "MCP transport request failed.");
+}
+var McpHttpClient = class {
+	client = new Client({
+		name: "tlc-multi-agent-assist",
+		version: "0.1.0"
+	});
+	transport;
+	timeoutMs;
+	initialized = false;
+	disposed = false;
+	constructor(options) {
+		const serverUrl = new URL(options.serverUrl);
+		if (serverUrl.protocol !== "https:" && serverUrl.protocol !== "http:") throw new TypeError("MCP server URL must use HTTP or HTTPS.");
+		this.timeoutMs = requirePositiveInteger(options.timeoutMs ?? defaultTimeoutMs, "timeoutMs");
+		const maxResponseBytes = requirePositiveInteger(options.maxResponseBytes ?? defaultMaxResponseBytes, "maxResponseBytes");
+		const maxRetryAfterMs = requirePositiveInteger(options.maxRetryAfterMs ?? defaultMaxRetryAfterMs, "maxRetryAfterMs");
+		const fetchImplementation = options.fetch ?? globalThis.fetch;
+		const authenticatedFetch = async (input, init) => {
+			const token = await options.accessTokenProvider();
+			if (!token.trim()) throw new McpTransportError("unauthorized", "Delegated authorization is unavailable.");
+			const headers = new Headers(init?.headers);
+			headers.set("authorization", `Bearer ${token}`);
+			const requestInit = {
+				...init,
+				headers
+			};
+			let response = await fetchImplementation(input, requestInit);
+			if (response.status === 429) {
+				const retryDelay = Math.min(parseRetryAfter(response.headers.get("retry-after")), maxRetryAfterMs);
+				await response.body?.cancel();
+				await waitForRetry(retryDelay, init?.signal);
+				response = await fetchImplementation(input, requestInit);
+				if (response.status === 429) {
+					await response.body?.cancel();
+					throw new McpTransportError("rate_limited", "MCP server rate limit was exceeded.", 429, Math.min(parseRetryAfter(response.headers.get("retry-after")), maxRetryAfterMs));
+				}
+			}
+			return capResponse(response, maxResponseBytes);
+		};
+		this.transport = new StreamableHTTPClientTransport(serverUrl, { fetch: authenticatedFetch });
+	}
+	async initialize(signal) {
+		this.assertUsable();
+		if (this.initialized) return;
+		try {
+			await this.client.connect(this.transport, this.requestOptions(signal));
+			this.initialized = true;
+		} catch (error) {
+			throw normalizeError(error, signal);
+		}
+	}
+	async listTools(signal) {
+		this.assertInitialized();
+		try {
+			return await this.client.listTools(void 0, this.requestOptions(signal));
+		} catch (error) {
+			throw normalizeError(error, signal);
+		}
+	}
+	async callTool(name, args, signal) {
+		this.assertInitialized();
+		try {
+			return await this.client.callTool({
+				name,
+				arguments: args
+			}, void 0, this.requestOptions(signal));
+		} catch (error) {
+			throw normalizeError(error, signal);
+		}
+	}
+	async dispose() {
+		if (this.disposed) return;
+		this.disposed = true;
+		this.initialized = false;
+		try {
+			await this.client.close();
+		} catch {
+			throw new McpTransportError("transport", "MCP transport disposal failed.");
+		}
+	}
+	requestOptions(signal) {
+		return {
+			timeout: this.timeoutMs,
+			maxTotalTimeout: this.timeoutMs,
+			...signal ? { signal } : {}
+		};
+	}
+	assertUsable() {
+		if (this.disposed) throw new McpTransportError("disposed", "MCP client has been disposed.");
+	}
+	assertInitialized() {
+		this.assertUsable();
+		if (!this.initialized) throw new McpTransportError("transport", "MCP client is not initialized.");
+	}
+};
+//#endregion
+//#region packages/connectors/mcp/pool.ts
+var McpPoolError = class extends Error {
+	code;
+	constructor(code, message) {
+		super(message);
+		this.code = code;
+		this.name = "McpPoolError";
+	}
+};
+var retryableCodes = /* @__PURE__ */ new Set([
+	"rate_limited",
+	"timeout",
+	"transport"
+]);
+var McpClientPool = class {
+	entries = /* @__PURE__ */ new Map();
+	createClient;
+	now;
+	disposed = false;
+	constructor(options) {
+		this.now = options.now ?? Date.now;
+		this.createClient = options.clientFactory ?? ((server) => new McpHttpClient({
+			serverUrl: server.serverUrl,
+			accessTokenProvider: () => options.accessTokenProvider(server),
+			timeoutMs: server.limits.callTimeoutMs,
+			maxResponseBytes: server.limits.maxResultBytes
+		}));
+		const connections = /* @__PURE__ */ new Map();
+		for (const server of options.registry.servers) {
+			if (!server.enabled) continue;
+			const connectionId = server.connectionId ?? server.id;
+			const existing = connections.get(connectionId);
+			if (existing) {
+				this.entries.set(server.id, existing);
+				continue;
+			}
+			const entry = {
+				config: server,
+				client: void 0,
+				initialization: void 0,
+				activeCalls: 0,
+				waiters: [],
+				health: "cold",
+				circuit: "closed",
+				consecutiveFailures: 0,
+				openedAt: void 0,
+				halfOpenInFlight: false
+			};
+			connections.set(connectionId, entry);
+			this.entries.set(server.id, entry);
+		}
+	}
+	async listTools(serverId, signal) {
+		return this.execute(serverId, (client) => client.listTools(signal), signal);
+	}
+	async callTool(serverId, name, args, signal) {
+		return this.execute(serverId, (client) => client.callTool(name, args, signal), signal);
+	}
+	getHealth(serverId) {
+		const entry = this.getEntry(serverId);
+		return {
+			serverId,
+			health: entry.health,
+			circuit: entry.circuit,
+			activeCalls: entry.activeCalls,
+			consecutiveFailures: entry.consecutiveFailures
+		};
+	}
+	async dispose() {
+		if (this.disposed) return;
+		this.disposed = true;
+		const error = new McpPoolError("disposed", "MCP client pool has been disposed.");
+		const disposals = [];
+		for (const entry of new Set(this.entries.values())) {
+			entry.health = "disposed";
+			for (const waiter of entry.waiters.splice(0)) {
+				waiter.signal?.removeEventListener("abort", waiter.abort ?? (() => void 0));
+				waiter.reject(error);
+			}
+			if (entry.client) disposals.push(entry.client.dispose());
+		}
+		await Promise.allSettled(disposals);
+	}
+	async execute(serverId, operation, signal) {
+		const entry = this.getEntry(serverId);
+		await this.acquire(entry, signal);
+		try {
+			this.assertCircuitAvailable(entry);
+			for (let attempt = 1; attempt <= entry.config.retry.maxAttempts; attempt += 1) try {
+				const result = await operation(await this.getClient(entry, signal));
+				this.recordSuccess(entry);
+				return result;
+			} catch (error) {
+				const retryable = this.isRetryable(error, entry);
+				if (!retryable || attempt === entry.config.retry.maxAttempts) {
+					this.recordFailure(entry, retryable);
+					throw error;
+				}
+				entry.health = "degraded";
+				await this.resetClient(entry);
+				await this.delay(this.retryDelay(entry, attempt, error), signal);
+			}
+			throw new McpPoolError("circuit_open", "MCP retry attempts were exhausted.");
+		} finally {
+			if (entry.circuit === "half-open") entry.halfOpenInFlight = false;
+			this.release(entry);
+		}
+	}
+	getEntry(serverId) {
+		if (this.disposed) throw new McpPoolError("disposed", "MCP client pool has been disposed.");
+		const entry = this.entries.get(serverId);
+		if (!entry) throw new McpPoolError("server_disabled", "MCP server is not enabled.");
+		return entry;
+	}
+	assertCircuitAvailable(entry) {
+		if (entry.circuit === "open") {
+			if (this.now() - (entry.openedAt ?? this.now()) < entry.config.circuitBreaker.openDurationMs) throw new McpPoolError("circuit_open", "MCP server circuit is open.");
+			entry.circuit = "half-open";
+			entry.halfOpenInFlight = false;
+		}
+		if (entry.circuit === "half-open") {
+			if (entry.halfOpenInFlight) throw new McpPoolError("circuit_open", "MCP server circuit probe is in progress.");
+			entry.halfOpenInFlight = true;
+		}
+	}
+	async getClient(entry, signal) {
+		if (entry.client) return entry.client;
+		if (!entry.initialization) {
+			const client = this.createClient(entry.config);
+			entry.initialization = client.initialize(signal).then(() => {
+				if (this.disposed) throw new McpPoolError("disposed", "MCP client pool has been disposed.");
+				entry.client = client;
+				entry.health = "healthy";
+				return client;
+			}).catch(async (error) => {
+				await client.dispose().catch(() => void 0);
+				throw error;
+			}).finally(() => {
+				entry.initialization = void 0;
+			});
+		}
+		return entry.initialization;
+	}
+	async resetClient(entry) {
+		const client = entry.client;
+		entry.client = void 0;
+		entry.initialization = void 0;
+		if (client) await client.dispose().catch(() => void 0);
+	}
+	isRetryable(error, entry) {
+		if (!(error instanceof McpTransportError)) return false;
+		if (!retryableCodes.has(error.code)) return false;
+		return error.status === void 0 || entry.config.retry.retryOnStatus.includes(error.status);
+	}
+	retryDelay(entry, attempt, error) {
+		const configuredDelay = entry.config.retry.initialDelayMs * entry.config.retry.backoffMultiplier ** (attempt - 1);
+		const retryAfterMs = error instanceof McpTransportError ? error.retryAfterMs ?? 0 : 0;
+		return Math.min(Math.max(configuredDelay, retryAfterMs), entry.config.circuitBreaker.openDurationMs);
+	}
+	recordSuccess(entry) {
+		entry.health = "healthy";
+		entry.circuit = "closed";
+		entry.consecutiveFailures = 0;
+		entry.openedAt = void 0;
+		entry.halfOpenInFlight = false;
+	}
+	recordFailure(entry, transient) {
+		entry.health = transient ? "degraded" : "unavailable";
+		if (!transient) return;
+		entry.consecutiveFailures += 1;
+		if (entry.circuit === "half-open" || entry.consecutiveFailures >= entry.config.circuitBreaker.failureThreshold) {
+			entry.circuit = "open";
+			entry.health = "unavailable";
+			entry.openedAt = this.now();
+		}
+	}
+	async acquire(entry, signal) {
+		if (entry.activeCalls < entry.config.limits.maxConcurrentCalls) {
+			entry.activeCalls += 1;
+			return;
+		}
+		await new Promise((resolve, reject) => {
+			const waiter = {
+				resolve,
+				reject,
+				...signal ? { signal } : {}
+			};
+			if (signal) {
+				waiter.abort = () => {
+					const index = entry.waiters.indexOf(waiter);
+					if (index >= 0) entry.waiters.splice(index, 1);
+					reject(new McpTransportError("aborted", "MCP request was cancelled."));
+				};
+				if (signal.aborted) {
+					waiter.abort();
+					return;
+				}
+				signal.addEventListener("abort", waiter.abort, { once: true });
+			}
+			entry.waiters.push(waiter);
+		});
+		entry.activeCalls += 1;
+	}
+	release(entry) {
+		entry.activeCalls -= 1;
+		const waiter = entry.waiters.shift();
+		if (!waiter) return;
+		waiter.signal?.removeEventListener("abort", waiter.abort ?? (() => void 0));
+		waiter.resolve();
+	}
+	async delay(delayMs, signal) {
+		await new Promise((resolve, reject) => {
+			const finish = () => {
+				signal?.removeEventListener("abort", abort);
+				resolve();
+			};
+			const timer = setTimeout(finish, delayMs);
+			const abort = () => {
+				clearTimeout(timer);
+				signal?.removeEventListener("abort", abort);
+				reject(new McpTransportError("aborted", "MCP request was cancelled."));
+			};
+			if (signal?.aborted) {
+				abort();
+				return;
+			}
+			signal?.addEventListener("abort", abort, { once: true });
+		});
+	}
+};
+//#endregion
+//#region packages/connectors/msx-mcp/adapter.ts
+var stakeholderSchema = z.object({
+	id: z.string().min(1),
+	name: z.string().min(1),
+	role: z.string().min(1),
+	influence: z.enum([
+		"high",
+		"medium",
+		"low"
+	]),
+	lastTouchAt: z.string().datetime().optional()
+}).strict();
+var activitySchema = z.object({
+	id: z.string().min(1),
+	kind: z.enum([
+		"appointment",
+		"phone-call",
+		"email",
+		"task"
+	]),
+	subject: z.string().min(1),
+	occurredAt: z.string().datetime(),
+	owner: z.string().min(1).optional()
+}).strict();
+var pipelineRowSchema = opportunitySchema.extend({
+	forecastCategory: z.string().min(1).optional(),
+	probability: z.number().min(0).max(100).optional()
+}).strict();
+var opportunity360Schema = z.object({
+	opportunity: opportunitySchema,
+	milestones: z.array(milestoneSchema),
+	stakeholders: z.array(stakeholderSchema),
+	activities: z.array(activitySchema),
+	competitors: z.array(z.string().min(1)),
+	products: z.array(z.string().min(1))
+}).strict();
+var account360Schema = z.object({
+	account: accountSchema,
+	opportunities: z.array(opportunitySchema),
+	team: z.array(z.string().min(1)),
+	consumption: z.number().nonnegative().optional(),
+	supportPosture: z.string().min(1).optional()
+}).strict();
+var stakeholderMapSchema = z.object({
+	scope: scopeRefSchema,
+	stakeholders: z.array(stakeholderSchema)
+}).strict();
+var forecastSnapshotSchema = z.object({
+	currency: z.string().length(3),
+	committed: z.number().nonnegative(),
+	bestCase: z.number().nonnegative(),
+	target: z.number().nonnegative(),
+	gap: z.number()
+}).strict();
+var MsxMcpReadAdapter = class {
+	broker;
+	now;
+	createToolCallId;
+	constructor(broker, now = () => /* @__PURE__ */ new Date(), createToolCallId = randomUUID) {
+		this.broker = broker;
+		this.now = now;
+		this.createToolCallId = createToolCallId;
+	}
+	getOpportunity360(opportunityId, context) {
+		return this.read("get_opportunity_360", "opportunity", { opportunityId }, opportunity360Schema.nullable(), null, context);
+	}
+	getAccount360(accountId, context) {
+		return this.read("get_account_360", "account", { accountId }, account360Schema.nullable(), null, context);
+	}
+	listPipeline(filter, context) {
+		const scope = filter.accountId ? "account" : "portfolio";
+		return this.read("list_pipeline", scope, { filter }, z.array(pipelineRowSchema), [], context);
+	}
+	getStakeholderMap(scope, context) {
+		return this.read("get_stakeholder_map", scope.kind, { scope }, stakeholderMapSchema.nullable(), null, context);
+	}
+	listActivities(scope, window, context) {
+		return this.read("list_activities", scope.kind, {
+			scope,
+			window
+		}, z.array(activitySchema), [], context);
+	}
+	getForecastSnapshot(filter, context) {
+		const scope = filter.accountId ? "account" : "portfolio";
+		return this.read("get_forecast_snapshot", scope, { filter }, forecastSnapshotSchema.nullable(), null, context);
+	}
+	async read(tool, scope, arguments_, schema, empty, context) {
+		const checkedAt = this.now().toISOString();
+		const lineage = {
+			connector: "msx-mcp",
+			operation: tool,
+			queryTemplateId: `msx.${tool}.v1`,
+			toolCallId: this.createToolCallId()
+		};
+		try {
+			const result = await this.broker.execute({
+				correlationId: context.correlationId,
+				serverId: "msx",
+				tool,
+				capability: context.capability,
+				scope,
+				arguments: arguments_,
+				...context.signal ? { signal: context.signal } : {}
+			});
+			return this.success(result, schema, checkedAt, lineage);
+		} catch (error) {
+			const code = getErrorCode$1(error);
+			if (code === "aborted" || error instanceof Error && error.name === "AbortError") throw error;
+			if (code === "unauthorized" || code?.endsWith("_denied") || code === "approval_required") return this.failure("unauthorized", "unauthorized", empty, checkedAt, lineage);
+			if (error instanceof MsxMcpAdapterError) throw error;
+			return this.failure("partial", "unavailable", empty, checkedAt, lineage);
+		}
+	}
+	success(result, schema, checkedAt, lineage) {
+		if (result.kind !== "untrusted-mcp-data") throw new MsxMcpAdapterError("MSX MCP result envelope is invalid.");
+		const parsed = schema.safeParse(unwrapMcpData(result.data));
+		if (!parsed.success) throw new MsxMcpAdapterError("MSX MCP result does not match the local contract.");
+		return {
+			state: result.truncated ? "partial" : "complete",
+			data: parsed.data,
+			rowCount: result.recordCount,
+			truncated: result.truncated,
+			sourceHealth: {
+				source: "msx-mcp",
+				state: result.truncated ? "partial" : "live",
+				detail: result.truncated ? "MSX MCP returned a row-limited result." : "MSX MCP returned delegated user-scoped data.",
+				checkedAt
+			},
+			lineage
+		};
+	}
+	failure(state, sourceState, data, checkedAt, lineage) {
+		return {
+			state,
+			data,
+			rowCount: 0,
+			truncated: false,
+			sourceHealth: {
+				source: "msx-mcp",
+				state: sourceState,
+				detail: sourceState === "unauthorized" ? "MSX MCP delegated authorization is unavailable." : "MSX MCP data is temporarily unavailable.",
+				checkedAt
+			},
+			lineage
+		};
+	}
+};
+var MsxMcpAdapterError = class extends Error {
+	code = "malformed_response";
+	constructor(message) {
+		super(message);
+		this.name = "MsxMcpAdapterError";
+	}
+};
+function unwrapMcpData(value) {
+	if (typeof value === "string") try {
+		return JSON.parse(value);
+	} catch {
+		throw new MsxMcpAdapterError("MSX MCP text content is not valid JSON.");
+	}
+	if (isRecord(value) && Array.isArray(value.content)) {
+		const text = value.content.find((item) => isRecord(item) && item.type === "text" && typeof item.text === "string");
+		if (isRecord(text) && typeof text.text === "string") return unwrapMcpData(text.text);
+	}
+	return value;
+}
+function getErrorCode$1(error) {
+	return isRecord(error) && typeof error.code === "string" ? error.code : void 0;
+}
+function isRecord(value) {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+//#endregion
+//#region packages/orchestrator/workflows/runtime.ts
+var WorkflowRuntime = class {
+	registry;
+	executor;
+	history;
+	results = /* @__PURE__ */ new Map();
+	controllers = /* @__PURE__ */ new Map();
+	completions = /* @__PURE__ */ new Map();
+	now;
+	createId;
+	resultAssembler;
+	constructor(registry, executor, options = {}) {
+		this.registry = registry;
+		this.executor = executor;
+		this.now = options.now ?? Date.now;
+		this.createId = options.createId ?? randomUUID;
+		this.resultAssembler = options.resultAssembler;
+		this.history = new WorkflowRunHistory({
+			...options.historyCapacity === void 0 ? {} : { capacity: options.historyCapacity },
+			onEvicted: (run) => {
+				this.results.delete(run.resultRef ?? "");
+				this.controllers.delete(run.runId);
+				this.completions.delete(run.runId);
+			}
+		});
+	}
+	start(request) {
+		const definition = this.registry.get(request.workflowId);
+		const scope = scopeRefSchema.parse(request.scope);
+		if (definition.scope !== scope.kind) throw new WorkflowRuntimeError("scope_mismatch", `Workflow ${definition.id} requires ${definition.scope} scope.`);
+		if (definition.executionMode === "agentic") throw new WorkflowRuntimeError("unsupported_execution_mode", "This runtime does not execute agentic workflows.");
+		const runId = this.createId();
+		const correlationId = request.correlationId ?? this.createId();
+		const run = workflowRunSchema.parse({
+			contractVersion: "1.0",
+			runId,
+			workflowId: definition.id,
+			status: "queued",
+			scope,
+			connectorCalls: [],
+			telemetry: {
+				correlationId,
+				cacheHit: false
+			}
+		});
+		this.history.set(run);
+		this.controllers.set(runId, new AbortController());
+		this.completions.set(runId, deferredCompletion());
+		queueMicrotask(() => {
+			this.execute(runId, definition, request.input);
+		});
+		return run;
+	}
+	get(runId) {
+		return this.history.get(runId);
+	}
+	list(scope, limit) {
+		return this.history.list(scope, limit);
+	}
+	getResult(resultRef) {
+		const result = this.results.get(resultRef);
+		return result ? structuredClone(result) : void 0;
+	}
+	wait(runId) {
+		const run = this.requireRun(runId);
+		if (isTerminal(run.status)) return Promise.resolve(run);
+		const completion = this.completions.get(runId);
+		if (!completion) throw new WorkflowRuntimeError("run_not_found", `Workflow run ${runId} is not available.`);
+		return completion.promise.then((completed) => structuredClone(completed));
+	}
+	cancel(runId) {
+		const run = this.requireRun(runId);
+		if (isTerminal(run.status)) return run;
+		this.controllers.get(runId)?.abort(new WorkflowCancellationError());
+		const timestamp = iso(this.now());
+		const cancelled = this.transition(run, "cancelled", {
+			startedAt: run.startedAt ?? timestamp,
+			completedAt: timestamp
+		});
+		this.finish(cancelled);
+		return cancelled;
+	}
+	async execute(runId, definition, input) {
+		const queued = this.history.get(runId);
+		const controller = this.controllers.get(runId);
+		if (!queued || !controller || queued.status !== "queued") return;
+		const startedMs = this.now();
+		let run = this.transition(queued, "running", { startedAt: iso(startedMs) });
+		const result = {
+			workflowId: definition.id,
+			scope: run.scope,
+			steps: []
+		};
+		const resultRef = `memory://workflow-runs/${runId}/result`;
+		let outcome = "complete";
+		try {
+			for (const step of definition.connectorPlan) {
+				const callStarted = this.now();
+				const stepAbort = linkedAbortController(controller.signal);
+				try {
+					const connectorResult = await withTimeout(this.executor.execute(step, {
+						runId,
+						workflowId: definition.id,
+						correlationId: run.telemetry.correlationId,
+						scope: run.scope,
+						input,
+						signal: stepAbort.controller.signal
+					}), Math.max(0, definition.sla.timeoutMs - (this.now() - startedMs)), stepAbort.controller);
+					const current = this.history.get(runId);
+					if (!current || current.status !== "running" || controller.signal.aborted) return;
+					run = current;
+					const status = connectorResult.state === "complete" ? "success" : connectorResult.state;
+					run.connectorCalls.push({
+						connector: step.connector,
+						operation: step.operation,
+						status,
+						durationMs: Math.max(0, this.now() - callStarted),
+						recordCount: connectorResult.rowCount,
+						truncated: connectorResult.truncated
+					});
+					if (run.telemetry.firstResultMs === void 0 && connectorResult.state !== "unauthorized") run.telemetry.firstResultMs = Math.max(0, this.now() - startedMs);
+					result.steps.push({
+						connector: step.connector,
+						operation: step.operation,
+						data: connectorResult.data,
+						...connectorResult.lineage ? { lineage: connectorResult.lineage } : {},
+						...connectorResult.sourceHealth ? { sourceHealth: connectorResult.sourceHealth } : {}
+					});
+					if (connectorResult.state === "unauthorized") outcome = step.required ? "unauthorized" : "partial";
+					else if (connectorResult.state === "partial") outcome = "partial";
+					if (this.resultAssembler && connectorResult.state !== "unauthorized") {
+						result.output = this.resultAssembler.assemble({
+							definition,
+							scope: run.scope,
+							input,
+							steps: result.steps,
+							generatedAt: iso(this.now())
+						});
+						this.results.set(resultRef, structuredClone(result));
+						run = workflowRunSchema.parse({
+							...run,
+							resultRef
+						});
+					}
+					this.history.set(run);
+					if (step.required && connectorResult.state === "unauthorized") break;
+				} catch (error) {
+					const current = this.history.get(runId);
+					if (!current || current.status !== "running") return;
+					run = current;
+					if (error instanceof WorkflowCancellationError || controller.signal.reason instanceof WorkflowCancellationError) return;
+					const errorCode = getErrorCode(error);
+					const unauthorized = errorCode?.endsWith("_denied") || errorCode === "unauthorized" || errorCode === "scope_required";
+					run.connectorCalls.push({
+						connector: step.connector,
+						operation: step.operation,
+						status: unauthorized ? "unauthorized" : "failed",
+						durationMs: Math.max(0, this.now() - callStarted),
+						recordCount: 0,
+						truncated: false
+					});
+					this.history.set(run);
+					if (step.required) {
+						if (unauthorized) {
+							outcome = "unauthorized";
+							break;
+						}
+						const failed = this.transition(run, "failed", { completedAt: iso(this.now()) });
+						this.finish(failed);
+						return;
+					}
+					result.steps.push({
+						connector: step.connector,
+						operation: step.operation,
+						data: void 0,
+						sourceHealth: {
+							source: step.connector,
+							state: unauthorized ? "unauthorized" : "unavailable",
+							detail: unauthorized ? `${step.connector} delegated authorization is unavailable.` : `${step.connector} enrichment is temporarily unavailable.`,
+							checkedAt: iso(this.now())
+						}
+					});
+					outcome = "partial";
+				} finally {
+					stepAbort.dispose();
+				}
+			}
+			const current = this.history.get(runId);
+			if (!current || current.status !== "running" || controller.signal.aborted) return;
+			if (this.resultAssembler) result.output = this.resultAssembler.assemble({
+				definition,
+				scope: current.scope,
+				input,
+				steps: result.steps,
+				generatedAt: iso(this.now())
+			});
+			this.results.set(resultRef, structuredClone(result));
+			const completed = this.transition(current, "completed", {
+				completedAt: iso(this.now()),
+				state: outcome,
+				resultRef
+			});
+			this.finish(completed);
+		} catch {
+			const current = this.history.get(runId);
+			if (!current || current.status !== "running") return;
+			const failed = this.transition(current, "failed", { completedAt: iso(this.now()) });
+			this.finish(failed);
+		}
+	}
+	transition(run, status, patch) {
+		if (!isWorkflowRunTransitionAllowed(run.status, status)) throw new WorkflowRuntimeError("invalid_transition", `Workflow run cannot transition from ${run.status} to ${status}.`);
+		const next = workflowRunSchema.parse({
+			...run,
+			...patch,
+			status
+		});
+		this.history.set(next);
+		return next;
+	}
+	requireRun(runId) {
+		const run = this.history.get(runId);
+		if (!run) throw new WorkflowRuntimeError("run_not_found", `Workflow run ${runId} is not available.`);
+		return run;
+	}
+	finish(run) {
+		this.controllers.delete(run.runId);
+		this.completions.get(run.runId)?.resolve(run);
+	}
+};
+var WorkflowRuntimeError = class extends Error {
+	code;
+	constructor(code, message) {
+		super(message);
+		this.code = code;
+		this.name = "WorkflowRuntimeError";
+	}
+};
+var WorkflowCancellationError = class extends Error {
+	constructor() {
+		super("Workflow execution was cancelled.");
+		this.name = "AbortError";
+	}
+};
+var WorkflowTimeoutError = class extends Error {
+	code = "timeout";
+	constructor() {
+		super("Workflow execution timed out.");
+		this.name = "TimeoutError";
+	}
+};
+function withTimeout(operation, timeoutMs, controller) {
+	if (timeoutMs <= 0) {
+		controller.abort(new WorkflowTimeoutError());
+		return Promise.reject(new WorkflowTimeoutError());
+	}
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			const error = new WorkflowTimeoutError();
+			controller.abort(error);
+			reject(error);
+		}, timeoutMs);
+		operation.then((value) => {
+			clearTimeout(timer);
+			resolve(value);
+		}, (error) => {
+			clearTimeout(timer);
+			reject(error);
+		});
+	});
+}
+function deferredCompletion() {
+	let resolve;
+	return {
+		promise: new Promise((resolvePromise) => {
+			resolve = resolvePromise;
+		}),
+		resolve
+	};
+}
+function getErrorCode(error) {
+	return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : void 0;
+}
+function isTerminal(status) {
+	return status === "completed" || status === "failed" || status === "cancelled";
+}
+function iso(milliseconds) {
+	return new Date(milliseconds).toISOString();
+}
+function linkedAbortController(parent) {
+	const controller = new AbortController();
+	const abort = () => controller.abort(parent.reason);
+	if (parent.aborted) abort();
+	else parent.addEventListener("abort", abort, { once: true });
+	return {
+		controller,
+		dispose: () => parent.removeEventListener("abort", abort)
+	};
+}
+//#endregion
+//#region packages/orchestrator/workflows/host.ts
+var workflowIdSchema = z.string().regex(/^WF-[0-9]{3}$/);
+var runIdSchema = z.string().uuid();
+var listWorkflowDefinitionsRequestSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	scope: z.enum([
+		"portfolio",
+		"account",
+		"opportunity"
+	]).optional()
+}).strict();
+var startWorkflowHostRequestSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	workflowId: workflowIdSchema,
+	scope: scopeRefSchema,
+	input: z.unknown().optional(),
+	correlationId: z.string().uuid().optional()
+}).strict();
+var workflowRunRequestSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	runId: runIdSchema
+}).strict();
+var workflowGuidanceRequestSchema = workflowRunRequestSchema.extend({
+	queueItemId: z.string().min(1).max(200),
+	capability: workflowGuidanceHandoffSchema.shape.capability
+}).strict();
+var listWorkflowRunsRequestSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	scope: scopeRefSchema.optional(),
+	limit: z.number().int().min(1).max(100).default(25)
+}).strict();
+var workflowRunViewSchema = z.object({
+	run: workflowRunSchema,
+	output: initialWorkflowOutputSchema.optional()
+}).strict();
+var workflowHostOperationSchema = z.enum([
+	"list",
+	"start",
+	"get",
+	"cancel",
+	"history",
+	"guidance"
+]);
+var SharedWorkflowHost = class {
+	registry;
+	runtime;
+	constructor(registry, runtime) {
+		this.registry = registry;
+		this.runtime = runtime;
+	}
+	listDefinitions(rawRequest) {
+		const request = listWorkflowDefinitionsRequestSchema.parse(rawRequest);
+		return z.array(workflowDefinitionSchema).parse(this.registry.list(request.scope));
+	}
+	start(rawRequest) {
+		const request = startWorkflowHostRequestSchema.parse(rawRequest);
+		return workflowRunSchema.parse(this.runtime.start({
+			workflowId: request.workflowId,
+			scope: request.scope,
+			...request.input === void 0 ? {} : { input: request.input },
+			...request.correlationId === void 0 ? {} : { correlationId: request.correlationId }
+		}));
+	}
+	get(rawRequest) {
+		const request = workflowRunRequestSchema.parse(rawRequest);
+		const run = this.runtime.get(request.runId);
+		if (!run) throw new WorkflowRuntimeError("run_not_found", `Workflow run ${request.runId} is not available.`);
+		const result = run.resultRef ? this.runtime.getResult(run.resultRef) : void 0;
+		return workflowRunViewSchema.parse({
+			run,
+			...result?.output === void 0 ? {} : { output: initialWorkflowOutputSchema.parse(result.output) }
+		});
+	}
+	cancel(rawRequest) {
+		const request = workflowRunRequestSchema.parse(rawRequest);
+		return workflowRunSchema.parse(this.runtime.cancel(request.runId));
+	}
+	listRuns(rawRequest) {
+		const request = listWorkflowRunsRequestSchema.parse(rawRequest);
+		return z.array(workflowRunSchema).parse(this.runtime.list(request.scope, request.limit));
+	}
+	prepareGuidance(rawRequest) {
+		const request = workflowGuidanceRequestSchema.parse(rawRequest);
+		const view = this.get({
+			contractVersion: "1.0",
+			runId: request.runId
+		});
+		if (view.run.status !== "completed" || !view.run.resultRef || !view.output) throw new WorkflowRuntimeError("result_not_available", "Guidance requires a completed workflow result.");
+		const item = view.output.queueItems.find(({ id }) => id === request.queueItemId);
+		if (!item) throw new WorkflowRuntimeError("queue_item_not_found", `Queue item ${request.queueItemId} is not available.`);
+		if (!item.accountId || !item.opportunityId) throw new WorkflowRuntimeError("opportunity_scope_required", "Guidance requires an opportunity-scoped queue item.");
+		const lineageIds = new Set(view.output.lineage.map(({ toolCallId }) => toolCallId));
+		if (item.evidenceIds.some((evidenceId) => !lineageIds.has(evidenceId))) throw new WorkflowRuntimeError("invalid_evidence", "Queue-item evidence does not belong to the workflow result.");
+		const facts = [
+			{
+				label: "Priority",
+				value: item.priority
+			},
+			...item.owner ? [{
+				label: "Owner",
+				value: item.owner
+			}] : [],
+			...item.dueDate ? [{
+				label: "Due date",
+				value: item.dueDate
+			}] : []
+		];
+		const prompt = [
+			`Review ${view.output.workflowId} result "${item.title}" and recommend the next evidence-backed action.`,
+			...facts.map(({ label, value }) => `${label}: ${value}`),
+			`Evidence IDs: ${item.evidenceIds.join(", ")}. Cite only these IDs.`
+		].join("\n");
+		return workflowGuidanceHandoffSchema.parse({
+			contractVersion: "1.0",
+			workflowId: view.output.workflowId,
+			resultRef: view.run.resultRef,
+			capability: request.capability,
+			scope: {
+				kind: "opportunity",
+				accountId: item.accountId,
+				opportunityId: item.opportunityId
+			},
+			prompt,
+			context: {
+				cardTitle: view.output.card.title,
+				queueItemId: item.id,
+				queueItemTitle: item.title,
+				facts,
+				evidenceIds: item.evidenceIds
+			}
+		});
+	}
+};
+function invokeWorkflowHost(host, rawOperation, request) {
+	switch (workflowHostOperationSchema.parse(rawOperation)) {
+		case "list": return z.array(workflowDefinitionSchema).parse(host.listDefinitions(request));
+		case "start": return workflowRunSchema.parse(host.start(request));
+		case "get": return workflowRunViewSchema.parse(host.get(request));
+		case "cancel": return workflowRunSchema.parse(host.cancel(request));
+		case "history": return z.array(workflowRunSchema).parse(host.listRuns(request));
+		case "guidance": return workflowGuidanceHandoffSchema.parse(host.prepareGuidance(request));
+	}
+}
+//#endregion
+//#region packages/orchestrator/workflows/registry.ts
+var workflowDefinitionsSchema = z.array(workflowDefinitionSchema).min(1);
+var WorkflowRegistry = class {
+	definitions = /* @__PURE__ */ new Map();
+	constructor(definitions) {
+		this.replace(definitions);
+	}
+	replace(definitions) {
+		const parsed = workflowDefinitionsSchema.parse(definitions);
+		const replacement = /* @__PURE__ */ new Map();
+		for (const definition of parsed) {
+			if (replacement.has(definition.id)) throw new WorkflowRegistryError("duplicate_workflow", `Workflow ${definition.id} is defined more than once.`);
+			replacement.set(definition.id, definition);
+		}
+		this.definitions = replacement;
+	}
+	get(workflowId) {
+		const definition = this.definitions.get(workflowId);
+		if (!definition) throw new WorkflowRegistryError("workflow_not_found", `Workflow ${workflowId} is not registered.`);
+		return structuredClone(definition);
+	}
+	list(scope) {
+		return [...this.definitions.values()].filter((definition) => scope === void 0 || definition.scope === scope).sort((left, right) => left.id.localeCompare(right.id)).map((definition) => structuredClone(definition));
+	}
+};
+var WorkflowRegistryError = class extends Error {
+	code;
+	constructor(code, message) {
+		super(message);
+		this.code = code;
+		this.name = "WorkflowRegistryError";
+	}
+};
+//#endregion
+//#region packages/orchestrator/workflows/configured-host.ts
+function createConfiguredWorkflowHost(options) {
+	const pool = new McpClientPool({
+		registry: options.registry,
+		accessTokenProvider: (server) => options.getAccessToken(server)
+	});
+	const broker = new McpToolBroker({
+		registry: options.registry,
+		policy: options.policy,
+		invokeTool: (serverId, tool, args, signal) => pool.callTool(serverId, tool, args, signal)
+	});
+	const executor = new InitialWorkflowConnectorExecutor(new DataverseMcpReadAdapter({
+		entityMap: options.entityMap,
+		broker
+	}), new MsxMcpReadAdapter(broker), options.resolveDelegatedScope);
+	const workflowRegistry = new WorkflowRegistry(initialWorkflowDefinitions);
+	return {
+		host: new SharedWorkflowHost(workflowRegistry, new WorkflowRuntime(workflowRegistry, executor, { resultAssembler: new InitialWorkflowResultAssembler() })),
+		dispose: () => pool.dispose()
+	};
+}
+//#endregion
+//#region packages/orchestrator/workflows/sample-host.ts
+var sampleRows = {
+	"WF-001": [{
+		id: "opp-grid-modernization",
+		accountId: "account-contoso",
+		name: "Grid operations modernization",
+		closeDate: "2026-08-15"
+	}, {
+		id: "opp-ai-service",
+		accountId: "account-fabrikam",
+		name: "AI-assisted customer service",
+		closeDate: "2026-08-29"
+	}],
+	"WF-002": [{
+		id: "milestone-grid",
+		opportunityId: "opp-grid-modernization",
+		name: "Architecture sign-off",
+		status: "At Risk",
+		targetDate: "2026-09-01"
+	}],
+	"WF-003": [{
+		id: "milestone-stage-gap",
+		opportunityId: "opp-grid-modernization",
+		name: "Customer outcome evidence",
+		status: "At Risk",
+		targetDate: "2026-09-05"
+	}],
+	"WF-005": [{
+		id: "milestone-governance",
+		opportunityId: "opp-ai-service",
+		name: "Proof review",
+		status: "Blocked",
+		targetDate: "2026-09-10"
+	}],
+	"WF-006": [{
+		id: "opp-grid-modernization",
+		accountId: "account-contoso",
+		name: "Grid operations modernization",
+		closeDate: "2026-10-30"
+	}],
+	"WF-007": [{
+		id: "meeting-grid",
+		opportunityId: "opp-grid-modernization",
+		subject: "Executive architecture review",
+		ownerId: "owner-1",
+		dueDate: "2026-09-18",
+		status: "Open"
+	}],
+	"WF-009": [{
+		id: "opp-grid-modernization",
+		accountId: "account-contoso",
+		name: "Grid operations modernization",
+		ownerId: "owner-1",
+		closeDate: "2026-10-30"
+	}, {
+		id: "opp-cloud-security-readiness",
+		accountId: "account-contoso",
+		name: "Cloud security readiness",
+		ownerId: "owner-1",
+		closeDate: "2027-02-26"
+	}],
+	"WF-010": [{
+		id: "activity-grid",
+		opportunityId: "opp-grid-modernization",
+		subject: "Customer follow-up",
+		ownerId: "owner-1",
+		dueDate: "2026-08-01",
+		status: "Open"
+	}],
+	"WF-012": [{
+		id: "milestone-exit-1",
+		opportunityId: "opp-grid-modernization",
+		name: "Decision criteria confirmed",
+		status: "Completed",
+		targetDate: "2026-09-08"
+	}, {
+		id: "milestone-exit-2",
+		opportunityId: "opp-grid-modernization",
+		name: "Execution owner assigned",
+		status: "At Risk",
+		targetDate: "2026-09-12"
+	}]
+};
+var sampleMsxRows = [{
+	id: "opp-grid-modernization",
+	accountId: "account-contoso",
+	name: "Grid operations modernization",
+	owner: "Avery Johnson",
+	recordedStage: 3,
+	value: 42e5,
+	currency: "USD",
+	closeDate: "2026-10-30",
+	forecastCategory: "Committed",
+	probability: 80
+}, {
+	id: "opp-ai-service",
+	accountId: "account-fabrikam",
+	name: "AI-assisted customer service",
+	recordedStage: 2,
+	value: 175e4,
+	currency: "USD",
+	closeDate: "2026-12-18",
+	forecastCategory: "Best Case",
+	probability: 65
+}];
+function createSampleWorkflowHost() {
+	const registry = new WorkflowRegistry(initialWorkflowDefinitions);
+	return new SharedWorkflowHost(registry, new WorkflowRuntime(registry, { execute: async (step, context) => {
+		const workflowId = context.workflowId;
+		const data = step.connector === "dataverse-mcp" ? sampleRows[workflowId] : step.operation === "get_forecast_snapshot" ? {
+			currency: "USD",
+			committed: 42e5,
+			bestCase: 175e4,
+			target: 7e6,
+			gap: -28e5
+		} : sampleMsxRows;
+		const lineage = {
+			connector: step.connector,
+			operation: step.operation,
+			toolCallId: `sample-${workflowId}-${step.connector}`
+		};
+		const sourceHealth = {
+			source: step.connector,
+			state: "sample",
+			detail: "Sanitized workflow fixture data.",
+			checkedAt: (/* @__PURE__ */ new Date()).toISOString()
+		};
+		return {
+			state: "complete",
+			data,
+			rowCount: Array.isArray(data) ? data.length : 1,
+			truncated: false,
+			lineage,
+			sourceHealth
+		};
+	} }, { resultAssembler: new InitialWorkflowResultAssembler() }));
+}
+//#endregion
 //#region packages/orchestrator/index.ts
 var ThinSliceOrchestrator = class {
 	msx;
@@ -2233,11 +5004,25 @@ async function openConfigurationAndExit(application, dialog, shell, filePath, de
 	application.quit();
 }
 //#endregion
+//#region apps/desktop/electron/main/workflow-ipc.ts
+var workflowIpcChannels = {
+	list: "tlc:workflow-list",
+	start: "tlc:workflow-start",
+	get: "tlc:workflow-get",
+	cancel: "tlc:workflow-cancel",
+	history: "tlc:workflow-history",
+	guidance: "tlc:workflow-guidance"
+};
+function createWorkflowIpcHandlers(host) {
+	return Object.fromEntries(Object.entries(workflowIpcChannels).map(([operation, channel]) => [channel, (request) => invokeWorkflowHost(host, operation, request)]));
+}
+//#endregion
 //#region apps/desktop/electron/main/index.ts
 var currentDirectory = dirname(fileURLToPath(import.meta.url));
 var desktopRoot = resolve(currentDirectory, "../..");
 var rendererFile = process.env["TLC_UI_MODE"] === "legacy" ? resolve(desktopRoot, "dist/renderer/index.html") : resolve(desktopRoot, "dist/revamp/desktop.html");
 var preloadFile = resolve(desktopRoot, "dist-electron/preload/index.cjs");
+var appIcon = resolve(desktopRoot, "build/icon.png");
 var developmentUrl = process.env["VITE_DEV_SERVER_URL"];
 var allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString();
 var dataMode = process.env["TLC_DATA_MODE"] === "sample" ? "sample" : "live";
@@ -2306,6 +5091,36 @@ var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object
 		})
 	}];
 })), reportPerformance);
+var configurationRoot = app.isPackaged ? resolve(process.resourcesPath, "config") : resolve(desktopRoot, "../../config");
+var [mcpRegistry, mcpPolicy, dataverseEntityMap] = await Promise.all([
+	loadMcpServerRegistry(resolve(configurationRoot, "mcp.servers.json")),
+	loadMcpToolPolicy(resolve(configurationRoot, "mcp.tool-policy.json")),
+	loadDataverseEntityMap(resolve(configurationRoot, "dataverse.entity-map.json"))
+]);
+var delegatedScope;
+var configuredWorkflowHost = dataMode === "sample" ? void 0 : createConfiguredWorkflowHost({
+	registry: mcpRegistry,
+	policy: mcpPolicy,
+	entityMap: dataverseEntityMap,
+	getAccessToken: async (server) => {
+		const token = await credentials.msx.getToken(server.authentication.scopes);
+		if (!token) throw new Error("A delegated MCP access token is unavailable.");
+		return token.token;
+	},
+	resolveDelegatedScope: () => {
+		delegatedScope ??= resolveMsxScope();
+		return delegatedScope;
+	}
+});
+var workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost();
+async function resolveMsxScope() {
+	const accounts = await msxConnector.listAccounts();
+	const opportunities = (await Promise.all(accounts.map(({ id }) => msxConnector.listOpportunities(id)))).flat();
+	return {
+		delegatedUserAccountIds: accounts.map(({ id }) => id),
+		delegatedUserOpportunityIds: opportunities.map(({ id }) => id)
+	};
+}
 async function getDataStatus() {
 	if (dataMode === "sample") return {
 		mode: "sample",
@@ -2331,6 +5146,10 @@ function assertTrustedSender(event) {
 	if (!senderUrl || !senderUrl.startsWith(allowedRendererUrl)) throw new Error("Rejected IPC request from an untrusted renderer.");
 }
 function registerIpc() {
+	for (const [channel, handler] of Object.entries(createWorkflowIpcHandlers(workflowHost))) ipcMain.handle(channel, (event, request) => {
+		assertTrustedSender(event);
+		return handler(request);
+	});
 	ipcMain.handle("tlc:exit-application", (event) => {
 		assertTrustedSender(event);
 		setImmediate(() => app.quit());
@@ -2424,6 +5243,7 @@ async function createWindow() {
 		minHeight: 720,
 		backgroundColor: "#f5f7fa",
 		title: "TLC Account Team Intelligence",
+		icon: appIcon,
 		autoHideMenuBar: true,
 		webPreferences: {
 			preload: preloadFile,
@@ -2452,6 +5272,9 @@ app.on("window-all-closed", () => {
 });
 app.on("activate", () => {
 	if (BrowserWindow.getAllWindows().length === 0) createWindow();
+});
+app.on("before-quit", () => {
+	configuredWorkflowHost?.dispose();
 });
 //#endregion
 export {};

@@ -1,3 +1,6 @@
 export * from './contracts/index.js'
+export * from './configuration/dataverse-entity-map.js'
+export * from './configuration/mcp-servers.js'
+export * from './configuration/mcp-tool-policy.js'
 export * from './sharing/opportunity-link.js'
 export * from './telemetry/performance.js'

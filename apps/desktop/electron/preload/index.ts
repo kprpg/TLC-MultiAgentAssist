@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { Account, AgentTaskRequest, AgentTaskResponse, AuthStatus, DesktopDataStatus, EmailComposeRequest, EmailComposeResult, ExportResponseRequest, ExportResponseResult, McemRequest, McemResponse, McemStageTransitionRequest, McemStageTransitionResult, Milestone, MilestoneUpdate, Opportunity, OpportunityUpdate } from '../../../../packages/common/index.js'
+import type { WorkflowHostOperation } from '../../../../packages/orchestrator/workflows/index.js'
 
 export interface TlcDesktopApi {
   exitApplication(): Promise<void>
@@ -16,6 +17,7 @@ export interface TlcDesktopApi {
   openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
   exportAgentResponse(request: ExportResponseRequest): Promise<ExportResponseResult>
   openEvidence(url: string): Promise<void>
+  invokeWorkflow(operation: WorkflowHostOperation, request: unknown): Promise<unknown>
 }
 
 const api: TlcDesktopApi = {
@@ -32,7 +34,8 @@ const api: TlcDesktopApi = {
   runAgentTask: (request) => ipcRenderer.invoke('tlc:run-agent-task', request),
   openEmailCompose: (request) => ipcRenderer.invoke('tlc:open-email-compose', request),
   exportAgentResponse: (request) => ipcRenderer.invoke('tlc:export-agent-response', request),
-  openEvidence: (url) => ipcRenderer.invoke('tlc:open-evidence', url)
+  openEvidence: (url) => ipcRenderer.invoke('tlc:open-evidence', url),
+  invokeWorkflow: (operation, request) => ipcRenderer.invoke(`tlc:workflow-${operation}`, request)
 }
 
 contextBridge.exposeInMainWorld('tlc', api)

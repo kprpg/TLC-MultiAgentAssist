@@ -1,0 +1,11 @@
+{
+  "name": "@tlc/connector-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./index.ts" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@tlc/common": "0.1.0"
+  }
+}

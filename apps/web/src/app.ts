@@ -29,6 +29,7 @@ import {
 } from '../../../packages/common/index.js'
 import { createOutlookDraftMessage } from '../../desktop/electron/main/outlook-compose.js'
 import { createResponseDocumentBuffer } from '../../desktop/electron/main/response-document.js'
+import { invokeWorkflowHost, type WorkflowHost, type WorkflowHostOperation } from '../../../packages/orchestrator/workflows/index.js'
 
 const accountIdSchema = z.string().min(1).max(200)
 const maximumBodyBytes = 1_048_576
@@ -52,6 +53,7 @@ export interface AuthenticatedRequest {
 
 export interface WebApiOptions {
     createRuntime(authentication: AuthenticatedRequest): Promise<WebRuntime> | WebRuntime
+    resolveWorkflowHost?(authentication: AuthenticatedRequest): Promise<WorkflowHost> | WorkflowHost
     authenticate?(request: IncomingMessage): Promise<AuthenticatedRequest> | AuthenticatedRequest
     shutdown?(): Promise<void> | void
     onError?(error: unknown, correlationId: string): void
@@ -109,6 +111,14 @@ export function buildWebApiHandler(options: WebApiOptions) {
                 response.setHeader('content-disposition', `attachment; filename="${fileName}"`)
                 response.setHeader('x-tlc-file-name', fileName)
                 response.end(document)
+                return true
+            }
+
+            const workflowMatch = /^\/api\/workflows\/(list|start|get|cancel|history)$/.exec(url.pathname)
+            if (request.method === 'POST' && workflowMatch && options.resolveWorkflowHost) {
+                const host = await options.resolveWorkflowHost(authentication)
+                const operation = workflowMatch[1] as WorkflowHostOperation
+                sendJson(response, 200, invokeWorkflowHost(host, operation, await readJsonBody(request)))
                 return true
             }
 

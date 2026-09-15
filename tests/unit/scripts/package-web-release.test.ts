@@ -27,6 +27,7 @@ describe('web release package', () => {
             scripts: { start: 'node server.js' }
         })
         expect(packageJson.dependencies).toHaveProperty('@azure/identity')
+        expect(packageJson.dependencies).toHaveProperty('@modelcontextprotocol/sdk')
         expect(packageJson.dependencies).toHaveProperty('docx')
         expect(packageJson.dependencies).toHaveProperty('remark-gfm')
         expect(packageJson.dependencies).toHaveProperty('unified')
@@ -34,6 +35,9 @@ describe('web release package', () => {
         await expect(stat(join(outputRoot, 'apps/desktop/dist/revamp/index.html'))).resolves.toMatchObject({ isFile: expect.any(Function) })
         await expect(stat(join(outputRoot, 'docs/knowledge/MCEM Overview.pdf'))).resolves.toMatchObject({ isFile: expect.any(Function) })
         await expect(stat(join(outputRoot, 'config/foundry.environment.example.json'))).resolves.toMatchObject({ isFile: expect.any(Function) })
+        await expect(stat(join(outputRoot, 'config/mcp.servers.json'))).resolves.toMatchObject({ isFile: expect.any(Function) })
+        await expect(stat(join(outputRoot, 'config/mcp.tool-policy.json'))).resolves.toMatchObject({ isFile: expect.any(Function) })
+        await expect(stat(join(outputRoot, 'config/dataverse.entity-map.json'))).resolves.toMatchObject({ isFile: expect.any(Function) })
         await expect(stat(join(outputRoot, 'config/foundry.environment.json'))).rejects.toThrow()
     })
 })
@@ -42,11 +46,14 @@ async function writeFixture(sourceRoot: string) {
     const files: Record<string, string> = {
         'package.json': JSON.stringify({ engines: { node: '>=22.12.0' }, dependencies: { '@azure/identity': '1.0.0' } }),
         'apps/web/package.json': JSON.stringify({ version: '1.2.3', dependencies: { zod: '1.0.0' } }),
-        'apps/desktop/package.json': JSON.stringify({ dependencies: { docx: '1.0.0', 'remark-gfm': '1.0.0', unified: '1.0.0' } }),
+        'apps/desktop/package.json': JSON.stringify({ dependencies: { '@modelcontextprotocol/sdk': '1.29.0', docx: '1.0.0', 'remark-gfm': '1.0.0', unified: '1.0.0' } }),
         'apps/web/dist/server.js': 'export {}',
         'apps/desktop/dist/revamp/index.html': '<div id="root"></div>',
         'docs/knowledge/MCEM Overview.pdf': 'fixture',
-        'config/foundry.environment.example.json': '{}'
+        'config/foundry.environment.example.json': '{}',
+        'config/mcp.servers.json': '{}',
+        'config/mcp.tool-policy.json': '{}',
+        'config/dataverse.entity-map.json': '{}'
     }
     await Promise.all(Object.entries(files).map(async ([relativePath, contents]) => {
         const path = join(sourceRoot, relativePath)

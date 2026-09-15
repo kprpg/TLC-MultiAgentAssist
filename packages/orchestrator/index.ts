@@ -170,3 +170,7 @@ export class ThinSliceOrchestrator {
 }
 
 export { addMsxOpportunityLink }
+export * from './policies/mcp-tool-authorization.js'
+export * from './progress/index.js'
+export * from './routing/mcp-tool-broker.js'
+export * from './workflows/index.js'

@@ -2,6 +2,7 @@ import { expect, test, _electron as electron } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { workflowDefinitions, workflowOutput, workflowRun } from './workflow-fixtures.js'
 
 test('opens the default desktop blade workspace through the existing IPC bridge', async () => {
     const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-revamp-test-'))
@@ -10,13 +11,19 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
         env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_UI_MODE: '' }
     })
     let exitedFromUi = false
+    const completedRun = {
+        ...workflowRun('WF-001', 'completed', 'complete'),
+        connectorCalls: [{ connector: 'dataverse-mcp' as const, operation: 'read_query', status: 'success' as const, durationMs: 840, recordCount: 1, truncated: false }],
+        telemetry: { correlationId: '22222222-2222-4222-8222-222222222222', firstResultMs: 620, cacheHit: false }
+    }
 
     try {
         const window = await app.firstWindow()
         await window.setViewportSize({ width: 1400, height: 768 })
         const pageErrors: Error[] = []
         window.on('pageerror', (error) => pageErrors.push(error))
-        await app.evaluate(({ ipcMain }) => {
+        await app.evaluate(({ ipcMain }, fixtures) => {
+            const { definitions, historicalRun, output } = fixtures
             ipcMain.removeHandler('tlc:get-data-status')
             ipcMain.handle('tlc:get-data-status', () => ({
                 mode: 'live',
@@ -27,12 +34,47 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
                     detail: 'Authenticated test identity.'
                 }
             }))
-        })
+            let workflowId = 'WF-001'
+            const run = (status: 'running' | 'completed' | 'cancelled') => ({
+                contractVersion: '1.0',
+                runId: '11111111-1111-4111-8111-111111111111',
+                workflowId,
+                status,
+                ...(status === 'completed' ? { state: 'complete', resultRef: `result:${workflowId}` } : {}),
+                scope: { kind: 'portfolio' },
+                startedAt: '2026-09-12T10:00:00.000Z',
+                ...(status !== 'running' ? { completedAt: '2026-09-12T10:00:01.000Z' } : {}),
+                connectorCalls: [],
+                telemetry: { correlationId: '22222222-2222-4222-8222-222222222222', cacheHit: false }
+            })
+            for (const channel of ['tlc:workflow-list', 'tlc:workflow-start', 'tlc:workflow-get', 'tlc:workflow-cancel', 'tlc:workflow-history']) ipcMain.removeHandler(channel)
+            ipcMain.handle('tlc:workflow-list', (_event, request: { scope?: string }) => request.scope === 'portfolio' ? definitions : [])
+            ipcMain.handle('tlc:workflow-history', () => [historicalRun])
+            ipcMain.handle('tlc:workflow-start', (_event, request: { workflowId: string }) => { workflowId = request.workflowId; return run('running') })
+            ipcMain.handle('tlc:workflow-get', (_event, request: { runId: string }) => request.runId === historicalRun.runId ? { run: historicalRun, output } : { run: run('completed') })
+            ipcMain.handle('tlc:workflow-cancel', () => run('cancelled'))
+        }, { definitions: workflowDefinitions, historicalRun: completedRun, output: workflowOutput() })
 
         await expect(window).toHaveTitle('TLC Account Team Intelligence | Desktop')
         await expect(window.getByText('DESKTOP · CONNECTED DATA')).toBeVisible()
         await expect(window.getByRole('region', { name: 'Accounts blade' })).toBeVisible()
         await expect(window.getByRole('heading', { name: 'Select a customer account' })).toBeVisible()
+
+        await window.getByRole('button', { name: 'Workflows' }).click()
+        const launcher = window.getByRole('region', { name: 'Workflow Launcher' })
+        await expect(launcher.locator('.workflow-card')).toHaveCount(4)
+        await launcher.getByRole('button', { name: /Stale opportunity sweep/ }).first().click()
+        await expect(launcher.getByRole('table', { name: 'Stale opportunities' })).toContainText('Northwind renewal')
+        await expect(launcher.getByRole('region', { name: 'Operational queue' })).toContainText('Review Northwind renewal')
+        await launcher.getByRole('button', { name: 'Activity details' }).click()
+        await expect(window.getByRole('dialog', { name: 'Workflow activity' })).toContainText('840 ms')
+        await window.getByRole('button', { name: 'Close' }).click()
+        await launcher.getByLabel('Filter workflows by persona').selectOption('Manager')
+        await expect(launcher.locator('.workflow-card')).toHaveCount(3)
+        await launcher.locator('.workflow-card').filter({ hasText: 'Stale opportunity sweep' }).getByRole('button', { name: 'Run workflow' }).click()
+        await expect(launcher.getByRole('status')).toContainText('Workflow completed with all required sources.')
+        await window.getByRole('button', { name: 'Home' }).click()
+        await expect(window.getByRole('region', { name: 'Accounts blade' })).toBeVisible()
 
         await window.getByRole('button', { name: /Contoso Energy/ }).first().click()
         await expect(window.getByRole('region', { name: 'Opportunities blade' })).toBeVisible()

@@ -16,6 +16,9 @@ export async function packageWebRelease(outputRoot = join(repositoryRoot, 'relea
   await copy('apps/desktop/dist/revamp', join(outputRoot, 'apps/desktop/dist/revamp'))
   await copy('docs/knowledge/MCEM Overview.pdf', join(outputRoot, 'docs/knowledge/MCEM Overview.pdf'))
   await copy('config/foundry.environment.example.json', join(outputRoot, 'config/foundry.environment.example.json'))
+  await copy('config/mcp.servers.json', join(outputRoot, 'config/mcp.servers.json'))
+  await copy('config/mcp.tool-policy.json', join(outputRoot, 'config/mcp.tool-policy.json'))
+  await copy('config/dataverse.entity-map.json', join(outputRoot, 'config/dataverse.entity-map.json'))
 
   const releasePackage = {
     name: '@tlc/web-release',

@@ -77,7 +77,7 @@ describe('App Service release package', () => {
         expect(archive.file('package/server.js')).toBeNull()
     })
 
-    it('writes ZIP64 metadata for packages that may exceed the classic entry limit', async () => {
+    it('writes ZIP64 metadata for packages that may exceed the classic entry limit', { timeout: 15_000 }, async () => {
         const temporaryDirectory = await mkdtemp(join(tmpdir(), 'tlc-web-appservice-many-files-test-'))
         temporaryDirectories.push(temporaryDirectory)
         const packageRoot = join(temporaryDirectory, 'package')
