@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "environment": "shared",
   "authentication": {
-    "mode": "interactive-browser",
+    "mode": "azure-cli",
     "expectedUserDomain": "@microsoft.com",
     "foundryTenantId": "173eb3fc-9ba1-437f-99a1-89d5e53b91d1",
     "appRegistration": {
