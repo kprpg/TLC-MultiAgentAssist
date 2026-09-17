@@ -141,6 +141,17 @@ export function buildInitialWorkflowQuery(workflowId: InitialWorkflowId, input: 
             }
         case 'WF-012':
             return milestoneQuery(input.asOf, [])
+        case 'WF-004':
+        case 'WF-008':
+            return {
+                entity: 'opportunity', select: ['id', 'accountId', 'name', 'closeDate'], filter: [],
+                orderBy: [{ field: 'closeDate', direction: 'asc' }], top: 500, expand: []
+            }
+        case 'WF-011':
+            return {
+                entity: 'opportunity', select: ['id', 'accountId', 'name', 'closeDate'], filter: [],
+                orderBy: [{ field: 'accountId', direction: 'asc' }, { field: 'closeDate', direction: 'asc' }], top: 500, expand: []
+            }
     }
 }
 
@@ -169,7 +180,7 @@ function buildCard(
             }))
         }
     }
-    if (workflowId === 'WF-002' || workflowId === 'WF-010' || workflowId === 'WF-012') {
+    if (workflowId === 'WF-002' || workflowId === 'WF-004' || workflowId === 'WF-010' || workflowId === 'WF-012') {
         return {
             kind: 'action-list', title, evidenceIds,
             actions: queueItems.map((item) => ({ id: item.id, label: item.title, priority: item.priority }))
@@ -181,6 +192,21 @@ function buildCard(
             metrics: [
                 { label: 'Overloaded owners', value: queueItems.length },
                 { label: 'Active opportunities', value: records.length }
+            ]
+        }
+    }
+    if (workflowId === 'WF-008') {
+        const perAccount = new Map<string, number>()
+        for (const record of records) {
+            perAccount.set(text(record.accountId) ?? 'Unassigned', (perAccount.get(text(record.accountId) ?? 'Unassigned') ?? 0) + 1)
+        }
+        const topCount = perAccount.size > 0 ? Math.max(...perAccount.values()) : 0
+        return {
+            kind: 'metric-strip', title, evidenceIds,
+            metrics: [
+                { label: 'Pipeline opportunities', value: records.length },
+                { label: 'Accounts', value: perAccount.size },
+                { label: 'Top account share %', value: records.length > 0 ? Math.round((topCount / records.length) * 100) : 0 }
             ]
         }
     }
@@ -216,6 +242,7 @@ function buildQueueItems(
     return records.map((record, index) => {
         const recordId = text(record.id) ?? `${index + 1}`
         const dueDate = date(record.targetDate) ?? date(record.dueDate) ?? date(record.closeDate)
+        const opportunityId = text(record.opportunityId) ?? (opportunityScopedWorkflows.has(workflowId) ? text(record.id) : undefined)
         return {
             id: `${workflowId}:${recordId}`,
             workflowId,
@@ -223,7 +250,7 @@ function buildQueueItems(
             title: queueTitle(workflowId, record),
             ...(text(record.ownerId) ? { owner: text(record.ownerId) } : {}),
             ...(text(record.accountId) ? { accountId: text(record.accountId) } : {}),
-            ...(text(record.opportunityId) ? { opportunityId: text(record.opportunityId) } : {}),
+            ...(opportunityId ? { opportunityId } : {}),
             ...(dueDate ? { dueDate } : {}),
             evidenceIds,
             status: 'new' as const
@@ -231,16 +258,22 @@ function buildQueueItems(
     })
 }
 
+// Opportunity-entity workflows surface the row id as the opportunity id so queue items can hand off to guidance.
+const opportunityScopedWorkflows = new Set<InitialWorkflowId>(['WF-001', 'WF-004', 'WF-006', 'WF-008', 'WF-011'])
+
 function queueTitle(workflowId: InitialWorkflowId, record: Record<string, unknown>): string {
     const label = text(record.name) ?? text(record.subject) ?? text(record.id) ?? 'Untitled record'
     const prefix: Record<Exclude<InitialWorkflowId, 'WF-009'>, string> = {
         'WF-001': 'Review stale opportunity',
         'WF-002': 'Triage overdue milestone',
         'WF-003': 'Review stage evidence',
+        'WF-004': 'Map stakeholders for',
         'WF-005': 'Review governance exception',
         'WF-006': 'Review commit risk',
         'WF-007': 'Prepare for next meeting',
+        'WF-008': 'Review concentration exposure',
         'WF-010': 'Complete overdue follow-up',
+        'WF-011': 'Review opportunity dependencies',
         'WF-012': 'Assemble stage exit evidence'
     }
     return `${prefix[workflowId as Exclude<InitialWorkflowId, 'WF-009'>]}: ${label}`

@@ -66,11 +66,20 @@ export interface WorkflowResultAssembler {
     }): unknown
 }
 
+export type WorkflowStepErrorInfo = {
+    workflowId: string
+    connector: string
+    operation: string
+    required: boolean
+    message: string
+}
+
 export type WorkflowRuntimeOptions = {
     historyCapacity?: number
     now?: () => number
     createId?: () => string
     resultAssembler?: WorkflowResultAssembler
+    onStepError?: (info: WorkflowStepErrorInfo) => void
 }
 
 type Completion = {
@@ -86,6 +95,7 @@ export class WorkflowRuntime {
     private readonly now: () => number
     private readonly createId: () => string
     private readonly resultAssembler: WorkflowResultAssembler | undefined
+    private readonly onStepError: ((info: WorkflowStepErrorInfo) => void) | undefined
 
     constructor(
         private readonly registry: WorkflowRegistry,
@@ -95,6 +105,7 @@ export class WorkflowRuntime {
         this.now = options.now ?? Date.now
         this.createId = options.createId ?? randomUUID
         this.resultAssembler = options.resultAssembler
+        this.onStepError = options.onStepError
         this.history = new WorkflowRunHistory({
             ...(options.historyCapacity === undefined ? {} : { capacity: options.historyCapacity }),
             onEvicted: (run) => {
@@ -242,6 +253,13 @@ export class WorkflowRuntime {
                     if (error instanceof WorkflowCancellationError || controller.signal.reason instanceof WorkflowCancellationError) return
                     const errorCode = getErrorCode(error)
                     const unauthorized = errorCode?.endsWith('_denied') || errorCode === 'unauthorized' || errorCode === 'scope_required'
+                    this.onStepError?.({
+                        workflowId: run.workflowId,
+                        connector: step.connector,
+                        operation: step.operation,
+                        required: step.required ?? false,
+                        message: error instanceof Error ? error.message : String(error)
+                    })
                     run.connectorCalls.push({
                         connector: step.connector,
                         operation: step.operation,

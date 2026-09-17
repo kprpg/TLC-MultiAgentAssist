@@ -7,7 +7,8 @@ import {
     type ScopeRef
 } from '../../common/index.js'
 import {
-    translateDataverseQuery,
+    renderDataverseSql,
+    toSqlColumn,
     type DataverseDelegatedScope
 } from './query-guard.js'
 
@@ -62,6 +63,8 @@ export type DataverseMcpReadAdapterOptions = {
     maximumRows?: number
     now?: () => Date
     createToolCallId?: () => string
+    // When false, omit the explicit delegated-scope IN predicate and trust the delegated token's row-level security.
+    enforceDelegatedScope?: boolean
 }
 
 export class DataverseMcpReadAdapter {
@@ -79,50 +82,40 @@ export class DataverseMcpReadAdapter {
         query: GuardedQueryRequest,
         context: DataverseMcpQueryContext
     ): Promise<DataverseMcpQueryResult> {
-        const arguments_ = translateDataverseQuery(
-            this.options.entityMap,
-            query,
-            context.delegatedScope,
-            this.maximumRows
-        )
         const checkedAt = this.now().toISOString()
         const lineage: McpEvidenceLineage = {
             connector: 'dataverse-mcp',
             operation: 'read_query',
             toolCallId: this.createToolCallId()
         }
+        const target = Math.max(1, Math.min(query.top, this.maximumRows))
 
         try {
-            const result = await this.options.broker.execute({
-                correlationId: context.correlationId,
-                serverId: 'dataverse',
-                tool: 'read_query',
-                capability: context.capability,
-                scope: context.scope.kind,
-                arguments: arguments_,
-                ...(context.signal ? { signal: context.signal } : {})
-            })
-            if (result.kind !== 'untrusted-mcp-data') {
-                throw new DataverseMcpAdapterError('malformed_response', 'Dataverse MCP result was not marked as untrusted data.')
+            if (target <= READ_QUERY_PER_CALL_LIMIT) {
+                const page = await this.fetchPage(query, context, target)
+                const truncated = page.recordCount > page.records.length
+                return this.assembleResult(page.records, page.recordCount, truncated, checkedAt, lineage)
             }
-            const rows = extractRows(result.data)
-            const records = mapRowsToCanonical(this.options.entityMap, query, rows)
-            const truncated = result.truncated || records.length < result.recordCount
-            return {
-                state: truncated ? 'partial' : 'complete',
-                records,
-                recordCount: result.recordCount,
-                truncated,
-                sourceHealth: {
-                    source: 'dataverse-mcp',
-                    state: truncated ? 'partial' : 'live',
-                    detail: truncated
-                        ? 'Dataverse MCP returned a row-limited delegated result.'
-                        : 'Dataverse MCP returned delegated user-scoped data.',
-                    checkedAt
-                },
-                lineage
+            // The OOB Dataverse read_query caps each call at 20 rows and has no OFFSET, so page by primary id.
+            const collected: Array<Record<string, unknown>> = []
+            let lastId: string | undefined
+            let exhausted = false
+            while (collected.length < target && !exhausted) {
+                const pageSize = Math.min(READ_QUERY_PER_CALL_LIMIT, target - collected.length)
+                const pageQuery: GuardedQueryRequest = {
+                    ...query,
+                    orderBy: [{ field: 'id', direction: 'asc' }],
+                    filter: lastId === undefined ? query.filter : [...query.filter, { field: 'id', operator: 'gt', value: lastId }],
+                    top: pageSize
+                }
+                const page = await this.fetchPage(pageQuery, context, pageSize)
+                collected.push(...page.records)
+                const lastRecordId = page.records.at(-1)?.['id']
+                if (page.records.length < pageSize || typeof lastRecordId !== 'string') exhausted = true
+                else lastId = lastRecordId
             }
+            const ordered = sortRecords(collected, query.orderBy).slice(0, target)
+            return this.assembleResult(ordered, collected.length, !exhausted, checkedAt, lineage)
         } catch (error) {
             const code = errorCode(error)
             if (code === 'aborted' || (error instanceof Error && error.name === 'AbortError')) throw error
@@ -133,12 +126,100 @@ export class DataverseMcpReadAdapter {
             return failureResult('partial', 'unavailable', 'Dataverse MCP data is temporarily unavailable.', checkedAt, lineage)
         }
     }
+
+    private async fetchPage(
+        query: GuardedQueryRequest,
+        context: DataverseMcpQueryContext,
+        maxRows: number
+    ): Promise<{ records: Array<Record<string, unknown>>; recordCount: number }> {
+        const querytext = renderDataverseSql(
+            this.options.entityMap,
+            query,
+            context.delegatedScope,
+            maxRows,
+            { enforceScope: this.options.enforceDelegatedScope !== false }
+        )
+        const result = await this.options.broker.execute({
+            correlationId: context.correlationId,
+            serverId: 'dataverse',
+            tool: 'read_query',
+            capability: context.capability,
+            scope: context.scope.kind,
+            arguments: { querytext },
+            ...(context.signal ? { signal: context.signal } : {})
+        })
+        if (result.kind !== 'untrusted-mcp-data') {
+            throw new DataverseMcpAdapterError('malformed_response', 'Dataverse MCP result was not marked as untrusted data.')
+        }
+        assertNotMcpError(result.data)
+        const records = mapRowsToCanonical(this.options.entityMap, query, extractRows(result.data))
+        return { records, recordCount: result.recordCount }
+    }
+
+    private assembleResult(
+        records: Array<Record<string, unknown>>,
+        recordCount: number,
+        truncated: boolean,
+        checkedAt: string,
+        lineage: McpEvidenceLineage
+    ): DataverseMcpQueryResult {
+        return {
+            state: truncated ? 'partial' : 'complete',
+            records,
+            recordCount: Math.max(recordCount, records.length),
+            truncated,
+            sourceHealth: {
+                source: 'dataverse-mcp',
+                state: truncated ? 'partial' : 'live',
+                detail: truncated
+                    ? 'Dataverse MCP returned a row-limited delegated result.'
+                    : 'Dataverse MCP returned delegated user-scoped data.',
+                checkedAt
+            },
+            lineage
+        }
+    }
+}
+
+const READ_QUERY_PER_CALL_LIMIT = 20
+
+function sortRecords(
+    records: Array<Record<string, unknown>>,
+    orderBy: GuardedQueryRequest['orderBy']
+): Array<Record<string, unknown>> {
+    if (orderBy.length === 0) return records
+    return [...records].sort((left, right) => {
+        for (const order of orderBy) {
+            const comparison = compareOrderValues(left[order.field], right[order.field])
+            if (comparison !== 0) return order.direction === 'asc' ? comparison : -comparison
+        }
+        return 0
+    })
+}
+
+function compareOrderValues(left: unknown, right: unknown): number {
+    if (left === right) return 0
+    if (left === null || left === undefined) return 1
+    if (right === null || right === undefined) return -1
+    if ((typeof left === 'string' || typeof left === 'number') && (typeof right === 'string' || typeof right === 'number')) {
+        return left < right ? -1 : left > right ? 1 : 0
+    }
+    return 0
 }
 
 export class DataverseMcpAdapterError extends Error {
     constructor(readonly code: 'malformed_response', message: string) {
         super(message)
         this.name = 'DataverseMcpAdapterError'
+    }
+}
+
+function assertNotMcpError(value: unknown): void {
+    if (isRecord(value) && value.isError === true) {
+        const text = Array.isArray(value.content)
+            ? value.content.map((block) => (isRecord(block) && typeof block.text === 'string' ? block.text : '')).join(' ').trim()
+            : ''
+        throw new DataverseMcpAdapterError('malformed_response', text || 'Dataverse MCP read_query returned an error.')
     }
 }
 
@@ -178,7 +259,7 @@ function mapRowsToCanonical(
     })
     return rows.map((row) => Object.fromEntries(selected.map((attribute) => [
         attribute.canonical,
-        row[attribute.logicalName] ?? null
+        row[toSqlColumn(attribute.logicalName)] ?? row[attribute.logicalName] ?? null
     ])))
 }
 

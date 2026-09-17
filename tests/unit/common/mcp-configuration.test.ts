@@ -54,7 +54,7 @@ const validPolicyEntry = {
 } as const
 
 describe('MCP configuration', () => {
-    it('loads strict, disabled, non-secret checked-in defaults', async () => {
+    it('loads dataverse-read-enabled, msx-and-write-denied, non-secret checked-in defaults', async () => {
         const serverPath = fileURLToPath(new URL('../../../config/mcp.servers.json', import.meta.url))
         const policyPath = fileURLToPath(new URL('../../../config/mcp.tool-policy.json', import.meta.url))
         const rawConfiguration = `${await readFile(serverPath, 'utf8')}\n${await readFile(policyPath, 'utf8')}`
@@ -64,9 +64,13 @@ describe('MCP configuration', () => {
             loadMcpToolPolicy(policyPath)
         ])
 
-        expect(registry.servers.every((server) => !server.enabled)).toBe(true)
+        // Dataverse MCP is the authorized live backbone; the separate MSX-MCP endpoint is not wired yet.
+        expect(registry.servers.find((server) => server.id === 'dataverse')?.enabled).toBe(true)
+        expect(registry.servers.find((server) => server.id === 'msx')?.enabled).toBe(false)
         expect(policy.defaultDeny).toBe(true)
-        expect(policy.entries.every((entry) => !entry.enabled)).toBe(true)
+        expect(policy.entries.filter((entry) => entry.riskClass === 'read' && entry.enabled).map((entry) => entry.tool)).toEqual(['read_query'])
+        expect(policy.entries.filter((entry) => entry.serverId === 'msx').every((entry) => !entry.enabled)).toBe(true)
+        expect(policy.entries.filter((entry) => entry.riskClass !== 'read').every((entry) => !entry.enabled)).toBe(true)
         expect(policy.entries.filter((entry) => entry.serverId === 'msx' && entry.riskClass === 'read').map((entry) => entry.tool)).toEqual([
             'get_opportunity_360',
             'get_account_360',

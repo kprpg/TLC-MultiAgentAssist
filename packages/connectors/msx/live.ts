@@ -129,6 +129,7 @@ export class LiveMsxConnector implements MsxConnector {
   private portfolioPromise: Promise<{ accounts: Account[]; opportunities: Opportunity[] }> | undefined
   private readonly observationPromises = new Map<string, Promise<CriterionObservation[]>>()
   private readonly milestonePromises = new Map<string, Promise<MilestoneRow[]>>()
+  private currentUserIdPromise: Promise<string> | undefined
 
   constructor(
     private readonly tokenProvider: MsxAccessTokenProvider,
@@ -266,6 +267,18 @@ export class LiveMsxConnector implements MsxConnector {
     this.portfolioPromise = undefined
     this.observationPromises.clear()
     this.milestonePromises.clear()
+    this.currentUserIdPromise = undefined
+  }
+
+  /** Returns the signed-in user's Dataverse systemuser id (WhoAmI UserId), cached for reuse. */
+  getCurrentUserId(): Promise<string> {
+    this.currentUserIdPromise ??= this.requestJson<WhoAmIResponse>('WhoAmI')
+      .then((identity) => identity.UserId)
+      .catch((error) => {
+        this.currentUserIdPromise = undefined
+        throw error
+      })
+    return this.currentUserIdPromise
   }
 
   private async assertOpportunityAccess(opportunityId: string): Promise<void> {

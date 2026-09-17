@@ -13,7 +13,7 @@ import { InitialWorkflowConnectorExecutor, InitialWorkflowResultAssembler } from
 import { initialWorkflowDefinitions } from './cohort.js'
 import { SharedWorkflowHost } from './host.js'
 import { WorkflowRegistry } from './registry.js'
-import { WorkflowRuntime } from './runtime.js'
+import { WorkflowRuntime, type WorkflowStepErrorInfo } from './runtime.js'
 
 export type ConfiguredWorkflowHostOptions = {
     registry: McpServerRegistry
@@ -21,6 +21,11 @@ export type ConfiguredWorkflowHostOptions = {
     entityMap: DataverseEntityMap
     getAccessToken(server: McpServer): Promise<string>
     resolveDelegatedScope(scope: ScopeRef): DataverseDelegatedScope | Promise<DataverseDelegatedScope>
+    // When false, Dataverse reads omit the explicit delegated-scope IN predicate (trust the delegated token).
+    enforceDelegatedScope?: boolean
+    // Caps the Dataverse read_query TOP (the OOB Dataverse MCP tool rejects requests above 20 rows).
+    maximumRows?: number
+    onStepError?: (info: WorkflowStepErrorInfo) => void
 }
 
 export type ConfiguredWorkflowHost = {
@@ -39,13 +44,19 @@ export function createConfiguredWorkflowHost(options: ConfiguredWorkflowHostOpti
         invokeTool: (serverId, tool, args, signal) => pool.callTool(serverId, tool, args, signal)
     })
     const executor = new InitialWorkflowConnectorExecutor(
-        new DataverseMcpReadAdapter({ entityMap: options.entityMap, broker }),
+        new DataverseMcpReadAdapter({
+            entityMap: options.entityMap,
+            broker,
+            ...(options.enforceDelegatedScope === undefined ? {} : { enforceDelegatedScope: options.enforceDelegatedScope }),
+            ...(options.maximumRows === undefined ? {} : { maximumRows: options.maximumRows })
+        }),
         new MsxMcpReadAdapter(broker),
         options.resolveDelegatedScope
     )
     const workflowRegistry = new WorkflowRegistry(initialWorkflowDefinitions)
     const runtime = new WorkflowRuntime(workflowRegistry, executor, {
-        resultAssembler: new InitialWorkflowResultAssembler()
+        resultAssembler: new InitialWorkflowResultAssembler(),
+        ...(options.onStepError ? { onStepError: options.onStepError } : {})
     })
     return {
         host: new SharedWorkflowHost(workflowRegistry, runtime),

@@ -43,7 +43,7 @@ const context = {
     scope: { kind: 'portfolio' },
     delegatedScope: {
         delegatedUserAccountIds: [],
-        delegatedUserOpportunityIds: ['00000000-0000-0000-0000-000000000001']
+        delegatedUserOpportunityIds: ['1', '2']
     }
 } as const
 
@@ -60,7 +60,7 @@ function adapter(broker: DataverseToolBroker): DataverseMcpReadAdapter {
 describe('DataverseMcpReadAdapter', () => {
     it('queries the fixture through the guarded payload and returns canonical lineage', async () => {
         const connector = adapter(new FixtureDataverseMcpBroker({
-            opportunities: [
+            opportunity: [
                 { opportunityid: '2', name: 'Second', estimatedclosedate: '2026-12-01' },
                 { opportunityid: '1', name: 'First', estimatedclosedate: '2026-10-01' }
             ]
@@ -138,5 +138,27 @@ describe('DataverseMcpReadAdapter', () => {
         }
 
         await expect(adapter(broker).query(query, context)).rejects.toBeInstanceOf(DataverseMcpAdapterError)
+    })
+
+    it('paginates by primary id past the per-call limit and returns the requested order', async () => {
+        const rows = Array.from({ length: 25 }, (_unused, index) => {
+            const suffix = String(index + 1).padStart(3, '0')
+            return { opportunityid: `opp-${suffix}`, name: `Opp ${suffix}`, estimatedclosedate: `2026-${String((index % 12) + 1).padStart(2, '0')}-15` }
+        })
+        const paginating = new DataverseMcpReadAdapter({
+            entityMap,
+            broker: new FixtureDataverseMcpBroker({ opportunity: rows }),
+            maximumRows: 50,
+            now: () => new Date('2026-09-12T12:00:00.000Z'),
+            createToolCallId: () => 'tool-call-1'
+        })
+        const result = await paginating.query(
+            { entity: 'opportunity', select: ['id', 'name', 'closeDate'], filter: [], orderBy: [{ field: 'closeDate', direction: 'asc' }], top: 50, expand: [] },
+            { ...context, delegatedScope: { delegatedUserAccountIds: [], delegatedUserOpportunityIds: rows.map((row) => row.opportunityid) } }
+        )
+
+        expect(result.records).toHaveLength(25)
+        const dates = result.records.map((record) => record.closeDate as string)
+        expect(dates).toEqual([...dates].sort())
     })
 })

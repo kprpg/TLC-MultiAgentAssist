@@ -50,8 +50,8 @@
         { "canonical": "id", "logicalName": "msp_engagementmilestoneid", "label": "Milestone ID", "dataType": "uniqueidentifier", "sensitivity": "internal", "includeInPrompt": true },
         { "canonical": "opportunityId", "logicalName": "_msp_opportunityid_value", "label": "Opportunity ID", "dataType": "lookup", "sensitivity": "internal", "includeInPrompt": true },
         { "canonical": "name", "logicalName": "msp_name", "label": "Milestone name", "dataType": "string", "sensitivity": "internal", "includeInPrompt": true },
-        { "canonical": "status", "logicalName": "statuscode", "label": "Status", "dataType": "optionset", "sensitivity": "internal", "includeInPrompt": true },
-        { "canonical": "targetDate", "logicalName": "msp_targetdate", "label": "Target date", "dataType": "date", "sensitivity": "internal", "includeInPrompt": true }
+        { "canonical": "status", "logicalName": "msp_milestonestatusname", "label": "Status", "dataType": "string", "sensitivity": "internal", "includeInPrompt": true },
+        { "canonical": "targetDate", "logicalName": "msp_milestonedate", "label": "Target date", "dataType": "date", "sensitivity": "internal", "includeInPrompt": true }
       ]
     },
     {
@@ -69,7 +69,7 @@
         { "canonical": "subject", "logicalName": "subject", "label": "Subject", "dataType": "string", "sensitivity": "internal", "includeInPrompt": true },
         { "canonical": "ownerId", "logicalName": "_ownerid_value", "label": "Owner ID", "dataType": "lookup", "sensitivity": "internal", "includeInPrompt": true },
         { "canonical": "dueDate", "logicalName": "scheduledend", "label": "Due date", "dataType": "date", "sensitivity": "internal", "includeInPrompt": true },
-        { "canonical": "status", "logicalName": "statuscode", "label": "Status", "dataType": "optionset", "sensitivity": "internal", "includeInPrompt": true }
+        { "canonical": "status", "logicalName": "statecodename", "label": "Status", "dataType": "string", "sensitivity": "internal", "includeInPrompt": true }
       ]
     },
     {

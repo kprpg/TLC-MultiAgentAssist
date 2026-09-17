@@ -50,7 +50,7 @@ export const compositeMsxForecastSnapshot = {
 }
 
 export const compositeDataverseBrokerRows: Record<string, Array<Record<string, unknown>>> = {
-    opportunities: compositeDataverseWorkflowRows['WF-001']!.map((row) => ({
+    opportunity: compositeDataverseWorkflowRows['WF-001']!.map((row) => ({
         opportunityid: row.id,
         _parentaccountid_value: row.accountId,
         name: row.name,
