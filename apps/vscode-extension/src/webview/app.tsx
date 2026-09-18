@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactElement } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import workflowDescriptionsJson from '../../../../config/workflow-descriptions.json' with { type: 'json' }
 import { dataClient } from './data-client.js'
 import { onHostMessage } from './bridge.js'
 import { formatResponseMarkdown } from './response-markdown.js'
@@ -64,6 +65,10 @@ function playFailureMessage(status: string): string {
 }
 
 const today = (): string => new Date().toISOString().slice(0, 10)
+
+// Play info-tooltip copy is authored in config/workflow-descriptions.json, not in source.
+const workflowDescriptions: Readonly<Record<string, { summary: string; reads: string; useIt: string } | undefined>> =
+    workflowDescriptionsJson.descriptions
 
 /** Renders agent/guidance markdown identically to the desktop/web hosts; links open evidence. */
 function AgentMarkdown({ content }: { content: string }): ReactElement {
@@ -143,6 +148,35 @@ function mcemToMarkdown(data: McemView, opportunityName: string): string {
     ].join('\n')
 }
 
+function PlayInfoTooltip({ workflowId, name }: { workflowId: string; name: string }): ReactElement | null {
+    const [open, setOpen] = useState(false)
+    const description = workflowDescriptions[workflowId]
+    if (!description) return null
+    return (
+        <span className="info-anchor" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+            <button
+                type="button"
+                className="info-bubble"
+                aria-label={`What does "${name}" do?`}
+                aria-expanded={open}
+                onClick={() => setOpen((current) => !current)}
+                onFocus={() => setOpen(true)}
+                onBlur={() => setOpen(false)}
+            >
+                i
+            </button>
+            {open && (
+                <span className="info-popover" role="tooltip">
+                    <strong>{name}</strong>
+                    <span>{description.summary}</span>
+                    <span><em>Reads:</em> {description.reads}</span>
+                    <span><em>Use it to:</em> {description.useIt}</span>
+                </span>
+            )}
+        </span>
+    )
+}
+
 function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: number } | undefined }): ReactElement {
     const [definitions, setDefinitions] = useState<Loadable<WorkflowDefinitionView[]>>({ status: 'idle' })
     const [running, setRunning] = useState<string | undefined>(undefined)
@@ -202,6 +236,7 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                         <li key={definition.id}>
                             <div className="play-head">
                                 <span className="play-name">{definition.name}</span>
+                                <PlayInfoTooltip workflowId={definition.id} name={definition.name} />
                                 <span className="badge">{definition.id}</span>
                             </div>
                             <div className="play-meta muted">{definition.personaTargets.join(', ')}</div>
@@ -228,11 +263,18 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                                 <h4>Operational queue</h4>
                                 <ul className="item-list">
                                     {current.queue.map((item) => (
-                                        <li key={item.id}>
-                                            <span className="badge">{item.priority}</span> {item.title}
+                                        <li key={item.id} className="queue-item">
+                                            <span className="queue-item-text"><span className="badge">{item.priority}</span> {item.title}</span>
                                             {item.accountId && item.opportunityId && (
-                                                <button className="link" disabled={guidance.status === 'loading'} onClick={() => void sendToGuidance(current.runId, item.id, item.title, guidanceAgentFor(current.workflowId))}>
-                                                    {guidance.status === 'loading' && guidance.itemId === item.id ? ' Sending...' : ` Send to ${agentLabel(guidanceAgentFor(current.workflowId))}`}
+                                                <button
+                                                    className="send-agent"
+                                                    title={`Send this item to ${agentLabel(guidanceAgentFor(current.workflowId))}`}
+                                                    disabled={guidance.status === 'loading'}
+                                                    onClick={() => void sendToGuidance(current.runId, item.id, item.title, guidanceAgentFor(current.workflowId))}
+                                                >
+                                                    {guidance.status === 'loading' && guidance.itemId === item.id
+                                                        ? 'Sending...'
+                                                        : `Send to ${agentLabel(guidanceAgentFor(current.workflowId))}`}
                                                 </button>
                                             )}
                                         </li>

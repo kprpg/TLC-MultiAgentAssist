@@ -6,7 +6,7 @@ import { LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../pack
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../packages/connectors/foundry/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
-import { createConfiguredWorkflowHost, type WorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
+import { createLivePlayWorkflowHost, type WorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import type { AuthenticatedRequest, WebRuntime } from './app.js'
 
 export interface HostedRuntimeOptions {
@@ -82,15 +82,14 @@ export async function createHostedWorkflowHostResolver(options: HostedRuntimeOpt
         await evictOldestWorkflowHost(hosts)
         const token = { value: authentication.accessToken }
         const msx = new LiveMsxConnector({ getAccessToken: async () => token.value }, fetch, undefined, undefined, msxWriteMetadataFromEnvironment(environment))
-        let delegatedScope: Promise<{ delegatedUserAccountIds: string[]; delegatedUserOpportunityIds: string[] }> | undefined
-        const configured = createConfiguredWorkflowHost({
+        const configured = createLivePlayWorkflowHost({
             registry,
             policy,
             entityMap,
             getAccessToken: async () => token.value,
-            resolveDelegatedScope: () => {
-                delegatedScope ??= resolveMsxScope(msx)
-                return delegatedScope
+            resolveCurrentUserId: () => msx.getCurrentUserId(),
+            onStepError: (info) => {
+                console.error(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? 'required' : 'optional'} step failed: ${info.message}`)
             }
         })
         hosts.set(principalKey, { host: configured.host, dispose: configured.dispose, token, lastUsed: Date.now() })
@@ -107,13 +106,4 @@ export async function evictOldestWorkflowHost<T extends { lastUsed: number; disp
     if (!oldest) return
     hosts.delete(oldest[0])
     await oldest[1].dispose()
-}
-
-async function resolveMsxScope(msx: LiveMsxConnector) {
-    const accounts = await msx.listAccounts()
-    const opportunities = (await Promise.all(accounts.map(({ id }) => msx.listOpportunities(id)))).flat()
-    return {
-        delegatedUserAccountIds: accounts.map(({ id }) => id),
-        delegatedUserOpportunityIds: opportunities.map(({ id }) => id)
-    }
 }

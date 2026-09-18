@@ -230,6 +230,13 @@ export class WorkflowRuntime {
                     })
                     if (connectorResult.state === 'unauthorized') {
                         outcome = step.required ? 'unauthorized' : 'partial'
+                        this.onStepError?.({
+                            workflowId: run.workflowId,
+                            connector: step.connector,
+                            operation: step.operation,
+                            required: step.required ?? false,
+                            message: connectorResult.sourceHealth?.detail ?? `${step.connector} delegated authorization is unavailable.`
+                        })
                     } else {
                         if (connectorResult.state === 'partial') outcome = 'partial'
                     }

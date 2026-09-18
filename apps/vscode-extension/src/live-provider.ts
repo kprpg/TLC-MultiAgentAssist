@@ -13,13 +13,10 @@ import { AzureCliCredential } from '@azure/identity'
 import { LiveMsxConnector } from '../../../packages/connectors/msx/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../packages/connectors/foundry/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
-import { createConfiguredWorkflowHost, type WorkflowStepErrorInfo } from '../../../packages/orchestrator/workflows/index.js'
+import { createLivePlayWorkflowHost, type WorkflowStepErrorInfo } from '../../../packages/orchestrator/workflows/index.js'
 import type { ExtensionDataProvider } from './data-provider.js'
 import { ExtensionMcemGuidanceConnector } from './mcem-guidance.js'
 import { AGENT_CAPABILITIES, buildLiveDataProvider, buildLiveTaskAgents } from './live-provider-core.js'
-
-// Plays fetch up to this many rows via keyset pagination (the OOB Dataverse read_query caps each call at 20).
-const LIVE_PLAY_ROW_LIMIT = 100
 
 /** Real Foundry prompt agents (Desktop/Web parity) using the checked-in Foundry environment + Azure CLI auth. */
 function buildFoundryTaskAgents(): TaskAgentRegistry | undefined {
@@ -46,24 +43,12 @@ function buildFoundryTaskAgents(): TaskAgentRegistry | undefined {
     }])) as TaskAgentRegistry
 }
 
-async function resolveDelegatedScope(msx: LiveMsxConnector): Promise<{ currentUserId: string; delegatedUserAccountIds: string[]; delegatedUserOpportunityIds: string[] }> {
-    // Scope Plays to the signed-in user's deal-team portfolio via a JOIN to msp_dealteam on the
-    // WhoAmI user id. One cheap identity call (no portfolio enumeration) keeps reads fast and
-    // strictly restricted to the user's own accounts/opportunities/milestones.
-    const currentUserId = await msx.getCurrentUserId()
-    return {
-        currentUserId,
-        delegatedUserAccountIds: [],
-        delegatedUserOpportunityIds: []
-    }
-}
-
 /**
  * Live provider (Desktop/Web parity). Portfolio, writes, MCEM evaluation, and agent guidance
  * flow through the shared orchestrator over the delegated MSX OData connection; Plays flow
- * through the configured workflow host (Dataverse MCP read_query). MCEM uses the versioned
- * fixture guidance criteria and agents render deterministic guidance over live context, so no
- * Foundry credential or PDF bundle is required in the extension host.
+ * through the shared live Play host (Dataverse MCP read_query, deal-team scoped). MCEM uses the
+ * versioned fixture guidance criteria and agents render deterministic guidance over live context,
+ * so no Foundry credential or PDF bundle is required in the extension host.
  */
 export function createLiveDataProvider(
     getToken: () => Promise<string>,
@@ -78,17 +63,12 @@ export function createLiveDataProvider(
     const taskAgents = (useFoundryAgents ? buildFoundryTaskAgents() : undefined) ?? buildLiveTaskAgents()
     const orchestrator = new ThinSliceOrchestrator(msx, new ExtensionMcemGuidanceConnector(), taskAgents)
 
-    let delegatedScope: Promise<{ currentUserId: string; delegatedUserAccountIds: string[]; delegatedUserOpportunityIds: string[] }> | undefined
-    const configured = createConfiguredWorkflowHost({
+    const configured = createLivePlayWorkflowHost({
         registry,
         policy,
         entityMap,
         getAccessToken: () => getToken(),
-        maximumRows: LIVE_PLAY_ROW_LIMIT,
-        resolveDelegatedScope: () => {
-            delegatedScope ??= resolveDelegatedScope(msx)
-            return delegatedScope
-        },
+        resolveCurrentUserId: () => msx.getCurrentUserId(),
         ...(onStepError ? { onStepError } : {})
     })
     return buildLiveDataProvider({ orchestrator, host: configured.host, account, dispose: () => configured.dispose() })

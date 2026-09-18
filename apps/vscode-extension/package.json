@@ -44,16 +44,16 @@
     "views": {
       "tlcAssist": [
         {
-          "id": "tlcConnection",
-          "name": "Connection"
-        },
-        {
           "id": "tlcPortfolio",
           "name": "Portfolio"
         },
         {
           "id": "tlcPlays",
           "name": "Plays"
+        },
+        {
+          "id": "tlcConnection",
+          "name": "Connection"
         }
       ]
     },

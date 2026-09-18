@@ -14,7 +14,7 @@ import { FixtureMsxConnector, LiveMsxConnector, msxWriteMetadataFromEnvironment 
 import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../../packages/connectors/foundry/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
-import { createConfiguredWorkflowHost, createSampleWorkflowHost } from '../../../../packages/orchestrator/workflows/index.js'
+import { createLivePlayWorkflowHost, createSampleWorkflowHost } from '../../../../packages/orchestrator/workflows/index.js'
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
 import { prepareFoundryEnvironmentFile } from './packaged-configuration.js'
 import { createRuntimeCredentials } from './runtime-credentials.js'
@@ -92,9 +92,10 @@ const mcemGuidancePath = app.isPackaged
   ? resolve(process.resourcesPath, 'docs/knowledge/MCEM Overview.pdf')
   : resolve(desktopRoot, '../../docs/knowledge/MCEM Overview.pdf')
 const mcemConnector = new LocalPdfMcemGuidanceConnector(mcemGuidancePath)
-const msxConnector = dataMode === 'sample'
-  ? new FixtureMsxConnector()
+const liveMsxConnector = dataMode === 'sample'
+  ? undefined
   : new LiveMsxConnector(tokenProvider, fetch, undefined, reportPerformance, msxWriteMetadataFromEnvironment(process.env))
+const msxConnector = liveMsxConnector ?? new FixtureMsxConnector()
 const foundryOpenAIClient = runtimeEnvironment
   ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry)
   : undefined
@@ -136,8 +137,7 @@ const [mcpRegistry, mcpPolicy, dataverseEntityMap] = await Promise.all([
   loadMcpToolPolicy(resolve(configurationRoot, 'mcp.tool-policy.json')),
   loadDataverseEntityMap(resolve(configurationRoot, 'dataverse.entity-map.json'))
 ])
-let delegatedScope: Promise<{ delegatedUserAccountIds: string[]; delegatedUserOpportunityIds: string[] }> | undefined
-const configuredWorkflowHost = dataMode === 'sample' ? undefined : createConfiguredWorkflowHost({
+const configuredWorkflowHost = dataMode === 'sample' ? undefined : createLivePlayWorkflowHost({
   registry: mcpRegistry,
   policy: mcpPolicy,
   entityMap: dataverseEntityMap,
@@ -146,21 +146,15 @@ const configuredWorkflowHost = dataMode === 'sample' ? undefined : createConfigu
     if (!token) throw new Error('A delegated MCP access token is unavailable.')
     return token.token
   },
-  resolveDelegatedScope: () => {
-    delegatedScope ??= resolveMsxScope()
-    return delegatedScope
+  resolveCurrentUserId: async () => {
+    if (!liveMsxConnector) throw new Error('Live Plays require the live MSX connection.')
+    return liveMsxConnector.getCurrentUserId()
+  },
+  onStepError: (info) => {
+    console.error(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? 'required' : 'optional'} step failed: ${info.message}`)
   }
 })
 const workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost()
-
-async function resolveMsxScope() {
-  const accounts = await msxConnector.listAccounts()
-  const opportunities = (await Promise.all(accounts.map(({ id }) => msxConnector.listOpportunities(id)))).flat()
-  return {
-    delegatedUserAccountIds: accounts.map(({ id }) => id),
-    delegatedUserOpportunityIds: opportunities.map(({ id }) => id)
-  }
-}
 
 async function getDataStatus(): Promise<DesktopDataStatus> {
   if (dataMode === 'sample') {

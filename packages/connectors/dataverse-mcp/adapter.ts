@@ -120,7 +120,7 @@ export class DataverseMcpReadAdapter {
             const code = errorCode(error)
             if (code === 'aborted' || (error instanceof Error && error.name === 'AbortError')) throw error
             if (isUnauthorizedCode(code)) {
-                return failureResult('unauthorized', 'unauthorized', 'Dataverse MCP delegated authorization is unavailable.', checkedAt, lineage)
+                return failureResult('unauthorized', 'unauthorized', `Dataverse MCP delegated authorization is unavailable (${code}).`, checkedAt, lineage)
             }
             if (error instanceof DataverseMcpAdapterError) throw error
             return failureResult('partial', 'unavailable', 'Dataverse MCP data is temporarily unavailable.', checkedAt, lineage)
