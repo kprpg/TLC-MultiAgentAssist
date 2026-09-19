@@ -852,18 +852,26 @@ textarea {
     margin-top: 4px;
 }
 
-.chip-button {
-    padding: 2px 8px;
-    border-radius: 10px;
-    border: 1px solid var(--vscode-panel-border);
-    background: transparent;
-    color: var(--vscode-foreground);
+.comments-button {
+    padding: 3px 10px;
+    border: 1px solid var(--vscode-button-border, var(--vscode-contrastBorder, var(--vscode-panel-border)));
+    border-radius: 4px;
+    background: var(--vscode-button-secondaryBackground, var(--vscode-editorWidget-background));
+    color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
     cursor: pointer;
     font-size: 11px;
+    font-weight: 500;
+    transition: background-color 80ms ease, border-color 80ms ease;
 }
 
-.chip-button:hover {
-    background: var(--vscode-toolbar-hoverBackground);
+.comments-button:hover {
+    border-color: var(--vscode-focusBorder);
+    background: var(--vscode-button-secondaryHoverBackground, var(--vscode-toolbar-hoverBackground));
+}
+
+.comments-button:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: 2px;
 }
 
 .record-editor {

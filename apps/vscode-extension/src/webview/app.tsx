@@ -13,6 +13,7 @@ import { mcemStages } from './mcem-stages.js'
 import { NextBestActions } from './next-best-actions.js'
 import { PlayRoleOwners } from './play-role-owners.js'
 import { AppHeader } from './app-header.js'
+import { CommentsButton } from './comments-button.js'
 import { portfolioLayoutClassName } from './portfolio-layout.js'
 import { sortMilestones, sortOpportunities, type MilestoneSort, type OpportunitySort, type SortDirection } from './sorting.js'
 import type {
@@ -513,7 +514,7 @@ function MilestonesEditor({ opportunityId, milestones, onChanged, onNote }: { op
                                 </div>
                             </td>
                             <td><button className="table-field-button" onClick={() => setEdit({ milestoneId: milestone.id, field: 'status', value: milestone.status })}>{milestone.status}</button></td>
-                            <td className="milestone-comments-cell"><button className="chip-button" onClick={() => setEdit({ milestoneId: milestone.id, field: 'comments', value: milestone.comments ?? '' })}>Comments</button></td>
+                            <td className="milestone-comments-cell"><CommentsButton title="Milestone comments" onClick={() => setEdit({ milestoneId: milestone.id, field: 'comments', value: milestone.comments ?? '' })} /></td>
                         </tr>
                         {edit && edit.milestoneId === milestone.id && (
                             <tr className="record-editor-row">
@@ -754,7 +755,7 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
                                             </button>
                                         </td>
                                         <td><span className="badge">Stage {opportunity.recordedStage}</span></td>
-                                        <td className="opportunity-comments-cell"><button className="chip-button" title="Opportunity comments" onClick={() => { setCommentsFor(opportunity.id); setCommentsText(opportunity.comments ?? '') }}>Comments</button></td>
+                                        <td className="opportunity-comments-cell"><CommentsButton title="Opportunity comments" onClick={() => { setCommentsFor(opportunity.id); setCommentsText(opportunity.comments ?? '') }} /></td>
                                     </tr>
                                     {commentsFor === opportunity.id && (
                                         <tr className="record-editor-row">
