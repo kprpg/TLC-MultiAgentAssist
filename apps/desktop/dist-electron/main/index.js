@@ -833,6 +833,17 @@ async function loadMcpToolPolicy(filePath) {
 	return mcpToolPolicySchema.parse(candidate);
 }
 //#endregion
+//#region packages/common/configuration/workflow-descriptions.ts
+var workflowDescriptionSchema = z.object({
+	summary: z.string().min(1).max(400),
+	reads: z.string().min(1).max(400),
+	useIt: z.string().min(1).max(400)
+}).strict();
+z.object({
+	schemaVersion: z.literal(1),
+	descriptions: z.record(z.string().regex(/^WF-[0-9]{3}$/), workflowDescriptionSchema)
+}).strict();
+//#endregion
 //#region packages/common/sharing/opportunity-link.ts
 function addMsxOpportunityLink(content, opportunityId) {
 	if (/microsoftsales\.crm\.dynamics\.com\/main\.aspx[^\s)]*\bopportunity\b/i.test(content)) return content;

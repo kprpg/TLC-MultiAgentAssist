@@ -1,11 +1,19 @@
-import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactElement } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState, type DragEvent, type ReactElement } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import workflowDescriptionsJson from '../../../../config/workflow-descriptions.json' with { type: 'json' }
+import { agentCapabilities } from '../../../../packages/common/types/agent-capabilities.js'
 import { dataClient } from './data-client.js'
 import { onHostMessage } from './bridge.js'
 import { formatResponseMarkdown } from './response-markdown.js'
+import { GuidanceAgentTabs } from './guidance-agent-tabs.js'
+import { RecordTableHeader } from './record-table-header.js'
 import { suggestedPrompts } from './prompt-catalog.js'
+import { mcemStages } from './mcem-stages.js'
+import { NextBestActions } from './next-best-actions.js'
+import { PlayRoleOwners } from './play-role-owners.js'
+import { AppHeader } from './app-header.js'
+import { portfolioLayoutClassName } from './portfolio-layout.js'
 import { sortMilestones, sortOpportunities, type MilestoneSort, type OpportunitySort, type SortDirection } from './sorting.js'
 import type {
     AccountView,
@@ -22,13 +30,6 @@ import type {
 
 type Tab = 'portfolio' | 'plays'
 type Loadable<T> = { status: 'idle' | 'loading' | 'error' | 'ready'; data?: T; error?: string }
-
-const CAPABILITIES: Array<{ id: AgentCapability; label: string }> = [
-    { id: 'account-pulse', label: 'Account Pulse' },
-    { id: 'mcem-coach', label: 'MCEM Coach' },
-    { id: 'pursuit-executive', label: 'Pursuit' },
-    { id: 'risk-solution-play', label: 'Risk & Play' }
-]
 
 // Routes each Play's queue-item guidance handoff to the most relevant agent.
 const GUIDANCE_AGENT_BY_WORKFLOW: Readonly<Record<string, AgentCapability>> = {
@@ -51,7 +52,7 @@ function guidanceAgentFor(workflowId: string): AgentCapability {
 }
 
 function agentLabel(capability: AgentCapability): string {
-    return CAPABILITIES.find((item) => item.id === capability)?.label ?? 'Guidance'
+    return agentCapabilities.find((item) => item.id === capability)?.label ?? 'Guidance'
 }
 
 function playFailureMessage(status: string): string {
@@ -239,7 +240,7 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                                 <PlayInfoTooltip workflowId={definition.id} name={definition.name} />
                                 <span className="badge">{definition.id}</span>
                             </div>
-                            <div className="play-meta muted">{definition.personaTargets.join(', ')}</div>
+                            <PlayRoleOwners roles={definition.personaTargets} />
                             <button className="primary" disabled={running !== undefined} onClick={() => void runPlay(definition.id)}>
                                 {running === definition.id ? 'Running...' : 'Run'}
                             </button>
@@ -337,15 +338,11 @@ function GuidancePane({ accountId, opportunityId, opportunityName, onNote }: { a
         }
     }, [capability, accountId, opportunityId, taskPrompt])
 
-    const label = CAPABILITIES.find((item) => item.id === capability)?.label ?? 'Guidance'
+    const label = agentCapabilities.find((item) => item.id === capability)?.label ?? 'Guidance'
 
     return (
         <div>
-            <div className="agent-tabs" role="tablist">
-                {CAPABILITIES.map((item) => (
-                    <button key={item.id} role="tab" aria-selected={capability === item.id} className={capability === item.id ? 'tab active' : 'tab'} onClick={() => setCapability(item.id)}>{item.label}</button>
-                ))}
-            </div>
+            <GuidanceAgentTabs capability={capability} onSelect={setCapability} />
             <div className="prompt-suggestions" aria-label={`${label} suggested prompts`}>
                 {suggestedPrompts[capability].map((prompt) => (
                     <button key={prompt} type="button" className="prompt-chip" disabled={agent.status === 'loading'} onClick={() => void runAgentPrompt(prompt)}>{prompt}</button>
@@ -494,40 +491,61 @@ function MilestonesEditor({ opportunityId, milestones, onChanged, onNote }: { op
                 </label>
                 <button className="link" onClick={() => setDirection((current) => current === 'ascending' ? 'descending' : 'ascending')}>{direction === 'ascending' ? 'Asc' : 'Desc'}</button>
             </div>
-            <ul className="item-list">
+            <div className="milestone-table-wrap">
+                <table className="record-table milestone-table">
+                    <colgroup>
+                        <col className="milestone-name-column" />
+                        <col className="milestone-stage-column" />
+                        <col className="milestone-comments-column" />
+                    </colgroup>
+                    <RecordTableHeader nameLabel="Milestone name" />
+                    <tbody>
                 {sorted.map((milestone) => (
-                    <li key={milestone.id} className="milestone-row">
-                        <div><strong>{milestone.name}</strong> - {milestone.status}{milestone.targetDate ? ` (due ${milestone.targetDate})` : ''}{milestone.commitment ? ` - ${milestone.commitment}` : ''}</div>
-                        <div className="field-buttons">
-                            {MILESTONE_FIELDS.map((field) => (
-                                <button key={field.id} className="chip-button" onClick={() => setEdit({ milestoneId: milestone.id, field: field.id, value: milestoneFieldValue(milestone, field.id) })}>{field.label}</button>
-                            ))}
-                        </div>
-                        {edit && edit.milestoneId === milestone.id && (
-                            <div className="record-editor">
-                                <label>{MILESTONE_FIELDS.find((field) => field.id === edit.field)?.label}</label>
-                                {edit.field === 'status' && (
-                                    <select value={edit.value} onChange={(event) => setEdit({ ...edit, value: event.target.value })}>{MILESTONE_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}</select>
-                                )}
-                                {edit.field === 'customerCommitment' && (
-                                    <select value={edit.value} onChange={(event) => setEdit({ ...edit, value: event.target.value })}>{COMMITMENT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}</select>
-                                )}
-                                {edit.field === 'targetDate' && (
-                                    <input type="date" value={edit.value} onChange={(event) => setEdit({ ...edit, value: event.target.value })} />
-                                )}
-                                {(edit.field === 'riskDetails' || edit.field === 'comments') && (
-                                    <textarea rows={2} value={edit.value} onChange={(event) => setEdit({ ...edit, value: event.target.value })} />
-                                )}
-                                <div className="actions">
-                                    <button className="secondary" disabled={saving} onClick={() => setEdit(undefined)}>Cancel</button>
-                                    <button className="primary" disabled={saving} onClick={() => void save()}>{saving ? 'Saving...' : 'Save'}</button>
+                    <Fragment key={milestone.id}>
+                        <tr>
+                            <td className="milestone-name-cell">
+                                <strong>{milestone.name}</strong>
+                                <span className="milestone-meta">{milestone.targetDate ? `Due ${milestone.targetDate}` : 'No target date'} · {milestone.commitment ?? 'Uncommitted'}</span>
+                                <div className="milestone-field-actions">
+                                    {MILESTONE_FIELDS.filter((field) => field.id === 'targetDate' || field.id === 'customerCommitment' || field.id === 'riskDetails').map((field) => (
+                                        <button key={field.id} className="table-field-button" onClick={() => setEdit({ milestoneId: milestone.id, field: field.id, value: milestoneFieldValue(milestone, field.id) })}>{field.label}</button>
+                                    ))}
                                 </div>
-                            </div>
+                            </td>
+                            <td><button className="table-field-button" onClick={() => setEdit({ milestoneId: milestone.id, field: 'status', value: milestone.status })}>{milestone.status}</button></td>
+                            <td className="milestone-comments-cell"><button className="chip-button" onClick={() => setEdit({ milestoneId: milestone.id, field: 'comments', value: milestone.comments ?? '' })}>Comments</button></td>
+                        </tr>
+                        {edit && edit.milestoneId === milestone.id && (
+                            <tr className="record-editor-row">
+                                <td colSpan={3}>
+                                    <div className="record-editor">
+                                        <label>{MILESTONE_FIELDS.find((field) => field.id === edit.field)?.label}</label>
+                                        {edit.field === 'status' && (
+                                            <select value={edit.value} onChange={(event) => setEdit({ ...edit, value: event.target.value })}>{MILESTONE_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}</select>
+                                        )}
+                                        {edit.field === 'customerCommitment' && (
+                                            <select value={edit.value} onChange={(event) => setEdit({ ...edit, value: event.target.value })}>{COMMITMENT_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}</select>
+                                        )}
+                                        {edit.field === 'targetDate' && (
+                                            <input type="date" value={edit.value} onChange={(event) => setEdit({ ...edit, value: event.target.value })} />
+                                        )}
+                                        {(edit.field === 'riskDetails' || edit.field === 'comments') && (
+                                            <textarea rows={2} value={edit.value} onChange={(event) => setEdit({ ...edit, value: event.target.value })} />
+                                        )}
+                                        <div className="actions">
+                                            <button className="secondary" disabled={saving} onClick={() => setEdit(undefined)}>Cancel</button>
+                                            <button className="primary" disabled={saving} onClick={() => void save()}>{saving ? 'Saving...' : 'Save'}</button>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
                         )}
-                    </li>
+                    </Fragment>
                 ))}
-                {milestones.length === 0 && <li className="muted">No milestones.</li>}
-            </ul>
+                        {milestones.length === 0 && <tr><td colSpan={3} className="muted">No milestones.</td></tr>}
+                    </tbody>
+                </table>
+            </div>
         </div>
     )
 }
@@ -568,11 +586,15 @@ function StageBoard({ accountId, opportunities, onChanged, onNote }: { accountId
         <div>
             <p className="muted">Drag an opportunity card to an adjacent stage.</p>
             <div className="stage-board">
-                {[1, 2, 3, 4, 5].map((stage) => {
-                    const cards = opportunities.filter((opportunity) => opportunity.recordedStage === stage)
+                {mcemStages.map((stage) => {
+                    const cards = opportunities.filter((opportunity) => opportunity.recordedStage === stage.id)
                     return (
-                        <div key={stage} className="stage-column" onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDrop(stage, event)}>
-                            <div className="stage-column-header">Stage {stage} <span className="badge">{cards.length}</span></div>
+                        <div key={stage.id} className="stage-column" aria-label={`Stage ${stage.id}: ${stage.name}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => handleDrop(stage.id, event)}>
+                            <div className="stage-column-header">
+                                <div className="stage-column-heading"><span>Stage {stage.id}</span><span className="badge">{cards.length}</span></div>
+                                <strong>{stage.name}</strong>
+                                <span className="stage-column-role">{stage.role}</span>
+                            </div>
                             {cards.map((opportunity) => (
                                 <div key={opportunity.id} className="stage-card" draggable onDragStart={(event) => event.dataTransfer.setData('text/plain', opportunity.id)}>
                                     <strong>{opportunity.name}</strong>
@@ -601,7 +623,12 @@ function StageBoard({ accountId, opportunities, onChanged, onNote }: { accountId
 
 type SubTab = 'overview' | 'guidance' | 'stages'
 
-function PortfolioPanel({ focus }: { focus?: { accountId?: string | undefined; opportunityId?: string | undefined } | undefined }): ReactElement {
+function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpanded }: {
+    focus?: { accountId?: string | undefined; opportunityId?: string | undefined } | undefined
+    accountsExpanded: boolean
+    detailsExpanded: boolean
+    actionsExpanded: boolean
+}): ReactElement {
     const [accounts, setAccounts] = useState<Loadable<AccountView[]>>({ status: 'idle' })
     const [accountId, setAccountId] = useState<string | undefined>(undefined)
     const [opportunities, setOpportunities] = useState<OpportunityView[]>([])
@@ -692,8 +719,8 @@ function PortfolioPanel({ focus }: { focus?: { accountId?: string | undefined; o
     if (accounts.status === 'error') return <p className="error">Could not load accounts: {accounts.error}</p>
 
     return (
-        <div className="split">
-            <section className="pane">
+        <div className={portfolioLayoutClassName({ accountsExpanded, detailsExpanded, actionsExpanded })}>
+            {accountsExpanded && <section id="portfolio-accounts-panel" className="pane">
                 <h3>Accounts</h3>
                 <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
                     {accounts.data?.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
@@ -709,31 +736,48 @@ function PortfolioPanel({ focus }: { focus?: { accountId?: string | undefined; o
                     </label>
                     <button className="link" onClick={() => setOpportunityDirection((current) => current === 'ascending' ? 'descending' : 'ascending')}>{opportunityDirection === 'ascending' ? 'Asc' : 'Desc'}</button>
                 </div>
-                <ul className="opp-list">
-                    {sortedOpportunities.map((opportunity) => (
-                        <li key={opportunity.id}>
-                            <div className="opp-row">
-                                <button className={opportunity.id === opportunityId ? 'link active' : 'link'} onClick={() => setOpportunityId(opportunity.id)}>
-                                    {opportunity.name}
-                                </button>
-                                <span className="badge">Stage {opportunity.recordedStage}</span>
-                                <button className="chip-button" title="Opportunity comments" onClick={() => { setCommentsFor(opportunity.id); setCommentsText(opportunity.comments ?? '') }}>Comments</button>
-                            </div>
-                            {commentsFor === opportunity.id && (
-                                <div className="record-editor">
-                                    <label>Opportunity comments</label>
-                                    <textarea rows={2} value={commentsText} onChange={(event) => setCommentsText(event.target.value)} />
-                                    <div className="actions">
-                                        <button className="secondary" disabled={savingComments} onClick={() => setCommentsFor(undefined)}>Cancel</button>
-                                        <button className="primary" disabled={savingComments} onClick={() => void saveComments(opportunity.id)}>{savingComments ? 'Saving...' : 'Save'}</button>
-                                    </div>
-                                </div>
-                            )}
-                        </li>
-                    ))}
-                </ul>
-            </section>
-            <section className="pane">
+                <div className="opportunity-table-wrap">
+                    <table className="record-table opportunity-table">
+                        <colgroup>
+                            <col className="opportunity-name-column" />
+                            <col className="opportunity-stage-column" />
+                            <col className="opportunity-comments-column" />
+                        </colgroup>
+                        <RecordTableHeader nameLabel="Opportunity name" />
+                        <tbody>
+                            {sortedOpportunities.map((opportunity) => (
+                                <Fragment key={opportunity.id}>
+                                    <tr className={opportunity.id === opportunityId ? 'selected' : undefined}>
+                                        <td className="opportunity-name-cell">
+                                            <button className={opportunity.id === opportunityId ? 'link active' : 'link'} title={opportunity.name} onClick={() => setOpportunityId(opportunity.id)}>
+                                                {opportunity.name}
+                                            </button>
+                                        </td>
+                                        <td><span className="badge">Stage {opportunity.recordedStage}</span></td>
+                                        <td className="opportunity-comments-cell"><button className="chip-button" title="Opportunity comments" onClick={() => { setCommentsFor(opportunity.id); setCommentsText(opportunity.comments ?? '') }}>Comments</button></td>
+                                    </tr>
+                                    {commentsFor === opportunity.id && (
+                                        <tr className="record-editor-row">
+                                            <td colSpan={3}>
+                                                <div className="record-editor">
+                                                    <label>Opportunity comments</label>
+                                                    <textarea rows={2} value={commentsText} onChange={(event) => setCommentsText(event.target.value)} />
+                                                    <div className="actions">
+                                                        <button className="secondary" disabled={savingComments} onClick={() => setCommentsFor(undefined)}>Cancel</button>
+                                                        <button className="primary" disabled={savingComments} onClick={() => void saveComments(opportunity.id)}>{savingComments ? 'Saving...' : 'Save'}</button>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </Fragment>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </section>}
+            {(detailsExpanded || actionsExpanded) && <div className={`portfolio-workbench${detailsExpanded ? '' : ' details-collapsed'}${actionsExpanded ? '' : ' actions-collapsed'}`}>
+            {detailsExpanded && <section id="portfolio-details-panel" className="pane portfolio-details-pane">
                 {selectedOpportunity ? (
                     <div>
                         <h3>{selectedOpportunity.name}</h3>
@@ -791,7 +835,16 @@ function PortfolioPanel({ focus }: { focus?: { accountId?: string | undefined; o
                         {note && <p className="muted">{note}</p>}
                     </div>
                 ) : <p className="muted">Select an opportunity.</p>}
-            </section>
+            </section>}
+            {actionsExpanded && selectedOpportunity && (
+                <NextBestActions
+                    evaluation={mcem.status === 'ready' ? mcem.data : undefined}
+                    loading={mcem.status === 'loading'}
+                    error={mcem.status === 'error' ? mcem.error : undefined}
+                    onRun={() => void runCoach()}
+                />
+            )}
+            </div>}
         </div>
     )
 }
@@ -801,6 +854,9 @@ export function App(): ReactElement {
     const [mode, setMode] = useState<'sample' | 'live'>(() => (document.getElementById('root')?.dataset.mode as 'sample' | 'live') ?? 'sample')
     const [focus, setFocus] = useState<{ accountId?: string | undefined; opportunityId?: string | undefined } | undefined>(undefined)
     const [runRequest, setRunRequest] = useState<{ workflowId: string; token: number } | undefined>(undefined)
+    const [accountsExpanded, setAccountsExpanded] = useState(true)
+    const [detailsExpanded, setDetailsExpanded] = useState(true)
+    const [actionsExpanded, setActionsExpanded] = useState(true)
 
     useEffect(() => {
         onHostMessage((message) => {
@@ -812,16 +868,21 @@ export function App(): ReactElement {
 
     return (
         <div className="app">
-            <header className="app-header">
-                <div className="brand">TLC Assist</div>
-                <nav className="tabs">
-                    <button className={tab === 'portfolio' ? 'tab active' : 'tab'} onClick={() => setTab('portfolio')}>Portfolio</button>
-                    <button className={tab === 'plays' ? 'tab active' : 'tab'} onClick={() => setTab('plays')}>Plays</button>
-                </nav>
-                <span className={`mode-badge mode-${mode}`}>{mode === 'live' ? 'Live' : 'Sample'}</span>
-            </header>
+            <AppHeader
+                tab={tab}
+                mode={mode}
+                accountsExpanded={accountsExpanded}
+                detailsExpanded={detailsExpanded}
+                actionsExpanded={actionsExpanded}
+                onSelectTab={setTab}
+                onToggleAccounts={() => setAccountsExpanded((current) => !current)}
+                onToggleDetails={() => setDetailsExpanded((current) => !current)}
+                onToggleActions={() => setActionsExpanded((current) => !current)}
+            />
             <main className="app-body">
-                {tab === 'portfolio' ? <PortfolioPanel focus={focus} /> : <PlaysPanel runRequest={runRequest} />}
+                {tab === 'portfolio' ? (
+                    <PortfolioPanel focus={focus} accountsExpanded={accountsExpanded} detailsExpanded={detailsExpanded} actionsExpanded={actionsExpanded} />
+                ) : <PlaysPanel runRequest={runRequest} />}
             </main>
         </div>
     )
