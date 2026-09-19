@@ -1,0 +1,163 @@
+{
+  "name": "tlc-assist-vscode",
+  "displayName": "TLC Assist",
+  "description": "Account-team operations and opportunity guidance for TLC MultiAgent Assist, inside VS Code.",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "publisher": "tlc",
+  "license": "SEE LICENSE IN LICENSE.md",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kprpg/TLC-MultiAgentAssist.git",
+    "directory": "apps/vscode-extension"
+  },
+  "bugs": {
+    "url": "https://github.com/kprpg/TLC-MultiAgentAssist/issues"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "TLC Assist reads remote enterprise data through delegated identity and does not require workspace file trust for its core read-only views."
+    }
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/host/extension.cjs",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "tlcAssist",
+          "title": "TLC Assist",
+          "icon": "media/tlc-activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "tlcAssist": [
+        {
+          "id": "tlcPortfolio",
+          "name": "Portfolio"
+        },
+        {
+          "id": "tlcPlays",
+          "name": "Plays"
+        },
+        {
+          "id": "tlcConnection",
+          "name": "Connection"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "tlcPortfolio",
+        "contents": "Open the TLC Assist workbench to review your portfolio.\n[Open TLC Assist](command:tlc.open)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "tlc.open",
+        "title": "TLC: Open Assist",
+        "category": "TLC Assist"
+      },
+      {
+        "command": "tlc.refresh",
+        "title": "TLC: Refresh Data",
+        "category": "TLC Assist",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "tlc.runPlay",
+        "title": "TLC: Run Play",
+        "category": "TLC Assist"
+      },
+      {
+        "command": "tlc.openRun",
+        "title": "TLC: Open Latest Run",
+        "category": "TLC Assist"
+      },
+      {
+        "command": "tlc.showConnection",
+        "title": "TLC: Show Connection Status",
+        "category": "TLC Assist"
+      },
+      {
+        "command": "tlc.testLiveConnection",
+        "title": "TLC: Test Live Connection",
+        "category": "TLC Assist"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "tlc.refresh",
+          "when": "view == tlcPortfolio || view == tlcPlays || view == tlcConnection",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "TLC Assist",
+      "properties": {
+        "tlc.mode": {
+          "type": "string",
+          "enum": [
+            "sample",
+            "live"
+          ],
+          "default": "sample",
+          "markdownDescription": "Data mode. `sample` uses sanitized fixtures with no network calls. `live` requires a supported delegated Microsoft identity and is gated by the MCP tool policy."
+        },
+        "tlc.openOnStartup": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open the TLC Assist workbench automatically when the extension activates."
+        },
+        "tlc.dynamicsResource": {
+          "type": "string",
+          "default": "https://microsoftsales.crm.dynamics.com",
+          "description": "Dynamics/MSX resource base URL used by TLC: Test Live Connection to acquire a delegated token and read the Web API."
+        },
+        "tlc.useFoundryAgents": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "In `live` mode, call the real Microsoft Foundry agents (traces appear in Foundry) using Azure CLI auth (`az login`). When `false`, use the built-in deterministic guidance renderer instead."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build:host": "vite build --config vite.host.config.ts",
+    "build:webview": "vite build --config vite.webview.config.ts",
+    "build": "npm run build:host && npm run build:webview",
+    "watch:host": "vite build --watch --config vite.host.config.ts",
+    "watch:webview": "vite build --watch --config vite.webview.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "package": "vsce package --no-dependencies --out dist/tlc-assist-vscode.vsix",
+    "install:local": "npm run build && npm run package && (code --install-extension dist/tlc-assist-vscode.vsix --force || code-insiders --install-extension dist/tlc-assist-vscode.vsix --force)",
+    "install:local:insiders": "npm run build && npm run package && code-insiders --install-extension dist/tlc-assist-vscode.vsix --force",
+    "uninstall:local": "code --uninstall-extension tlc.tlc-assist-vscode || code-insiders --uninstall-extension tlc.tlc-assist-vscode",
+    "test:extension": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.9.2",
+    "docx": "^9.7.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5"
+  }
+}

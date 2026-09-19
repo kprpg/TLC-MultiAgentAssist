@@ -1,0 +1,13 @@
+.vscode/**
+.vscode-test/**
+.vscode-test.mjs
+src/**
+test/**
+tsconfig.json
+vite.host.config.ts
+vite.webview.config.ts
+**/*.map
+**/*.ts
+**/*.tsx
+!dist/host/extension.cjs
+node_modules/**

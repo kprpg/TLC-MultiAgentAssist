@@ -34,9 +34,9 @@
     {
       "id": "dataverse",
       "displayName": "Dataverse MCP",
-      "enabled": false,
+      "enabled": true,
       "execution": "local-client",
-      "serverUrl": "https://dataverse-mcp.invalid/api/mcp",
+      "serverUrl": "https://microsoftsales.crm.dynamics.com/api/mcp",
       "serverLabel": "dataverse_broad",
       "authentication": {
         "kind": "entra-delegated",

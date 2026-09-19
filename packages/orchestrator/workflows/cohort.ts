@@ -8,7 +8,7 @@ import {
     type WorkflowDefinition
 } from '../../common/index.js'
 
-export const initialWorkflowIds = ['WF-001', 'WF-002', 'WF-003', 'WF-005', 'WF-006', 'WF-007', 'WF-009', 'WF-010', 'WF-012'] as const
+export const initialWorkflowIds = ['WF-001', 'WF-002', 'WF-003', 'WF-004', 'WF-005', 'WF-006', 'WF-007', 'WF-008', 'WF-009', 'WF-010', 'WF-011', 'WF-012'] as const
 export type InitialWorkflowId = typeof initialWorkflowIds[number]
 
 const asOfSchema = z.string().date()
@@ -17,11 +17,14 @@ export const initialWorkflowInputSchemas = {
     'WF-001': z.object({ asOf: asOfSchema, staleAfterDays: z.number().int().min(1).max(365).default(30) }).strict(),
     'WF-002': z.object({ asOf: asOfSchema }).strict(),
     'WF-003': z.object({ asOf: asOfSchema }).strict(),
+    'WF-004': z.object({ asOf: asOfSchema }).strict(),
     'WF-005': z.object({ asOf: asOfSchema, lookbackDays: z.number().int().min(1).max(90).default(7) }).strict(),
     'WF-006': z.object({ asOf: asOfSchema }).strict(),
     'WF-007': z.object({ asOf: asOfSchema, meetingWindowDays: z.number().int().min(1).max(90).default(14) }).strict(),
+    'WF-008': z.object({ asOf: asOfSchema }).strict(),
     'WF-009': z.object({ asOf: asOfSchema, maximumActiveItems: z.number().int().min(1).max(100).default(20) }).strict(),
     'WF-010': z.object({ asOf: asOfSchema, followUpAfterDays: z.number().int().min(1).max(90).default(14) }).strict(),
+    'WF-011': z.object({ asOf: asOfSchema }).strict(),
     'WF-012': z.object({ asOf: asOfSchema }).strict()
 } satisfies Record<InitialWorkflowId, z.ZodType>
 
@@ -77,6 +80,9 @@ export const initialWorkflowDefinitions: readonly WorkflowDefinition[] = Object.
         { connector: 'dataverse-mcp', operation: 'read_query', required: true },
         { connector: 'msx-mcp', operation: 'list_pipeline', required: false }
     ]),
+    createDefinition('WF-004', 'Missing stakeholder map', ['AE', 'ATS'], 'account-planning', 'action-list', [
+        { connector: 'dataverse-mcp', operation: 'read_query', required: true }
+    ]),
     createDefinition('WF-005', 'Weekly governance exceptions', ['Manager'], 'governance', 'exception-list', [
         { connector: 'dataverse-mcp', operation: 'read_query', required: true },
         { connector: 'msx-mcp', operation: 'list_pipeline', required: false }
@@ -89,10 +95,16 @@ export const initialWorkflowDefinitions: readonly WorkflowDefinition[] = Object.
         { connector: 'dataverse-mcp', operation: 'read_query', required: true },
         { connector: 'msx-mcp', operation: 'list_pipeline', required: false }
     ]),
+    createDefinition('WF-008', 'Pipeline concentration risk', ['Manager'], 'forecast-readiness', 'metric-strip', [
+        { connector: 'dataverse-mcp', operation: 'read_query', required: true }
+    ]),
     createDefinition('WF-009', 'Owner workload imbalance', ['Manager'], 'ownership', 'metric-strip', [
         { connector: 'dataverse-mcp', operation: 'read_query', required: true }
     ]),
     createDefinition('WF-010', 'Activity follow-up debt', ['Seller', 'SE'], 'activity-compliance', 'action-list', [
+        { connector: 'dataverse-mcp', operation: 'read_query', required: true }
+    ]),
+    createDefinition('WF-011', 'Opportunity dependency graph', ['Manager'], 'portfolio-hygiene', 'record-table', [
         { connector: 'dataverse-mcp', operation: 'read_query', required: true }
     ]),
     createDefinition('WF-012', 'Stage exit evidence packet', ['Specialist', 'SE'], 'stage-governance', 'action-list', [

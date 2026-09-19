@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "descriptions": {
+    "WF-001": {
+      "summary": "Finds opportunities whose close date has already slipped past, so nothing sits forgotten in your pipeline.",
+      "reads": "Your opportunities with a close date on or before the staleness cutoff (30 days before today by default).",
+      "useIt": "Re-date, re-qualify, or close out each opportunity so your forecast reflects reality."
+    },
+    "WF-002": {
+      "summary": "Lists engagement milestones that are past their target date and still not completed.",
+      "reads": "Milestones on your opportunities with a target date on or before today and a status other than Completed.",
+      "useIt": "Work the overdue list: complete, re-date, or escalate each milestone with its owner."
+    },
+    "WF-003": {
+      "summary": "Flags opportunities where the recorded sales stage is not backed by milestone evidence.",
+      "reads": "Open, past-due milestones on your opportunities, compared against the stage each opportunity claims.",
+      "useIt": "Either capture the missing evidence or correct the stage before it reaches a forecast review."
+    },
+    "WF-004": {
+      "summary": "Highlights opportunities that have no stakeholder or deal-team mapping recorded.",
+      "reads": "Your opportunities, checking which ones lack recorded stakeholder coverage.",
+      "useIt": "Map the economic buyer, technical decision maker, and champion before the next customer conversation."
+    },
+    "WF-005": {
+      "summary": "The exception list a manager reviews each week: milestones explicitly marked At Risk or Blocked.",
+      "reads": "Past-due milestones on your opportunities whose status is At Risk or Blocked.",
+      "useIt": "Bring these to weekly governance with an owner and unblock date for each."
+    },
+    "WF-006": {
+      "summary": "Surfaces opportunities where the committed forecast conflicts with the underlying deal signals.",
+      "reads": "Your opportunities ordered by close date, reconciled against the MSX forecast snapshot when available.",
+      "useIt": "Resolve each conflict before forecast submission so commit numbers hold up."
+    },
+    "WF-007": {
+      "summary": "Builds a prep pack of everything scheduled with your customers in the coming weeks.",
+      "reads": "Activities on your opportunities due between today and the end of the meeting window (14 days by default).",
+      "useIt": "Walk into each meeting knowing the open threads, owners, and commitments attached to it."
+    },
+    "WF-008": {
+      "summary": "Measures how much of your pipeline depends on a single account.",
+      "reads": "All of your opportunities, aggregated by account to compute the top account's share of pipeline.",
+      "useIt": "If one account dominates, diversify coverage or plan explicitly for the concentration risk."
+    },
+    "WF-009": {
+      "summary": "Compares how opportunities are distributed across owners on your team.",
+      "reads": "Your opportunities grouped by owner and close date.",
+      "useIt": "Rebalance ownership where one seller is carrying a disproportionate share of the load."
+    },
+    "WF-010": {
+      "summary": "Finds customer follow-ups you committed to but never closed out.",
+      "reads": "Activities on your opportunities that are past the follow-up threshold (14 days by default) and still not Completed.",
+      "useIt": "Close the loop with the customer, then complete or reschedule the activity."
+    },
+    "WF-011": {
+      "summary": "Groups your opportunities by account to expose deals that depend on each other.",
+      "reads": "Your opportunities ordered by account and close date.",
+      "useIt": "Sequence dependent deals so an early slip does not cascade through the account."
+    },
+    "WF-012": {
+      "summary": "Assembles the milestone evidence needed to defend a stage exit.",
+      "reads": "All milestones on your opportunities with a target date on or before today, regardless of status.",
+      "useIt": "Attach the packet to your stage-exit review so the decision is evidence-based."
+    }
+  }
+}

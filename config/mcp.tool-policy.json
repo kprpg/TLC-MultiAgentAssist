@@ -6,7 +6,7 @@
       "serverId": "dataverse",
       "tool": "read_query",
       "riskClass": "read",
-      "enabled": false,
+      "enabled": true,
       "approval": "none",
       "allowedCapabilities": ["account-pulse", "mcem-coach", "pursuit-executive", "risk-solution-play"],
       "allowedScopes": ["opportunity", "account", "portfolio"],

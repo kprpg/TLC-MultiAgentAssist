@@ -42,7 +42,7 @@ import {
   WeatherSunny20Regular,
   Warning20Filled
 } from '@fluentui/react-icons'
-import { contractVersion, type Account, type AgentCapability, type AgentTaskResponse, type DesktopDataStatus, type McemResponse, type Opportunity } from '../../../../packages/common/index.js'
+import { agentCapabilities, contractVersion, type Account, type AgentCapability, type AgentTaskResponse, type DesktopDataStatus, type McemResponse, type Opportunity } from '../../../../packages/common/index.js'
 import { getDataModeLabel } from './data-mode-label.js'
 
 const prompt = 'How do we move this opportunity to the next MCEM stage?'
@@ -507,9 +507,10 @@ export function App() {
                 setAgentResult(null)
                 setAgentError('')
               }}>
-                {(Object.entries(agentTasks) as [AgentCapability, { label: string; prompts: readonly string[] }][]).map(([value, task]) => (
-                  <Tab key={value} value={value}>{task.label}</Tab>
-                ))}
+                {(Object.entries(agentTasks) as [AgentCapability, { label: string; prompts: readonly string[] }][]).map(([value, task]) => {
+                  const description = agentCapabilities.find((item) => item.id === value)?.description ?? task.label
+                  return <Tab key={value} value={value} title={description}>{task.label}</Tab>
+                })}
               </TabList>
               <div className="agent-prompt-suggestions" aria-label={`${agentTasks[capability].label} suggested prompts`}>
                 {agentTasks[capability].prompts.map((suggestedPrompt) => (

@@ -833,6 +833,17 @@ async function loadMcpToolPolicy(filePath) {
 	return mcpToolPolicySchema.parse(candidate);
 }
 //#endregion
+//#region packages/common/configuration/workflow-descriptions.ts
+var workflowDescriptionSchema = z.object({
+	summary: z.string().min(1).max(400),
+	reads: z.string().min(1).max(400),
+	useIt: z.string().min(1).max(400)
+}).strict();
+z.object({
+	schemaVersion: z.literal(1),
+	descriptions: z.record(z.string().regex(/^WF-[0-9]{3}$/), workflowDescriptionSchema)
+}).strict();
+//#endregion
 //#region packages/common/sharing/opportunity-link.ts
 function addMsxOpportunityLink(content, opportunityId) {
 	if (/microsoftsales\.crm\.dynamics\.com\/main\.aspx[^\s)]*\bopportunity\b/i.test(content)) return content;
@@ -1004,6 +1015,7 @@ var LiveMsxConnector = class {
 	portfolioPromise;
 	observationPromises = /* @__PURE__ */ new Map();
 	milestonePromises = /* @__PURE__ */ new Map();
+	currentUserIdPromise;
 	constructor(tokenProvider, fetchImplementation = fetch, baseUrl = defaultBaseUrl, performanceReporter, writeMetadata = {}) {
 		this.tokenProvider = tokenProvider;
 		this.fetchImplementation = fetchImplementation;
@@ -1110,6 +1122,15 @@ var LiveMsxConnector = class {
 		this.portfolioPromise = void 0;
 		this.observationPromises.clear();
 		this.milestonePromises.clear();
+		this.currentUserIdPromise = void 0;
+	}
+	/** Returns the signed-in user's Dataverse systemuser id (WhoAmI UserId), cached for reuse. */
+	getCurrentUserId() {
+		this.currentUserIdPromise ??= this.requestJson("WhoAmI").then((identity) => identity.UserId).catch((error) => {
+			this.currentUserIdPromise = void 0;
+			throw error;
+		});
+		return this.currentUserIdPromise;
 	}
 	async assertOpportunityAccess(opportunityId) {
 		if (!(await this.getPortfolio()).opportunities.some((opportunity) => opportunity.id === opportunityId)) throw new Error("The opportunity is not in the signed-in user’s active MSX portfolio.");
@@ -2352,11 +2373,14 @@ var initialWorkflowIds = [
 	"WF-001",
 	"WF-002",
 	"WF-003",
+	"WF-004",
 	"WF-005",
 	"WF-006",
 	"WF-007",
+	"WF-008",
 	"WF-009",
 	"WF-010",
+	"WF-011",
 	"WF-012"
 ];
 var asOfSchema = z.string().date();
@@ -2367,6 +2391,7 @@ var initialWorkflowInputSchemas = {
 	}).strict(),
 	"WF-002": z.object({ asOf: asOfSchema }).strict(),
 	"WF-003": z.object({ asOf: asOfSchema }).strict(),
+	"WF-004": z.object({ asOf: asOfSchema }).strict(),
 	"WF-005": z.object({
 		asOf: asOfSchema,
 		lookbackDays: z.number().int().min(1).max(90).default(7)
@@ -2376,6 +2401,7 @@ var initialWorkflowInputSchemas = {
 		asOf: asOfSchema,
 		meetingWindowDays: z.number().int().min(1).max(90).default(14)
 	}).strict(),
+	"WF-008": z.object({ asOf: asOfSchema }).strict(),
 	"WF-009": z.object({
 		asOf: asOfSchema,
 		maximumActiveItems: z.number().int().min(1).max(100).default(20)
@@ -2384,6 +2410,7 @@ var initialWorkflowInputSchemas = {
 		asOf: asOfSchema,
 		followUpAfterDays: z.number().int().min(1).max(90).default(14)
 	}).strict(),
+	"WF-011": z.object({ asOf: asOfSchema }).strict(),
 	"WF-012": z.object({ asOf: asOfSchema }).strict()
 };
 var workflowQueueItemSchema = z.object({
@@ -2443,6 +2470,11 @@ var initialWorkflowDefinitions = Object.freeze([
 		operation: "list_pipeline",
 		required: false
 	}]),
+	createDefinition("WF-004", "Missing stakeholder map", ["AE", "ATS"], "account-planning", "action-list", [{
+		connector: "dataverse-mcp",
+		operation: "read_query",
+		required: true
+	}]),
 	createDefinition("WF-005", "Weekly governance exceptions", ["Manager"], "governance", "exception-list", [{
 		connector: "dataverse-mcp",
 		operation: "read_query",
@@ -2470,12 +2502,22 @@ var initialWorkflowDefinitions = Object.freeze([
 		operation: "list_pipeline",
 		required: false
 	}]),
+	createDefinition("WF-008", "Pipeline concentration risk", ["Manager"], "forecast-readiness", "metric-strip", [{
+		connector: "dataverse-mcp",
+		operation: "read_query",
+		required: true
+	}]),
 	createDefinition("WF-009", "Owner workload imbalance", ["Manager"], "ownership", "metric-strip", [{
 		connector: "dataverse-mcp",
 		operation: "read_query",
 		required: true
 	}]),
 	createDefinition("WF-010", "Activity follow-up debt", ["Seller", "SE"], "activity-compliance", "action-list", [{
+		connector: "dataverse-mcp",
+		operation: "read_query",
+		required: true
+	}]),
+	createDefinition("WF-011", "Opportunity dependency graph", ["Manager"], "portfolio-hygiene", "record-table", [{
 		connector: "dataverse-mcp",
 		operation: "read_query",
 		required: true
@@ -2704,6 +2746,42 @@ function buildInitialWorkflowQuery(workflowId, input) {
 			expand: []
 		};
 		case "WF-012": return milestoneQuery(input.asOf, []);
+		case "WF-004":
+		case "WF-008": return {
+			entity: "opportunity",
+			select: [
+				"id",
+				"accountId",
+				"name",
+				"closeDate"
+			],
+			filter: [],
+			orderBy: [{
+				field: "closeDate",
+				direction: "asc"
+			}],
+			top: 500,
+			expand: []
+		};
+		case "WF-011": return {
+			entity: "opportunity",
+			select: [
+				"id",
+				"accountId",
+				"name",
+				"closeDate"
+			],
+			filter: [],
+			orderBy: [{
+				field: "accountId",
+				direction: "asc"
+			}, {
+				field: "closeDate",
+				direction: "asc"
+			}],
+			top: 500,
+			expand: []
+		};
 	}
 }
 function milestoneQuery(asOf, extraFilters) {
@@ -2742,7 +2820,7 @@ function buildCard(workflowId, title, records, queueItems, evidenceIds) {
 			evidenceIds: item.evidenceIds
 		}))
 	};
-	if (workflowId === "WF-002" || workflowId === "WF-010" || workflowId === "WF-012") return {
+	if (workflowId === "WF-002" || workflowId === "WF-004" || workflowId === "WF-010" || workflowId === "WF-012") return {
 		kind: "action-list",
 		title,
 		evidenceIds,
@@ -2764,6 +2842,30 @@ function buildCard(workflowId, title, records, queueItems, evidenceIds) {
 			value: records.length
 		}]
 	};
+	if (workflowId === "WF-008") {
+		const perAccount = /* @__PURE__ */ new Map();
+		for (const record of records) perAccount.set(text(record.accountId) ?? "Unassigned", (perAccount.get(text(record.accountId) ?? "Unassigned") ?? 0) + 1);
+		const topCount = perAccount.size > 0 ? Math.max(...perAccount.values()) : 0;
+		return {
+			kind: "metric-strip",
+			title,
+			evidenceIds,
+			metrics: [
+				{
+					label: "Pipeline opportunities",
+					value: records.length
+				},
+				{
+					label: "Accounts",
+					value: perAccount.size
+				},
+				{
+					label: "Top account share %",
+					value: records.length > 0 ? Math.round(topCount / records.length * 100) : 0
+				}
+			]
+		};
+	}
 	const columns = workflowId === "WF-007" ? [
 		"id",
 		"opportunityId",
@@ -2811,6 +2913,7 @@ function buildQueueItems(workflowId, records, input, evidenceIds) {
 	return records.map((record, index) => {
 		const recordId = text(record.id) ?? `${index + 1}`;
 		const dueDate = date(record.targetDate) ?? date(record.dueDate) ?? date(record.closeDate);
+		const opportunityId = text(record.opportunityId) ?? (opportunityScopedWorkflows.has(workflowId) ? text(record.id) : void 0);
 		return {
 			id: `${workflowId}:${recordId}`,
 			workflowId,
@@ -2818,23 +2921,33 @@ function buildQueueItems(workflowId, records, input, evidenceIds) {
 			title: queueTitle(workflowId, record),
 			...text(record.ownerId) ? { owner: text(record.ownerId) } : {},
 			...text(record.accountId) ? { accountId: text(record.accountId) } : {},
-			...text(record.opportunityId) ? { opportunityId: text(record.opportunityId) } : {},
+			...opportunityId ? { opportunityId } : {},
 			...dueDate ? { dueDate } : {},
 			evidenceIds,
 			status: "new"
 		};
 	});
 }
+var opportunityScopedWorkflows = /* @__PURE__ */ new Set([
+	"WF-001",
+	"WF-004",
+	"WF-006",
+	"WF-008",
+	"WF-011"
+]);
 function queueTitle(workflowId, record) {
 	const label = text(record.name) ?? text(record.subject) ?? text(record.id) ?? "Untitled record";
 	return `${{
 		"WF-001": "Review stale opportunity",
 		"WF-002": "Triage overdue milestone",
 		"WF-003": "Review stage evidence",
+		"WF-004": "Map stakeholders for",
 		"WF-005": "Review governance exception",
 		"WF-006": "Review commit risk",
 		"WF-007": "Prepare for next meeting",
+		"WF-008": "Review concentration exposure",
 		"WF-010": "Complete overdue follow-up",
+		"WF-011": "Review opportunity dependencies",
 		"WF-012": "Assemble stage exit evidence"
 	}[workflowId]}: ${label}`;
 }
@@ -2929,6 +3042,11 @@ function addDays(value, days) {
 }
 //#endregion
 //#region packages/connectors/dataverse-mcp/query-guard.ts
+var dealTeamOpportunityColumn = {
+	opportunity: "opportunityid",
+	msp_engagementmilestone: "msp_opportunityid",
+	activitypointer: "regardingobjectid"
+};
 var DataverseQueryGuardError = class extends Error {
 	code;
 	constructor(code, message) {
@@ -2937,7 +3055,59 @@ var DataverseQueryGuardError = class extends Error {
 		this.name = "DataverseQueryGuardError";
 	}
 };
-function translateDataverseQuery(entityMapInput, queryInput, delegatedScope, maximumRows) {
+/** Strips the OData lookup decoration (`_x_value`) so a logical name is valid in a TDS SQL column list. */
+function toSqlColumn(logicalName) {
+	return /^_(.+)_value$/.exec(logicalName)?.[1] ?? logicalName;
+}
+function sqlScalar(value) {
+	if (typeof value === "number") return String(value);
+	if (typeof value === "boolean") return value ? "1" : "0";
+	return `'${value.replace(/'/g, "''")}'`;
+}
+function sqlOperator(operator) {
+	switch (operator) {
+		case "ne": return "<>";
+		case "gt": return ">";
+		case "ge":
+		case "on-or-after": return ">=";
+		case "lt": return "<";
+		case "le":
+		case "on-or-before": return "<=";
+		case "in": return "IN";
+		case "contains":
+		case "startswith": return "LIKE";
+		default: return "=";
+	}
+}
+function sqlValue(operator, value) {
+	if (Array.isArray(value)) return `(${value.map(sqlScalar).join(", ")})`;
+	if (operator === "contains") return sqlScalar(`%${value}%`);
+	if (operator === "startswith") return sqlScalar(`${value}%`);
+	return sqlScalar(value);
+}
+function renderSqlScopePredicate(template, scope) {
+	const replacements = {
+		delegatedUserAccountIds: scope.delegatedUserAccountIds,
+		delegatedUserOpportunityIds: scope.delegatedUserOpportunityIds
+	};
+	const placeholders = [...template.matchAll(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g)];
+	if (placeholders.length === 0) throw new DataverseQueryGuardError("scope_required", "Dataverse scope predicate has no delegated-user placeholder.");
+	let rendered = template;
+	for (const match of placeholders) {
+		const name = match[1];
+		const values = name === void 0 ? void 0 : replacements[name];
+		if (!values || values.length === 0 || values.some((value) => !isSafeIdentifier(value))) throw new DataverseQueryGuardError("scope_required", "Delegated Dataverse scope is missing or invalid.");
+		rendered = rendered.replaceAll(`{${name}}`, `(${values.map((value) => `'${value}'`).join(", ")})`);
+	}
+	if (/[{}]/.test(rendered)) throw new DataverseQueryGuardError("scope_required", "Dataverse scope predicate contains an unknown placeholder.");
+	return rendered;
+}
+/**
+* Renders a guarded, delegated-scoped TDS `SELECT` string for the Dataverse MCP `read_query`
+* tool (which takes a `querytext` SQL string, not a structured payload). Applies the same
+* entity/field allowlist and delegated-scope requirements as {@link translateDataverseQuery}.
+*/
+function renderDataverseSql(entityMapInput, queryInput, delegatedScope, maximumRows, options = {}) {
 	const entityMap = dataverseEntityMapSchema.parse(entityMapInput);
 	const query = guardedQueryRequestSchema.parse(queryInput);
 	if (!Number.isInteger(maximumRows) || maximumRows < 1) throw new Error("Dataverse maximum row count must be a positive integer.");
@@ -2945,53 +3115,31 @@ function translateDataverseQuery(entityMapInput, queryInput, delegatedScope, max
 	if (!entity) throw new DataverseQueryGuardError("entity_denied", "Dataverse entity is not allowlisted.");
 	if (query.expand.length > 0) throw new DataverseQueryGuardError("relationship_denied", "Dataverse relationship expansion is not allowlisted by the semantic map.");
 	const attributes = new Map(entity.attributes.map((attribute) => [attribute.canonical, attribute]));
-	const resolveAttribute = (canonical) => {
+	const column = (canonical) => {
 		const attribute = attributes.get(canonical);
 		if (!attribute) throw new DataverseQueryGuardError("field_denied", "Dataverse field is not allowlisted.");
-		return attribute;
+		return toSqlColumn(attribute.logicalName);
 	};
-	const userScopePredicate = entity.userScopePredicate === void 0 ? void 0 : renderScopePredicate(entity.userScopePredicate, delegatedScope);
-	return {
-		entitySetName: entity.entitySetName,
-		select: query.select.map((field) => resolveAttribute(field).logicalName),
-		filter: query.filter.map((filter) => ({
-			field: resolveAttribute(filter.field).logicalName,
-			operator: normalizeOperator(filter.operator),
-			value: filter.value
-		})),
-		orderBy: query.orderBy.map((order) => ({
-			field: resolveAttribute(order.field).logicalName,
-			direction: order.direction
-		})),
-		top: Math.min(query.top, maximumRows),
-		expand: [],
-		...userScopePredicate ? { userScopePredicate } : {}
-	};
-}
-function renderScopePredicate(template, scope) {
-	const replacements = {
-		delegatedUserAccountIds: scope.delegatedUserAccountIds,
-		delegatedUserOpportunityIds: scope.delegatedUserOpportunityIds
-	};
-	let rendered = template;
-	const placeholders = [...template.matchAll(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g)];
-	if (placeholders.length === 0) throw new DataverseQueryGuardError("scope_required", "Dataverse scope predicate has no delegated-user placeholder.");
-	for (const match of placeholders) {
-		const name = match[1];
-		const values = name === void 0 ? void 0 : replacements[name];
-		if (!values || values.length === 0 || values.some((value) => !isSafeIdentifier(value))) throw new DataverseQueryGuardError("scope_required", "Delegated Dataverse scope is missing or invalid.");
-		rendered = rendered.replaceAll(`{${name}}`, `(${values.join(",")})`);
-	}
-	if (/[{}]/.test(rendered)) throw new DataverseQueryGuardError("scope_required", "Dataverse scope predicate contains an unknown placeholder.");
-	return rendered;
+	const top = Math.min(query.top, maximumRows);
+	const dealTeamColumn = dealTeamOpportunityColumn[toSqlColumn(entity.logicalName)];
+	const useJoinScope = options.enforceScope !== false && Boolean(delegatedScope.currentUserId) && Boolean(dealTeamColumn);
+	const qualify = (sqlColumn) => useJoinScope ? `m.${sqlColumn}` : sqlColumn;
+	const selectColumns = query.select.map((canonical) => qualify(column(canonical)));
+	const whereClauses = query.filter.map((filter) => `${qualify(column(filter.field))} ${sqlOperator(filter.operator)} ${sqlValue(filter.operator, filter.value)}`);
+	if (useJoinScope) {
+		const userId = delegatedScope.currentUserId;
+		if (!isSafeIdentifier(userId)) throw new DataverseQueryGuardError("scope_required", "The delegated user id is missing or invalid.");
+		whereClauses.unshift(`dt.msp_dealteamuserid = '${userId}'`, "dt.statecode = 0");
+	} else if (options.enforceScope !== false && entity.userScopePredicate !== void 0) whereClauses.push(renderSqlScopePredicate(entity.userScopePredicate, delegatedScope));
+	const orderBy = query.orderBy.map((order) => `${qualify(column(order.field))} ${order.direction.toUpperCase()}`);
+	let sql = `SELECT TOP ${top} ${selectColumns.join(", ")} FROM ${toSqlColumn(entity.logicalName)}`;
+	if (useJoinScope) sql += ` m JOIN msp_dealteam dt ON m.${dealTeamColumn} = dt.msp_parentopportunityid`;
+	if (whereClauses.length > 0) sql += ` WHERE ${whereClauses.join(" AND ")}`;
+	if (orderBy.length > 0) sql += ` ORDER BY ${orderBy.join(", ")}`;
+	return sql;
 }
 function isSafeIdentifier(value) {
 	return /^[a-zA-Z0-9][a-zA-Z0-9-]{0,127}$/.test(value);
-}
-function normalizeOperator(operator) {
-	if (operator === "on-or-after") return "ge";
-	if (operator === "on-or-before") return "le";
-	return operator;
 }
 //#endregion
 //#region packages/connectors/dataverse-mcp/adapter.ts
@@ -3007,49 +3155,105 @@ var DataverseMcpReadAdapter = class {
 		this.createToolCallId = options.createToolCallId ?? randomUUID;
 	}
 	async query(query, context) {
-		const arguments_ = translateDataverseQuery(this.options.entityMap, query, context.delegatedScope, this.maximumRows);
 		const checkedAt = this.now().toISOString();
 		const lineage = {
 			connector: "dataverse-mcp",
 			operation: "read_query",
 			toolCallId: this.createToolCallId()
 		};
+		const target = Math.max(1, Math.min(query.top, this.maximumRows));
 		try {
-			const result = await this.options.broker.execute({
-				correlationId: context.correlationId,
-				serverId: "dataverse",
-				tool: "read_query",
-				capability: context.capability,
-				scope: context.scope.kind,
-				arguments: arguments_,
-				...context.signal ? { signal: context.signal } : {}
-			});
-			if (result.kind !== "untrusted-mcp-data") throw new DataverseMcpAdapterError("malformed_response", "Dataverse MCP result was not marked as untrusted data.");
-			const rows = extractRows(result.data);
-			const records = mapRowsToCanonical(this.options.entityMap, query, rows);
-			const truncated = result.truncated || records.length < result.recordCount;
-			return {
-				state: truncated ? "partial" : "complete",
-				records,
-				recordCount: result.recordCount,
-				truncated,
-				sourceHealth: {
-					source: "dataverse-mcp",
-					state: truncated ? "partial" : "live",
-					detail: truncated ? "Dataverse MCP returned a row-limited delegated result." : "Dataverse MCP returned delegated user-scoped data.",
-					checkedAt
-				},
-				lineage
-			};
+			if (target <= READ_QUERY_PER_CALL_LIMIT) {
+				const page = await this.fetchPage(query, context, target);
+				const truncated = page.recordCount > page.records.length;
+				return this.assembleResult(page.records, page.recordCount, truncated, checkedAt, lineage);
+			}
+			const collected = [];
+			let lastId;
+			let exhausted = false;
+			while (collected.length < target && !exhausted) {
+				const pageSize = Math.min(READ_QUERY_PER_CALL_LIMIT, target - collected.length);
+				const pageQuery = {
+					...query,
+					orderBy: [{
+						field: "id",
+						direction: "asc"
+					}],
+					filter: lastId === void 0 ? query.filter : [...query.filter, {
+						field: "id",
+						operator: "gt",
+						value: lastId
+					}],
+					top: pageSize
+				};
+				const page = await this.fetchPage(pageQuery, context, pageSize);
+				collected.push(...page.records);
+				const lastRecordId = page.records.at(-1)?.["id"];
+				if (page.records.length < pageSize || typeof lastRecordId !== "string") exhausted = true;
+				else lastId = lastRecordId;
+			}
+			const ordered = sortRecords(collected, query.orderBy).slice(0, target);
+			return this.assembleResult(ordered, collected.length, !exhausted, checkedAt, lineage);
 		} catch (error) {
 			const code = errorCode(error);
 			if (code === "aborted" || error instanceof Error && error.name === "AbortError") throw error;
-			if (isUnauthorizedCode(code)) return failureResult("unauthorized", "unauthorized", "Dataverse MCP delegated authorization is unavailable.", checkedAt, lineage);
+			if (isUnauthorizedCode(code)) return failureResult("unauthorized", "unauthorized", `Dataverse MCP delegated authorization is unavailable (${code}).`, checkedAt, lineage);
 			if (error instanceof DataverseMcpAdapterError) throw error;
 			return failureResult("partial", "unavailable", "Dataverse MCP data is temporarily unavailable.", checkedAt, lineage);
 		}
 	}
+	async fetchPage(query, context, maxRows) {
+		const querytext = renderDataverseSql(this.options.entityMap, query, context.delegatedScope, maxRows, { enforceScope: this.options.enforceDelegatedScope !== false });
+		const result = await this.options.broker.execute({
+			correlationId: context.correlationId,
+			serverId: "dataverse",
+			tool: "read_query",
+			capability: context.capability,
+			scope: context.scope.kind,
+			arguments: { querytext },
+			...context.signal ? { signal: context.signal } : {}
+		});
+		if (result.kind !== "untrusted-mcp-data") throw new DataverseMcpAdapterError("malformed_response", "Dataverse MCP result was not marked as untrusted data.");
+		assertNotMcpError(result.data);
+		return {
+			records: mapRowsToCanonical(this.options.entityMap, query, extractRows(result.data)),
+			recordCount: result.recordCount
+		};
+	}
+	assembleResult(records, recordCount, truncated, checkedAt, lineage) {
+		return {
+			state: truncated ? "partial" : "complete",
+			records,
+			recordCount: Math.max(recordCount, records.length),
+			truncated,
+			sourceHealth: {
+				source: "dataverse-mcp",
+				state: truncated ? "partial" : "live",
+				detail: truncated ? "Dataverse MCP returned a row-limited delegated result." : "Dataverse MCP returned delegated user-scoped data.",
+				checkedAt
+			},
+			lineage
+		};
+	}
 };
+var READ_QUERY_PER_CALL_LIMIT = 20;
+function sortRecords(records, orderBy) {
+	if (orderBy.length === 0) return records;
+	return [...records].sort((left, right) => {
+		for (const order of orderBy) {
+			const comparison = compareOrderValues(left[order.field], right[order.field]);
+			if (comparison !== 0) return order.direction === "asc" ? comparison : -comparison;
+		}
+		return 0;
+	});
+}
+function compareOrderValues(left, right) {
+	if (left === right) return 0;
+	if (left === null || left === void 0) return 1;
+	if (right === null || right === void 0) return -1;
+	if ((typeof left === "string" || typeof left === "number") && (typeof right === "string" || typeof right === "number")) return left < right ? -1 : left > right ? 1 : 0;
+	return 0;
+}
 var DataverseMcpAdapterError = class extends Error {
 	code;
 	constructor(code, message) {
@@ -3058,6 +3262,9 @@ var DataverseMcpAdapterError = class extends Error {
 		this.name = "DataverseMcpAdapterError";
 	}
 };
+function assertNotMcpError(value) {
+	if (isRecord$1(value) && value.isError === true) throw new DataverseMcpAdapterError("malformed_response", (Array.isArray(value.content) ? value.content.map((block) => isRecord$1(block) && typeof block.text === "string" ? block.text : "").join(" ").trim() : "") || "Dataverse MCP read_query returned an error.");
+}
 function extractRows(value) {
 	if (typeof value === "string") return extractRows(parseJson(value));
 	if (Array.isArray(value)) return requireRows(value);
@@ -3086,7 +3293,7 @@ function mapRowsToCanonical(entityMap, query, rows) {
 		if (!attribute) throw new DataverseMcpAdapterError("malformed_response", "Dataverse field mapping disappeared after translation.");
 		return attribute;
 	});
-	return rows.map((row) => Object.fromEntries(selected.map((attribute) => [attribute.canonical, row[attribute.logicalName] ?? null])));
+	return rows.map((row) => Object.fromEntries(selected.map((attribute) => [attribute.canonical, row[toSqlColumn(attribute.logicalName)] ?? row[attribute.logicalName] ?? null])));
 }
 function failureResult(state, sourceState, detail, checkedAt, lineage) {
 	return {
@@ -3717,12 +3924,14 @@ var WorkflowRuntime = class {
 	now;
 	createId;
 	resultAssembler;
+	onStepError;
 	constructor(registry, executor, options = {}) {
 		this.registry = registry;
 		this.executor = executor;
 		this.now = options.now ?? Date.now;
 		this.createId = options.createId ?? randomUUID;
 		this.resultAssembler = options.resultAssembler;
+		this.onStepError = options.onStepError;
 		this.history = new WorkflowRunHistory({
 			...options.historyCapacity === void 0 ? {} : { capacity: options.historyCapacity },
 			onEvicted: (run) => {
@@ -3834,8 +4043,16 @@ var WorkflowRuntime = class {
 						...connectorResult.lineage ? { lineage: connectorResult.lineage } : {},
 						...connectorResult.sourceHealth ? { sourceHealth: connectorResult.sourceHealth } : {}
 					});
-					if (connectorResult.state === "unauthorized") outcome = step.required ? "unauthorized" : "partial";
-					else if (connectorResult.state === "partial") outcome = "partial";
+					if (connectorResult.state === "unauthorized") {
+						outcome = step.required ? "unauthorized" : "partial";
+						this.onStepError?.({
+							workflowId: run.workflowId,
+							connector: step.connector,
+							operation: step.operation,
+							required: step.required ?? false,
+							message: connectorResult.sourceHealth?.detail ?? `${step.connector} delegated authorization is unavailable.`
+						});
+					} else if (connectorResult.state === "partial") outcome = "partial";
 					if (this.resultAssembler && connectorResult.state !== "unauthorized") {
 						result.output = this.resultAssembler.assemble({
 							definition,
@@ -3859,6 +4076,13 @@ var WorkflowRuntime = class {
 					if (error instanceof WorkflowCancellationError || controller.signal.reason instanceof WorkflowCancellationError) return;
 					const errorCode = getErrorCode(error);
 					const unauthorized = errorCode?.endsWith("_denied") || errorCode === "unauthorized" || errorCode === "scope_required";
+					this.onStepError?.({
+						workflowId: run.workflowId,
+						connector: step.connector,
+						operation: step.operation,
+						required: step.required ?? false,
+						message: error instanceof Error ? error.message : String(error)
+					});
 					run.connectorCalls.push({
 						connector: step.connector,
 						operation: step.operation,
@@ -4197,18 +4421,80 @@ function createConfiguredWorkflowHost(options) {
 	});
 	const executor = new InitialWorkflowConnectorExecutor(new DataverseMcpReadAdapter({
 		entityMap: options.entityMap,
-		broker
+		broker,
+		...options.enforceDelegatedScope === void 0 ? {} : { enforceDelegatedScope: options.enforceDelegatedScope },
+		...options.maximumRows === void 0 ? {} : { maximumRows: options.maximumRows }
 	}), new MsxMcpReadAdapter(broker), options.resolveDelegatedScope);
 	const workflowRegistry = new WorkflowRegistry(initialWorkflowDefinitions);
 	return {
-		host: new SharedWorkflowHost(workflowRegistry, new WorkflowRuntime(workflowRegistry, executor, { resultAssembler: new InitialWorkflowResultAssembler() })),
+		host: new SharedWorkflowHost(workflowRegistry, new WorkflowRuntime(workflowRegistry, executor, {
+			resultAssembler: new InitialWorkflowResultAssembler(),
+			...options.onStepError ? { onStepError: options.onStepError } : {}
+		})),
 		dispose: () => pool.dispose()
 	};
+}
+/**
+* Builds a delegated-scope resolver that scopes Dataverse reads to the signed-in user's deal-team
+* portfolio through a `msp_dealteam` JOIN on their user id, which is far cheaper than enumerating
+* the portfolio and injecting a large `IN (...)` predicate. The user id is resolved once and cached.
+*/
+function createDealTeamScopeResolver(resolveCurrentUserId) {
+	let currentUserId;
+	return async () => {
+		currentUserId ??= resolveCurrentUserId().catch((error) => {
+			currentUserId = void 0;
+			throw error;
+		});
+		return {
+			currentUserId: await currentUserId,
+			delegatedUserAccountIds: [],
+			delegatedUserOpportunityIds: []
+		};
+	};
+}
+/** Shared live Play host for Desktop, Web, and the VS Code extension. */
+function createLivePlayWorkflowHost(options) {
+	const { resolveCurrentUserId, maximumRows, ...configured } = options;
+	return createConfiguredWorkflowHost({
+		...configured,
+		maximumRows: maximumRows ?? 100,
+		resolveDelegatedScope: createDealTeamScopeResolver(resolveCurrentUserId)
+	});
 }
 //#endregion
 //#region packages/orchestrator/workflows/sample-host.ts
 var sampleRows = {
 	"WF-001": [{
+		id: "opp-grid-modernization",
+		accountId: "account-contoso",
+		opportunityId: "opp-grid-modernization",
+		name: "Grid operations modernization",
+		closeDate: "2026-08-15"
+	}, {
+		id: "opp-ai-service",
+		accountId: "account-fabrikam",
+		opportunityId: "opp-ai-service",
+		name: "AI-assisted customer service",
+		closeDate: "2026-08-29"
+	}],
+	"WF-002": [{
+		id: "milestone-grid",
+		accountId: "account-contoso",
+		opportunityId: "opp-grid-modernization",
+		name: "Architecture sign-off",
+		status: "At Risk",
+		targetDate: "2026-09-01"
+	}],
+	"WF-003": [{
+		id: "milestone-stage-gap",
+		accountId: "account-contoso",
+		opportunityId: "opp-grid-modernization",
+		name: "Customer outcome evidence",
+		status: "At Risk",
+		targetDate: "2026-09-05"
+	}],
+	"WF-004": [{
 		id: "opp-grid-modernization",
 		accountId: "account-contoso",
 		name: "Grid operations modernization",
@@ -4219,22 +4505,9 @@ var sampleRows = {
 		name: "AI-assisted customer service",
 		closeDate: "2026-08-29"
 	}],
-	"WF-002": [{
-		id: "milestone-grid",
-		opportunityId: "opp-grid-modernization",
-		name: "Architecture sign-off",
-		status: "At Risk",
-		targetDate: "2026-09-01"
-	}],
-	"WF-003": [{
-		id: "milestone-stage-gap",
-		opportunityId: "opp-grid-modernization",
-		name: "Customer outcome evidence",
-		status: "At Risk",
-		targetDate: "2026-09-05"
-	}],
 	"WF-005": [{
 		id: "milestone-governance",
+		accountId: "account-fabrikam",
 		opportunityId: "opp-ai-service",
 		name: "Proof review",
 		status: "Blocked",
@@ -4243,46 +4516,84 @@ var sampleRows = {
 	"WF-006": [{
 		id: "opp-grid-modernization",
 		accountId: "account-contoso",
+		opportunityId: "opp-grid-modernization",
 		name: "Grid operations modernization",
 		closeDate: "2026-10-30"
 	}],
 	"WF-007": [{
 		id: "meeting-grid",
+		accountId: "account-contoso",
 		opportunityId: "opp-grid-modernization",
 		subject: "Executive architecture review",
 		ownerId: "owner-1",
 		dueDate: "2026-09-18",
 		status: "Open"
 	}],
+	"WF-008": [
+		{
+			id: "opp-grid-modernization",
+			accountId: "account-contoso",
+			name: "Grid operations modernization",
+			closeDate: "2026-10-30"
+		},
+		{
+			id: "opp-cloud-security-readiness",
+			accountId: "account-contoso",
+			name: "Cloud security readiness",
+			closeDate: "2027-02-26"
+		},
+		{
+			id: "opp-ai-service",
+			accountId: "account-fabrikam",
+			name: "AI-assisted customer service",
+			closeDate: "2026-12-18"
+		}
+	],
 	"WF-009": [{
 		id: "opp-grid-modernization",
 		accountId: "account-contoso",
+		opportunityId: "opp-grid-modernization",
 		name: "Grid operations modernization",
 		ownerId: "owner-1",
 		closeDate: "2026-10-30"
 	}, {
 		id: "opp-cloud-security-readiness",
 		accountId: "account-contoso",
+		opportunityId: "opp-cloud-security-readiness",
 		name: "Cloud security readiness",
 		ownerId: "owner-1",
 		closeDate: "2027-02-26"
 	}],
 	"WF-010": [{
 		id: "activity-grid",
+		accountId: "account-contoso",
 		opportunityId: "opp-grid-modernization",
 		subject: "Customer follow-up",
 		ownerId: "owner-1",
 		dueDate: "2026-08-01",
 		status: "Open"
 	}],
+	"WF-011": [{
+		id: "opp-grid-modernization",
+		accountId: "account-contoso",
+		name: "Grid operations modernization",
+		closeDate: "2026-10-30"
+	}, {
+		id: "opp-cloud-security-readiness",
+		accountId: "account-contoso",
+		name: "Cloud security readiness",
+		closeDate: "2027-02-26"
+	}],
 	"WF-012": [{
 		id: "milestone-exit-1",
+		accountId: "account-contoso",
 		opportunityId: "opp-grid-modernization",
 		name: "Decision criteria confirmed",
 		status: "Completed",
 		targetDate: "2026-09-08"
 	}, {
 		id: "milestone-exit-2",
+		accountId: "account-contoso",
 		opportunityId: "opp-grid-modernization",
 		name: "Execution owner assigned",
 		status: "At Risk",
@@ -5062,7 +5373,8 @@ var reportPerformance = (event) => {
 	console.info(`[performance] ${JSON.stringify(event)}`);
 };
 var mcemConnector = new LocalPdfMcemGuidanceConnector(app.isPackaged ? resolve(process.resourcesPath, "docs/knowledge/MCEM Overview.pdf") : resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
-var msxConnector = dataMode === "sample" ? new FixtureMsxConnector() : new LiveMsxConnector(tokenProvider, fetch, void 0, reportPerformance, msxWriteMetadataFromEnvironment(process.env));
+var liveMsxConnector = dataMode === "sample" ? void 0 : new LiveMsxConnector(tokenProvider, fetch, void 0, reportPerformance, msxWriteMetadataFromEnvironment(process.env));
+var msxConnector = liveMsxConnector ?? new FixtureMsxConnector();
 var foundryOpenAIClient = runtimeEnvironment ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry) : void 0;
 var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object.fromEntries([
 	"account-pulse",
@@ -5097,8 +5409,7 @@ var [mcpRegistry, mcpPolicy, dataverseEntityMap] = await Promise.all([
 	loadMcpToolPolicy(resolve(configurationRoot, "mcp.tool-policy.json")),
 	loadDataverseEntityMap(resolve(configurationRoot, "dataverse.entity-map.json"))
 ]);
-var delegatedScope;
-var configuredWorkflowHost = dataMode === "sample" ? void 0 : createConfiguredWorkflowHost({
+var configuredWorkflowHost = dataMode === "sample" ? void 0 : createLivePlayWorkflowHost({
 	registry: mcpRegistry,
 	policy: mcpPolicy,
 	entityMap: dataverseEntityMap,
@@ -5107,20 +5418,15 @@ var configuredWorkflowHost = dataMode === "sample" ? void 0 : createConfiguredWo
 		if (!token) throw new Error("A delegated MCP access token is unavailable.");
 		return token.token;
 	},
-	resolveDelegatedScope: () => {
-		delegatedScope ??= resolveMsxScope();
-		return delegatedScope;
+	resolveCurrentUserId: async () => {
+		if (!liveMsxConnector) throw new Error("Live Plays require the live MSX connection.");
+		return liveMsxConnector.getCurrentUserId();
+	},
+	onStepError: (info) => {
+		console.error(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? "required" : "optional"} step failed: ${info.message}`);
 	}
 });
 var workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost();
-async function resolveMsxScope() {
-	const accounts = await msxConnector.listAccounts();
-	const opportunities = (await Promise.all(accounts.map(({ id }) => msxConnector.listOpportunities(id)))).flat();
-	return {
-		delegatedUserAccountIds: accounts.map(({ id }) => id),
-		delegatedUserOpportunityIds: opportunities.map(({ id }) => id)
-	};
-}
 async function getDataStatus() {
 	if (dataMode === "sample") return {
 		mode: "sample",
