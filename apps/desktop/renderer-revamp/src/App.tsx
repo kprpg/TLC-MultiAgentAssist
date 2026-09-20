@@ -555,10 +555,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   }
 
   function toggleOpportunity(nextOpportunity: Opportunity) {
-    if (opportunity?.id === nextOpportunity.id) {
-      return
-    }
-    void selectOpportunity(nextOpportunity)
+    if (opportunity?.id !== nextOpportunity.id) void selectOpportunity(nextOpportunity)
   }
 
   function loadGuidance(nextCapability = capability) {
