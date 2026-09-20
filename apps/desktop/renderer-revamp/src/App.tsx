@@ -201,7 +201,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [searchOpportunities, setSearchOpportunities] = useState<Opportunity[]>([])
   const [searchLoading, setSearchLoading] = useState(true)
   const [exiting, setExiting] = useState(false)
-  const [expandedOpportunityId, setExpandedOpportunityId] = useState<string | null>(null)
+  const [, setExpandedOpportunityId] = useState<string | null>(null)
   const [milestoneEdit, setMilestoneEdit] = useState<MilestoneEdit | null>(null)
   const [opportunityCommentsOpen, setOpportunityCommentsOpen] = useState(false)
   const [opportunityComments, setOpportunityComments] = useState('')
