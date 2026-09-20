@@ -554,7 +554,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     }
   }
 
-  function toggleOpportunity(nextOpportunity: Opportunity) {
+  function selectOpportunityIfDifferent(nextOpportunity: Opportunity) {
     if (opportunity?.id !== nextOpportunity.id) void selectOpportunity(nextOpportunity)
   }
 
@@ -912,7 +912,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                         positioning="above"
                         relationship="description"
                       >
-                        <button className="opportunity-link-button" onClick={() => toggleOpportunity(item)}>
+                        <button className="opportunity-link-button" onClick={() => selectOpportunityIfDifferent(item)}>
                           <strong>{item.name}</strong>
                           <span>{item.owner ?? 'Owner not assigned'}</span>
                         </button>
