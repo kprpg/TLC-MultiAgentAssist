@@ -201,7 +201,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [searchOpportunities, setSearchOpportunities] = useState<Opportunity[]>([])
   const [searchLoading, setSearchLoading] = useState(true)
   const [exiting, setExiting] = useState(false)
-  const [, setExpandedOpportunityId] = useState<string | null>(null)
   const [milestoneEdit, setMilestoneEdit] = useState<MilestoneEdit | null>(null)
   const [opportunityCommentsOpen, setOpportunityCommentsOpen] = useState(false)
   const [opportunityComments, setOpportunityComments] = useState('')
@@ -511,7 +510,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setError('')
     setAccount(nextAccount)
     setOpportunity(null)
-    setExpandedOpportunityId(null)
     setMilestones([])
     setResult(null)
     setAgentResult(null)
@@ -534,7 +532,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       setOpportunities(searchOpportunities.filter((item) => item.accountId === nextAccount.id))
     }
     setOpportunity(nextOpportunity)
-    setExpandedOpportunityId(nextOpportunity.id)
     setOpportunityCommentsOpen(false)
     setMilestones([])
     setResult(null)
@@ -559,7 +556,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
   function toggleOpportunity(nextOpportunity: Opportunity) {
     if (opportunity?.id === nextOpportunity.id) {
-      setExpandedOpportunityId((current) => current === nextOpportunity.id ? null : nextOpportunity.id)
       return
     }
     void selectOpportunity(nextOpportunity)
@@ -771,7 +767,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setAccount(null)
     setOpportunities([])
     setOpportunity(null)
-    setExpandedOpportunityId(null)
     setMilestones([])
     setResult(null)
     setAgentResult(null)
