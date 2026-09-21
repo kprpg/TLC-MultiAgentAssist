@@ -44,7 +44,7 @@ This PRD treats the newer direction as authoritative while preserving the guide'
 
 ## 3. Product Goal
 
-Enable an account team member to open one application, select an account or opportunity, and receive grounded, role-specific guidance across weekly prioritization, MCEM progression, pursuit planning, executive preparation, risk management, and solution play assembly.
+Enable an account team member to open one application, select an account or opportunity, and receive grounded, role-specific guidance across weekly prioritization, MCEM progression, pursuit planning, executive preparation, risk management, and domain-specific solution play assembly, such as Azure Infrastructure.
 
 ## 4. User Problem
 
@@ -264,7 +264,7 @@ The Teams channel must use Teams SSO, token exchange, and on-behalf-of access to
 | FR-02 | Select an authorized MSX account and opportunity.                                                | Must                             |
 | FR-03 | Route requests through one orchestrated experience to four agents.                               | Must                             |
 | FR-04 | Provide MCEM guidance grounded in MSX evidence and approved MCEM content.                        | Must                             |
-| FR-05 | Generate weekly focus, executive brief, pursuit plan, risk review, and solution play outputs.    | Must                             |
+| FR-05 | Generate weekly focus, executive brief, pursuit plan, risk review, and domain-specific solution play outputs. | Must                             |
 | FR-06 | Cite sources, timestamps, assumptions, and missing data.                                         | Must                             |
 | FR-07 | Search approved SharePoint and Seismic content.                                                  | Must, subject to access approval |
 | FR-08 | Enrich with approved LinkedIn signals.                                                           | Should, subject to API approval  |
