@@ -249,14 +249,7 @@ Default suggested prompts:
 
 ### 7.4 Risk & Solution Play
 
-Purpose: risk assessment and Microsoft solution-play recommendations. Flags competitor and stall risks, proposes mitigations, checks the opportunity solution domain (for example, Azure Infrastructure), and matches the deal to the right Microsoft solution plays and assets. If the domain is not present in the supplied evidence, the agent calls out the gap instead of guessing.
-
-Default suggested prompts:
-
-1. Identify the highest grounded risks and mitigation actions.
-2. Recommend a solution play based on the available evidence.
-3. Prepare likely objections, proof points, and a demo path.
-4. Which blockers could delay this opportunity and who should own them?
+Purpose: risk assessment and Microsoft solution-play recommendations. Flags competitor and stall risks, proposes mitigations, and matches the deal to the right Microsoft solution plays and assets.
 
 ![Risk & Solution Play tab — risk and play prompts](./media/11-agent-risk-play.png)
 
