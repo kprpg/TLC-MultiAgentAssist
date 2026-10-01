@@ -114,6 +114,34 @@ button {
     padding: 16px;
 }
 
+.discover-panel .discover-header {
+    margin-bottom: 12px;
+}
+
+.discover-panel .discover-header h2 {
+    margin: 0 0 4px;
+}
+
+.discover-panel .discover-header p {
+    margin: 0 0 8px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.discover-note {
+    margin: 8px 0;
+    color: var(--vscode-descriptionForeground);
+}
+
+.error-text {
+    color: var(--vscode-errorForeground);
+}
+
+.deal-team-joined {
+    color: var(--vscode-charts-green, #89d185);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
 .split {
     display: grid;
     grid-template-columns: minmax(240px, 1fr) minmax(320px, 2fr);

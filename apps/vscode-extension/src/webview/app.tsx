@@ -20,16 +20,18 @@ import type {
     AccountView,
     AgentCapability,
     AgentTaskView,
+    DiscoverableOpportunityView,
     McemView,
     MilestoneUpdateInput,
     MilestoneView,
     OpportunityView,
+    SeDomainView,
     WorkflowDefinitionView,
     WorkflowOutputView,
     WorkflowResultCardView
 } from './view-types.js'
 
-type Tab = 'portfolio' | 'plays'
+type Tab = 'portfolio' | 'plays' | 'discover'
 type Loadable<T> = { status: 'idle' | 'loading' | 'error' | 'ready'; data?: T; error?: string }
 
 // Routes each Play's queue-item guidance handoff to the most relevant agent.
@@ -850,6 +852,90 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
     )
 }
 
+const SE_DOMAINS: ReadonlyArray<{ id: SeDomainView; label: string }> = [
+    { id: 'infra', label: 'Infrastructure' },
+    { id: 'data', label: 'Data' },
+    { id: 'ai-apps', label: 'AI & Apps' },
+    { id: 'security', label: 'Security' },
+    { id: 'modern-work', label: 'Modern Work' },
+    { id: 'biz-apps', label: 'BizApps / Power Platform / D365' },
+    { id: 'devices', label: 'Devices / Mixed Reality' },
+    { id: 'services', label: 'Services' }
+]
+
+/** Discover tab: lists open opportunities for an SE domain with one-click deal-team join. */
+function DiscoverPanel(): ReactElement {
+    const [domain, setDomain] = useState<SeDomainView>('infra')
+    const [items, setItems] = useState<Loadable<DiscoverableOpportunityView[]>>({ status: 'idle' })
+    const [joining, setJoining] = useState<string | undefined>(undefined)
+    const [note, setNote] = useState<string | undefined>(undefined)
+
+    useEffect(() => {
+        let active = true
+        setItems({ status: 'loading' })
+        dataClient.discoverOpportunities(domain)
+            .then((data) => { if (active) setItems({ status: 'ready', data }) })
+            .catch((error: unknown) => { if (active) setItems({ status: 'error', error: error instanceof Error ? error.message : 'Discovery failed.' }) })
+        return () => { active = false }
+    }, [domain])
+
+    const join = async (opportunityId: string): Promise<void> => {
+        setJoining(opportunityId)
+        setNote(undefined)
+        try {
+            const result = await dataClient.joinDealTeam(opportunityId)
+            setItems((current) => current.status === 'ready' && current.data
+                ? { status: 'ready', data: current.data.map((item) => item.id === opportunityId ? { ...item, onDealTeam: result.onDealTeam } : item) }
+                : current)
+            setNote(result.alreadyMember ? 'You were already on this deal team.' : 'Added you to the deal team. It now appears in your portfolio.')
+        } catch (error) {
+            setNote(error instanceof Error ? error.message : 'Could not join the deal team.')
+        } finally {
+            setJoining(undefined)
+        }
+    }
+
+    return (
+        <section className="discover-panel" aria-label="Discover opportunities">
+            <header className="discover-header">
+                <h2>Discover opportunities</h2>
+                <p>Find open, non-closed opportunities for your Solution Engineer domain and add yourself to the deal team.</p>
+                <nav className="tabs" role="tablist" aria-label="Solution Engineer domain">
+                    {SE_DOMAINS.map((option) => (
+                        <button key={option.id} role="tab" aria-selected={domain === option.id} className={domain === option.id ? 'tab active' : 'tab'} onClick={() => setDomain(option.id)}>{option.label}</button>
+                    ))}
+                </nav>
+            </header>
+            {note && <p className="discover-note" role="status">{note}</p>}
+            {items.status === 'loading' && <p>Loading opportunities…</p>}
+            {items.status === 'error' && <p className="error-text">{items.error}</p>}
+            {items.status === 'ready' && items.data && items.data.length === 0 && <p>No open opportunities were found for this domain.</p>}
+            {items.status === 'ready' && items.data && items.data.length > 0 && (
+                <div className="opportunity-table-wrap">
+                    <table className="record-table">
+                        <thead><tr><th>Opportunity</th><th>Account</th><th>Technical capability</th><th>Stage</th><th>Action</th></tr></thead>
+                        <tbody>
+                            {items.data.map((item) => (
+                                <tr key={item.id}>
+                                    <td><strong>{item.name}</strong></td>
+                                    <td>{item.accountName ?? '-'}</td>
+                                    <td>{item.technicalCapability ?? '-'}</td>
+                                    <td>{item.recordedStage}</td>
+                                    <td>
+                                        {item.onDealTeam
+                                            ? <span className="deal-team-joined">On deal team</span>
+                                            : <button className="tab" disabled={joining === item.id} onClick={() => void join(item.id)}>{joining === item.id ? 'Adding…' : 'Add me'}</button>}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+        </section>
+    )
+}
+
 export function App(): ReactElement {
     const [tab, setTab] = useState<Tab>('portfolio')
     const [mode, setMode] = useState<'sample' | 'live'>(() => (document.getElementById('root')?.dataset.mode as 'sample' | 'live') ?? 'sample')
@@ -883,7 +969,7 @@ export function App(): ReactElement {
             <main className="app-body">
                 {tab === 'portfolio' ? (
                     <PortfolioPanel focus={focus} accountsExpanded={accountsExpanded} detailsExpanded={detailsExpanded} actionsExpanded={actionsExpanded} />
-                ) : <PlaysPanel runRequest={runRequest} />}
+                ) : tab === 'discover' ? <DiscoverPanel /> : <PlaysPanel runRequest={runRequest} />}
             </main>
         </div>
     )

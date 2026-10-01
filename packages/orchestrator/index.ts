@@ -6,10 +6,13 @@ import {
   mcemStageTransitionRequestSchema,
   mcemStageTransitionResultSchema,
   mcemRequestSchema,
+  seDomainSchema,
   type Account,
   type AgentCapability,
   type AgentTaskRequest,
   type AgentTaskResponse,
+  type DealTeamJoinResult,
+  type DiscoverableOpportunity,
   type McemRequest,
   type McemResponse,
   type McemStageTransitionRequest,
@@ -18,6 +21,7 @@ import {
   type MilestoneUpdate,
   type Opportunity,
   type OpportunityUpdate,
+  type SeDomainId,
   measurePerformance,
   type PerformanceReporter
 } from '../common/index.js'
@@ -70,6 +74,17 @@ export class ThinSliceOrchestrator {
 
   listOpportunities(accountId: string): Promise<Opportunity[]> {
     return this.msx.listOpportunities(accountId)
+  }
+
+  async discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]> {
+    return this.msx.discoverOpportunities(seDomainSchema.parse(domain))
+  }
+
+  async joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult> {
+    if (typeof opportunityId !== 'string' || opportunityId.trim().length === 0) {
+      throw new Error('An opportunity id is required to join a deal team.')
+    }
+    return this.msx.joinDealTeam(opportunityId)
   }
 
   listMilestones(opportunityId: string): Promise<Milestone[]> {

@@ -89,10 +89,12 @@ describe('revamp live web data client', () => {
 
     it('downloads the rich email draft returned by the web host', async () => {
         const click = vi.fn()
-        const anchor = { href: '', download: '', click }
+        const remove = vi.fn()
+        const anchor = { href: '', download: '', style: { display: '' }, click, remove }
+        const appendChild = vi.fn()
         const createObjectURL = vi.fn(() => 'blob:email-draft')
         const revokeObjectURL = vi.fn()
-        vi.stubGlobal('document', { createElement: vi.fn(() => anchor) })
+        vi.stubGlobal('document', { createElement: vi.fn(() => anchor), body: { appendChild } })
         vi.stubGlobal('URL', { createObjectURL, revokeObjectURL })
         const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('MIME-Version: 1.0', {
             status: 200,
@@ -108,9 +110,45 @@ describe('revamp live web data client', () => {
         })).resolves.toEqual({ state: 'opened' })
 
         expect(anchor.download).toBe('Account guidance.eml')
+        expect(anchor.style.display).toBe('none')
+        expect(appendChild).toHaveBeenCalledWith(anchor)
         expect(click).toHaveBeenCalledOnce()
+        expect(remove).toHaveBeenCalledOnce()
         expect(createObjectURL).toHaveBeenCalledOnce()
-        expect(revokeObjectURL).toHaveBeenCalledWith('blob:email-draft')
+        expect(revokeObjectURL).not.toHaveBeenCalled()
+        await vi.waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('blob:email-draft'))
+        vi.unstubAllGlobals()
+    })
+
+    it('downloads the Word document returned by the web host', async () => {
+        const click = vi.fn()
+        const remove = vi.fn()
+        const anchor = { href: '', download: '', style: { display: '' }, click, remove }
+        const appendChild = vi.fn()
+        const createObjectURL = vi.fn(() => 'blob:word-document')
+        const revokeObjectURL = vi.fn()
+        vi.stubGlobal('document', { createElement: vi.fn(() => anchor), body: { appendChild } })
+        vi.stubGlobal('URL', { createObjectURL, revokeObjectURL })
+        const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('document bytes', {
+            status: 200,
+            headers: {
+                'content-type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'x-tlc-file-name': 'Account guidance.docx'
+            }
+        }))
+
+        await expect(createWebApiClient(fetcher).exportAgentResponse({
+            contractVersion,
+            responseTitle: 'Account guidance',
+            responseMarkdown: '## Guidance',
+            generatedAt: '2026-09-21T12:00:00.000Z'
+        })).resolves.toEqual({ state: 'saved', filePath: 'Account guidance.docx' })
+
+        expect(anchor.download).toBe('Account guidance.docx')
+        expect(appendChild).toHaveBeenCalledWith(anchor)
+        expect(click).toHaveBeenCalledOnce()
+        expect(remove).toHaveBeenCalledOnce()
+        await vi.waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('blob:word-document'))
         vi.unstubAllGlobals()
     })
 

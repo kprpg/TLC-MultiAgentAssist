@@ -12,12 +12,12 @@ export function AppHeader({
     onToggleDetails,
     onToggleActions
 }: {
-    tab: 'portfolio' | 'plays'
+    tab: 'portfolio' | 'plays' | 'discover'
     mode: 'sample' | 'live'
     accountsExpanded: boolean
     detailsExpanded: boolean
     actionsExpanded: boolean
-    onSelectTab(tab: 'portfolio' | 'plays'): void
+    onSelectTab(tab: 'portfolio' | 'plays' | 'discover'): void
     onToggleAccounts(): void
     onToggleDetails(): void
     onToggleActions(): void
@@ -27,6 +27,7 @@ export function AppHeader({
             <nav className="tabs">
                 <button className={tab === 'portfolio' ? 'tab active' : 'tab'} onClick={() => onSelectTab('portfolio')}>Portfolio</button>
                 <button className={tab === 'plays' ? 'tab active' : 'tab'} onClick={() => onSelectTab('plays')}>Plays</button>
+                <button className={tab === 'discover' ? 'tab active' : 'tab'} onClick={() => onSelectTab('discover')}>Discover</button>
             </nav>
             {tab === 'portfolio' && (
                 <PortfolioLayoutControls

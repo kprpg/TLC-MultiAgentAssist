@@ -1,4 +1,4 @@
-import type { Account, Milestone, MilestoneUpdate, Opportunity, OpportunityUpdate } from '../../common/index.js'
+import type { Account, DealTeamJoinResult, DiscoverableOpportunity, Milestone, MilestoneUpdate, Opportunity, OpportunityUpdate, SeDomainId } from '../../common/index.js'
 import type { MsxConnector, OpportunityContext } from '../common/index.js'
 
 export {
@@ -223,9 +223,167 @@ const observationsByOpportunity: Record<string, OpportunityContext['observations
   ]
 }
 
+const discoverableOpportunities: DiscoverableOpportunity[] = [
+  {
+    id: 'opp-discover-hybrid-networking',
+    accountId: 'account-contoso',
+    accountName: 'Contoso Energy',
+    name: 'Hybrid networking modernization',
+    recordedStage: 2,
+    value: 1850000,
+    currency: 'USD',
+    closeDate: '2027-02-12',
+    domain: 'infra',
+    solutionArea: 'Cloud and AI Platforms',
+    technicalCapability: 'Advanced Networking',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-vmware-migration',
+    accountId: 'account-fabrikam',
+    accountName: 'Fabrikam Retail',
+    name: 'Datacenter exit to Azure VMware Solution',
+    recordedStage: 1,
+    value: 2950000,
+    currency: 'USD',
+    closeDate: '2027-04-02',
+    domain: 'infra',
+    solutionArea: 'Cloud and AI Platforms',
+    technicalCapability: 'Azure VMware Solutions',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-synapse-analytics',
+    accountId: 'account-contoso',
+    accountName: 'Contoso Energy',
+    name: 'Enterprise analytics on Synapse and Power BI',
+    recordedStage: 2,
+    value: 2100000,
+    currency: 'USD',
+    closeDate: '2027-01-22',
+    domain: 'data',
+    solutionArea: 'Cloud and AI Platforms',
+    technicalCapability: 'New Analytics with Synapse & PowerBI',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-sql-managed-instance',
+    accountId: 'account-fabrikam',
+    accountName: 'Fabrikam Retail',
+    name: 'SQL Server migration to Azure SQL MI',
+    recordedStage: 3,
+    value: 1650000,
+    currency: 'USD',
+    closeDate: '2026-12-19',
+    domain: 'data',
+    solutionArea: 'Cloud and AI Platforms',
+    technicalCapability: 'SQL Server Migration to Azure SQL MI',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-azure-ai-ml',
+    accountId: 'account-contoso',
+    accountName: 'Contoso Energy',
+    name: 'Azure AI and ML platform adoption',
+    recordedStage: 2,
+    value: 3400000,
+    currency: 'USD',
+    closeDate: '2027-02-05',
+    domain: 'ai-apps',
+    solutionArea: 'Cloud and AI Platforms',
+    technicalCapability: 'Azure AI and ML',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-cloud-native-apps',
+    accountId: 'account-fabrikam',
+    accountName: 'Fabrikam Retail',
+    name: 'Cloud-native apps on AKS and Cosmos DB',
+    recordedStage: 1,
+    value: 2750000,
+    currency: 'USD',
+    closeDate: '2027-03-27',
+    domain: 'ai-apps',
+    solutionArea: 'Cloud and AI Platforms',
+    technicalCapability: 'Modernize/New Cloud Native Apps with AKS and Azure Cosmos/Postgres DB',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-zero-trust',
+    accountId: 'account-contoso',
+    accountName: 'Contoso Energy',
+    name: 'Zero Trust security modernization',
+    recordedStage: 2,
+    value: 2200000,
+    currency: 'USD',
+    closeDate: '2027-02-18',
+    domain: 'security',
+    solutionArea: 'Security',
+    technicalCapability: 'Threat Protection',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-teams-calling',
+    accountId: 'account-fabrikam',
+    accountName: 'Fabrikam Retail',
+    name: 'Teams Phone and calling rollout',
+    recordedStage: 1,
+    value: 980000,
+    currency: 'USD',
+    closeDate: '2027-03-05',
+    domain: 'modern-work',
+    technicalCapability: 'Calling',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-d365-customer-service',
+    accountId: 'account-fabrikam',
+    accountName: 'Fabrikam Retail',
+    name: 'Dynamics 365 Customer Service transformation',
+    recordedStage: 2,
+    value: 1750000,
+    currency: 'USD',
+    closeDate: '2027-01-28',
+    domain: 'biz-apps',
+    solutionArea: 'AI Business Solutions',
+    technicalCapability: 'Customer Service',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-surface-deployment',
+    accountId: 'account-contoso',
+    accountName: 'Contoso Energy',
+    name: 'Surface device deployment and management',
+    recordedStage: 1,
+    value: 640000,
+    currency: 'USD',
+    closeDate: '2027-04-15',
+    domain: 'devices',
+    solutionArea: 'Windows and Devices',
+    technicalCapability: 'Surface & Partner Devices',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-cloud-advisory',
+    accountId: 'account-contoso',
+    accountName: 'Contoso Energy',
+    name: 'Cloud advisory and adoption services',
+    recordedStage: 2,
+    value: 850000,
+    currency: 'USD',
+    closeDate: '2027-02-22',
+    domain: 'services',
+    solutionArea: 'Microsoft Services',
+    technicalCapability: 'Advisory Services',
+    onDealTeam: false
+  }
+]
+
 export class FixtureMsxConnector implements MsxConnector {
   private readonly opportunities = structuredClone(opportunities)
   private readonly milestonesByOpportunity = structuredClone(milestonesByOpportunity)
+  private readonly discoverable = structuredClone(discoverableOpportunities)
+  private readonly joinedOpportunityIds = new Set<string>()
 
   async listAccounts(): Promise<Account[]> {
     return structuredClone(accounts)
@@ -289,5 +447,33 @@ export class FixtureMsxConnector implements MsxConnector {
         checkedAt: now
       }
     }
+  }
+
+  async discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]> {
+    return this.discoverable
+      .filter((opportunity) => opportunity.domain === domain)
+      .map((opportunity) => structuredClone({
+        ...opportunity,
+        onDealTeam: this.joinedOpportunityIds.has(opportunity.id)
+      }))
+  }
+
+  async joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult> {
+    const seed = this.discoverable.find((candidate) => candidate.id === opportunityId)
+    if (!seed) throw new Error(`Unknown sample opportunity: ${opportunityId}`)
+    const alreadyMember = this.joinedOpportunityIds.has(opportunityId)
+    if (!alreadyMember) {
+      this.joinedOpportunityIds.add(opportunityId)
+      const { domain, accountName, solutionArea, technicalCapability, onDealTeam, ...opportunity } = seed
+      void domain
+      void accountName
+      void solutionArea
+      void technicalCapability
+      void onDealTeam
+      if (!this.opportunities.some((candidate) => candidate.id === opportunityId)) {
+        this.opportunities.push(structuredClone(opportunity))
+      }
+    }
+    return { opportunityId, onDealTeam: true, alreadyMember }
   }
 }

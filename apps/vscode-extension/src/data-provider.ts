@@ -3,6 +3,8 @@ import {
     type Account,
     type AgentCapability,
     type AgentTaskResponse,
+    type DealTeamJoinResult,
+    type DiscoverableOpportunity,
     type McemResponse,
     type McemStageTransitionResult,
     type Milestone,
@@ -10,6 +12,7 @@ import {
     type Opportunity,
     type OpportunityUpdate,
     type ScopeRef,
+    type SeDomainId,
     type WorkflowDefinition,
     type WorkflowGuidanceHandoff,
     type WorkflowRun
@@ -22,7 +25,9 @@ import {
 import {
     buildSampleAgentResponse,
     buildSampleEvaluation,
+    discoverSampleOpportunities,
     findSampleOpportunity,
+    joinSampleDealTeam,
     listSampleAccounts,
     listSampleMilestones,
     listSampleOpportunities,
@@ -40,6 +45,8 @@ export interface ExtensionDataProvider {
     getCurrentUserEmail(): Promise<string | undefined>
     listAccounts(): Promise<Account[]>
     listOpportunities(accountId: string): Promise<Opportunity[]>
+    discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
+    joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
     listMilestones(opportunityId: string): Promise<Milestone[]>
     updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
     updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
@@ -73,6 +80,8 @@ export function createSampleDataProvider(): ExtensionDataProvider {
         getCurrentUserEmail: async () => undefined,
         listAccounts: async () => listSampleAccounts(),
         listOpportunities: async (accountId) => listSampleOpportunities(accountId),
+        discoverOpportunities: async (domain) => discoverSampleOpportunities(domain),
+        joinDealTeam: async (opportunityId) => joinSampleDealTeam(opportunityId),
         listMilestones: async (opportunityId) => listSampleMilestones(opportunityId),
         updateOpportunity: async (opportunityId, update) => updateSampleOpportunity(opportunityId, update),
         updateMilestone: async (opportunityId, milestoneId, update) => updateSampleMilestone(opportunityId, milestoneId, update),

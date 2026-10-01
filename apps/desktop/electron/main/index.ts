@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { z } from 'zod'
-import { agentTaskRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, mcemRequestSchema, mcemStageTransitionRequestSchema, milestoneUpdateSchema, opportunityUpdateSchema, type AuthStatus, type DesktopDataStatus, type McpServer, type PerformanceReporter } from '../../../../packages/common/index.js'
+import { agentTaskRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, mcemRequestSchema, mcemStageTransitionRequestSchema, milestoneUpdateSchema, opportunityUpdateSchema, seDomainSchema, type AuthStatus, type DesktopDataStatus, type McpServer, type PerformanceReporter } from '../../../../packages/common/index.js'
 import {
   loadFoundryEnvironment,
   type FoundryEnvironment
@@ -18,8 +18,9 @@ import { createLivePlayWorkflowHost, createSampleWorkflowHost } from '../../../.
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
 import { prepareFoundryEnvironmentFile } from './packaged-configuration.js'
 import { createRuntimeCredentials } from './runtime-credentials.js'
-import { createOutlookDraftMessage } from './outlook-compose.js'
+import { openOutlookDraft } from './outlook-compose.js'
 import { createResponseDocumentBuffer } from './response-document.js'
+import { showResponseSaveDialog } from './response-save-dialog.js'
 import { buildSampleAgentResponse } from './sample-agent-response.js'
 import { openConfigurationAndExit } from './startup-dialog.js'
 import { createWorkflowIpcHandlers } from './workflow-ipc.js'
@@ -208,6 +209,14 @@ function registerIpc(): void {
     assertTrustedSender(event)
     return orchestrator.listOpportunities(z.string().min(1).parse(accountId))
   })
+  ipcMain.handle('tlc:discover-opportunities', (event, domain: unknown) => {
+    assertTrustedSender(event)
+    return orchestrator.discoverOpportunities(seDomainSchema.parse(domain))
+  })
+  ipcMain.handle('tlc:join-deal-team', (event, opportunityId: unknown) => {
+    assertTrustedSender(event)
+    return orchestrator.joinDealTeam(z.string().min(1).parse(opportunityId))
+  })
   ipcMain.handle('tlc:list-milestones', (event, opportunityId: unknown) => {
     assertTrustedSender(event)
     return orchestrator.listMilestones(z.string().min(1).parse(opportunityId))
@@ -238,19 +247,19 @@ function registerIpc(): void {
     const draftDirectory = resolve(app.getPath('temp'), 'TLC-MultiAgentAssist', 'email-drafts')
     await mkdir(draftDirectory, { recursive: true })
     const draftPath = resolve(draftDirectory, `${safeFileName(request.responseTitle)}-${randomUUID()}.eml`)
-    await writeFile(draftPath, createOutlookDraftMessage(request), 'utf8')
-    const openError = await shell.openPath(draftPath)
-    if (openError) throw new Error(`Outlook could not open the email draft: ${openError}`)
+    await openOutlookDraft(request, draftPath, {
+      writeFile,
+      openPath: (path) => shell.openPath(path),
+      openExternal: (url) => shell.openExternal(url)
+    })
     return { state: 'opened' as const }
   })
   ipcMain.handle('tlc:export-agent-response', async (event, rawRequest: unknown) => {
     assertTrustedSender(event)
     const request = exportResponseRequestSchema.parse(rawRequest)
-    const result = await dialog.showSaveDialog({
-      title: 'Export agent response',
-      defaultPath: `${safeFileName(request.responseTitle)}.docx`,
-      filters: [{ name: 'Microsoft Word document', extensions: ['docx'] }],
-      properties: ['createDirectory', 'showOverwriteConfirmation']
+    const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined
+    const result = await showResponseSaveDialog(parentWindow, `${safeFileName(request.responseTitle)}.docx`, (options, parent) => {
+      return parent ? dialog.showSaveDialog(parent, options) : dialog.showSaveDialog(options)
     })
     if (result.canceled || !result.filePath) return { state: 'cancelled' as const }
     const filePath = result.filePath.toLowerCase().endsWith('.docx') ? result.filePath : `${result.filePath}.docx`

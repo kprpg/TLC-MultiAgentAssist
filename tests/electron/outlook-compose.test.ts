@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { contractVersion, type EmailComposeRequest } from '../../packages/common/index.js'
-import { createOutlookComposeUri, createOutlookDraftMessage, markdownToEmailHtml, markdownToEmailText } from '../../apps/desktop/electron/main/outlook-compose.js'
+import { createOutlookComposeUri, createOutlookDraftMessage, markdownToEmailHtml, markdownToEmailText, openOutlookDraft } from '../../apps/desktop/electron/main/outlook-compose.js'
 
 const request: EmailComposeRequest = {
   contractVersion,
@@ -81,5 +81,33 @@ Open opportunity (https://example.com/opportunity)`)
       ...request,
       responseMarkdown: 'x'.repeat(20_000)
     })).toThrow('The response is too long to open in Outlook. Export it to Word instead.')
+  })
+})
+
+describe('openOutlookDraft', () => {
+  it('opens the rich draft when the operating system supports EML files', async () => {
+    const host = {
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      openPath: vi.fn().mockResolvedValue(''),
+      openExternal: vi.fn().mockResolvedValue(undefined)
+    }
+
+    await openOutlookDraft(request, 'C:\\Temp\\guidance.eml', host)
+
+    expect(host.writeFile).toHaveBeenCalledWith('C:\\Temp\\guidance.eml', expect.stringContaining('X-Unsent: 1'), 'utf8')
+    expect(host.openPath).toHaveBeenCalledWith('C:\\Temp\\guidance.eml')
+    expect(host.openExternal).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the default mail handler when EML files cannot be opened', async () => {
+    const host = {
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      openPath: vi.fn().mockResolvedValue('No application is associated with EML files.'),
+      openExternal: vi.fn().mockResolvedValue(undefined)
+    }
+
+    await openOutlookDraft(request, 'C:\\Temp\\guidance.eml', host)
+
+    expect(host.openExternal).toHaveBeenCalledWith(expect.stringMatching(/^mailto:alex%40example\.com,casey%40example\.com\?/))
   })
 })

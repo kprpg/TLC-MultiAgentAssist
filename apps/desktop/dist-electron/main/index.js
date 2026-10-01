@@ -298,6 +298,105 @@ var workflowGuidanceHandoffSchema = z.object({
 	}).strict()
 }).strict();
 //#endregion
+//#region packages/common/configuration/se-domains.ts
+/**
+* Solution Engineer domains used to route MSX opportunity discovery.
+*
+* The classification is derived from the MSX `opportunity` Dataverse schema:
+* `msp_solutionarea` is too coarse to separate Infrastructure, Data, and
+* AI/Apps work (all three fall under "Cloud and AI Platforms"), so the fine
+* grained `msp_technicalcapability` choice is used as the primary discriminator.
+*/
+var seDomainIds = [
+	"infra",
+	"data",
+	"ai-apps"
+];
+var seDomainSchema = z.enum(seDomainIds);
+/**
+* `msp_solutionarea` option code for "Cloud and AI Platforms". All three SE
+* domains sit under this single solution area, so it is shared across them and
+* used only as a coarse gate.
+*/
+var CLOUD_AND_AI_PLATFORMS = 39438e4;
+var seDomainDefinitions = {
+	infra: {
+		id: "infra",
+		label: "Infrastructure",
+		description: "Azure infrastructure, migration, networking, and hybrid/edge opportunities.",
+		solutionAreaCodes: [CLOUD_AND_AI_PLATFORMS],
+		technicalCapabilityCodes: [
+			86198e4,
+			861980074,
+			861980075,
+			861980076,
+			861980005,
+			861980029,
+			861980011,
+			861980008,
+			861980015,
+			861980024,
+			861980030,
+			861980072,
+			861980028,
+			861980026,
+			861980019,
+			861980018,
+			861980014
+		],
+		conversationCodes: [
+			884800006,
+			884800003,
+			884800001
+		]
+	},
+	data: {
+		id: "data",
+		label: "Data",
+		description: "Analytics, data platform, and database modernization opportunities.",
+		solutionAreaCodes: [CLOUD_AND_AI_PLATFORMS],
+		technicalCapabilityCodes: [
+			861980073,
+			861980077,
+			861980085,
+			861980020,
+			861980049,
+			861980027
+		],
+		conversationCodes: [
+			884800007,
+			884800015,
+			884800002
+		]
+	},
+	"ai-apps": {
+		id: "ai-apps",
+		label: "AI & Apps",
+		description: "AI, machine learning, app modernization, and cloud-native application opportunities.",
+		solutionAreaCodes: [CLOUD_AND_AI_PLATFORMS],
+		technicalCapabilityCodes: [
+			861980002,
+			861980009,
+			861980023,
+			861980007,
+			861980071,
+			861980041,
+			861980082
+		],
+		conversationCodes: [
+			8848e5,
+			884800012,
+			884800005,
+			884800014,
+			884800011
+		]
+	}
+};
+seDomainIds.map((id) => seDomainDefinitions[id]);
+function getSeDomainDefinition(id) {
+	return seDomainDefinitions[id];
+}
+//#endregion
 //#region packages/common/contracts/mcp.ts
 var canonicalFieldSchema = z.string().regex(/^[a-z][a-zA-Z0-9]*$/);
 var guardedQueryValueSchema = z.union([
@@ -428,6 +527,18 @@ var milestoneUpdateSchema = z.object({
 	comments: z.string().max(3e4).optional()
 }).refine((value) => Object.keys(value).length > 0, "At least one milestone field is required.");
 var opportunityUpdateSchema = z.object({ comments: z.string().max(3e4) });
+opportunitySchema.extend({
+	domain: seDomainSchema,
+	accountName: z.string().min(1).optional(),
+	solutionArea: z.string().min(1).optional(),
+	technicalCapability: z.string().min(1).optional(),
+	onDealTeam: z.boolean()
+});
+z.object({
+	opportunityId: z.string().min(1),
+	onDealTeam: z.literal(true),
+	alreadyMember: z.boolean()
+}).strict();
 var mcemStageTransitionRequestSchema = z.object({
 	contractVersion: z.literal("1.0"),
 	accountId: z.string().min(1),
@@ -956,6 +1067,9 @@ async function loadFoundryEnvironment(filePath) {
 //#region packages/connectors/msx/live.ts
 var defaultBaseUrl = "https://microsoftsales.crm.dynamics.com/api/data/v9.2/";
 var formattedValueSuffix = "@OData.Community.Display.V1.FormattedValue";
+var guidPattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+/** Upper bound on discovered opportunities returned per domain query. */
+var discoveryRowLimit = 200;
 var milestoneStatusCodes = {
 	"On Track": 86198e4,
 	"At Risk": 861980001,
@@ -967,6 +1081,17 @@ var customerCommitmentCodes = {
 	Uncommitted: 86198e4,
 	Committed: 861980003
 };
+var defaultDealTeamWriteMetadata = {
+	entitySet: "msp_dealteams",
+	logicalName: "msp_dealteam",
+	userLookupField: "_msp_dealteamuserid_value",
+	opportunityLookupField: "_msp_parentopportunityid_value"
+};
+/** Derives a lookup attribute logical name (e.g. `msp_dealteamuserid`) from its `_x_value` field. */
+function lookupAttributeName(valueField) {
+	return valueField.replace(/^_/, "").replace(/_value$/, "");
+}
+var navigationPropertyPattern = /^[A-Za-z][A-Za-z0-9_]*$/;
 function msxWriteMetadataFromEnvironment(environment) {
 	const riskDetailsField = environment["TLC_MSX_RISK_DETAILS_FIELD"]?.trim();
 	const configuredCodes = {};
@@ -992,10 +1117,25 @@ function msxWriteMetadataFromEnvironment(environment) {
 		if (!Number.isSafeInteger(code)) throw new Error(`${variable} must be an integer MSX option code.`);
 		stageCodes[stage] = code;
 	}
+	const dealTeam = {};
+	for (const [key, variable] of [
+		["entitySet", "TLC_MSX_DEALTEAM_ENTITY_SET"],
+		["logicalName", "TLC_MSX_DEALTEAM_LOGICAL_NAME"],
+		["userNavigationProperty", "TLC_MSX_DEALTEAM_USER_NAV_PROPERTY"],
+		["opportunityNavigationProperty", "TLC_MSX_DEALTEAM_OPPORTUNITY_NAV_PROPERTY"],
+		["userLookupField", "TLC_MSX_DEALTEAM_USER_LOOKUP_FIELD"],
+		["opportunityLookupField", "TLC_MSX_DEALTEAM_OPPORTUNITY_LOOKUP_FIELD"]
+	]) {
+		const rawValue = environment[variable]?.trim();
+		if (!rawValue) continue;
+		if (!navigationPropertyPattern.test(rawValue)) throw new Error(`${variable} must be a valid Dataverse identifier.`);
+		dealTeam[key] = rawValue;
+	}
 	return {
 		...riskDetailsField ? { riskDetailsField } : {},
 		...Object.keys(configuredCodes).length > 0 ? { milestoneStatusCodes: configuredCodes } : {},
-		...Object.keys(stageCodes).length > 0 ? { stageCodes } : {}
+		...Object.keys(stageCodes).length > 0 ? { stageCodes } : {},
+		...Object.keys(dealTeam).length > 0 ? { dealTeam } : {}
 	};
 }
 var MsxRequestError = class extends Error {
@@ -1016,6 +1156,7 @@ var LiveMsxConnector = class {
 	observationPromises = /* @__PURE__ */ new Map();
 	milestonePromises = /* @__PURE__ */ new Map();
 	currentUserIdPromise;
+	dealTeamBindingsPromise;
 	constructor(tokenProvider, fetchImplementation = fetch, baseUrl = defaultBaseUrl, performanceReporter, writeMetadata = {}) {
 		this.tokenProvider = tokenProvider;
 		this.fetchImplementation = fetchImplementation;
@@ -1117,6 +1258,114 @@ var LiveMsxConnector = class {
 				checkedAt: retrievedAt
 			}
 		};
+	}
+	async discoverOpportunities(domain) {
+		const definition = getSeDomainDefinition(domain);
+		const domainMatch = [definition.technicalCapabilityCodes.map((code) => `msp_technicalcapability eq ${code}`).join(" or "), definition.conversationCodes.map((code) => `msp_conversation eq ${code}`).join(" or ")].filter(Boolean).join(" or ");
+		const domainClauses = domainMatch ? [`(${domainMatch})`] : [];
+		const portfolio = await this.getPortfolio();
+		const accountNameById = new Map(portfolio.accounts.map((account) => [account.id, account.name]));
+		const assignedAccountIds = [...accountNameById.keys()];
+		if (assignedAccountIds.length === 0) return [];
+		const dealTeamOpportunityIds = new Set(portfolio.opportunities.map((opportunity) => opportunity.id));
+		return (await measurePerformance("msx.discover-opportunities", this.performanceReporter, () => this.requestOpportunitiesForAccounts(assignedAccountIds, domainClauses))).filter((row) => row._parentaccountid_value && accountNameById.has(row._parentaccountid_value)).map((row) => {
+			const accountName = accountNameById.get(row._parentaccountid_value) ?? formattedValue(row, "_parentaccountid_value");
+			const solutionArea = formattedValue(row, "msp_solutionarea");
+			const technicalCapability = formattedValue(row, "msp_technicalcapability");
+			return {
+				...this.mapOpportunity(row),
+				domain,
+				...accountName ? { accountName } : {},
+				...solutionArea ? { solutionArea } : {},
+				...technicalCapability ? { technicalCapability } : {},
+				onDealTeam: dealTeamOpportunityIds.has(row.opportunityid)
+			};
+		}).sort((left, right) => left.name.localeCompare(right.name));
+	}
+	/** Fetches open opportunities within the given assigned accounts, filtered by the domain clauses. */
+	async requestOpportunitiesForAccounts(accountIds, domainClauses) {
+		const select = "opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description,msp_solutionarea,msp_technicalcapability,msp_conversation";
+		const rows = [];
+		for (let offset = 0; offset < accountIds.length; offset += 40) {
+			const filterClauses = [
+				"statecode eq 0",
+				`(${accountIds.slice(offset, offset + 40).map((id) => `_parentaccountid_value eq ${id}`).join(" or ")})`,
+				...domainClauses
+			];
+			rows.push(...await this.requestAll("opportunities", {
+				"$select": select,
+				"$filter": filterClauses.join(" and "),
+				"$orderby": "name asc",
+				"$top": String(discoveryRowLimit)
+			}));
+		}
+		return rows;
+	}
+	async joinDealTeam(opportunityId) {
+		if (!guidPattern.test(opportunityId)) throw new Error("The opportunity id must be a valid MSX GUID.");
+		const dealTeam = {
+			...defaultDealTeamWriteMetadata,
+			...this.writeMetadata.dealTeam
+		};
+		const userId = await this.getCurrentUserId();
+		if ((await this.requestAll(dealTeam.entitySet, {
+			"$select": "msp_dealteamid",
+			"$filter": `statecode eq 0 and ${dealTeam.userLookupField} eq ${userId} and ${dealTeam.opportunityLookupField} eq ${opportunityId}`,
+			"$top": "1"
+		})).length > 0) {
+			this.portfolioPromise = void 0;
+			return {
+				opportunityId,
+				onDealTeam: true,
+				alreadyMember: true
+			};
+		}
+		const bindings = await this.resolveDealTeamBindings(dealTeam);
+		await this.post(dealTeam.entitySet, {
+			[`${bindings.userNavigationProperty}@odata.bind`]: `/systemusers(${userId})`,
+			[`${bindings.opportunityNavigationProperty}@odata.bind`]: `/opportunities(${opportunityId})`
+		});
+		this.portfolioPromise = void 0;
+		return {
+			opportunityId,
+			onDealTeam: true,
+			alreadyMember: false
+		};
+	}
+	/**
+	* Resolves the single-valued navigation property names used to bind a deal-team row to the
+	* systemuser and opportunity. Prefers explicit configuration, then live relationship metadata,
+	* then a conventional fallback derived from the lookup field names. The metadata lookup is cached.
+	*/
+	resolveDealTeamBindings(dealTeam) {
+		if (dealTeam.userNavigationProperty && dealTeam.opportunityNavigationProperty) return Promise.resolve({
+			userNavigationProperty: dealTeam.userNavigationProperty,
+			opportunityNavigationProperty: dealTeam.opportunityNavigationProperty
+		});
+		this.dealTeamBindingsPromise ??= this.discoverDealTeamBindings(dealTeam).catch((error) => {
+			this.dealTeamBindingsPromise = void 0;
+			throw error;
+		});
+		return this.dealTeamBindingsPromise;
+	}
+	async discoverDealTeamBindings(dealTeam) {
+		const userAttribute = lookupAttributeName(dealTeam.userLookupField);
+		const opportunityAttribute = lookupAttributeName(dealTeam.opportunityLookupField);
+		const fallback = {
+			userNavigationProperty: dealTeam.userNavigationProperty ?? userAttribute,
+			opportunityNavigationProperty: dealTeam.opportunityNavigationProperty ?? opportunityAttribute
+		};
+		try {
+			const relationships = await this.requestAll(`EntityDefinitions(LogicalName='${dealTeam.logicalName}')/ManyToOneRelationships`, { "$select": "ReferencingAttribute,ReferencingEntityNavigationPropertyName" });
+			const userNav = relationships.find((row) => row.ReferencingAttribute === userAttribute)?.ReferencingEntityNavigationPropertyName;
+			const opportunityNav = relationships.find((row) => row.ReferencingAttribute === opportunityAttribute)?.ReferencingEntityNavigationPropertyName;
+			return {
+				userNavigationProperty: dealTeam.userNavigationProperty ?? userNav ?? fallback.userNavigationProperty,
+				opportunityNavigationProperty: dealTeam.opportunityNavigationProperty ?? opportunityNav ?? fallback.opportunityNavigationProperty
+			};
+		} catch {
+			return fallback;
+		}
 	}
 	refresh() {
 		this.portfolioPromise = void 0;
@@ -1268,6 +1517,21 @@ var LiveMsxConnector = class {
 			body: JSON.stringify(body)
 		});
 		if (!response.ok) throw new MsxRequestError(`MSX update failed with status ${response.status}.`, response.status);
+	}
+	async post(path, body) {
+		const url = new URL(path, this.baseUrl);
+		this.assertTrustedUrl(url);
+		const accessToken = await this.tokenProvider.getAccessToken();
+		const response = await this.fetchImplementation(url, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${accessToken}`,
+				Accept: "application/json",
+				"Content-Type": "application/json"
+			},
+			body: JSON.stringify(body)
+		});
+		if (!response.ok) throw new MsxRequestError(`MSX create failed with status ${response.status}.`, response.status);
 	}
 	assertTrustedUrl(url) {
 		if (url.origin !== this.baseUrl.origin || !url.pathname.startsWith(this.baseUrl.pathname)) throw new MsxRequestError("MSX returned an untrusted continuation URL.");
@@ -1783,9 +2047,97 @@ var observationsByOpportunity = {
 		}
 	]
 };
+var discoverableOpportunities = [
+	{
+		id: "opp-discover-hybrid-networking",
+		accountId: "account-contoso",
+		accountName: "Contoso Energy",
+		name: "Hybrid networking modernization",
+		recordedStage: 2,
+		value: 185e4,
+		currency: "USD",
+		closeDate: "2027-02-12",
+		domain: "infra",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Advanced Networking",
+		onDealTeam: false
+	},
+	{
+		id: "opp-discover-vmware-migration",
+		accountId: "account-fabrikam",
+		accountName: "Fabrikam Retail",
+		name: "Datacenter exit to Azure VMware Solution",
+		recordedStage: 1,
+		value: 295e4,
+		currency: "USD",
+		closeDate: "2027-04-02",
+		domain: "infra",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Azure VMware Solutions",
+		onDealTeam: false
+	},
+	{
+		id: "opp-discover-synapse-analytics",
+		accountId: "account-contoso",
+		accountName: "Contoso Energy",
+		name: "Enterprise analytics on Synapse and Power BI",
+		recordedStage: 2,
+		value: 21e5,
+		currency: "USD",
+		closeDate: "2027-01-22",
+		domain: "data",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "New Analytics with Synapse & PowerBI",
+		onDealTeam: false
+	},
+	{
+		id: "opp-discover-sql-managed-instance",
+		accountId: "account-fabrikam",
+		accountName: "Fabrikam Retail",
+		name: "SQL Server migration to Azure SQL MI",
+		recordedStage: 3,
+		value: 165e4,
+		currency: "USD",
+		closeDate: "2026-12-19",
+		domain: "data",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "SQL Server Migration to Azure SQL MI",
+		onDealTeam: false
+	},
+	{
+		id: "opp-discover-azure-ai-ml",
+		accountId: "account-contoso",
+		accountName: "Contoso Energy",
+		name: "Azure AI and ML platform adoption",
+		recordedStage: 2,
+		value: 34e5,
+		currency: "USD",
+		closeDate: "2027-02-05",
+		domain: "ai-apps",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Azure AI and ML",
+		onDealTeam: false
+	},
+	{
+		id: "opp-discover-cloud-native-apps",
+		accountId: "account-fabrikam",
+		accountName: "Fabrikam Retail",
+		name: "Cloud-native apps on AKS and Cosmos DB",
+		recordedStage: 1,
+		value: 275e4,
+		currency: "USD",
+		closeDate: "2027-03-27",
+		domain: "ai-apps",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Modernize/New Cloud Native Apps with AKS and Azure Cosmos/Postgres DB",
+		onDealTeam: false
+	}
+];
 var FixtureMsxConnector = class {
 	opportunities = structuredClone(opportunities);
 	milestonesByOpportunity = structuredClone(milestonesByOpportunity);
+	discoverable = structuredClone(discoverableOpportunities);
+	joinedOpportunityIds = /* @__PURE__ */ new Set();
 	async listAccounts() {
 		return structuredClone(accounts);
 	}
@@ -1835,6 +2187,27 @@ var FixtureMsxConnector = class {
 				detail: "Sanitized fixture data; no live MSX call was made.",
 				checkedAt: now
 			}
+		};
+	}
+	async discoverOpportunities(domain) {
+		return this.discoverable.filter((opportunity) => opportunity.domain === domain).map((opportunity) => structuredClone({
+			...opportunity,
+			onDealTeam: this.joinedOpportunityIds.has(opportunity.id)
+		}));
+	}
+	async joinDealTeam(opportunityId) {
+		const seed = this.discoverable.find((candidate) => candidate.id === opportunityId);
+		if (!seed) throw new Error(`Unknown sample opportunity: ${opportunityId}`);
+		const alreadyMember = this.joinedOpportunityIds.has(opportunityId);
+		if (!alreadyMember) {
+			this.joinedOpportunityIds.add(opportunityId);
+			const { domain, accountName, solutionArea, technicalCapability, onDealTeam, ...opportunity } = seed;
+			if (!this.opportunities.some((candidate) => candidate.id === opportunityId)) this.opportunities.push(structuredClone(opportunity));
+		}
+		return {
+			opportunityId,
+			onDealTeam: true,
+			alreadyMember
 		};
 	}
 };
@@ -4673,6 +5046,13 @@ var ThinSliceOrchestrator = class {
 	listOpportunities(accountId) {
 		return this.msx.listOpportunities(accountId);
 	}
+	async discoverOpportunities(domain) {
+		return this.msx.discoverOpportunities(seDomainSchema.parse(domain));
+	}
+	async joinDealTeam(opportunityId) {
+		if (typeof opportunityId !== "string" || opportunityId.trim().length === 0) throw new Error("An opportunity id is required to join a deal team.");
+		return this.msx.joinDealTeam(opportunityId);
+	}
 	listMilestones(opportunityId) {
 		return this.msx.listMilestones(opportunityId);
 	}
@@ -4873,7 +5253,19 @@ function createRuntimeCredentials(authentication) {
 }
 //#endregion
 //#region apps/desktop/electron/main/outlook-compose.ts
+var maxComposeUriLength = 16e3;
 var mimeBoundary = "----tlc-agent-response-boundary";
+async function openOutlookDraft(request, draftPath, host) {
+	await host.writeFile(draftPath, createOutlookDraftMessage(request), "utf8");
+	const openError = await host.openPath(draftPath);
+	if (!openError) return;
+	try {
+		await host.openExternal(createOutlookComposeUri(request));
+	} catch (fallbackError) {
+		const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+		throw new Error(`The email draft could not be opened: ${openError}. The default mail fallback also failed: ${fallbackMessage}`);
+	}
+}
 function createOutlookDraftMessage(request) {
 	const textBody = markdownToEmailText(request.responseMarkdown);
 	const htmlBody = markdownToEmailHtml(request.responseMarkdown);
@@ -4897,6 +5289,13 @@ function createOutlookDraftMessage(request) {
 		`--${mimeBoundary}--`,
 		""
 	].join("\r\n");
+}
+function createOutlookComposeUri(request) {
+	const recipients = request.recipients.map(encodeURIComponent).join(",");
+	const body = markdownToEmailText(request.responseMarkdown);
+	const composeUri = `mailto:${recipients}?subject=${encodeURIComponent(request.subject)}&body=${encodeURIComponent(body)}`;
+	if (composeUri.length > maxComposeUriLength) throw new Error("The response is too long to open in Outlook. Export it to Word instead.");
+	return composeUri;
 }
 function markdownToEmailText(markdown) {
 	return formatBlocks(unified().use(remarkParse).use(remarkGfm).parse(markdown).children).join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
@@ -5249,6 +5648,19 @@ function headingLevel(depth) {
 	][depth - 1] ?? HeadingLevel.HEADING_6;
 }
 //#endregion
+//#region apps/desktop/electron/main/response-save-dialog.ts
+function showResponseSaveDialog(parent, defaultPath, showDialog) {
+	return showDialog({
+		title: "Export agent response",
+		defaultPath,
+		filters: [{
+			name: "Microsoft Word document",
+			extensions: ["docx"]
+		}],
+		properties: ["createDirectory", "showOverwriteConfirmation"]
+	}, parent);
+}
+//#endregion
 //#region apps/desktop/electron/main/sample-agent-response.ts
 function isReadyToAdvance(context) {
 	return context.localEvaluation.evidenceBasedStage > context.opportunityContext.opportunity.recordedStage;
@@ -5476,6 +5888,14 @@ function registerIpc() {
 		assertTrustedSender(event);
 		return orchestrator.listOpportunities(z.string().min(1).parse(accountId));
 	});
+	ipcMain.handle("tlc:discover-opportunities", (event, domain) => {
+		assertTrustedSender(event);
+		return orchestrator.discoverOpportunities(seDomainSchema.parse(domain));
+	});
+	ipcMain.handle("tlc:join-deal-team", (event, opportunityId) => {
+		assertTrustedSender(event);
+		return orchestrator.joinDealTeam(z.string().min(1).parse(opportunityId));
+	});
 	ipcMain.handle("tlc:list-milestones", (event, opportunityId) => {
 		assertTrustedSender(event);
 		return orchestrator.listMilestones(z.string().min(1).parse(opportunityId));
@@ -5505,23 +5925,18 @@ function registerIpc() {
 		const request = emailComposeRequestSchema.parse(rawRequest);
 		const draftDirectory = resolve(app.getPath("temp"), "TLC-MultiAgentAssist", "email-drafts");
 		await mkdir(draftDirectory, { recursive: true });
-		const draftPath = resolve(draftDirectory, `${safeFileName(request.responseTitle)}-${randomUUID()}.eml`);
-		await writeFile(draftPath, createOutlookDraftMessage(request), "utf8");
-		const openError = await shell.openPath(draftPath);
-		if (openError) throw new Error(`Outlook could not open the email draft: ${openError}`);
+		await openOutlookDraft(request, resolve(draftDirectory, `${safeFileName(request.responseTitle)}-${randomUUID()}.eml`), {
+			writeFile,
+			openPath: (path) => shell.openPath(path),
+			openExternal: (url) => shell.openExternal(url)
+		});
 		return { state: "opened" };
 	});
 	ipcMain.handle("tlc:export-agent-response", async (event, rawRequest) => {
 		assertTrustedSender(event);
 		const request = exportResponseRequestSchema.parse(rawRequest);
-		const result = await dialog.showSaveDialog({
-			title: "Export agent response",
-			defaultPath: `${safeFileName(request.responseTitle)}.docx`,
-			filters: [{
-				name: "Microsoft Word document",
-				extensions: ["docx"]
-			}],
-			properties: ["createDirectory", "showOverwriteConfirmation"]
+		const result = await showResponseSaveDialog(BrowserWindow.fromWebContents(event.sender) ?? void 0, `${safeFileName(request.responseTitle)}.docx`, (options, parent) => {
+			return parent ? dialog.showSaveDialog(parent, options) : dialog.showSaveDialog(options);
 		});
 		if (result.canceled || !result.filePath) return { state: "cancelled" };
 		const filePath = result.filePath.toLowerCase().endsWith(".docx") ? result.filePath : `${result.filePath}.docx`;

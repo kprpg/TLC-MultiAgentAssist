@@ -6,6 +6,8 @@ electron.contextBridge.exposeInMainWorld("tlc", {
 	connectMcem: () => electron.ipcRenderer.invoke("tlc:connect-mcem"),
 	listAccounts: () => electron.ipcRenderer.invoke("tlc:list-accounts"),
 	listOpportunities: (accountId) => electron.ipcRenderer.invoke("tlc:list-opportunities", accountId),
+	discoverOpportunities: (domain) => electron.ipcRenderer.invoke("tlc:discover-opportunities", domain),
+	joinDealTeam: (opportunityId) => electron.ipcRenderer.invoke("tlc:join-deal-team", opportunityId),
 	listMilestones: (opportunityId) => electron.ipcRenderer.invoke("tlc:list-milestones", opportunityId),
 	updateMilestone: (opportunityId, milestoneId, update) => electron.ipcRenderer.invoke("tlc:update-milestone", opportunityId, milestoneId, update),
 	updateOpportunity: (opportunityId, update) => electron.ipcRenderer.invoke("tlc:update-opportunity", opportunityId, update),

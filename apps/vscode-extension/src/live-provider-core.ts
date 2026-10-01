@@ -63,6 +63,8 @@ export function buildLiveDataProvider({ orchestrator, host, account, dispose }: 
         getCurrentUserEmail: async () => account,
         listAccounts: () => orchestrator.listAccounts(),
         listOpportunities: (accountId) => orchestrator.listOpportunities(accountId),
+        discoverOpportunities: (domain) => orchestrator.discoverOpportunities(domain),
+        joinDealTeam: (opportunityId) => orchestrator.joinDealTeam(opportunityId),
         listMilestones: (opportunityId) => orchestrator.listMilestones(opportunityId),
         updateOpportunity: (opportunityId, update) => orchestrator.updateOpportunity(opportunityId, update),
         updateMilestone: (opportunityId, milestoneId, update) => orchestrator.updateMilestone(opportunityId, milestoneId, update),

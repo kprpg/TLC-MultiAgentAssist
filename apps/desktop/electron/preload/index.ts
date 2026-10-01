@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Account, AgentTaskRequest, AgentTaskResponse, AuthStatus, DesktopDataStatus, EmailComposeRequest, EmailComposeResult, ExportResponseRequest, ExportResponseResult, McemRequest, McemResponse, McemStageTransitionRequest, McemStageTransitionResult, Milestone, MilestoneUpdate, Opportunity, OpportunityUpdate } from '../../../../packages/common/index.js'
+import type { Account, AgentTaskRequest, AgentTaskResponse, AuthStatus, DealTeamJoinResult, DesktopDataStatus, DiscoverableOpportunity, EmailComposeRequest, EmailComposeResult, ExportResponseRequest, ExportResponseResult, McemRequest, McemResponse, McemStageTransitionRequest, McemStageTransitionResult, Milestone, MilestoneUpdate, Opportunity, OpportunityUpdate, SeDomainId } from '../../../../packages/common/index.js'
 import type { WorkflowHostOperation } from '../../../../packages/orchestrator/workflows/index.js'
 
 export interface TlcDesktopApi {
@@ -8,6 +8,8 @@ export interface TlcDesktopApi {
   connectMcem(): Promise<AuthStatus>
   listAccounts(): Promise<Account[]>
   listOpportunities(accountId: string): Promise<Opportunity[]>
+  discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
+  joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
   listMilestones(opportunityId: string): Promise<Milestone[]>
   updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
   updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
@@ -26,6 +28,8 @@ const api: TlcDesktopApi = {
   connectMcem: () => ipcRenderer.invoke('tlc:connect-mcem'),
   listAccounts: () => ipcRenderer.invoke('tlc:list-accounts'),
   listOpportunities: (accountId) => ipcRenderer.invoke('tlc:list-opportunities', accountId),
+  discoverOpportunities: (domain) => ipcRenderer.invoke('tlc:discover-opportunities', domain),
+  joinDealTeam: (opportunityId) => ipcRenderer.invoke('tlc:join-deal-team', opportunityId),
   listMilestones: (opportunityId) => ipcRenderer.invoke('tlc:list-milestones', opportunityId),
   updateMilestone: (opportunityId, milestoneId, update) => ipcRenderer.invoke('tlc:update-milestone', opportunityId, milestoneId, update),
   updateOpportunity: (opportunityId, update) => ipcRenderer.invoke('tlc:update-opportunity', opportunityId, update),

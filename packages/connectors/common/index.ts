@@ -1,4 +1,4 @@
-import type { Account, Milestone, MilestoneUpdate, Opportunity, OpportunityUpdate, SourceHealth } from '../../common/index.js'
+import type { Account, DealTeamJoinResult, DiscoverableOpportunity, Milestone, MilestoneUpdate, Opportunity, OpportunityUpdate, SeDomainId, SourceHealth } from '../../common/index.js'
 
 export interface CriterionObservation {
   criterionId: string
@@ -40,6 +40,14 @@ export interface MsxConnector {
   updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
   updateOpportunityStage(opportunityId: string, targetStage: number, auditNote: string): Promise<Opportunity>
   getOpportunityContext(opportunityId: string): Promise<OpportunityContext>
+  /**
+   * Discovers non-closed, non-completed MSX opportunities matching a Solution
+   * Engineer domain, flagging any the signed-in user is already on the deal
+   * team for.
+   */
+  discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
+  /** Adds the signed-in user to an opportunity's deal team. */
+  joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
 }
 
 export interface McemGuidanceConnector {

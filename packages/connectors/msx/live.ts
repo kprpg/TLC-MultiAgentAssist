@@ -1,22 +1,29 @@
 import {
   customerCommitmentSchema,
+  getSeDomainDefinition,
   measurePerformance,
   milestoneStatusSchema,
   milestoneUpdateSchema,
   opportunityUpdateSchema,
   type Account,
   type CustomerCommitment,
+  type DealTeamJoinResult,
+  type DiscoverableOpportunity,
   type Milestone,
   type MilestoneStatus,
   type MilestoneUpdate,
   type Opportunity,
   type OpportunityUpdate,
-  type PerformanceReporter
+  type PerformanceReporter,
+  type SeDomainId
 } from '../../common/index.js'
 import type { CriterionObservation, MsxConnector, OpportunityContext } from '../common/index.js'
 
 const defaultBaseUrl = 'https://microsoftsales.crm.dynamics.com/api/data/v9.2/'
 const formattedValueSuffix = '@OData.Community.Display.V1.FormattedValue'
+const guidPattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
+/** Upper bound on discovered opportunities returned per domain query. */
+const discoveryRowLimit = 200
 
 export interface MsxAccessTokenProvider {
   getAccessToken(): Promise<string>
@@ -51,7 +58,18 @@ interface OpportunityRow {
   msp_estcompletiondate?: string
   estimatedclosedate?: string
   description?: string | null
+  msp_solutionarea?: number
+  msp_technicalcapability?: number
   [key: string]: unknown
+}
+
+interface DealTeamMemberRow {
+  msp_dealteamid?: string
+}
+
+interface RelationshipMetadataRow {
+  ReferencingAttribute?: string
+  ReferencingEntityNavigationPropertyName?: string
 }
 
 interface MilestoneRow {
@@ -79,11 +97,41 @@ const customerCommitmentCodes: Record<CustomerCommitment, number> = {
   Committed: 861980003
 }
 
+export interface MsxDealTeamWriteMetadata {
+  /** Entity set for deal-team membership rows. */
+  entitySet: string
+  /** Logical (singular) entity name, used to read relationship metadata. */
+  logicalName: string
+  /** Single-valued navigation property binding the member to a systemuser. Discovered from metadata when omitted. */
+  userNavigationProperty?: string
+  /** Single-valued navigation property binding the row to the opportunity. Discovered from metadata when omitted. */
+  opportunityNavigationProperty?: string
+  /** Logical name of the deal-team -> user lookup value field, for existence checks. */
+  userLookupField: string
+  /** Logical name of the deal-team -> opportunity lookup value field, for existence checks. */
+  opportunityLookupField: string
+}
+
+export const defaultDealTeamWriteMetadata: MsxDealTeamWriteMetadata = {
+  entitySet: 'msp_dealteams',
+  logicalName: 'msp_dealteam',
+  userLookupField: '_msp_dealteamuserid_value',
+  opportunityLookupField: '_msp_parentopportunityid_value'
+}
+
+/** Derives a lookup attribute logical name (e.g. `msp_dealteamuserid`) from its `_x_value` field. */
+function lookupAttributeName(valueField: string): string {
+  return valueField.replace(/^_/, '').replace(/_value$/, '')
+}
+
 export interface MsxWriteMetadata {
   riskDetailsField?: string
   milestoneStatusCodes?: Partial<Record<MilestoneStatus, number>>
   stageCodes?: Partial<Record<1 | 2 | 3 | 4 | 5, number>>
+  dealTeam?: Partial<MsxDealTeamWriteMetadata>
 }
+
+const navigationPropertyPattern = /^[A-Za-z][A-Za-z0-9_]*$/
 
 export function msxWriteMetadataFromEnvironment(environment: NodeJS.ProcessEnv): MsxWriteMetadata {
   const riskDetailsField = environment['TLC_MSX_RISK_DETAILS_FIELD']?.trim()
@@ -107,10 +155,25 @@ export function msxWriteMetadataFromEnvironment(environment: NodeJS.ProcessEnv):
     if (!Number.isSafeInteger(code)) throw new Error(`${variable} must be an integer MSX option code.`)
     stageCodes[stage] = code
   }
+  const dealTeam: Partial<MsxDealTeamWriteMetadata> = {}
+  for (const [key, variable] of [
+    ['entitySet', 'TLC_MSX_DEALTEAM_ENTITY_SET'],
+    ['logicalName', 'TLC_MSX_DEALTEAM_LOGICAL_NAME'],
+    ['userNavigationProperty', 'TLC_MSX_DEALTEAM_USER_NAV_PROPERTY'],
+    ['opportunityNavigationProperty', 'TLC_MSX_DEALTEAM_OPPORTUNITY_NAV_PROPERTY'],
+    ['userLookupField', 'TLC_MSX_DEALTEAM_USER_LOOKUP_FIELD'],
+    ['opportunityLookupField', 'TLC_MSX_DEALTEAM_OPPORTUNITY_LOOKUP_FIELD']
+  ] as const) {
+    const rawValue = environment[variable]?.trim()
+    if (!rawValue) continue
+    if (!navigationPropertyPattern.test(rawValue)) throw new Error(`${variable} must be a valid Dataverse identifier.`)
+    dealTeam[key] = rawValue
+  }
   return {
     ...(riskDetailsField ? { riskDetailsField } : {}),
     ...(Object.keys(configuredCodes).length > 0 ? { milestoneStatusCodes: configuredCodes } : {}),
-    ...(Object.keys(stageCodes).length > 0 ? { stageCodes } : {})
+    ...(Object.keys(stageCodes).length > 0 ? { stageCodes } : {}),
+    ...(Object.keys(dealTeam).length > 0 ? { dealTeam } : {})
   }
 }
 
@@ -130,6 +193,7 @@ export class LiveMsxConnector implements MsxConnector {
   private readonly observationPromises = new Map<string, Promise<CriterionObservation[]>>()
   private readonly milestonePromises = new Map<string, Promise<MilestoneRow[]>>()
   private currentUserIdPromise: Promise<string> | undefined
+  private dealTeamBindingsPromise: Promise<{ userNavigationProperty: string; opportunityNavigationProperty: string }> | undefined
 
   constructor(
     private readonly tokenProvider: MsxAccessTokenProvider,
@@ -260,6 +324,134 @@ export class LiveMsxConnector implements MsxConnector {
         detail: 'Live MSX opportunity and engagement-milestone evidence scoped to the signed-in user’s active deal-team portfolio.',
         checkedAt: retrievedAt
       }
+    }
+  }
+
+  async discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]> {
+    const definition = getSeDomainDefinition(domain)
+    // Technical capability is the discriminator between Infra/Data/AI-Apps. Solution area
+    // ("Cloud and AI Platforms") is shared across all three, so it is not used as an AND gate —
+    // requiring both would eliminate the many opportunities that leave technical capability unset.
+    // Conversation is OR'd in as a secondary signal to catch opportunities where technical
+    // capability has not been populated.
+    const capabilityClause = definition.technicalCapabilityCodes.map((code) => `msp_technicalcapability eq ${code}`).join(' or ')
+    const conversationClause = definition.conversationCodes.map((code) => `msp_conversation eq ${code}`).join(' or ')
+    const domainMatch = [capabilityClause, conversationClause].filter(Boolean).join(' or ')
+    const domainClauses: string[] = domainMatch ? [`(${domainMatch})`] : []
+
+    // Scope discovery to the signed-in user's assigned customers: reuse the deal-team-derived
+    // portfolio, whose accounts are exactly the accounts MSX surfaces for this user. Opportunities
+    // in those accounts that the user is not yet on the deal team for are the discovery targets.
+    const portfolio = await this.getPortfolio()
+    const accountNameById = new Map(portfolio.accounts.map((account) => [account.id, account.name]))
+    const assignedAccountIds = [...accountNameById.keys()]
+    if (assignedAccountIds.length === 0) return []
+    const dealTeamOpportunityIds = new Set(portfolio.opportunities.map((opportunity) => opportunity.id))
+
+    const rows = await measurePerformance('msx.discover-opportunities', this.performanceReporter, () =>
+      this.requestOpportunitiesForAccounts(assignedAccountIds, domainClauses))
+
+    return rows
+      .filter((row) => row._parentaccountid_value && accountNameById.has(row._parentaccountid_value))
+      .map((row) => {
+        const accountName = accountNameById.get(row._parentaccountid_value!) ?? formattedValue(row, '_parentaccountid_value')
+        const solutionArea = formattedValue(row, 'msp_solutionarea')
+        const technicalCapability = formattedValue(row, 'msp_technicalcapability')
+        return {
+          ...this.mapOpportunity(row),
+          domain,
+          ...(accountName ? { accountName } : {}),
+          ...(solutionArea ? { solutionArea } : {}),
+          ...(technicalCapability ? { technicalCapability } : {}),
+          onDealTeam: dealTeamOpportunityIds.has(row.opportunityid)
+        }
+      })
+      .sort((left, right) => left.name.localeCompare(right.name))
+  }
+
+  /** Fetches open opportunities within the given assigned accounts, filtered by the domain clauses. */
+  private async requestOpportunitiesForAccounts(accountIds: string[], domainClauses: string[]): Promise<OpportunityRow[]> {
+    const select = 'opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description,msp_solutionarea,msp_technicalcapability,msp_conversation'
+    const rows: OpportunityRow[] = []
+    for (let offset = 0; offset < accountIds.length; offset += 40) {
+      const chunk = accountIds.slice(offset, offset + 40)
+      const accountFilter = chunk.map((id) => `_parentaccountid_value eq ${id}`).join(' or ')
+      const filterClauses = ['statecode eq 0', `(${accountFilter})`, ...domainClauses]
+      rows.push(...await this.requestAll<OpportunityRow>('opportunities', {
+        '$select': select,
+        '$filter': filterClauses.join(' and '),
+        '$orderby': 'name asc',
+        '$top': String(discoveryRowLimit)
+      }))
+    }
+    return rows
+  }
+
+  async joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult> {
+    if (!guidPattern.test(opportunityId)) {
+      throw new Error('The opportunity id must be a valid MSX GUID.')
+    }
+    const dealTeam = { ...defaultDealTeamWriteMetadata, ...this.writeMetadata.dealTeam }
+    const userId = await this.getCurrentUserId()
+
+    const existing = await this.requestAll<DealTeamMemberRow>(dealTeam.entitySet, {
+      '$select': 'msp_dealteamid',
+      '$filter': `statecode eq 0 and ${dealTeam.userLookupField} eq ${userId} and ${dealTeam.opportunityLookupField} eq ${opportunityId}`,
+      '$top': '1'
+    })
+    if (existing.length > 0) {
+      this.portfolioPromise = undefined
+      return { opportunityId, onDealTeam: true, alreadyMember: true }
+    }
+
+    const bindings = await this.resolveDealTeamBindings(dealTeam)
+    await this.post(dealTeam.entitySet, {
+      [`${bindings.userNavigationProperty}@odata.bind`]: `/systemusers(${userId})`,
+      [`${bindings.opportunityNavigationProperty}@odata.bind`]: `/opportunities(${opportunityId})`
+    })
+    this.portfolioPromise = undefined
+    return { opportunityId, onDealTeam: true, alreadyMember: false }
+  }
+
+  /**
+   * Resolves the single-valued navigation property names used to bind a deal-team row to the
+   * systemuser and opportunity. Prefers explicit configuration, then live relationship metadata,
+   * then a conventional fallback derived from the lookup field names. The metadata lookup is cached.
+   */
+  private resolveDealTeamBindings(dealTeam: MsxDealTeamWriteMetadata): Promise<{ userNavigationProperty: string; opportunityNavigationProperty: string }> {
+    if (dealTeam.userNavigationProperty && dealTeam.opportunityNavigationProperty) {
+      return Promise.resolve({
+        userNavigationProperty: dealTeam.userNavigationProperty,
+        opportunityNavigationProperty: dealTeam.opportunityNavigationProperty
+      })
+    }
+    this.dealTeamBindingsPromise ??= this.discoverDealTeamBindings(dealTeam).catch((error: unknown) => {
+      this.dealTeamBindingsPromise = undefined
+      throw error
+    })
+    return this.dealTeamBindingsPromise
+  }
+
+  private async discoverDealTeamBindings(dealTeam: MsxDealTeamWriteMetadata): Promise<{ userNavigationProperty: string; opportunityNavigationProperty: string }> {
+    const userAttribute = lookupAttributeName(dealTeam.userLookupField)
+    const opportunityAttribute = lookupAttributeName(dealTeam.opportunityLookupField)
+    const fallback = {
+      userNavigationProperty: dealTeam.userNavigationProperty ?? userAttribute,
+      opportunityNavigationProperty: dealTeam.opportunityNavigationProperty ?? opportunityAttribute
+    }
+    try {
+      const relationships = await this.requestAll<RelationshipMetadataRow>(
+        `EntityDefinitions(LogicalName='${dealTeam.logicalName}')/ManyToOneRelationships`,
+        { '$select': 'ReferencingAttribute,ReferencingEntityNavigationPropertyName' }
+      )
+      const userNav = relationships.find((row) => row.ReferencingAttribute === userAttribute)?.ReferencingEntityNavigationPropertyName
+      const opportunityNav = relationships.find((row) => row.ReferencingAttribute === opportunityAttribute)?.ReferencingEntityNavigationPropertyName
+      return {
+        userNavigationProperty: dealTeam.userNavigationProperty ?? userNav ?? fallback.userNavigationProperty,
+        opportunityNavigationProperty: dealTeam.opportunityNavigationProperty ?? opportunityNav ?? fallback.opportunityNavigationProperty
+      }
+    } catch {
+      return fallback
     }
   }
 
@@ -452,6 +644,24 @@ export class LiveMsxConnector implements MsxConnector {
     })
     if (!response.ok) {
       throw new MsxRequestError(`MSX update failed with status ${response.status}.`, response.status)
+    }
+  }
+
+  private async post(path: string, body: Record<string, unknown>): Promise<void> {
+    const url = new URL(path, this.baseUrl)
+    this.assertTrustedUrl(url)
+    const accessToken = await this.tokenProvider.getAccessToken()
+    const response = await this.fetchImplementation(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    })
+    if (!response.ok) {
+      throw new MsxRequestError(`MSX create failed with status ${response.status}.`, response.status)
     }
   }
 

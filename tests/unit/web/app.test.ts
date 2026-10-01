@@ -138,6 +138,46 @@ describe('hosted web API', () => {
         expect(webRuntime.listMilestones).toHaveBeenCalledWith('opportunity-1')
     })
 
+    it('discovers opportunities for a solution-engineer domain', async () => {
+        const webRuntime = runtime()
+        vi.mocked(webRuntime.discoverOpportunities).mockResolvedValue([{
+            id: 'opp-discover', accountId: 'account-1', name: 'Infra deal', recordedStage: 2, value: 1000, currency: 'USD', closeDate: '2027-01-01', domain: 'infra', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'Advanced Networking', onDealTeam: false
+        }])
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => webRuntime }))
+
+        const response = await fetch(`${baseUrl}/api/discover/infra`, { headers: authenticationHeaders })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual([expect.objectContaining({ id: 'opp-discover', domain: 'infra', onDealTeam: false })])
+        expect(webRuntime.discoverOpportunities).toHaveBeenCalledWith('infra')
+    })
+
+    it('rejects an unknown discovery domain before invoking the runtime', async () => {
+        const webRuntime = runtime()
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => webRuntime }))
+
+        const response = await fetch(`${baseUrl}/api/discover/marketing`, { headers: authenticationHeaders })
+
+        expect(response.status).toBe(400)
+        expect(webRuntime.discoverOpportunities).not.toHaveBeenCalled()
+    })
+
+    it('joins the signed-in user to an opportunity deal team', async () => {
+        const webRuntime = runtime()
+        vi.mocked(webRuntime.joinDealTeam).mockResolvedValue({ opportunityId: 'opportunity-1', onDealTeam: true, alreadyMember: false })
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => webRuntime }))
+
+        const response = await fetch(`${baseUrl}/api/opportunities/opportunity-1/deal-team`, {
+            method: 'POST',
+            headers: { ...authenticationHeaders, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+            body: '{}'
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ opportunityId: 'opportunity-1', onDealTeam: true, alreadyMember: false })
+        expect(webRuntime.joinDealTeam).toHaveBeenCalledWith('opportunity-1')
+    })
+
     it('validates and forwards partial MSX updates', async () => {
         const webRuntime = runtime()
         vi.mocked(webRuntime.updateMilestone).mockResolvedValue({
@@ -294,6 +334,8 @@ function runtime(): WebRuntime {
     return {
         listAccounts: vi.fn(async () => [{ id: 'account-1', name: 'Contoso', segment: 'Live MSX' }]),
         listOpportunities: vi.fn(async () => []),
+        discoverOpportunities: vi.fn(async () => []),
+        joinDealTeam: vi.fn(),
         listMilestones: vi.fn(async () => []),
         updateMilestone: vi.fn(),
         updateOpportunity: vi.fn(),

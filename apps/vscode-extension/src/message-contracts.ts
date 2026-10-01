@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { milestoneUpdateSchema, opportunityUpdateSchema, scopeRefSchema } from '../../../packages/common/index.js'
+import { milestoneUpdateSchema, opportunityUpdateSchema, scopeRefSchema, seDomainSchema } from '../../../packages/common/index.js'
 
 /**
  * Strict, discriminated message envelopes for the webview <-> extension-host bridge.
@@ -18,6 +18,8 @@ export const bridgeMethodSchema = z.enum([
     'getCurrentUserEmail',
     'listAccounts',
     'listOpportunities',
+    'discoverOpportunities',
+    'joinDealTeam',
     'listMilestones',
     'updateOpportunity',
     'updateMilestone',
@@ -43,6 +45,8 @@ export const bridgeParamSchemas = {
     getCurrentUserEmail: z.void().optional(),
     listAccounts: z.void().optional(),
     listOpportunities: z.object({ accountId: z.string().min(1).max(200) }).strict(),
+    discoverOpportunities: z.object({ domain: seDomainSchema }).strict(),
+    joinDealTeam: z.object({ opportunityId: z.string().min(1).max(200) }).strict(),
     listMilestones: z.object({ opportunityId: z.string().min(1).max(200) }).strict(),
     updateOpportunity: z.object({
         opportunityId: z.string().min(1).max(200),

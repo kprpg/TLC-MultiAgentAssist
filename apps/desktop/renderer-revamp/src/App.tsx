@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, DrawerBody, DrawerHeader, DrawerHeaderTitle, Field, FluentProvider, Input, Menu, MenuItem, MenuItemRadio, MenuList, MenuPopover, MenuTrigger, MessageBar, OverlayDrawer, Spinner, Textarea, Tooltip, webDarkTheme, webLightTheme } from '@fluentui/react-components'
+import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, DialogTrigger, DrawerBody, DrawerHeader, DrawerHeaderTitle, Field, FluentProvider, Input, Menu, MenuItem, MenuItemRadio, MenuList, MenuPopover, MenuTrigger, MessageBar, OverlayDrawer, Spinner, Textarea, Tooltip, webDarkTheme, webLightTheme } from '@fluentui/react-components'
 import {
   Apps20Regular,
   ArrowDownload20Regular,
@@ -15,6 +15,7 @@ import {
   ClipboardTaskListLtr20Regular,
   Dismiss20Regular,
   Home20Regular,
+  Info20Regular,
   Lightbulb20Regular,
   List20Regular,
   Mail20Regular,
@@ -27,9 +28,10 @@ import {
   Sparkle20Regular,
   Warning20Filled
 } from '@fluentui/react-icons'
-import type { Account, AgentCapability, AgentTaskResponse, CustomerCommitment, McemResponse, Milestone, MilestoneStatus, MilestoneUpdate, Opportunity, ScopeRef, WorkflowDefinition, WorkflowRun } from '../../../../packages/common/index.js'
-import { addMsxOpportunityLink, agentCapabilities, contractVersion } from '../../../../packages/common/index.js'
+import type { Account, AgentCapability, AgentTaskResponse, CustomerCommitment, DiscoverableOpportunity, McemResponse, Milestone, MilestoneStatus, MilestoneUpdate, Opportunity, ScopeRef, SeDomainId, WorkflowDefinition, WorkflowRun } from '../../../../packages/common/index.js'
+import { addMsxOpportunityLink, agentCapabilities, contractVersion, seDomainList } from '../../../../packages/common/index.js'
 import type { InitialWorkflowOutput } from '../../../../packages/orchestrator/workflows/index.js'
+import workflowDescriptions from '../../../../config/workflow-descriptions.json'
 import { createDataClient, stageOwner, type RevampDataClient } from './data-client.js'
 import { suggestedPrompts } from './prompt-catalog.js'
 import { formatResponseMarkdown } from './response-markdown.js'
@@ -38,7 +40,7 @@ import { sortMilestones, type MilestoneSort } from './milestone-sort.js'
 import { workflowGuidanceCapability } from './workflow-guidance.js'
 
 type Shell = 'desktop' | 'web'
-type WorkspaceView = 'accounts' | 'workflows'
+type WorkspaceView = 'accounts' | 'workflows' | 'discover'
 type CenterTab = 'msx' | 'guidance' | 'stages'
 type Blade = 'accounts' | 'opportunities' | 'actions'
 type SearchResult =
@@ -50,6 +52,7 @@ type MilestoneField = 'status' | 'riskDetails' | 'targetDate' | 'customerCommitm
 type MilestoneEdit = { milestoneId: string; field: MilestoneField; value: string }
 type PendingStageMove = { opportunity: Opportunity; targetStage: number; evaluation: McemResponse }
 type BoardDrag = { pointerId: number; opportunityId: string; sourceStage: number; startX: number; startY: number; targetStage: number | null; dragging: boolean }
+type WorkflowDescription = { summary: string; reads: string; useIt: string }
 
 const mcemStages = [
   { id: 1, name: 'Listen & Consult', role: 'Account Executive' },
@@ -69,6 +72,7 @@ const bladeWidthLimits: Record<Blade, { min: number; max: number }> = {
 
 const milestoneStatuses: MilestoneStatus[] = ['On Track', 'At Risk', 'Blocked', 'Completed', 'Cancelled', 'Lost to Competitor', 'Hygiene/Duplicate']
 const customerCommitments: CustomerCommitment[] = ['Uncommitted', 'Committed']
+const workflowDescriptionById = workflowDescriptions.descriptions as Record<string, WorkflowDescription>
 const milestoneFieldLabels: Record<MilestoneField, string> = {
   status: 'Milestone Status',
   riskDetails: 'Risk/Blocker Details',
@@ -200,6 +204,11 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchOpportunities, setSearchOpportunities] = useState<Opportunity[]>([])
   const [searchLoading, setSearchLoading] = useState(true)
+  const [discoverDomain, setDiscoverDomain] = useState<SeDomainId>('infra')
+  const [discoverResults, setDiscoverResults] = useState<DiscoverableOpportunity[]>([])
+  const [discoverLoading, setDiscoverLoading] = useState(false)
+  const [discoverLoadedDomain, setDiscoverLoadedDomain] = useState<SeDomainId | null>(null)
+  const [joiningOpportunityId, setJoiningOpportunityId] = useState<string | null>(null)
   const [exiting, setExiting] = useState(false)
   const [expandedOpportunityId, setExpandedOpportunityId] = useState<string | null>(null)
   const [milestoneEdit, setMilestoneEdit] = useState<MilestoneEdit | null>(null)
@@ -235,6 +244,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [workflowGuidanceLoading, setWorkflowGuidanceLoading] = useState<string | null>(null)
   const boardDragRef = useRef<BoardDrag | null>(null)
   const boardViewportRef = useRef<HTMLDivElement | null>(null)
+  const milestonePanelRef = useRef<HTMLDivElement | null>(null)
   const sortedOpportunities = sortOpportunities(opportunities, opportunitySort, opportunitySortDirection)
   const sortedMilestones = sortMilestones(milestones, milestoneSort, milestoneSortDirection)
 
@@ -255,6 +265,11 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     updateScrollState()
     return () => resizeObserver.disconnect()
   }, [centerTab, account?.id])
+
+  useEffect(() => {
+    if (!expandedOpportunityId) return
+    milestonePanelRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [expandedOpportunityId])
 
   useEffect(() => {
     if (workspaceView !== 'workflows') return
@@ -289,6 +304,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     })
     return () => { current = false }
   }, [client, workspaceView, workflowScopeKind, account?.id, opportunity?.id])
+
+  useEffect(() => {
+    if (workspaceView !== 'discover') return
+    if (discoverLoadedDomain === discoverDomain || discoverLoading) return
+    void loadDiscover(discoverDomain)
+  }, [workspaceView, discoverDomain])
 
   const workflowPersonas = [...new Set(workflowDefinitions.flatMap((definition) => definition.personaTargets))].sort()
   const workflowSources = [...new Set(workflowDefinitions.flatMap((definition) => definition.connectorPlan.map((step) => step.connector)))].sort()
@@ -544,14 +565,15 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setLoading(true)
     setMobileBlade('opportunities')
     try {
-      const [nextResult, nextMilestones] = await Promise.all([
+      const [resultOutcome, milestonesOutcome] = await Promise.allSettled([
         client.runMcemCoach(nextAccount.id, nextOpportunity.id),
         client.listMilestones(nextOpportunity.id)
       ])
-      setResult(nextResult)
-      setMilestones(nextMilestones)
-    } catch (cause) {
-      handleError(cause)
+      if (resultOutcome.status === 'fulfilled') setResult(resultOutcome.value)
+      if (milestonesOutcome.status === 'fulfilled') setMilestones(milestonesOutcome.value)
+      if (resultOutcome.status === 'rejected' && milestonesOutcome.status === 'rejected') handleError(resultOutcome.reason)
+      else if (resultOutcome.status === 'rejected') setError(`MCEM guidance is unavailable: ${resultOutcome.reason instanceof Error ? resultOutcome.reason.message : String(resultOutcome.reason)}`)
+      else if (milestonesOutcome.status === 'rejected') setError(`Milestones are unavailable: ${milestonesOutcome.reason instanceof Error ? milestonesOutcome.reason.message : String(milestonesOutcome.reason)}`)
     } finally {
       setLoading(false)
     }
@@ -661,20 +683,19 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     }
   }
 
-  async function openEmailDialog() {
-    if (!agentResult) return
-    const label = capabilities.find((item) => item.id === agentResult.capability)?.label ?? 'Agent response'
-    setEmailRecipients(await client.getCurrentUserEmail().catch(() => undefined) ?? '')
+  useEffect(() => {
+    if (!emailDialogOpen || !agentResult) return
+    const label = agentCapabilities.find((item) => item.id === agentResult.capability)?.label ?? 'Agent response'
     setEmailSubject(`${label}: ${opportunity?.name ?? 'Agent response'}`)
     setShareStatus('ready')
     setShareMessage('')
-    setEmailDialogOpen(true)
-  }
+    void client.getCurrentUserEmail().then((email) => setEmailRecipients(email ?? ''), () => setEmailRecipients(''))
+  }, [agentResult, client, emailDialogOpen, opportunity])
 
   async function openEmailCompose() {
     if (!agentResult || !opportunity) return
     const recipients = emailRecipients.split(/[;,]/).map((recipient) => recipient.trim()).filter(Boolean)
-    const label = capabilities.find((item) => item.id === agentResult.capability)?.label ?? 'Agent response'
+    const label = agentCapabilities.find((item) => item.id === agentResult.capability)?.label ?? 'Agent response'
     setShareStatus('running')
     setShareMessage('')
     try {
@@ -696,7 +717,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
   async function exportAgentResponse() {
     if (!agentResult) return
-    const label = capabilities.find((item) => item.id === agentResult.capability)?.label ?? 'Agent response'
+    const label = agentCapabilities.find((item) => item.id === agentResult.capability)?.label ?? 'Agent response'
     setShareStatus('running')
     setShareMessage('')
     try {
@@ -731,6 +752,35 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     }
   }
 
+  async function loadDiscover(domain: SeDomainId) {
+    setError('')
+    setDiscoverDomain(domain)
+    setDiscoverLoading(true)
+    try {
+      const items = await client.discoverOpportunities(domain)
+      setDiscoverResults(items)
+      setDiscoverLoadedDomain(domain)
+    } catch (cause) {
+      handleError(cause)
+    } finally {
+      setDiscoverLoading(false)
+    }
+  }
+
+  async function joinDealTeam(opportunityId: string) {
+    setError('')
+    setJoiningOpportunityId(opportunityId)
+    try {
+      const result = await client.joinDealTeam(opportunityId)
+      setDiscoverResults((current) => current.map((item) => item.id === opportunityId ? { ...item, onDealTeam: result.onDealTeam } : item))
+      await refreshAccounts()
+    } catch (cause) {
+      handleError(cause)
+    } finally {
+      setJoiningOpportunityId(null)
+    }
+  }
+
   async function refreshOpportunities() {
     if (!account) return
     setError('')
@@ -751,12 +801,15 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setError('')
     setLoading(true)
     try {
-      const [nextResult, nextMilestones] = await Promise.all([
+      const [resultOutcome, milestonesOutcome] = await Promise.allSettled([
         client.runMcemCoach(account.id, opportunity.id),
         client.listMilestones(opportunity.id)
       ])
-      setResult(nextResult)
-      setMilestones(nextMilestones)
+      if (resultOutcome.status === 'fulfilled') setResult(resultOutcome.value)
+      if (milestonesOutcome.status === 'fulfilled') setMilestones(milestonesOutcome.value)
+      if (resultOutcome.status === 'rejected' && milestonesOutcome.status === 'rejected') handleError(resultOutcome.reason)
+      else if (resultOutcome.status === 'rejected') setError(`MCEM guidance is unavailable: ${resultOutcome.reason instanceof Error ? resultOutcome.reason.message : String(resultOutcome.reason)}`)
+      else if (milestonesOutcome.status === 'rejected') setError(`Milestones are unavailable: ${milestonesOutcome.reason instanceof Error ? milestonesOutcome.reason.message : String(milestonesOutcome.reason)}`)
       if (centerTab === 'guidance' && taskPrompt.trim().length >= 3) {
         setAgentResult(await client.runAgentTask(capability, account.id, opportunity.id, taskPrompt.trim()))
       }
@@ -871,6 +924,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         <button className="rail-button" title="Opportunities" aria-label="Opportunities"><List20Regular /></button>
         <button className="rail-button" title="Guidance" aria-label="Guidance"><Sparkle20Regular /></button>
         <button className={`rail-button ${workspaceView === 'workflows' ? 'active' : ''}`} title="Workflows" aria-label="Workflows" onClick={() => setWorkspaceView('workflows')}><ClipboardTaskListLtr20Regular /></button>
+        <button className={`rail-button ${workspaceView === 'discover' ? 'active' : ''}`} title="Discover opportunities" aria-label="Discover opportunities" onClick={() => setWorkspaceView('discover')}><Person20Regular /></button>
       </nav>
 
       {workspaceView === 'accounts' && <>
@@ -920,7 +974,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                         positioning="above"
                         relationship="description"
                       >
-                        <button className="opportunity-link-button" onClick={() => toggleOpportunity(item)}>
+                        <button className="opportunity-link-button" aria-expanded={selected && expandedOpportunityId === item.id} aria-controls={`opportunity-milestones-${item.id}`} onClick={() => toggleOpportunity(item)}>
                           <strong>{item.name}</strong>
                           <span>{item.owner ?? 'Owner not assigned'}</span>
                         </button>
@@ -947,7 +1001,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
             <div className="record-editor-actions"><Button disabled={savingEdit} onClick={() => setOpportunityCommentsOpen(false)}>Cancel</Button><Button appearance="primary" disabled={savingEdit} onClick={() => void saveOpportunityComments()}>{savingEdit ? 'Saving...' : 'Save'}</Button></div>
           </div>}
 
-          {opportunity && <div className="milestone-table-wrap" aria-label={`${opportunity.name} milestones`}>
+          {opportunity && expandedOpportunityId === opportunity.id && <div ref={milestonePanelRef} id={`opportunity-milestones-${opportunity.id}`} className="milestone-table-wrap" role="region" aria-label={`${opportunity.name} milestones`}>
             <div className="milestone-tree-header">
               <span>Milestones</span>
               <div className="milestone-tree-actions">
@@ -1056,7 +1110,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           </div>}
           {!loading && centerTab === 'guidance' && <div className="workbench-content guidance-view">
             <div className="agent-tabs" role="tablist" aria-label="Agent role">
-              {agentCapabilities.map((item) => <Tooltip key={item.id} content={item.description} relationship="description" positioning="above"><button role="tab" title={item.description} aria-selected={capability === item.id} onClick={() => loadGuidance(item.id)}>{item.label}</button></Tooltip>)}
+              {agentCapabilities.map((item) => <span key={item.id} className="agent-tab-with-tooltip">
+                <button role="tab" aria-selected={capability === item.id} onClick={() => loadGuidance(item.id)}>{item.label}</button>
+                <Tooltip content={item.description} relationship="description" positioning="above">
+                  <Button appearance="subtle" size="small" className="agent-tooltip-trigger" icon={<Info20Regular />} aria-label={`About ${item.label}`} />
+                </Tooltip>
+              </span>)}
             </div>
             <div className="agent-prompt-suggestions" aria-label={`${agentCapabilities.find((item) => item.id === capability)?.label} suggested prompts`}>
               {suggestedPrompts[capability].map((prompt) => <button key={prompt} type="button" disabled={agentLoading} onClick={() => void runAgentPrompt(prompt)}>{prompt}</button>)}
@@ -1070,7 +1129,20 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
               <header className="agent-response-header">
                 <div><p className="eyebrow">{agentCapabilities.find((item) => item.id === agentResult.capability)?.label}</p><small>Agent {agentResult.agentVersion}</small></div>
                 <div className="response-actions" aria-label="Response actions">
-                  <Button icon={<Mail20Regular />} disabled={shareStatus === 'running'} onClick={openEmailDialog}>Send Email</Button>
+                  <Dialog open={emailDialogOpen} onOpenChange={(_, data) => setEmailDialogOpen(data.open)}>
+                    <DialogTrigger disableButtonEnhancement>
+                      <Button icon={<Mail20Regular />} disabled={shareStatus === 'running'}>Send Email</Button>
+                    </DialogTrigger>
+                    <DialogSurface><DialogBody><DialogTitle>{client.mode === 'desktop' ? 'Open email message' : 'Download email draft'}</DialogTitle><DialogContent className="email-draft-form">
+                      <p>{client.mode === 'desktop' ? 'The prepared message opens in your default mail application for review before sending.' : 'A rich Outlook email draft downloads for review before sending.'}</p>
+                      <Field label="Recipients" hint="Separate addresses with commas or semicolons."><Input type="email" aria-label="Email recipients" value={emailRecipients} onChange={(_, data) => setEmailRecipients(data.value)} /></Field>
+                      <Field label="Subject"><Input aria-label="Email subject" value={emailSubject} onChange={(_, data) => setEmailSubject(data.value)} /></Field>
+                      {shareStatus === 'error' && shareMessage && <MessageBar intent="error">{shareMessage}</MessageBar>}
+                    </DialogContent><DialogActions>
+                      <Button onClick={() => setEmailDialogOpen(false)}>Cancel</Button>
+                      <Button appearance="primary" icon={<Mail20Regular />} disabled={shareStatus === 'running' || !emailRecipients.trim() || !emailSubject.trim()} onClick={() => void openEmailCompose()}>{shareStatus === 'running' ? (client.mode === 'desktop' ? 'Opening...' : 'Preparing...') : (client.mode === 'desktop' ? 'Open Email' : 'Download Draft')}</Button>
+                    </DialogActions></DialogBody></DialogSurface>
+                  </Dialog>
                   <Button icon={<ArrowDownload20Regular />} disabled={shareStatus === 'running'} onClick={() => void exportAgentResponse()}>Export</Button>
                 </div>
               </header>
@@ -1079,17 +1151,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                 <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ a: ({ href, children }) => <a href={href} onClick={(event) => { event.preventDefault(); if (href) void client.openEvidence(href) }}>{children}</a> }}>{formatResponseMarkdown(agentResult.content)}</Markdown>
               </div>
             </article> : !agentLoading && <div className="empty-state compact">Choose a suggested prompt or ask a different question.</div>}
-            <Dialog open={emailDialogOpen} onOpenChange={(_, data) => setEmailDialogOpen(data.open)}>
-              <DialogSurface><DialogBody><DialogTitle>{client.mode === 'desktop' ? 'Open email message' : 'Download email draft'}</DialogTitle><DialogContent className="email-draft-form">
-                <p>{client.mode === 'desktop' ? 'The prepared message opens in your default mail application for review before sending.' : 'A rich Outlook email draft downloads for review before sending.'}</p>
-                <Field label="Recipients" hint="Separate addresses with commas or semicolons."><Input type="email" aria-label="Email recipients" value={emailRecipients} onChange={(_, data) => setEmailRecipients(data.value)} /></Field>
-                <Field label="Subject"><Input aria-label="Email subject" value={emailSubject} onChange={(_, data) => setEmailSubject(data.value)} /></Field>
-                {shareStatus === 'error' && shareMessage && <MessageBar intent="error">{shareMessage}</MessageBar>}
-              </DialogContent><DialogActions>
-                <Button onClick={() => setEmailDialogOpen(false)}>Cancel</Button>
-                <Button appearance="primary" icon={<Mail20Regular />} disabled={shareStatus === 'running' || !emailRecipients.trim() || !emailSubject.trim()} onClick={() => void openEmailCompose()}>{shareStatus === 'running' ? (client.mode === 'desktop' ? 'Opening...' : 'Preparing...') : (client.mode === 'desktop' ? 'Open Email' : 'Download Draft')}</Button>
-              </DialogActions></DialogBody></DialogSurface>
-            </Dialog>
           </div>}
           {!loading && centerTab === 'stages' && <div className="mcem-board-shell">
             <div ref={boardViewportRef} className="mcem-board-view" onScroll={(event) => setBoardScroll({
@@ -1257,13 +1318,16 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         <div className="workflow-grid">
           {filteredWorkflowDefinitions.map((definition) => {
             const expanded = expandedWorkflowId === definition.id
+            const description = workflowDescriptionById[definition.id]
             const parameter = definition.id === 'WF-001' ? { label: 'Stale after days', defaultValue: 30, min: 1, max: 365 }
               : definition.id === 'WF-005' ? { label: 'Lookback days', defaultValue: 7, min: 1, max: 90 }
                 : definition.id === 'WF-009' ? { label: 'Maximum active items', defaultValue: 20, min: 1, max: 100 }
                   : definition.id === 'WF-010' ? { label: 'Follow up after days', defaultValue: 14, min: 1, max: 90 }
                     : null
             return <article className="workflow-card" key={definition.id}>
-              <header><span>{definition.id}</span><strong>{definition.name}</strong></header>
+              <header><span>{definition.id}</span><strong>{definition.name}</strong>{description && <Tooltip content={<div className="play-tooltip-content"><strong>{definition.name}</strong><span>{description.summary}</span><span><em>Reads:</em> {description.reads}</span><span><em>Use it to:</em> {description.useIt}</span></div>} relationship="description" positioning="above">
+                <Button appearance="subtle" size="small" className="play-tooltip-trigger" icon={<Info20Regular />} aria-label={`What does "${definition.name}" do?`} />
+              </Tooltip>}</header>
               <p className="workflow-role-owners">Role owners: {definition.personaTargets.join(' · ')}</p>
               <dl><div><dt>Source</dt><dd>{definition.connectorPlan.map((step) => step.connector.replace('-mcp', '')).join(' + ')}</dd></div><div><dt>Mode</dt><dd>{definition.executionMode}</dd></div><div><dt>Cadence</dt><dd>On demand</dd></div></dl>
               {expanded && <div className="workflow-parameters">
@@ -1311,6 +1375,43 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           </DrawerBody>
         </OverlayDrawer>
       </section>}
+
+      {workspaceView === 'discover' && <section className="workflow-launcher discover-launcher" aria-label="Discover opportunities">
+        <header className="workflow-launcher-header">
+          <div><p className="eyebrow">DEAL TEAM DISCOVERY</p><h1>Discover opportunities</h1><p>Find open, non-closed opportunities for your Solution Engineer domain and add yourself to the deal team in one click.</p></div>
+        </header>
+
+        <div className="workflow-toolbar">
+          <div className="scope-switcher" role="group" aria-label="Solution Engineer domain">
+            {seDomainList.map((domain) => <button key={domain.id} className={discoverDomain === domain.id ? 'active' : ''} title={domain.description} onClick={() => void loadDiscover(domain.id)}>{domain.label}</button>)}
+          </div>
+          <Button appearance="subtle" icon={<ArrowClockwise20Regular />} disabled={discoverLoading} onClick={() => void loadDiscover(discoverDomain)}>Refresh</Button>
+        </div>
+
+        <div className="discover-body">
+          {discoverLoading && <div className="discover-loading"><Spinner size="small" label="Loading opportunities…" /></div>}
+          {!discoverLoading && discoverResults.length === 0 && <MessageBar intent="info">No open opportunities were found for this domain.</MessageBar>}
+          {!discoverLoading && discoverResults.length > 0 && <table className="record-table discover-table">
+            <thead><tr><th>Opportunity</th><th>Account</th><th>Solution area</th><th>Technical capability</th><th>Stage</th><th>Value</th><th>Closes</th><th aria-label="Action"></th></tr></thead>
+            <tbody>
+              {discoverResults.map((item) => <tr key={item.id}>
+                <td><strong>{item.name}</strong></td>
+                <td>{item.accountName ?? '-'}</td>
+                <td>{item.solutionArea ?? '-'}</td>
+                <td>{item.technicalCapability ?? '-'}</td>
+                <td>{item.recordedStage}</td>
+                <td>{formatMoney(item.value, item.currency)}</td>
+                <td>{item.closeDate}</td>
+                <td>
+                  {item.onDealTeam
+                    ? <span className="deal-team-joined"><CheckmarkCircle20Filled /> On deal team</span>
+                    : <Button size="small" appearance="primary" disabled={joiningOpportunityId === item.id} icon={joiningOpportunityId === item.id ? <Spinner size="tiny" /> : <Person20Regular />} onClick={() => void joinDealTeam(item.id)}>Add me</Button>}
+                </td>
+              </tr>)}
+            </tbody>
+          </table>}
+        </div>
+      </section>}
     </main>
 
     {workspaceView === 'accounts' && opportunity && <nav className="mobile-nav" aria-label="Mobile workspace navigation">
@@ -1322,6 +1423,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     {workspaceView === 'workflows' && <nav className="mobile-nav workflow-mobile-nav" aria-label="Mobile workspace navigation">
       <button onClick={() => setWorkspaceView('accounts')}><Building20Regular /><span>Accounts</span></button>
       <button className="active"><ClipboardTaskListLtr20Regular /><span>Workflows</span></button>
+    </nav>}
+    {workspaceView === 'discover' && <nav className="mobile-nav workflow-mobile-nav" aria-label="Mobile workspace navigation">
+      <button onClick={() => setWorkspaceView('accounts')}><Building20Regular /><span>Accounts</span></button>
+      <button className="active"><Person20Regular /><span>Discover</span></button>
     </nav>}
   </div>
 }

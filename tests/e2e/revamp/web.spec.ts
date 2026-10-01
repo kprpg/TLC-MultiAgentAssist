@@ -8,12 +8,14 @@ test('sends an opportunity-scoped workflow exception to existing guidance', asyn
         const operation = new URL(route.request().url()).pathname.split('/').at(-1)
         if (operation === 'list') await route.fulfill({ json: [workflowGuidanceDefinition] })
         else if (operation === 'history') await route.fulfill({ json: [completedRun] })
-        else if (operation === 'guidance') await route.fulfill({ json: {
-            contractVersion: '1.0', workflowId: 'WF-003', resultRef: 'result:WF-003', capability: 'mcem-coach',
-            scope: { kind: 'opportunity', accountId: 'account-contoso', opportunityId: 'opp-grid-modernization' },
-            prompt,
-            context: { cardTitle: 'Stage mismatches', queueItemId: 'queue-stage-1', queueItemTitle: 'Resolve Grid operations modernization stage mismatch', facts: [{ label: 'Priority', value: 'P0' }], evidenceIds: ['tool-call-1'] }
-        } })
+        else if (operation === 'guidance') await route.fulfill({
+            json: {
+                contractVersion: '1.0', workflowId: 'WF-003', resultRef: 'result:WF-003', capability: 'mcem-coach',
+                scope: { kind: 'opportunity', accountId: 'account-contoso', opportunityId: 'opp-grid-modernization' },
+                prompt,
+                context: { cardTitle: 'Stage mismatches', queueItemId: 'queue-stage-1', queueItemTitle: 'Resolve Grid operations modernization stage mismatch', facts: [{ label: 'Priority', value: 'P0' }], evidenceIds: ['tool-call-1'] }
+            }
+        })
         else await route.fulfill({ json: { run: completedRun, output: workflowGuidanceOutput() } })
     })
     await page.goto('/')
@@ -185,6 +187,44 @@ test('launches scoped workflows and renders cancellation and outcome states', as
     expect(await launcher.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
 })
 
+test('downloads email and Word guidance artifacts', async ({ page }) => {
+    const pageErrors: Error[] = []
+    page.on('pageerror', (error) => pageErrors.push(error))
+    await page.route('**/api/open-email-compose', (route) => route.fulfill({
+        status: 200,
+        contentType: 'message/rfc822',
+        headers: { 'x-tlc-file-name': 'guidance.eml' },
+        body: 'MIME-Version: 1.0'
+    }))
+    await page.route('**/api/export-agent-response', (route) => route.fulfill({
+        status: 200,
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        headers: { 'x-tlc-file-name': 'guidance.docx' },
+        body: 'test document'
+    }))
+    await page.goto('/')
+    await page.getByRole('button', { name: /Fabrikam Retail/ }).first().click()
+    await page.getByRole('region', { name: 'Opportunities blade' }).getByRole('button', { name: /^Customer data platform - ready to advance / }).click()
+    await page.getByRole('tab', { name: 'Multi-Agent Guidance' }).click()
+    await page.getByRole('button', { name: 'What should the account team focus on this week?' }).click()
+    expect(pageErrors).toEqual([])
+    await expect(page.getByText('sanitized web-preview evidence')).toBeVisible()
+
+    await page.getByRole('button', { name: 'Send Email' }).click()
+    expect(pageErrors).toEqual([])
+    await expect(page.getByRole('dialog')).toBeVisible({ timeout: 5_000 })
+    await expect(page.getByRole('textbox', { name: 'Email subject' })).toHaveValue(/Account Pulse:/)
+    await page.getByRole('textbox', { name: 'Email recipients' }).fill('reviewer@example.com')
+    await expect(page.getByRole('button', { name: 'Download Draft' })).toBeEnabled()
+    const emailDownload = page.waitForEvent('download')
+    await page.getByRole('button', { name: 'Download Draft' }).click()
+    expect((await emailDownload).suggestedFilename()).toBe('guidance.eml')
+
+    const wordDownload = page.waitForEvent('download')
+    await page.getByRole('button', { name: 'Export' }).click()
+    expect((await wordDownload).suggestedFilename()).toBe('guidance.docx')
+})
+
 test('runs the static web rendering with hierarchical blades', async ({ page }) => {
     const pageErrors: Error[] = []
     let emailMarkdown = ''
@@ -263,11 +303,15 @@ test('runs the static web rendering with hierarchical blades', async ({ page }) 
     await expect(page.getByRole('button', { name: 'Export' })).toBeVisible()
     await page.getByRole('button', { name: 'Send Email' }).click()
     await page.getByRole('textbox', { name: 'Email recipients' }).fill('reviewer@example.com')
+    const emailDownload = page.waitForEvent('download')
     await page.getByRole('button', { name: 'Download Draft' }).click()
+    expect((await emailDownload).suggestedFilename()).toBe('guidance.eml')
     await expect.poll(() => emailMarkdown).toContain('## Recommended sequence')
     expect(emailMarkdown).toContain('### ATS — Customer outcomes')
     expect(emailMarkdown).toContain('**MSX Opportunity:** [Open opportunity in MSX]')
+    const wordDownload = page.waitForEvent('download')
     await page.getByRole('button', { name: 'Export' }).click()
+    expect((await wordDownload).suggestedFilename()).toBe('guidance.docx')
     await expect.poll(() => exportMarkdown).toContain('## Recommended sequence')
     expect(exportMarkdown).toContain('### ATS — Customer outcomes')
     await page.getByRole('button', { name: 'Close Next best actions' }).click()

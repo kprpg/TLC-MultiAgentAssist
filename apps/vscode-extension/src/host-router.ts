@@ -42,6 +42,14 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
                 const params = parseBridgeParams('listOpportunities', parsed.data.params)
                 return successResponse(id, await provider.listOpportunities(params.accountId))
             }
+            case 'discoverOpportunities': {
+                const params = parseBridgeParams('discoverOpportunities', parsed.data.params)
+                return successResponse(id, await provider.discoverOpportunities(params.domain))
+            }
+            case 'joinDealTeam': {
+                const params = parseBridgeParams('joinDealTeam', parsed.data.params)
+                return successResponse(id, await provider.joinDealTeam(params.opportunityId))
+            }
             case 'listMilestones': {
                 const params = parseBridgeParams('listMilestones', parsed.data.params)
                 return successResponse(id, await provider.listMilestones(params.opportunityId))

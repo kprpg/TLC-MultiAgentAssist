@@ -5,6 +5,8 @@ import {
     accountSchema,
     agentTaskRequestSchema,
     agentTaskResponseSchema,
+    dealTeamJoinResultSchema,
+    discoverableOpportunitySchema,
     emailComposeRequestSchema,
     exportResponseRequestSchema,
     mcemRequestSchema,
@@ -15,9 +17,12 @@ import {
     milestoneUpdateSchema,
     opportunitySchema,
     opportunityUpdateSchema,
+    seDomainSchema,
     type Account,
     type AgentTaskRequest,
     type AgentTaskResponse,
+    type DealTeamJoinResult,
+    type DiscoverableOpportunity,
     type McemRequest,
     type McemResponse,
     type McemStageTransitionRequest,
@@ -25,7 +30,8 @@ import {
     type Milestone,
     type MilestoneUpdate,
     type Opportunity,
-    type OpportunityUpdate
+    type OpportunityUpdate,
+    type SeDomainId
 } from '../../../packages/common/index.js'
 import { createOutlookDraftMessage } from '../../desktop/electron/main/outlook-compose.js'
 import { createResponseDocumentBuffer } from '../../desktop/electron/main/response-document.js'
@@ -37,6 +43,8 @@ const maximumBodyBytes = 1_048_576
 export interface WebRuntime {
     listAccounts(): Promise<Account[]>
     listOpportunities(accountId: string): Promise<Opportunity[]>
+    discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
+    joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
     listMilestones(opportunityId: string): Promise<Milestone[]>
     updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
     updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
@@ -133,6 +141,20 @@ export function buildWebApiHandler(options: WebApiOptions) {
             if (request.method === 'GET' && opportunitiesMatch) {
                 const accountId = accountIdSchema.parse(decodeURIComponent(opportunitiesMatch[1]!))
                 sendJson(response, 200, opportunitySchema.array().parse(await runtime.listOpportunities(accountId)))
+                return true
+            }
+
+            const discoverMatch = /^\/api\/discover\/([^/]+)$/.exec(url.pathname)
+            if (request.method === 'GET' && discoverMatch) {
+                const domain = seDomainSchema.parse(decodeURIComponent(discoverMatch[1]!))
+                sendJson(response, 200, discoverableOpportunitySchema.array().parse(await runtime.discoverOpportunities(domain)))
+                return true
+            }
+
+            const dealTeamMatch = /^\/api\/opportunities\/([^/]+)\/deal-team$/.exec(url.pathname)
+            if (request.method === 'POST' && dealTeamMatch) {
+                const opportunityId = accountIdSchema.parse(decodeURIComponent(dealTeamMatch[1]!))
+                sendJson(response, 200, dealTeamJoinResultSchema.parse(await runtime.joinDealTeam(opportunityId)))
                 return true
             }
 

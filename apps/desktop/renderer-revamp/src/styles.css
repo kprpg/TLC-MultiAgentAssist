@@ -718,6 +718,44 @@ body.resizing-blade .blade {
         var(--cp-bg);
 }
 
+.discover-body {
+    max-width: 1180px;
+    margin: 16px auto 0;
+}
+
+.discover-loading {
+    padding: 24px 0;
+}
+
+.discover-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.discover-table th,
+.discover-table td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--cp-border);
+    vertical-align: middle;
+}
+
+.discover-table th {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--cp-text-muted);
+}
+
+.deal-team-joined {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--cp-success, #107c10);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
 .workflow-launcher-header {
     display: flex;
     max-width: 1180px;
@@ -855,6 +893,8 @@ body.resizing-blade .blade {
 
 .workflow-card header {
     display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
     gap: 4px;
 }
 
@@ -866,6 +906,23 @@ body.resizing-blade .blade {
 
 .workflow-card header strong {
     font-size: 14px;
+}
+
+.workflow-card header .play-tooltip-trigger {
+    min-width: 24px;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+}
+
+.play-tooltip-content {
+    display: grid;
+    max-width: 320px;
+    gap: 5px;
+}
+
+.play-tooltip-content span {
+    font-size: 12px;
 }
 
 .workflow-card>p {
@@ -1314,7 +1371,7 @@ body.resizing-blade .blade {
 }
 
 .center-tabs button,
-.agent-tabs button {
+.agent-tabs button[role="tab"] {
     padding: 8px 2px 7px;
     background: transparent;
     border: 0;
@@ -1325,7 +1382,7 @@ body.resizing-blade .blade {
 }
 
 .center-tabs button[aria-selected="true"],
-.agent-tabs button[aria-selected="true"] {
+.agent-tabs button[role="tab"][aria-selected="true"] {
     color: var(--cp-accent);
     border-bottom-color: var(--cp-accent);
 }
@@ -1691,9 +1748,22 @@ body.resizing-blade .blade {
     border-bottom: 1px solid var(--cp-border);
 }
 
-.guidance-view .agent-tabs button {
+.agent-tab-with-tooltip {
+    display: inline-flex;
+    align-items: center;
+}
+
+.guidance-view .agent-tabs button[role="tab"] {
     padding-top: 6px;
     padding-bottom: 5px;
+}
+
+.guidance-view .agent-tabs .agent-tooltip-trigger {
+    min-width: 22px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    color: var(--cp-text-muted);
 }
 
 .agent-prompt-suggestions {
