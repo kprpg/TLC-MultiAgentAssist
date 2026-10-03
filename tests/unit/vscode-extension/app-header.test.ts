@@ -19,6 +19,9 @@ describe('AppHeader', () => {
 
         expect(markup).toContain('Portfolio')
         expect(markup).toContain('Plays')
+        expect(markup).toContain('Discover')
+        expect(markup.indexOf('Discover')).toBeLessThan(markup.indexOf('Portfolio'))
+        expect(markup.indexOf('Portfolio')).toBeLessThan(markup.indexOf('Plays'))
         expect(markup).toContain('Live')
         expect(markup).not.toContain('TLC Assist')
     })

@@ -1,4 +1,6 @@
-import type { Account, DealTeamJoinResult, DiscoverableOpportunity, Milestone, MilestoneUpdate, Opportunity, OpportunityUpdate, SeDomainId, SourceHealth } from '../../common/index.js'
+import type { Account, AccountCandidate, AccountListOptions, AccountSearchRequest, AccountVisibility, DealTeamJoinResult, DealTeamLeaveResult, DiscoverableOpportunity, Milestone, MilestoneUpdate, Opportunity, OpportunityUpdate, SeDomainId, SourceHealth } from '../../common/index.js'
+
+export * from './portfolio-preferences.js'
 
 export interface CriterionObservation {
   criterionId: string
@@ -33,7 +35,10 @@ export interface StageGuidance {
 }
 
 export interface MsxConnector {
-  listAccounts(): Promise<Account[]>
+  listAccounts(options?: AccountListOptions): Promise<Account[]>
+  searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
+  addAccount(accountId: string): Promise<Account>
+  setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
   listOpportunities(accountId: string): Promise<Opportunity[]>
   listMilestones(opportunityId: string): Promise<Milestone[]>
   updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
@@ -48,6 +53,8 @@ export interface MsxConnector {
   discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
   /** Adds the signed-in user to an opportunity's deal team. */
   joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
+  /** Removes only the signed-in user's active membership for an opportunity. */
+  leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult>
 }
 
 export interface McemGuidanceConnector {

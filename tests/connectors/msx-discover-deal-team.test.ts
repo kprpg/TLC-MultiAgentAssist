@@ -91,6 +91,70 @@ describe('LiveMsxConnector.joinDealTeam', () => {
     await expect(connector.joinDealTeam('not-a-guid')).rejects.toThrow(/GUID/)
   })
 
+  describe('LiveMsxConnector.leaveDealTeam', () => {
+    it('deletes only the signed-in user membership for the selected opportunity', async () => {
+      const membershipId = '00000000-0000-4000-8000-000000000def'
+      const deleted: string[] = []
+      const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input))
+        if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+        if (url.pathname.endsWith('/msp_dealteams') && (init?.method ?? 'GET') === 'GET') {
+          expect(url.searchParams.get('$filter')).toContain(`_msp_parentopportunityid_value eq ${validGuid}`)
+          expect(url.searchParams.get('$filter')).toContain('_msp_dealteamuserid_value eq user-id')
+          return json({ value: [{ msp_dealteamid: membershipId }] })
+        }
+        if (url.pathname.endsWith(`/msp_dealteams(${membershipId})`) && init?.method === 'DELETE') {
+          deleted.push(url.pathname)
+          return new Response(null, { status: 204 })
+        }
+        throw new Error(`Unexpected request: ${url} ${init?.method}`)
+      })
+      const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch)
+
+      await expect(connector.leaveDealTeam(validGuid)).resolves.toEqual({
+        opportunityId: validGuid,
+        onDealTeam: false,
+        alreadyAbsent: false
+      })
+      expect(deleted).toHaveLength(1)
+    })
+
+    it('is idempotent when the signed-in user has no matching membership', async () => {
+      const request = vi.fn(async (input: string | URL | Request) => {
+        const url = new URL(String(input))
+        if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+        if (url.pathname.endsWith('/msp_dealteams')) return json({ value: [] })
+        throw new Error(`Unexpected request: ${url}`)
+      })
+      const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch)
+
+      await expect(connector.leaveDealTeam(validGuid)).resolves.toEqual({
+        opportunityId: validGuid,
+        onDealTeam: false,
+        alreadyAbsent: true
+      })
+    })
+
+    it('refuses to guess when duplicate active memberships exist', async () => {
+      const request = vi.fn(async (input: string | URL | Request) => {
+        const url = new URL(String(input))
+        if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+        if (url.pathname.endsWith('/msp_dealteams')) {
+          return json({
+            value: [
+              { msp_dealteamid: '00000000-0000-4000-8000-000000000def' },
+              { msp_dealteamid: '00000000-0000-4000-8000-000000000fed' }
+            ]
+          })
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      })
+      const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch)
+
+      await expect(connector.leaveDealTeam(validGuid)).rejects.toThrow(/duplicate active Deal Team memberships/)
+    })
+  })
+
   it('discovers navigation-property names from relationship metadata for the odata bind', async () => {
     const posted: Array<Record<string, unknown>> = []
     const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {

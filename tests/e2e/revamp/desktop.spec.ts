@@ -4,6 +4,47 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { workflowDefinitions, workflowOutput, workflowRun } from './workflow-fixtures.js'
 
+test('curates customer accounts through the Desktop IPC bridge', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-curation-test-'))
+    test.slow()
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_UI_MODE: '' }
+    })
+
+    try {
+        const window = await app.firstWindow()
+        await window.getByRole('button', { name: 'Add customer' }).click()
+        const dialog = window.getByRole('dialog', { name: 'Add customer account' })
+        await dialog.getByRole('button', { name: 'TPID' }).click()
+        await dialog.getByRole('textbox', { name: 'TPID' }).fill('1000003')
+        await dialog.getByRole('button', { name: 'Search' }).click()
+        await dialog.getByRole('button', { name: 'Add account' }).click()
+
+        await window.locator('.discover-launcher .scope-switcher button').filter({ hasText: /^Data$/ }).click()
+        const discoveryRow = window.locator('.discover-table tbody tr').filter({ hasText: 'Clinical data platform modernization' })
+        await discoveryRow.locator('button').filter({ hasText: 'Add me' }).click()
+        await expect(discoveryRow).toContainText('On deal team')
+
+        await window.locator('.rail-button[title="Accounts"]').click()
+        await window.locator('.account-button').filter({ hasText: 'Northwind Health' }).click()
+        await expect(window.locator('.opportunity-table-wrap .record-table')).toContainText('Clinical data platform modernization')
+
+        window.once('dialog', (confirmation) => confirmation.accept())
+        await window.locator('.account-row').filter({ hasText: 'Northwind Health' }).locator('button').filter({ hasText: /^Hide$/ }).click()
+        await expect(window.locator('.account-row').filter({ hasText: 'Northwind Health' })).toHaveCount(0)
+        await window.locator('button[aria-label="Show hidden customers"]').click()
+        const hiddenRow = window.locator('.account-row').filter({ hasText: 'Northwind Health' })
+        await expect(hiddenRow).toContainText('Hidden')
+        await expect(hiddenRow).toHaveCSS('opacity', '1')
+        await expect(hiddenRow.locator('button').filter({ hasText: /^Unhide$/ })).toHaveCSS('color', 'rgb(15, 108, 189)')
+        await hiddenRow.locator('button').filter({ hasText: 'Unhide' }).click()
+    } finally {
+        await app.close()
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
 test('opens the default desktop blade workspace through the existing IPC bridge', async () => {
     const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-revamp-test-'))
     test.slow()

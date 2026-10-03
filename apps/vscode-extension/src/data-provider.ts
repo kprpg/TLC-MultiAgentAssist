@@ -1,9 +1,14 @@
 import {
     workflowContractVersion,
     type Account,
+    type AccountCandidate,
+    type AccountListOptions,
+    type AccountSearchRequest,
+    type AccountVisibility,
     type AgentCapability,
     type AgentTaskResponse,
     type DealTeamJoinResult,
+    type DealTeamLeaveResult,
     type DiscoverableOpportunity,
     type McemResponse,
     type McemStageTransitionResult,
@@ -25,12 +30,16 @@ import {
 import {
     buildSampleAgentResponse,
     buildSampleEvaluation,
+    addSampleAccount,
     discoverSampleOpportunities,
     findSampleOpportunity,
     joinSampleDealTeam,
+    leaveSampleDealTeam,
     listSampleAccounts,
     listSampleMilestones,
     listSampleOpportunities,
+    searchSampleAccounts,
+    setSampleAccountVisibility,
     transitionSampleStage,
     updateSampleMilestone,
     updateSampleOpportunity
@@ -43,10 +52,14 @@ import {
 export interface ExtensionDataProvider {
     readonly mode: 'sample' | 'live'
     getCurrentUserEmail(): Promise<string | undefined>
-    listAccounts(): Promise<Account[]>
+    listAccounts(options?: AccountListOptions): Promise<Account[]>
+    searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
+    addAccount(accountId: string): Promise<Account>
+    setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
     listOpportunities(accountId: string): Promise<Opportunity[]>
     discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
     joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
+    leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult>
     listMilestones(opportunityId: string): Promise<Milestone[]>
     updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
     updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
@@ -74,14 +87,25 @@ function opportunityForOrThrow(opportunityId: string): Opportunity {
  * milestone, and agent data on top.
  */
 export function createSampleDataProvider(): ExtensionDataProvider {
-    const host: WorkflowHost = createSampleWorkflowHost()
+    const host: WorkflowHost = createSampleWorkflowHost(async () => {
+        const accounts = listSampleAccounts()
+        const opportunities = (await Promise.all(accounts.map((candidate) => listSampleOpportunities(candidate.id)))).flat()
+        return {
+            accountIds: accounts.map((candidate) => candidate.id),
+            opportunityIds: opportunities.map((candidate) => candidate.id)
+        }
+    })
     return {
         mode: 'sample',
         getCurrentUserEmail: async () => undefined,
-        listAccounts: async () => listSampleAccounts(),
+        listAccounts: async (options) => listSampleAccounts(options),
+        searchAccounts: async (request) => searchSampleAccounts(request),
+        addAccount: async (accountId) => addSampleAccount(accountId),
+        setAccountVisibility: async (accountId, visibility) => setSampleAccountVisibility(accountId, visibility),
         listOpportunities: async (accountId) => listSampleOpportunities(accountId),
         discoverOpportunities: async (domain) => discoverSampleOpportunities(domain),
         joinDealTeam: async (opportunityId) => joinSampleDealTeam(opportunityId),
+        leaveDealTeam: async (opportunityId) => leaveSampleDealTeam(opportunityId),
         listMilestones: async (opportunityId) => listSampleMilestones(opportunityId),
         updateOpportunity: async (opportunityId, update) => updateSampleOpportunity(opportunityId, update),
         updateMilestone: async (opportunityId, milestoneId, update) => updateSampleMilestone(opportunityId, milestoneId, update),

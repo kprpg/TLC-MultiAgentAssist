@@ -5,12 +5,13 @@ import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { z } from 'zod'
-import { agentTaskRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, mcemRequestSchema, mcemStageTransitionRequestSchema, milestoneUpdateSchema, opportunityUpdateSchema, seDomainSchema, type AuthStatus, type DesktopDataStatus, type McpServer, type PerformanceReporter } from '../../../../packages/common/index.js'
+import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, agentTaskRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, mcemRequestSchema, mcemStageTransitionRequestSchema, milestoneUpdateSchema, opportunityUpdateSchema, seDomainSchema, type AuthStatus, type DesktopDataStatus, type McpServer, type PerformanceReporter } from '../../../../packages/common/index.js'
 import {
   loadFoundryEnvironment,
   type FoundryEnvironment
 } from '../../../../packages/common/configuration/foundry-environment.js'
 import { FixtureMsxConnector, LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../../packages/connectors/msx/index.js'
+import { JsonFilePortfolioPreferenceStore } from '../../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../../packages/connectors/foundry/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
@@ -93,9 +94,12 @@ const mcemGuidancePath = app.isPackaged
   ? resolve(process.resourcesPath, 'docs/knowledge/MCEM Overview.pdf')
   : resolve(desktopRoot, '../../docs/knowledge/MCEM Overview.pdf')
 const mcemConnector = new LocalPdfMcemGuidanceConnector(mcemGuidancePath)
+const portfolioPreferenceStore = new JsonFilePortfolioPreferenceStore(
+  resolve(app.getPath('userData'), 'portfolio-preferences.json')
+)
 const liveMsxConnector = dataMode === 'sample'
   ? undefined
-  : new LiveMsxConnector(tokenProvider, fetch, undefined, reportPerformance, msxWriteMetadataFromEnvironment(process.env))
+  : new LiveMsxConnector(tokenProvider, fetch, undefined, reportPerformance, msxWriteMetadataFromEnvironment(process.env), portfolioPreferenceStore)
 const msxConnector = liveMsxConnector ?? new FixtureMsxConnector()
 const foundryOpenAIClient = runtimeEnvironment
   ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry)
@@ -151,11 +155,24 @@ const configuredWorkflowHost = dataMode === 'sample' ? undefined : createLivePla
     if (!liveMsxConnector) throw new Error('Live Plays require the live MSX connection.')
     return liveMsxConnector.getCurrentUserId()
   },
+  resolveExcludedAccountIds: async () => {
+    if (!liveMsxConnector) return []
+    return (await liveMsxConnector.listAccounts({ includeHidden: true }))
+      .filter((account) => account.visibility === 'hidden')
+      .map((account) => account.id)
+  },
   onStepError: (info) => {
     console.error(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? 'required' : 'optional'} step failed: ${info.message}`)
   }
 })
-const workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost()
+const workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost(async () => {
+  const accounts = await msxConnector.listAccounts()
+  const opportunities = (await Promise.all(accounts.map((account) => msxConnector.listOpportunities(account.id)))).flat()
+  return {
+    accountIds: accounts.map((account) => account.id),
+    opportunityIds: opportunities.map((opportunity) => opportunity.id)
+  }
+})
 
 async function getDataStatus(): Promise<DesktopDataStatus> {
   if (dataMode === 'sample') {
@@ -197,9 +214,24 @@ function registerIpc(): void {
     assertTrustedSender(event)
     return getDataStatus()
   })
-  ipcMain.handle('tlc:list-accounts', (event) => {
+  ipcMain.handle('tlc:list-accounts', (event, options: unknown) => {
     assertTrustedSender(event)
-    return orchestrator.listAccounts()
+    return orchestrator.listAccounts(accountListOptionsSchema.parse(options ?? {}))
+  })
+  ipcMain.handle('tlc:search-accounts', (event, request: unknown) => {
+    assertTrustedSender(event)
+    return orchestrator.searchAccounts(accountSearchRequestSchema.parse(request))
+  })
+  ipcMain.handle('tlc:add-account', (event, accountId: unknown) => {
+    assertTrustedSender(event)
+    return orchestrator.addAccount(z.string().min(1).max(200).parse(accountId))
+  })
+  ipcMain.handle('tlc:set-account-visibility', (event, accountId: unknown, visibility: unknown) => {
+    assertTrustedSender(event)
+    return orchestrator.setAccountVisibility(
+      z.string().min(1).max(200).parse(accountId),
+      accountVisibilitySchema.parse(visibility)
+    )
   })
   ipcMain.handle('tlc:connect-mcem', (event) => {
     assertTrustedSender(event)
@@ -216,6 +248,10 @@ function registerIpc(): void {
   ipcMain.handle('tlc:join-deal-team', (event, opportunityId: unknown) => {
     assertTrustedSender(event)
     return orchestrator.joinDealTeam(z.string().min(1).parse(opportunityId))
+  })
+  ipcMain.handle('tlc:leave-deal-team', (event, opportunityId: unknown) => {
+    assertTrustedSender(event)
+    return orchestrator.leaveDealTeam(z.string().min(1).max(200).parse(opportunityId))
   })
   ipcMain.handle('tlc:list-milestones', (event, opportunityId: unknown) => {
     assertTrustedSender(event)

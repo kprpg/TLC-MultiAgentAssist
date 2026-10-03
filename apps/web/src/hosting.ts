@@ -24,12 +24,10 @@ export function buildStaticHandler(staticRoot: string, dataMode: 'live' | 'sampl
         if (!(await isFile(filePath))) filePath = resolve(resolvedRoot, 'index.html')
         let content = await readFile(filePath)
         if (filePath.endsWith('index.html')) {
-            if (dataMode === 'live') {
-                content = Buffer.from(content.toString('utf8').replace(
-                    '</head>',
-                    '    <meta name="tlc-data-mode" content="live" />\n  </head>'
-                ))
-            }
+            content = Buffer.from(content.toString('utf8').replace(
+                '</head>',
+                `    <meta name="tlc-data-mode" content="${dataMode}" />\n  </head>`
+            ))
             response.setHeader('cache-control', 'no-store')
         } else {
             response.setHeader('cache-control', 'public, max-age=31536000, immutable')

@@ -131,9 +131,13 @@ Optional settings:
 | `TLC_MSX_RISK_DETAILS_FIELD`        | Verified Risk/Blocker logical field name | unset; corresponding update is rejected       |
 | `TLC_MSX_STATUS_LOST_TO_COMPETITOR` | Verified integer option value            | unset; corresponding update is rejected       |
 | `TLC_MSX_STATUS_HYGIENE_DUPLICATE`  | Verified integer option value            | unset; corresponding update is rejected       |
+| `TLC_MSX_ACCOUNT_TPID_FIELD`         | Verified account TPID logical field name | unset; TPID search is rejected                 |
+| `TLC_PORTFOLIO_PREFERENCES_PATH`     | Durable account-preference JSON path     | `.tlc/portfolio-preferences.json`              |
 | `AZURE_CLIENT_ID`                   | User-assigned managed identity client ID | unset                                         |
 
-The host validates the optional MSX field name and option values at startup and never guesses Dataverse metadata. Supply these settings in the local process environment or App Service application settings only after confirming the values for the target tenant.
+The host validates the optional MSX field names and option values at startup and never guesses Dataverse metadata. Supply these settings in the local process environment or App Service application settings only after confirming the values for the target tenant. Name-based account search remains available when the TPID field is unset.
+
+`TLC_PORTFOLIO_PREFERENCES_PATH` must point to durable writable storage in hosted environments. Preferences are partitioned by the immutable authenticated user ID and contain manually added and hidden account IDs only. They do not replace or modify MSX Deal Team records. In a scaled-out App Service deployment, mount the same durable path for every instance or replace the JSON store with an approved shared persistence implementation before enabling multi-instance writes.
 
 ## App Service Authentication
 

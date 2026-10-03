@@ -7,6 +7,7 @@ import { dataClient } from './data-client.js'
 import { onHostMessage } from './bridge.js'
 import { formatResponseMarkdown } from './response-markdown.js'
 import { GuidanceAgentTabs } from './guidance-agent-tabs.js'
+import { selectGuidancePrompt } from './guidance-prompt-selection.js'
 import { RecordTableHeader } from './record-table-header.js'
 import { suggestedPrompts } from './prompt-catalog.js'
 import { mcemStages } from './mcem-stages.js'
@@ -15,8 +16,13 @@ import { PlayRoleOwners } from './play-role-owners.js'
 import { AppHeader } from './app-header.js'
 import { CommentsButton } from './comments-button.js'
 import { portfolioLayoutClassName } from './portfolio-layout.js'
+import { formatMoney, milestoneTooltipContent, opportunityTooltipContent } from './portfolio-record-details.js'
+import { RecordTooltip } from './record-tooltip.js'
 import { sortMilestones, sortOpportunities, type MilestoneSort, type OpportunitySort, type SortDirection } from './sorting.js'
+import { DiscoveryControls, DiscoverySortHeader } from '../../../shared/discovery-controls.js'
+import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportunities, toggleDiscoverySort, type DiscoveryFilters, type DiscoverySort } from '../../../shared/discovery.js'
 import type {
+    AccountCandidateView,
     AccountView,
     AgentCapability,
     AgentTaskView,
@@ -348,7 +354,7 @@ function GuidancePane({ accountId, opportunityId, opportunityName, onNote }: { a
             <GuidanceAgentTabs capability={capability} onSelect={setCapability} />
             <div className="prompt-suggestions" aria-label={`${label} suggested prompts`}>
                 {suggestedPrompts[capability].map((prompt) => (
-                    <button key={prompt} type="button" className="prompt-chip" disabled={agent.status === 'loading'} onClick={() => void runAgentPrompt(prompt)}>{prompt}</button>
+                    <button key={prompt} type="button" className="prompt-chip" disabled={agent.status === 'loading'} onClick={() => selectGuidancePrompt(prompt, setTaskPrompt, (selectedPrompt) => void runAgentPrompt(selectedPrompt))}>{prompt}</button>
                 ))}
             </div>
             <div className="agent-composer">
@@ -453,7 +459,7 @@ function milestoneFieldValue(milestone: MilestoneView, field: (typeof MILESTONE_
 }
 
 /** Milestones sub-list with sort control and five editable fields per milestone. */
-function MilestonesEditor({ opportunityId, milestones, onChanged, onNote }: { opportunityId: string; milestones: MilestoneView[]; onChanged: () => void; onNote: (message: string) => void }): ReactElement {
+function MilestonesEditor({ opportunityId, currency, milestones, onChanged, onNote }: { opportunityId: string; currency: string; milestones: MilestoneView[]; onChanged: () => void; onNote: (message: string) => void }): ReactElement {
     const [sortBy, setSortBy] = useState<MilestoneSort>('targetDate')
     const [direction, setDirection] = useState<SortDirection>('ascending')
     const [edit, setEdit] = useState<{ milestoneId: string; field: (typeof MILESTONE_FIELDS)[number]['id']; value: string } | undefined>(undefined)
@@ -507,7 +513,18 @@ function MilestonesEditor({ opportunityId, milestones, onChanged, onNote }: { op
                     <Fragment key={milestone.id}>
                         <tr>
                             <td className="milestone-name-cell">
-                                <strong>{milestone.name}</strong>
+                                <RecordTooltip {...milestoneTooltipContent(milestone, currency)}>
+                                    {(tooltipId) => (
+                                        <span className="record-name-trigger" tabIndex={0} aria-describedby={tooltipId}>
+                                            <span className="record-name-line">
+                                                <strong>{milestone.name}</strong>
+                                                <span className="record-value">
+                                                    {milestone.estimatedMonthlyUsage === undefined ? '-' : formatMoney(milestone.estimatedMonthlyUsage, currency)}
+                                                </span>
+                                            </span>
+                                        </span>
+                                    )}
+                                </RecordTooltip>
                                 <span className="milestone-meta">{milestone.targetDate ? `Due ${milestone.targetDate}` : 'No target date'} · {milestone.commitment ?? 'Uncommitted'}</span>
                                 <div className="milestone-field-actions">
                                     {MILESTONE_FIELDS.filter((field) => field.id === 'targetDate' || field.id === 'customerCommitment' || field.id === 'riskDetails').map((field) => (
@@ -640,13 +657,28 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
     const [mcem, setMcem] = useState<Loadable<McemView>>({ status: 'idle' })
     const [sub, setSub] = useState<SubTab>('overview')
     const [note, setNote] = useState<string | undefined>(undefined)
+    const [showHiddenAccounts, setShowHiddenAccounts] = useState(false)
+    const [showAccountSearch, setShowAccountSearch] = useState(false)
+    const [accountMatchBy, setAccountMatchBy] = useState<'name' | 'tpid'>('name')
+    const [accountQuery, setAccountQuery] = useState('')
+    const [accountCandidates, setAccountCandidates] = useState<AccountCandidateView[]>([])
+    const [accountBusy, setAccountBusy] = useState(false)
+
+    const loadAccounts = useCallback(async (includeHidden: boolean) => {
+        setAccounts({ status: 'loading' })
+        try {
+            const data = await dataClient.listAccounts(includeHidden)
+            setAccounts({ status: 'ready', data })
+            const visible = data.filter((item) => item.visibility !== 'hidden')
+            setAccountId((current) => current && visible.some((item) => item.id === current) ? current : visible[0]?.id)
+        } catch (error) {
+            setAccounts({ status: 'error', error: error instanceof Error ? error.message : 'Could not load accounts.' })
+        }
+    }, [])
 
     useEffect(() => {
-        setAccounts({ status: 'loading' })
-        dataClient.listAccounts()
-            .then((data) => { setAccounts({ status: 'ready', data }); if (data[0]) setAccountId(data[0].id) })
-            .catch((error: Error) => setAccounts({ status: 'error', error: error.message }))
-    }, [])
+        void loadAccounts(false)
+    }, [loadAccounts])
 
     useEffect(() => {
         if (focus?.accountId) setAccountId(focus.accountId)
@@ -718,17 +750,84 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
         }
     }, [commentsText, loadOpportunities])
 
+    const searchAccounts = useCallback(async () => {
+        setAccountBusy(true)
+        setNote(undefined)
+        try {
+            setAccountCandidates(await dataClient.searchAccounts(accountQuery, accountMatchBy))
+        } catch (error) {
+            setNote(error instanceof Error ? error.message : 'Account search failed.')
+        } finally {
+            setAccountBusy(false)
+        }
+    }, [accountMatchBy, accountQuery])
+
+    const addOrUnhideAccount = useCallback(async (candidate: AccountCandidateView) => {
+        setAccountBusy(true)
+        setNote(undefined)
+        try {
+            if (candidate.state === 'hidden') await dataClient.setAccountVisibility(candidate.id, 'visible')
+            else if (candidate.state === 'not-added') await dataClient.addAccount(candidate.id)
+            await loadAccounts(showHiddenAccounts)
+            setShowAccountSearch(false)
+            setAccountQuery('')
+            setAccountCandidates([])
+            setAccountId(candidate.id)
+            setNote(`${candidate.name} is now available in Portfolio and Discovery. Use Discovery to add its opportunities to your Deal Team working set.`)
+        } catch (error) {
+            setNote(error instanceof Error ? error.message : 'Could not add account.')
+        } finally {
+            setAccountBusy(false)
+        }
+    }, [loadAccounts, showHiddenAccounts])
+
+    const changeAccountVisibility = useCallback(async (item: AccountView, visibility: 'visible' | 'hidden') => {
+        if (visibility === 'hidden' && !window.confirm(`Hide ${item.name} from Portfolio, Discovery, Plays, and downstream analysis? Deal Team membership will not change.`)) return
+        setAccountBusy(true)
+        setNote(undefined)
+        try {
+            await dataClient.setAccountVisibility(item.id, visibility)
+            await loadAccounts(showHiddenAccounts)
+            setNote(`${item.name} was ${visibility === 'hidden' ? 'hidden' : 'unhidden'}.`)
+        } catch (error) {
+            setNote(error instanceof Error ? error.message : 'Could not change account visibility.')
+        } finally {
+            setAccountBusy(false)
+        }
+    }, [loadAccounts, showHiddenAccounts])
+
     if (accounts.status === 'loading' || accounts.status === 'idle') return <p className="muted">Loading portfolio...</p>
     if (accounts.status === 'error') return <p className="error">Could not load accounts: {accounts.error}</p>
 
     return (
         <div className={portfolioLayoutClassName({ accountsExpanded, detailsExpanded, actionsExpanded })}>
             {accountsExpanded && <section id="portfolio-accounts-panel" className="pane">
-                <h3>Accounts</h3>
+                <div className="account-management-header"><h3 className="section-heading">Accounts</h3><div>
+                    <button className="secondary" onClick={() => setShowAccountSearch((current) => !current)}>Add customer</button>
+                    <button className="link" onClick={() => { const next = !showHiddenAccounts; setShowHiddenAccounts(next); void loadAccounts(next) }}>{showHiddenAccounts ? 'Hide hidden' : 'Show hidden'}</button>
+                </div></div>
+                {showAccountSearch && <div className="account-search-box">
+                    <label>Search by
+                        <select value={accountMatchBy} onChange={(event) => { setAccountMatchBy(event.target.value as 'name' | 'tpid'); setAccountCandidates([]) }}>
+                            <option value="name">Account name</option>
+                            <option value="tpid">TPID</option>
+                        </select>
+                    </label>
+                    <label>{accountMatchBy === 'name' ? 'Account name' : 'TPID'}
+                        <input value={accountQuery} onChange={(event) => setAccountQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void searchAccounts() }} />
+                    </label>
+                    <button disabled={accountBusy || (accountMatchBy === 'name' ? accountQuery.trim().length < 2 : !accountQuery.trim())} onClick={() => void searchAccounts()}>{accountBusy ? 'Searching...' : 'Search'}</button>
+                    <div className="account-candidates">
+                        {accountCandidates.map((candidate) => <div key={candidate.id}><span><strong>{candidate.name}</strong><small>{candidate.tpid ? `TPID ${candidate.tpid}` : candidate.segment}</small></span><button disabled={accountBusy || candidate.state === 'visible'} onClick={() => void addOrUnhideAccount(candidate)}>{candidate.state === 'visible' ? 'Already added' : candidate.state === 'hidden' ? 'Unhide' : 'Add'}</button></div>)}
+                    </div>
+                </div>}
                 <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
-                    {accounts.data?.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+                    {accounts.data?.filter((item) => item.visibility !== 'hidden').map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
                 </select>
-                <h3>Opportunities</h3>
+                {showHiddenAccounts && <div className="hidden-account-list">{accounts.data?.filter((item) => item.visibility === 'hidden').map((item) => <div key={item.id}><span>{item.name} <small>Hidden</small></span><button className="link" disabled={accountBusy} onClick={() => void changeAccountVisibility(item, 'visible')}>Unhide</button></div>)}</div>}
+                {accountId && <button className="link" disabled={accountBusy} onClick={() => { const item = accounts.data?.find((candidate) => candidate.id === accountId); if (item) void changeAccountVisibility(item, 'hidden') }}>Hide selected customer</button>}
+                <h3 className="section-heading">Opportunities</h3>
+                {opportunities.length === 0 && <p className="muted">No Deal Team opportunities. Use Discovery to add yourself to an active opportunity.</p>}
                 <div className="list-toolbar">
                     <label>Sort
                         <select value={opportunitySort} onChange={(event) => setOpportunitySort(event.target.value as OpportunitySort)}>
@@ -752,9 +851,16 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
                                 <Fragment key={opportunity.id}>
                                     <tr className={opportunity.id === opportunityId ? 'selected' : undefined}>
                                         <td className="opportunity-name-cell">
-                                            <button className={opportunity.id === opportunityId ? 'link active' : 'link'} title={opportunity.name} onClick={() => setOpportunityId(opportunity.id)}>
-                                                {opportunity.name}
-                                            </button>
+                                            <RecordTooltip {...opportunityTooltipContent(opportunity)}>
+                                                {(tooltipId) => (
+                                                    <button className={opportunity.id === opportunityId ? 'link record-link active' : 'link record-link'} aria-describedby={tooltipId} onClick={() => setOpportunityId(opportunity.id)}>
+                                                        <span className="record-name-line">
+                                                            <span className="record-name-text">{opportunity.name}</span>
+                                                            <span className="record-value">{formatMoney(opportunity.value, opportunity.currency)}</span>
+                                                        </span>
+                                                    </button>
+                                                )}
+                                            </RecordTooltip>
                                         </td>
                                         <td><span className="badge">Stage {opportunity.recordedStage}</span></td>
                                         <td className="opportunity-comments-cell"><CommentsButton title="Opportunity comments" onClick={() => { setCommentsFor(opportunity.id); setCommentsText(opportunity.comments ?? '') }} /></td>
@@ -792,8 +898,8 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
                         </nav>
                         {sub === 'overview' && (
                             <div>
-                                <h4>Milestones</h4>
-                                <MilestonesEditor opportunityId={selectedOpportunity.id} milestones={milestones} onChanged={reloadMilestones} onNote={setNote} />
+                                <h4 className="section-heading">Milestones</h4>
+                                <MilestonesEditor opportunityId={selectedOpportunity.id} currency={selectedOpportunity.currency} milestones={milestones} onChanged={reloadMilestones} onNote={setNote} />
                                 <div className="actions">
                                     <button className="primary" onClick={() => void runCoach()}>Run MCEM Coach</button>
                                 </div>
@@ -867,8 +973,12 @@ const SE_DOMAINS: ReadonlyArray<{ id: SeDomainView; label: string }> = [
 function DiscoverPanel(): ReactElement {
     const [domain, setDomain] = useState<SeDomainView>('infra')
     const [items, setItems] = useState<Loadable<DiscoverableOpportunityView[]>>({ status: 'idle' })
+    const [filters, setFilters] = useState<DiscoveryFilters>({ include: [], exclude: [] })
+    const [sort, setSort] = useState<DiscoverySort | null>(null)
     const [joining, setJoining] = useState<string | undefined>(undefined)
     const [note, setNote] = useState<string | undefined>(undefined)
+    const opportunities = items.data ?? []
+    const visibleOpportunities = sortDiscoveryOpportunities(filterDiscoveryOpportunities(opportunities, filters), sort)
 
     useEffect(() => {
         let active = true
@@ -895,27 +1005,46 @@ function DiscoverPanel(): ReactElement {
         }
     }
 
+    const leave = async (item: DiscoverableOpportunityView): Promise<void> => {
+        if (!window.confirm(`Remove yourself from the Deal Team for "${item.name}"? It will be removed from Portfolio and downstream analysis.`)) return
+        setJoining(item.id)
+        setNote(undefined)
+        try {
+            const result = await dataClient.leaveDealTeam(item.id)
+            setItems((current) => current.status === 'ready' && current.data
+                ? { status: 'ready', data: current.data.map((candidate) => candidate.id === item.id ? { ...candidate, onDealTeam: result.onDealTeam } : candidate) }
+                : current)
+            setNote(result.alreadyAbsent ? 'You were already absent from this Deal Team.' : 'Removed you from the Deal Team and downstream working set.')
+        } catch (error) {
+            setNote(error instanceof Error ? error.message : 'Could not leave the Deal Team.')
+        } finally {
+            setJoining(undefined)
+        }
+    }
+
     return (
         <section className="discover-panel" aria-label="Discover opportunities">
             <header className="discover-header">
                 <h2>Discover opportunities</h2>
-                <p>Find open, non-closed opportunities for your Solution Engineer domain and add yourself to the deal team.</p>
+                <p>Review all active opportunities for visible accounts and add or remove yourself from the Deal Team. Only Deal Team opportunities enter Portfolio, Plays, and downstream analysis.</p>
                 <nav className="tabs" role="tablist" aria-label="Solution Engineer domain">
                     {SE_DOMAINS.map((option) => (
                         <button key={option.id} role="tab" aria-selected={domain === option.id} className={domain === option.id ? 'tab active' : 'tab'} onClick={() => setDomain(option.id)}>{option.label}</button>
                     ))}
                 </nav>
             </header>
+            <DiscoveryControls customers={discoveryCustomers(opportunities)} filters={filters} onChange={setFilters} visibleCount={visibleOpportunities.length} totalCount={opportunities.length} loading={items.status === 'idle' || items.status === 'loading'} />
             {note && <p className="discover-note" role="status">{note}</p>}
             {items.status === 'loading' && <p>Loading opportunities…</p>}
             {items.status === 'error' && <p className="error-text">{items.error}</p>}
-            {items.status === 'ready' && items.data && items.data.length === 0 && <p>No open opportunities were found for this domain.</p>}
-            {items.status === 'ready' && items.data && items.data.length > 0 && (
+            {items.status === 'ready' && items.data && items.data.length === 0 && <p>No active opportunities were found for this domain.</p>}
+            {items.status === 'ready' && opportunities.length > 0 && visibleOpportunities.length === 0 && <p role="status">No opportunities match your customer filters. Clear filters to show all customers.</p>}
+            {items.status === 'ready' && visibleOpportunities.length > 0 && (
                 <div className="opportunity-table-wrap">
-                    <table className="record-table">
-                        <thead><tr><th>Opportunity</th><th>Account</th><th>Technical capability</th><th>Stage</th><th>Action</th></tr></thead>
+                    <table className="record-table" aria-label="Discovered opportunities">
+                        <thead><tr><th scope="col">Opportunity</th><DiscoverySortHeader column="account" sort={sort} onSort={(column) => setSort((current) => toggleDiscoverySort(current, column))} /><th scope="col">Technical capability</th><DiscoverySortHeader column="stage" sort={sort} onSort={(column) => setSort((current) => toggleDiscoverySort(current, column))} /><DiscoverySortHeader column="action" sort={sort} onSort={(column) => setSort((current) => toggleDiscoverySort(current, column))} /></tr></thead>
                         <tbody>
-                            {items.data.map((item) => (
+                            {visibleOpportunities.map((item) => (
                                 <tr key={item.id}>
                                     <td><strong>{item.name}</strong></td>
                                     <td>{item.accountName ?? '-'}</td>
@@ -923,7 +1052,7 @@ function DiscoverPanel(): ReactElement {
                                     <td>{item.recordedStage}</td>
                                     <td>
                                         {item.onDealTeam
-                                            ? <span className="deal-team-joined">On deal team</span>
+                                            ? <span className="deal-team-actions"><span className="deal-team-joined">On deal team</span><button className="link danger-link" disabled={joining === item.id} onClick={() => void leave(item)}>{joining === item.id ? 'Removing…' : 'Remove me'}</button></span>
                                             : <button className="tab" disabled={joining === item.id} onClick={() => void join(item.id)}>{joining === item.id ? 'Adding…' : 'Add me'}</button>}
                                     </td>
                                 </tr>

@@ -21,6 +21,11 @@
 	- Determine the responsible Account Executive, manager, Solution Engineer, Specialist / SSP, or other owner for each issue.
 	- Notify the responsible person through Teams or email, optionally initiate a chat, and provide an actionable script listing the affected opportunities, identified issues, and specific recommended updates.
 	- Apply the existing skill-backed forecast-comment pattern, which requires approval before changing the record, to additional eligible maintenance actions.
+10. [ ] Add scheduled workflow execution, neatly formatted report generation and delivery, and on-demand report generation.
+	- **Status: proposed; not implemented.** See the [feature and feasibility assessment](./WORKFLOW-REPORTING-FEASIBILITY.md).
+	- On-demand reports are highly feasible by reusing existing workflow results and document/email-draft formatting.
+	- Reliable unattended scheduling needs a durable, always-on runner; desktop and VS Code timers cannot run when their hosts are closed.
+	- Automatic sending is conditional on approved mail permissions, recipient policy, delegated data access, and changes to the current user-reviewed draft-only boundary.
 
 ## Improve Foundry agent interaction
 

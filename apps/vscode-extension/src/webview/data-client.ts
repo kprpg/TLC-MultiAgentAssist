@@ -1,9 +1,11 @@
 import { request } from './bridge.js'
 import type {
     AccountView,
+    AccountCandidateView,
     AgentCapability,
     AgentTaskView,
     DealTeamJoinResultView,
+    DealTeamLeaveResultView,
     DiscoverableOpportunityView,
     GuidanceHandoffView,
     McemTransitionView,
@@ -24,10 +26,14 @@ const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 
 export const dataClient = {
     getCurrentUserEmail: () => request<string | null>('getCurrentUserEmail'),
-    listAccounts: () => request<AccountView[]>('listAccounts'),
+    listAccounts: (includeHidden = false) => request<AccountView[]>('listAccounts', { includeHidden }),
+    searchAccounts: (query: string, matchBy: 'name' | 'tpid') => request<AccountCandidateView[]>('searchAccounts', { query, matchBy }),
+    addAccount: (accountId: string) => request<AccountView>('addAccount', { accountId }),
+    setAccountVisibility: (accountId: string, visibility: 'visible' | 'hidden') => request<AccountView>('setAccountVisibility', { accountId, visibility }),
     listOpportunities: (accountId: string) => request<OpportunityView[]>('listOpportunities', { accountId }),
     discoverOpportunities: (domain: SeDomainView) => request<DiscoverableOpportunityView[]>('discoverOpportunities', { domain }),
     joinDealTeam: (opportunityId: string) => request<DealTeamJoinResultView>('joinDealTeam', { opportunityId }),
+    leaveDealTeam: (opportunityId: string) => request<DealTeamLeaveResultView>('leaveDealTeam', { opportunityId }),
     listMilestones: (opportunityId: string) => request<MilestoneView[]>('listMilestones', { opportunityId }),
     updateOpportunity: (opportunityId: string, comments: string) => request<OpportunityView>('updateOpportunity', { opportunityId, update: { comments } }),
     updateMilestone: (opportunityId: string, milestoneId: string, update: MilestoneUpdateInput) => request<MilestoneView>('updateMilestone', { opportunityId, milestoneId, update }),

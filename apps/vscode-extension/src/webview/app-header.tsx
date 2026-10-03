@@ -25,9 +25,9 @@ export function AppHeader({
     return (
         <header className="app-header">
             <nav className="tabs">
+                <button className={tab === 'discover' ? 'tab active' : 'tab'} onClick={() => onSelectTab('discover')}>Discover</button>
                 <button className={tab === 'portfolio' ? 'tab active' : 'tab'} onClick={() => onSelectTab('portfolio')}>Portfolio</button>
                 <button className={tab === 'plays' ? 'tab active' : 'tab'} onClick={() => onSelectTab('plays')}>Plays</button>
-                <button className={tab === 'discover' ? 'tab active' : 'tab'} onClick={() => onSelectTab('discover')}>Discover</button>
             </nav>
             {tab === 'portfolio' && (
                 <PortfolioLayoutControls

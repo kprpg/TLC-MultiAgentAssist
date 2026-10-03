@@ -6,16 +6,35 @@ import { buildStaticHandler, setSecurityHeaders } from './hosting.js'
 import { listenWebServer } from './listener.js'
 import { createHostedRuntimeFactory, createHostedWorkflowHostResolver } from './runtime.js'
 import { createSampleWorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
+import { FixtureMsxConnector } from '../../../packages/connectors/msx/index.js'
+import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
+import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
+import type { AgentCapability } from '../../../packages/common/index.js'
 
 const port = parsePort(process.env['PORT'])
 const mode = resolveWebHostMode(process.env)
 const host = process.env['HOST']?.trim() || (mode === 'easy-auth' ? '0.0.0.0' : '127.0.0.1')
 if (mode === 'azure-cli') assertLoopbackHost(host)
 const staticRoot = resolve(process.env['TLC_WEB_STATIC_ROOT']?.trim() || 'apps/desktop/dist/revamp')
-const createRuntime = mode === 'sample'
-    ? () => { throw new Error('Live APIs are disabled in sample mode.') }
+const sampleMsx = mode === 'sample' ? new FixtureMsxConnector() : undefined
+const sampleRuntime = sampleMsx
+    ? new ThinSliceOrchestrator(
+        sampleMsx,
+        new LocalPdfMcemGuidanceConnector(resolve('docs/knowledge/MCEM Overview.pdf')),
+        createSampleTaskAgents()
+    )
+    : undefined
+const createRuntime = sampleRuntime
+    ? () => sampleRuntime
     : await createHostedRuntimeFactory()
-const sampleWorkflowHost = mode === 'sample' ? createSampleWorkflowHost() : undefined
+const sampleWorkflowHost = sampleMsx ? createSampleWorkflowHost(async () => {
+    const accounts = await sampleMsx.listAccounts()
+    const opportunities = (await Promise.all(accounts.map((account) => sampleMsx.listOpportunities(account.id)))).flat()
+    return {
+        accountIds: accounts.map((account) => account.id),
+        opportunityIds: opportunities.map((opportunity) => opportunity.id)
+    }
+}) : undefined
 const resolveWorkflowHost = sampleWorkflowHost ? () => sampleWorkflowHost : await createHostedWorkflowHostResolver()
 const authenticate = mode === 'sample'
     ? createSampleAuthentication()
@@ -47,6 +66,17 @@ async function closeLocalServer(): Promise<void> {
     await new Promise<void>((resolveClose, rejectClose) => {
         server.close((error) => error ? rejectClose(error) : resolveClose())
     })
+}
+
+function createSampleTaskAgents(): TaskAgentRegistry {
+    const capabilities: AgentCapability[] = ['account-pulse', 'mcem-coach', 'pursuit-executive', 'risk-solution-play']
+    return Object.fromEntries(capabilities.map((capability) => [capability, {
+        version: 'web-sample-v1',
+        agent: {
+            invoke: async (context: AgentTaskContext) =>
+                `## ${capability.replaceAll('-', ' ')}\n\nSample guidance for **${context.opportunity.name}**.\n\n${context.prompt}`
+        }
+    }])) as TaskAgentRegistry
 }
 
 try {

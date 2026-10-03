@@ -74,9 +74,12 @@ Live milestone updates use verified default MSX values for On Track, At Risk, Bl
 $env:TLC_MSX_RISK_DETAILS_FIELD = 'your_verified_logical_field_name'
 $env:TLC_MSX_STATUS_LOST_TO_COMPETITOR = 'your_verified_integer_option_value'
 $env:TLC_MSX_STATUS_HYGIENE_DUPLICATE = 'your_verified_integer_option_value'
+$env:TLC_MSX_ACCOUNT_TPID_FIELD = 'your_verified_account_tpid_logical_field_name'
 ```
 
-The app validates the field name and integer option values at startup. When a setting is absent, only the corresponding update is rejected; the app does not guess Dataverse metadata.
+The app validates the field names and integer option values at startup. When `TLC_MSX_ACCOUNT_TPID_FIELD` is absent, name search remains available but TPID search is rejected explicitly. When another setting is absent, only the corresponding update is rejected; the app does not guess Dataverse metadata.
+
+Desktop account additions and Hide/Unhide preferences are partitioned by the immutable signed-in user ID and stored in `portfolio-preferences.json` under Electron's per-user application-data directory. The file contains account IDs and visibility preferences only; it does not contain access tokens or credentials.
 
 ### Create the app registration
 

@@ -6,7 +6,7 @@ describe('desktop workflow host startup', () => {
     it('initializes the workflow host before registering IPC handlers', async () => {
         const mainSource = await readFile(resolve('apps/desktop/electron/main/index.ts'), 'utf8')
         const hostInitialization = mainSource.indexOf(
-            'const workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost()'
+            'const workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost('
         )
         const ipcRegistration = mainSource.indexOf('registerIpc()')
 

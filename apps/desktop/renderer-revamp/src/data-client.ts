@@ -1,8 +1,10 @@
 import {
     accountSchema,
+    accountCandidateSchema,
     agentTaskResponseSchema,
     contractVersion,
     dealTeamJoinResultSchema,
+    dealTeamLeaveResultSchema,
     discoverableOpportunitySchema,
     mcemStageTransitionRequestSchema,
     mcemStageTransitionResultSchema,
@@ -19,9 +21,14 @@ import {
     type WorkflowGuidanceHandoff,
     type WorkflowRun,
     type Account,
+    type AccountCandidate,
+    type AccountListOptions,
+    type AccountSearchRequest,
+    type AccountVisibility,
     type AgentCapability,
     type AgentTaskResponse,
     type DealTeamJoinResult,
+    type DealTeamLeaveResult,
     type DesktopDataStatus,
     type DiscoverableOpportunity,
     type EmailComposeRequest,
@@ -47,10 +54,14 @@ export interface RevampDataClient {
     readonly mode: 'desktop' | 'web-live' | 'web-sample'
     exitApplication(): Promise<void>
     getCurrentUserEmail(): Promise<string | undefined>
-    listAccounts(): Promise<Account[]>
+    listAccounts(options?: AccountListOptions): Promise<Account[]>
+    searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
+    addAccount(accountId: string): Promise<Account>
+    setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
     listOpportunities(accountId: string): Promise<Opportunity[]>
     discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
     joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
+    leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult>
     listMilestones(opportunityId: string): Promise<Milestone[]>
     updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
     updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
@@ -97,23 +108,27 @@ async function apiRequest(fetcher: Fetcher, path: string, init?: RequestInit): P
     return payload
 }
 
-export function createWebApiClient(fetcher: Fetcher = fetch): RevampDataClient {
+export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 'web-sample' = 'web-live'): RevampDataClient {
     const invokeWorkflow = (operation: WorkflowHostOperation, request: unknown) => apiRequest(
         fetcher,
         `/api/workflows/${operation}`,
         { method: 'POST', body: JSON.stringify(request) }
     )
     return {
-        mode: 'web-live',
+        mode,
         exitApplication: async () => { await apiRequest(fetcher, '/api/exit', { method: 'POST' }) },
         getCurrentUserEmail: async () => {
             const result = await apiRequest(fetcher, '/api/me') as { email?: unknown }
             return typeof result.email === 'string' ? result.email : undefined
         },
-        listAccounts: async () => accountSchema.array().parse(await apiRequest(fetcher, '/api/accounts')),
+        listAccounts: async (options) => accountSchema.array().parse(await apiRequest(fetcher, `/api/accounts${options?.includeHidden ? '?includeHidden=true' : ''}`)),
+        searchAccounts: async (request) => accountCandidateSchema.array().parse(await apiRequest(fetcher, `/api/account-candidates?matchBy=${encodeURIComponent(request.matchBy)}&query=${encodeURIComponent(request.query)}`)),
+        addAccount: async (accountId) => accountSchema.parse(await apiRequest(fetcher, '/api/accounts', { method: 'POST', body: JSON.stringify({ accountId }) })),
+        setAccountVisibility: async (accountId, visibility) => accountSchema.parse(await apiRequest(fetcher, `/api/accounts/${encodeURIComponent(accountId)}/visibility`, { method: 'PATCH', body: JSON.stringify({ visibility }) })),
         listOpportunities: async (accountId) => opportunitySchema.array().parse(await apiRequest(fetcher, `/api/accounts/${encodeURIComponent(accountId)}/opportunities`)),
         discoverOpportunities: async (domain) => discoverableOpportunitySchema.array().parse(await apiRequest(fetcher, `/api/discover/${encodeURIComponent(domain)}`)),
         joinDealTeam: async (opportunityId) => dealTeamJoinResultSchema.parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/deal-team`, { method: 'POST', body: JSON.stringify({}) })),
+        leaveDealTeam: async (opportunityId) => dealTeamLeaveResultSchema.parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/deal-team`, { method: 'DELETE', body: JSON.stringify({}) })),
         listMilestones: async (opportunityId) => milestoneSchema.array().parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/milestones`)),
         updateMilestone: async (opportunityId, milestoneId, update) => milestoneSchema.parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/milestones/${encodeURIComponent(milestoneId)}`, { method: 'PATCH', body: JSON.stringify(milestoneUpdateSchema.parse(update)) })),
         updateOpportunity: async (opportunityId, update) => opportunitySchema.parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}`, { method: 'PATCH', body: JSON.stringify(opportunityUpdateSchema.parse(update)) })),
@@ -179,10 +194,14 @@ export function createWebApiClient(fetcher: Fetcher = fetch): RevampDataClient {
 interface DesktopBridge {
     exitApplication(): Promise<void>
     getDataStatus(): Promise<DesktopDataStatus>
-    listAccounts(): Promise<Account[]>
+    listAccounts(options?: AccountListOptions): Promise<Account[]>
+    searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
+    addAccount(accountId: string): Promise<Account>
+    setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
     listOpportunities(accountId: string): Promise<Opportunity[]>
     discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
     joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
+    leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult>
     listMilestones(opportunityId: string): Promise<Milestone[]>
     updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
     updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
@@ -202,8 +221,9 @@ declare global {
 }
 
 const accounts: Account[] = [
-    { id: 'account-contoso', name: 'Contoso Energy', segment: 'Strategic' },
-    { id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise' }
+    { id: 'account-contoso', name: 'Contoso Energy', segment: 'Strategic', tpid: '1000001' },
+    { id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise', tpid: '1000002' },
+    { id: 'account-northwind', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003' }
 ]
 
 const opportunities: Opportunity[] = [
@@ -228,10 +248,29 @@ const discoverableOpportunities: DiscoverableOpportunity[] = [
     { id: 'opp-discover-teams-calling', accountId: 'account-fabrikam', accountName: 'Fabrikam Retail', name: 'Teams Phone and calling rollout', recordedStage: 1, value: 980000, currency: 'USD', closeDate: '2027-03-05', domain: 'modern-work', technicalCapability: 'Calling', onDealTeam: false },
     { id: 'opp-discover-d365-customer-service', accountId: 'account-fabrikam', accountName: 'Fabrikam Retail', name: 'Dynamics 365 Customer Service transformation', recordedStage: 2, value: 1750000, currency: 'USD', closeDate: '2027-01-28', domain: 'biz-apps', solutionArea: 'AI Business Solutions', technicalCapability: 'Customer Service', onDealTeam: false },
     { id: 'opp-discover-surface-deployment', accountId: 'account-contoso', accountName: 'Contoso Energy', name: 'Surface device deployment and management', recordedStage: 1, value: 640000, currency: 'USD', closeDate: '2027-04-15', domain: 'devices', solutionArea: 'Windows and Devices', technicalCapability: 'Surface & Partner Devices', onDealTeam: false },
-    { id: 'opp-discover-cloud-advisory', accountId: 'account-contoso', accountName: 'Contoso Energy', name: 'Cloud advisory and adoption services', recordedStage: 2, value: 850000, currency: 'USD', closeDate: '2027-02-22', domain: 'services', solutionArea: 'Microsoft Services', technicalCapability: 'Advisory Services', onDealTeam: false }
+    { id: 'opp-discover-cloud-advisory', accountId: 'account-contoso', accountName: 'Contoso Energy', name: 'Cloud advisory and adoption services', recordedStage: 2, value: 850000, currency: 'USD', closeDate: '2027-02-22', domain: 'services', solutionArea: 'Microsoft Services', technicalCapability: 'Advisory Services', onDealTeam: false },
+    { id: 'opp-discover-northwind-data', accountId: 'account-northwind', accountName: 'Northwind Health', name: 'Clinical data platform modernization', recordedStage: 1, value: 2100000, currency: 'USD', closeDate: '2027-05-20', domain: 'data', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'Analytics', onDealTeam: false }
 ]
 
-const joinedDiscoverableIds = new Set<string>()
+const dealTeamOpportunityIds = new Set(opportunities.map((opportunity) => opportunity.id))
+const manualAccountIds = new Set<string>()
+const hiddenAccountIds = new Set<string>()
+
+function sampleAccountRows(includeHidden = false): Account[] {
+    const dealTeamAccountIds = new Set(opportunities
+        .filter((opportunity) => dealTeamOpportunityIds.has(opportunity.id))
+        .map((opportunity) => opportunity.accountId))
+    return accounts
+        .filter((account) => dealTeamAccountIds.has(account.id) || manualAccountIds.has(account.id) || hiddenAccountIds.has(account.id))
+        .map((account) => ({
+            ...account,
+            provenance: dealTeamAccountIds.has(account.id) && manualAccountIds.has(account.id)
+                ? 'both' as const
+                : manualAccountIds.has(account.id) ? 'manual' as const : 'deal-team' as const,
+            visibility: hiddenAccountIds.has(account.id) ? 'hidden' as const : 'visible' as const
+        }))
+        .filter((account) => includeHidden || account.visibility !== 'hidden')
+}
 
 const milestones: Milestone[] = opportunities.flatMap((opportunity, index) => [{
     id: `${opportunity.id}-milestone`,
@@ -302,15 +341,50 @@ function webClient(): RevampDataClient {
         mode: 'web-sample',
         exitApplication: async () => { await apiRequest(fetch, '/api/exit', { method: 'POST' }) },
         getCurrentUserEmail: async () => undefined,
-        listAccounts: async () => structuredClone(accounts),
-        listOpportunities: async (accountId) => structuredClone(opportunities.filter((item) => item.accountId === accountId)),
-        discoverOpportunities: async (domain) => structuredClone(discoverableOpportunities.filter((item) => item.domain === domain).map((item) => ({ ...item, onDealTeam: joinedDiscoverableIds.has(item.id) }))),
+        listAccounts: async (options) => structuredClone(sampleAccountRows(options?.includeHidden)),
+        searchAccounts: async (request) => {
+            const query = request.query.trim().toLocaleLowerCase()
+            const currentById = new Map(sampleAccountRows(true).map((account) => [account.id, account]))
+            return structuredClone(accounts
+                .filter((account) => request.matchBy === 'name'
+                    ? account.name.toLocaleLowerCase().includes(query)
+                    : account.tpid === request.query.trim())
+                .map((account) => {
+                    const current = currentById.get(account.id)
+                    return {
+                        ...(current ?? account),
+                        state: current?.visibility === 'hidden' ? 'hidden' as const : current ? 'visible' as const : 'not-added' as const
+                    }
+                }))
+        },
+        addAccount: async (accountId) => {
+            const account = accounts.find((item) => item.id === accountId)
+            if (!account) throw new Error('Unknown sample account.')
+            manualAccountIds.add(accountId)
+            return structuredClone(sampleAccountRows(true).find((item) => item.id === accountId)!)
+        },
+        setAccountVisibility: async (accountId, visibility) => {
+            const account = accounts.find((item) => item.id === accountId)
+            if (!account) throw new Error('Unknown sample account.')
+            if (visibility === 'hidden') hiddenAccountIds.add(accountId)
+            else hiddenAccountIds.delete(accountId)
+            const current = sampleAccountRows(true).find((item) => item.id === accountId)
+            return structuredClone(current ?? { ...account, visibility })
+        },
+        listOpportunities: async (accountId) => structuredClone(opportunities.filter((item) =>
+            item.accountId === accountId && dealTeamOpportunityIds.has(item.id) && !hiddenAccountIds.has(accountId))),
+        discoverOpportunities: async (domain) => {
+            const visibleAccountIds = new Set(sampleAccountRows().map((account) => account.id))
+            return structuredClone(discoverableOpportunities
+                .filter((item) => item.domain === domain && visibleAccountIds.has(item.accountId))
+                .map((item) => ({ ...item, onDealTeam: dealTeamOpportunityIds.has(item.id) })))
+        },
         joinDealTeam: async (opportunityId) => {
             const seed = discoverableOpportunities.find((item) => item.id === opportunityId)
             if (!seed) throw new Error('Unknown sample opportunity.')
-            const alreadyMember = joinedDiscoverableIds.has(opportunityId)
+            const alreadyMember = dealTeamOpportunityIds.has(opportunityId)
             if (!alreadyMember) {
-                joinedDiscoverableIds.add(opportunityId)
+                dealTeamOpportunityIds.add(opportunityId)
                 if (!opportunities.some((item) => item.id === opportunityId)) {
                     const { domain, accountName, solutionArea, technicalCapability, onDealTeam, ...opportunity } = seed
                     void domain; void accountName; void solutionArea; void technicalCapability; void onDealTeam
@@ -318,6 +392,11 @@ function webClient(): RevampDataClient {
                 }
             }
             return { opportunityId, onDealTeam: true, alreadyMember }
+        },
+        leaveDealTeam: async (opportunityId) => {
+            const alreadyAbsent = !dealTeamOpportunityIds.has(opportunityId)
+            dealTeamOpportunityIds.delete(opportunityId)
+            return { opportunityId, onDealTeam: false, alreadyAbsent }
         },
         listMilestones: async (opportunityId) => structuredClone(milestones.filter((item) => item.opportunityId === opportunityId)),
         updateMilestone: async (opportunityId, milestoneId, update) => {
@@ -386,10 +465,14 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         mode: 'desktop',
         exitApplication: () => bridge.exitApplication(),
         getCurrentUserEmail: async () => (await bridge.getDataStatus()).auth.userEmail,
-        listAccounts: () => bridge.listAccounts(),
+        listAccounts: (options) => bridge.listAccounts(options),
+        searchAccounts: (request) => bridge.searchAccounts(request),
+        addAccount: (accountId) => bridge.addAccount(accountId),
+        setAccountVisibility: (accountId, visibility) => bridge.setAccountVisibility(accountId, visibility),
         listOpportunities: (accountId) => bridge.listOpportunities(accountId),
         discoverOpportunities: (domain) => bridge.discoverOpportunities(domain),
         joinDealTeam: (opportunityId) => bridge.joinDealTeam(opportunityId),
+        leaveDealTeam: (opportunityId) => bridge.leaveDealTeam(opportunityId),
         listMilestones: (opportunityId) => bridge.listMilestones(opportunityId),
         updateMilestone: (opportunityId, milestoneId, update) => bridge.updateMilestone(opportunityId, milestoneId, update),
         updateOpportunity: (opportunityId, update) => bridge.updateOpportunity(opportunityId, update),
@@ -419,9 +502,10 @@ export function createDataClient(shell: 'desktop' | 'web'): RevampDataClient {
         if (!window.tlc) throw new Error('The desktop data bridge is unavailable.')
         return desktopClient(window.tlc)
     }
-    if (document.querySelector<HTMLMetaElement>('meta[name="tlc-data-mode"]')?.content === 'live') {
-        return createWebApiClient()
-    }
+    const hostedMode = document.querySelector<HTMLMetaElement>('meta[name="tlc-data-mode"]')?.content
+    if (hostedMode === 'live') return createWebApiClient()
+    if (hostedMode === 'sample') return createWebApiClient(fetch, 'web-sample')
+    if (window.location.protocol === 'file:') return webClient()
     return webClient()
 }
 

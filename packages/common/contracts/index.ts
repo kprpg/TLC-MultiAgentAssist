@@ -3,6 +3,7 @@ import { workflowAgentCapabilityValues } from './workflows.js'
 import { seDomainSchema } from '../configuration/se-domains.js'
 
 export * from './mcp.js'
+export * from './portfolio.js'
 export * from './workflows.js'
 
 export const contractVersion = '1.0' as const
@@ -35,12 +36,6 @@ export const authStatusSchema = z.object({
 export const desktopDataStatusSchema = z.object({
   mode: dataModeSchema,
   auth: authStatusSchema
-})
-
-export const accountSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  segment: z.string().min(1)
 })
 
 export const opportunitySchema = z.object({
@@ -104,12 +99,6 @@ export const discoverableOpportunitySchema = opportunitySchema.extend({
   technicalCapability: z.string().min(1).optional(),
   onDealTeam: z.boolean()
 })
-
-export const dealTeamJoinResultSchema = z.object({
-  opportunityId: z.string().min(1),
-  onDealTeam: z.literal(true),
-  alreadyMember: z.boolean()
-}).strict()
 
 export const mcemStageTransitionRequestSchema = z.object({
   contractVersion: z.literal(contractVersion),
@@ -247,10 +236,8 @@ export const feedbackSchema = z.object({
   comment: z.string().max(500).optional()
 })
 
-export type Account = z.infer<typeof accountSchema>
 export type Opportunity = z.infer<typeof opportunitySchema>
 export type DiscoverableOpportunity = z.infer<typeof discoverableOpportunitySchema>
-export type DealTeamJoinResult = z.infer<typeof dealTeamJoinResultSchema>
 export type Milestone = z.infer<typeof milestoneSchema>
 export type MilestoneStatus = z.infer<typeof milestoneStatusSchema>
 export type CustomerCommitment = z.infer<typeof customerCommitmentSchema>

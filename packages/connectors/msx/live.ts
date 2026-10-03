@@ -1,4 +1,5 @@
 import {
+  accountSearchRequestSchema,
   customerCommitmentSchema,
   getSeDomainDefinition,
   measurePerformance,
@@ -6,8 +7,13 @@ import {
   milestoneUpdateSchema,
   opportunityUpdateSchema,
   type Account,
+  type AccountCandidate,
+  type AccountListOptions,
+  type AccountSearchRequest,
+  type AccountVisibility,
   type CustomerCommitment,
   type DealTeamJoinResult,
+  type DealTeamLeaveResult,
   type DiscoverableOpportunity,
   type Milestone,
   type MilestoneStatus,
@@ -17,7 +23,14 @@ import {
   type PerformanceReporter,
   type SeDomainId
 } from '../../common/index.js'
-import type { CriterionObservation, MsxConnector, OpportunityContext } from '../common/index.js'
+import {
+  MemoryPortfolioPreferenceStore,
+  type PortfolioPreferenceStore,
+  type PortfolioPreferences,
+  type CriterionObservation,
+  type MsxConnector,
+  type OpportunityContext
+} from '../common/index.js'
 
 const defaultBaseUrl = 'https://microsoftsales.crm.dynamics.com/api/data/v9.2/'
 const formattedValueSuffix = '@OData.Community.Display.V1.FormattedValue'
@@ -45,10 +58,12 @@ interface DealTeamRow {
 interface AccountRow {
   accountid: string
   name: string
+  [key: string]: unknown
 }
 
 interface OpportunityRow {
   opportunityid: string
+  statecode?: number
   _parentaccountid_value?: string
   _ownerid_value?: string
   name: string
@@ -126,6 +141,7 @@ function lookupAttributeName(valueField: string): string {
 
 export interface MsxWriteMetadata {
   riskDetailsField?: string
+  accountTpidField?: string
   milestoneStatusCodes?: Partial<Record<MilestoneStatus, number>>
   stageCodes?: Partial<Record<1 | 2 | 3 | 4 | 5, number>>
   dealTeam?: Partial<MsxDealTeamWriteMetadata>
@@ -135,6 +151,10 @@ const navigationPropertyPattern = /^[A-Za-z][A-Za-z0-9_]*$/
 
 export function msxWriteMetadataFromEnvironment(environment: NodeJS.ProcessEnv): MsxWriteMetadata {
   const riskDetailsField = environment['TLC_MSX_RISK_DETAILS_FIELD']?.trim()
+  const accountTpidField = environment['TLC_MSX_ACCOUNT_TPID_FIELD']?.trim()
+  if (accountTpidField && !navigationPropertyPattern.test(accountTpidField)) {
+    throw new Error('TLC_MSX_ACCOUNT_TPID_FIELD must be a valid Dataverse identifier.')
+  }
   const configuredCodes: Partial<Record<MilestoneStatus, number>> = {}
   const stageCodes: Partial<Record<1 | 2 | 3 | 4 | 5, number>> = {}
   for (const [status, variable] of [
@@ -171,6 +191,7 @@ export function msxWriteMetadataFromEnvironment(environment: NodeJS.ProcessEnv):
   }
   return {
     ...(riskDetailsField ? { riskDetailsField } : {}),
+    ...(accountTpidField ? { accountTpidField } : {}),
     ...(Object.keys(configuredCodes).length > 0 ? { milestoneStatusCodes: configuredCodes } : {}),
     ...(Object.keys(stageCodes).length > 0 ? { stageCodes } : {}),
     ...(Object.keys(dealTeam).length > 0 ? { dealTeam } : {})
@@ -200,7 +221,8 @@ export class LiveMsxConnector implements MsxConnector {
     private readonly fetchImplementation: typeof fetch = fetch,
     baseUrl = defaultBaseUrl,
     private readonly performanceReporter?: PerformanceReporter,
-    private readonly writeMetadata: MsxWriteMetadata = {}
+    private readonly writeMetadata: MsxWriteMetadata = {},
+    private readonly preferenceStore: PortfolioPreferenceStore = new MemoryPortfolioPreferenceStore()
   ) {
     this.baseUrl = new URL(baseUrl)
     if (writeMetadata.riskDetailsField && !/^[A-Za-z][A-Za-z0-9_]*$/.test(writeMetadata.riskDetailsField)) {
@@ -208,9 +230,68 @@ export class LiveMsxConnector implements MsxConnector {
     }
   }
 
-  async listAccounts(): Promise<Account[]> {
+  async listAccounts(options: AccountListOptions = {}): Promise<Account[]> {
     const portfolio = await this.getPortfolio()
-    return structuredClone(portfolio.accounts)
+    return structuredClone(portfolio.accounts.filter((account) => options.includeHidden || account.visibility !== 'hidden'))
+  }
+
+  async searchAccounts(input: AccountSearchRequest): Promise<AccountCandidate[]> {
+    const request = accountSearchRequestSchema.parse(input)
+    const escapedQuery = escapeODataStringLiteral(request.query)
+    const tpidField = this.writeMetadata.accountTpidField
+    if (request.matchBy === 'tpid' && !tpidField) {
+      throw new Error('TPID search requires TLC_MSX_ACCOUNT_TPID_FIELD to contain the verified account TPID logical field.')
+    }
+    const rows = await measurePerformance('msx.search-accounts', this.performanceReporter, () => this.requestAll<AccountRow>('accounts', {
+      '$select': ['accountid', 'name', tpidField].filter(isPresent).join(','),
+      '$filter': request.matchBy === 'name'
+        ? `statecode eq 0 and contains(name,'${escapedQuery}')`
+        : `statecode eq 0 and ${tpidField} eq '${escapedQuery}'`,
+      '$orderby': 'name asc',
+      '$top': '25'
+    }))
+    const portfolio = await this.getPortfolio()
+    const existingById = new Map(portfolio.accounts.map((account) => [account.id, account]))
+    return rows.map((row) => {
+      const existing = existingById.get(row.accountid)
+      return {
+        ...(existing ?? this.mapAccount(row)),
+        state: existing?.visibility === 'hidden' ? 'hidden' : existing ? 'visible' : 'not-added'
+      }
+    })
+  }
+
+  async addAccount(accountId: string): Promise<Account> {
+    this.assertAccountId(accountId)
+    const rows = await this.requestByIds<AccountRow>(
+      'accounts',
+      'accountid',
+      [accountId],
+      ['accountid', 'name', this.writeMetadata.accountTpidField].filter(isPresent).join(',')
+    )
+    if (rows.length !== 1) throw new Error('The selected account is unavailable or inactive in MSX.')
+    await this.preferenceStore.addAccount(await this.getCurrentUserId(), accountId)
+    this.portfolioPromise = undefined
+    const account = (await this.getPortfolio()).accounts.find((candidate) => candidate.id === accountId)
+    if (!account) throw new Error('The account preference was saved but the account could not be reloaded.')
+    return structuredClone(account)
+  }
+
+  async setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account> {
+    this.assertAccountId(accountId)
+    const rows = await this.requestByIds<AccountRow>(
+      'accounts',
+      'accountid',
+      [accountId],
+      ['accountid', 'name', this.writeMetadata.accountTpidField].filter(isPresent).join(',')
+    )
+    const row = rows[0]
+    if (!row) throw new Error('The selected account is unavailable or inactive in MSX.')
+    const userId = await this.getCurrentUserId()
+    const preferences = await this.preferenceStore.setVisibility(userId, accountId, visibility)
+    this.portfolioPromise = undefined
+    const account = (await this.getPortfolio()).accounts.find((candidate) => candidate.id === accountId)
+    return structuredClone(account ?? this.mapAccount(row, preferences, new Set()))
   }
 
   async listOpportunities(accountId: string): Promise<Opportunity[]> {
@@ -343,7 +424,11 @@ export class LiveMsxConnector implements MsxConnector {
     // portfolio, whose accounts are exactly the accounts MSX surfaces for this user. Opportunities
     // in those accounts that the user is not yet on the deal team for are the discovery targets.
     const portfolio = await this.getPortfolio()
-    const accountNameById = new Map(portfolio.accounts.map((account) => [account.id, account.name]))
+    const accountNameById = new Map(
+      portfolio.accounts
+        .filter((account) => account.visibility !== 'hidden')
+        .map((account) => [account.id, account.name])
+    )
     const assignedAccountIds = [...accountNameById.keys()]
     if (assignedAccountIds.length === 0) return []
     const dealTeamOpportunityIds = new Set(portfolio.opportunities.map((opportunity) => opportunity.id))
@@ -411,6 +496,35 @@ export class LiveMsxConnector implements MsxConnector {
     })
     this.portfolioPromise = undefined
     return { opportunityId, onDealTeam: true, alreadyMember: false }
+  }
+
+  async leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult> {
+    if (!guidPattern.test(opportunityId)) {
+      throw new Error('The opportunity id must be a valid MSX GUID.')
+    }
+    const dealTeam = { ...defaultDealTeamWriteMetadata, ...this.writeMetadata.dealTeam }
+    const userId = await this.getCurrentUserId()
+    const existing = await this.requestAll<DealTeamMemberRow>(dealTeam.entitySet, {
+      '$select': 'msp_dealteamid',
+      '$filter': `statecode eq 0 and ${dealTeam.userLookupField} eq ${userId} and ${dealTeam.opportunityLookupField} eq ${opportunityId}`,
+      '$top': '2'
+    })
+    if (existing.length === 0) {
+      this.portfolioPromise = undefined
+      return { opportunityId, onDealTeam: false, alreadyAbsent: true }
+    }
+    if (existing.length > 1) {
+      throw new Error('MSX returned duplicate active Deal Team memberships for this user and opportunity. Resolve the duplicate rows before retrying.')
+    }
+    const membershipId = existing[0]?.msp_dealteamid
+    if (!membershipId || !guidPattern.test(membershipId)) {
+      throw new Error('MSX returned a Deal Team membership without a valid row id.')
+    }
+    await this.delete(`${dealTeam.entitySet}(${membershipId})`)
+    this.portfolioPromise = undefined
+    this.observationPromises.delete(opportunityId)
+    this.milestonePromises.delete(opportunityId)
+    return { opportunityId, onDealTeam: false, alreadyAbsent: false }
   }
 
   /**
@@ -519,11 +633,11 @@ export class LiveMsxConnector implements MsxConnector {
   }
 
   private async loadPortfolio(): Promise<{ accounts: Account[]; opportunities: Opportunity[] }> {
-    const identity = await measurePerformance('msx.identity', this.performanceReporter, () =>
-      this.requestJson<WhoAmIResponse>('WhoAmI'))
+    const userId = await measurePerformance('msx.identity', this.performanceReporter, () => this.getCurrentUserId())
+    const preferences = await this.preferenceStore.read(userId)
     const dealTeamRows = await measurePerformance('msx.deal-team', this.performanceReporter, () => this.requestAll<DealTeamRow>('msp_dealteams', {
       '$select': '_msp_parentopportunityid_value',
-      '$filter': `statecode eq 0 and _msp_dealteamuserid_value eq ${identity.UserId}`
+      '$filter': `statecode eq 0 and _msp_dealteamuserid_value eq ${userId}`
     }))
     const opportunityIds = unique(
       dealTeamRows.map((row) => row._msp_parentopportunityid_value).filter(isPresent)
@@ -532,28 +646,58 @@ export class LiveMsxConnector implements MsxConnector {
       'opportunities',
       'opportunityid',
       opportunityIds,
-      'opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description'
+      'opportunityid,statecode,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description'
     ))
-    const activeOpportunities = opportunityRows.filter((row) => row._parentaccountid_value)
-    const accountIds = unique(
+    const activeOpportunities = opportunityRows.filter((row) => row._parentaccountid_value && (row.statecode === undefined || row.statecode === 0))
+    const dealTeamAccountIds = unique(
       activeOpportunities.map((row) => row._parentaccountid_value).filter(isPresent)
     )
+    const accountIds = unique([
+      ...dealTeamAccountIds,
+      ...preferences.manualAccountIds,
+      ...preferences.hiddenAccountIds
+    ])
     const accountRows = await measurePerformance('msx.accounts', this.performanceReporter, () => this.requestByIds<AccountRow>(
       'accounts',
       'accountid',
       accountIds,
-      'accountid,name'
+      ['accountid', 'name', this.writeMetadata.accountTpidField].filter(isPresent).join(',')
     ))
     const accounts = accountRows
-      .map((row) => ({ id: row.accountid, name: row.name, segment: 'Live MSX' }))
+      .map((row) => this.mapAccount(row, preferences, new Set(dealTeamAccountIds)))
       .sort((left, right) => left.name.localeCompare(right.name))
-    const accessibleAccountIds = new Set(accounts.map((account) => account.id))
+    const visibleAccountIds = new Set(accounts.filter((account) => account.visibility !== 'hidden').map((account) => account.id))
     const opportunities = activeOpportunities
-      .filter((row) => row._parentaccountid_value && accessibleAccountIds.has(row._parentaccountid_value))
+      .filter((row) => row._parentaccountid_value && visibleAccountIds.has(row._parentaccountid_value))
       .map((row) => this.mapOpportunity(row))
       .sort((left, right) => left.name.localeCompare(right.name))
 
     return { accounts, opportunities }
+  }
+
+  private mapAccount(
+    row: AccountRow,
+    preferences: PortfolioPreferences = { manualAccountIds: [], hiddenAccountIds: [], revision: 0 },
+    dealTeamAccountIds: ReadonlySet<string> = new Set()
+  ): Account {
+    const manual = preferences.manualAccountIds.includes(row.accountid)
+    const dealTeam = dealTeamAccountIds.has(row.accountid)
+    const tpidField = this.writeMetadata.accountTpidField
+    const tpid = tpidField && typeof row[tpidField] === 'string' ? row[tpidField].trim() : undefined
+    return {
+      id: row.accountid,
+      name: row.name,
+      segment: 'Live MSX',
+      ...(tpid ? { tpid } : {}),
+      ...(manual || dealTeam
+        ? { provenance: manual && dealTeam ? 'both' as const : manual ? 'manual' as const : 'deal-team' as const }
+        : {}),
+      visibility: preferences.hiddenAccountIds.includes(row.accountid) ? 'hidden' : 'visible'
+    }
+  }
+
+  private assertAccountId(accountId: string): void {
+    if (!guidPattern.test(accountId)) throw new Error('The account id must be a valid MSX GUID.')
   }
 
   private mapOpportunity(row: OpportunityRow): Opportunity {
@@ -665,6 +809,23 @@ export class LiveMsxConnector implements MsxConnector {
     }
   }
 
+  private async delete(path: string): Promise<void> {
+    const url = new URL(path, this.baseUrl)
+    this.assertTrustedUrl(url)
+    const accessToken = await this.tokenProvider.getAccessToken()
+    const response = await this.fetchImplementation(url, {
+      method: 'DELETE',
+      headers: {
+        Authorization: ['Bearer', accessToken].join(' '),
+        Accept: 'application/json',
+        'If-Match': '*'
+      }
+    })
+    if (!response.ok) {
+      throw new MsxRequestError(`MSX delete failed with status ${response.status}.`, response.status)
+    }
+  }
+
   private assertTrustedUrl(url: URL): void {
     if (url.origin !== this.baseUrl.origin || !url.pathname.startsWith(this.baseUrl.pathname)) {
       throw new MsxRequestError('MSX returned an untrusted continuation URL.')
@@ -683,6 +844,10 @@ function isPresent(value: string | undefined): value is string {
 function formattedValue(row: Record<string, unknown>, field: string): string | undefined {
   const value = row[`${field}${formattedValueSuffix}`]
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function escapeODataStringLiteral(value: string): string {
+  return value.replaceAll("'", "''")
 }
 
 function mapOpportunityObservations(opportunity: Opportunity, milestones: MilestoneRow[]): CriterionObservation[] {

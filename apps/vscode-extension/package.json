@@ -73,7 +73,46 @@
         "command": "tlc.refresh",
         "title": "TLC: Refresh Data",
         "category": "TLC Assist",
-        "icon": "$(refresh)"
+        "icon": {
+          "light": "media/actions/refresh-light.svg",
+          "dark": "media/actions/refresh-dark.svg"
+        }
+      },
+      {
+        "command": "tlc.addCustomer",
+        "title": "TLC: Add Customer Account",
+        "category": "TLC Assist",
+        "icon": {
+          "light": "media/actions/add-light.svg",
+          "dark": "media/actions/add-dark.svg"
+        }
+      },
+      {
+        "command": "tlc.toggleHiddenCustomers",
+        "title": "TLC: Toggle Hidden Customers",
+        "category": "TLC Assist",
+        "icon": {
+          "light": "media/actions/eye-light.svg",
+          "dark": "media/actions/eye-dark.svg"
+        }
+      },
+      {
+        "command": "tlc.hideCustomer",
+        "title": "Hide Customer",
+        "category": "TLC Assist",
+        "icon": {
+          "light": "media/actions/eye-hidden-light.svg",
+          "dark": "media/actions/eye-hidden-dark.svg"
+        }
+      },
+      {
+        "command": "tlc.unhideCustomer",
+        "title": "Unhide Customer",
+        "category": "TLC Assist",
+        "icon": {
+          "light": "media/actions/eye-light.svg",
+          "dark": "media/actions/eye-dark.svg"
+        }
       },
       {
         "command": "tlc.runPlay",
@@ -102,6 +141,28 @@
           "command": "tlc.refresh",
           "when": "view == tlcPortfolio || view == tlcPlays || view == tlcConnection",
           "group": "navigation"
+        },
+        {
+          "command": "tlc.addCustomer",
+          "when": "view == tlcPortfolio",
+          "group": "navigation@1"
+        },
+        {
+          "command": "tlc.toggleHiddenCustomers",
+          "when": "view == tlcPortfolio",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "tlc.hideCustomer",
+          "when": "view == tlcPortfolio && viewItem == accountVisible",
+          "group": "inline"
+        },
+        {
+          "command": "tlc.unhideCustomer",
+          "when": "view == tlcPortfolio && viewItem == accountHidden",
+          "group": "inline"
         }
       ]
     },

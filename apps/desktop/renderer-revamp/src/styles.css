@@ -370,6 +370,10 @@ body.resizing-blade .blade {
     display: flex;
 }
 
+.blade-header-actions button>span {
+    color: inherit;
+}
+
 .icon-button {
     width: 30px;
     height: 30px;
@@ -381,6 +385,33 @@ body.resizing-blade .blade {
 .collapsed-symbol:hover {
     color: var(--cp-accent);
     background: var(--cp-accent-soft);
+}
+
+.app-shell :is(.text-action, .icon-button, .tree-refresh-button, .agent-tooltip-trigger, .play-tooltip-trigger):not(:disabled) {
+    color: var(--cp-link);
+}
+
+.app-shell :is(.text-action, .icon-button, .tree-refresh-button, .agent-tooltip-trigger, .play-tooltip-trigger):not(:disabled):hover {
+    color: var(--cp-accent-hover);
+    background: var(--cp-accent-soft);
+}
+
+.app-shell .text-action:not(:disabled):hover {
+    text-decoration: underline;
+}
+
+.app-shell :is(.text-action, .icon-button, .tree-refresh-button):focus-visible {
+    outline: 2px solid var(--cp-accent);
+    outline-offset: 2px;
+}
+
+.app-shell .text-action.danger-action:not(:disabled) {
+    color: var(--cp-danger);
+}
+
+.app-shell .text-action.danger-action:not(:disabled):hover {
+    color: var(--cp-danger);
+    background: var(--cp-surface);
 }
 
 .blade-body {
@@ -502,6 +533,21 @@ body.resizing-blade .blade {
 
 .account-button {
     grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.account-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 2px;
+}
+
+.account-row.hidden .account-button {
+    opacity: 0.7;
+}
+
+.account-row .account-button:disabled {
+    cursor: default;
 }
 
 .account-button:hover,
@@ -721,6 +767,7 @@ body.resizing-blade .blade {
 .discover-body {
     max-width: 1180px;
     margin: 16px auto 0;
+    overflow-x: auto;
 }
 
 .discover-loading {
@@ -754,6 +801,54 @@ body.resizing-blade .blade {
     color: var(--cp-success, #107c10);
     font-weight: 600;
     white-space: nowrap;
+}
+
+.deal-team-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.account-search-dialog {
+    display: grid;
+    gap: 12px;
+}
+
+.account-search-dialog>p {
+    margin: 0;
+    color: var(--cp-text-muted);
+}
+
+.account-search-mode {
+    display: flex;
+    gap: 8px;
+}
+
+.account-candidate-list {
+    display: grid;
+    max-height: 260px;
+    gap: 6px;
+    overflow-y: auto;
+}
+
+.account-candidate {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px;
+    border: 1px solid var(--cp-border);
+    border-radius: 6px;
+}
+
+.account-candidate strong,
+.account-candidate small {
+    display: block;
+}
+
+.account-candidate small {
+    margin-top: 2px;
+    color: var(--cp-text-muted);
 }
 
 .workflow-launcher-header {
@@ -839,6 +934,7 @@ body.resizing-blade .blade {
     min-height: 30px;
     padding: 4px 8px;
     background: var(--cp-surface);
+    color: var(--cp-link);
     border: 0;
     border-right: 1px solid var(--cp-border);
     cursor: pointer;
@@ -1374,6 +1470,7 @@ body.resizing-blade .blade {
 .agent-tabs button[role="tab"] {
     padding: 8px 2px 7px;
     background: transparent;
+    color: var(--cp-link);
     border: 0;
     border-bottom: 2px solid transparent;
     cursor: pointer;

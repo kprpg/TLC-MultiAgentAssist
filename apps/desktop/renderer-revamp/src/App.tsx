@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, DialogTrigger, DrawerBody, DrawerHeader, DrawerHeaderTitle, Field, FluentProvider, Input, Menu, MenuItem, MenuItemRadio, MenuList, MenuPopover, MenuTrigger, MessageBar, OverlayDrawer, Spinner, Textarea, Tooltip, webDarkTheme, webLightTheme } from '@fluentui/react-components'
 import {
   Apps20Regular,
+  Add20Regular,
   ArrowDownload20Regular,
   ArrowClockwise20Regular,
   Building20Regular,
@@ -15,6 +16,8 @@ import {
   ClipboardTaskListLtr20Regular,
   Dismiss20Regular,
   Home20Regular,
+  Eye20Regular,
+  EyeOff20Regular,
   Info20Regular,
   Lightbulb20Regular,
   List20Regular,
@@ -28,7 +31,7 @@ import {
   Sparkle20Regular,
   Warning20Filled
 } from '@fluentui/react-icons'
-import type { Account, AgentCapability, AgentTaskResponse, CustomerCommitment, DiscoverableOpportunity, McemResponse, Milestone, MilestoneStatus, MilestoneUpdate, Opportunity, ScopeRef, SeDomainId, WorkflowDefinition, WorkflowRun } from '../../../../packages/common/index.js'
+import type { Account, AccountCandidate, AgentCapability, AgentTaskResponse, CustomerCommitment, DiscoverableOpportunity, McemResponse, Milestone, MilestoneStatus, MilestoneUpdate, Opportunity, ScopeRef, SeDomainId, WorkflowDefinition, WorkflowRun } from '../../../../packages/common/index.js'
 import { addMsxOpportunityLink, agentCapabilities, contractVersion, seDomainList } from '../../../../packages/common/index.js'
 import type { InitialWorkflowOutput } from '../../../../packages/orchestrator/workflows/index.js'
 import workflowDescriptions from '../../../../config/workflow-descriptions.json'
@@ -38,6 +41,8 @@ import { formatResponseMarkdown } from './response-markdown.js'
 import { sortOpportunities, type OpportunitySort, type SortDirection } from './opportunity-sort.js'
 import { sortMilestones, type MilestoneSort } from './milestone-sort.js'
 import { workflowGuidanceCapability } from './workflow-guidance.js'
+import { DiscoveryControls, DiscoverySortHeader } from '../../../shared/discovery-controls.js'
+import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportunities, toggleDiscoverySort, type DiscoveryFilters, type DiscoverySort } from '../../../shared/discovery.js'
 
 type Shell = 'desktop' | 'web'
 type WorkspaceView = 'accounts' | 'workflows' | 'discover'
@@ -206,9 +211,18 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [searchLoading, setSearchLoading] = useState(true)
   const [discoverDomain, setDiscoverDomain] = useState<SeDomainId>('infra')
   const [discoverResults, setDiscoverResults] = useState<DiscoverableOpportunity[]>([])
+  const [discoverFilters, setDiscoverFilters] = useState<DiscoveryFilters>({ include: [], exclude: [] })
+  const [discoverSort, setDiscoverSort] = useState<DiscoverySort | null>(null)
   const [discoverLoading, setDiscoverLoading] = useState(false)
   const [discoverLoadedDomain, setDiscoverLoadedDomain] = useState<SeDomainId | null>(null)
   const [joiningOpportunityId, setJoiningOpportunityId] = useState<string | null>(null)
+  const [accountDialogOpen, setAccountDialogOpen] = useState(false)
+  const [accountMatchBy, setAccountMatchBy] = useState<'name' | 'tpid'>('name')
+  const [accountQuery, setAccountQuery] = useState('')
+  const [accountCandidates, setAccountCandidates] = useState<AccountCandidate[]>([])
+  const [accountSearchBusy, setAccountSearchBusy] = useState(false)
+  const [accountMutationId, setAccountMutationId] = useState<string | null>(null)
+  const [showHiddenAccounts, setShowHiddenAccounts] = useState(false)
   const [exiting, setExiting] = useState(false)
   const [expandedOpportunityId, setExpandedOpportunityId] = useState<string | null>(null)
   const [milestoneEdit, setMilestoneEdit] = useState<MilestoneEdit | null>(null)
@@ -247,6 +261,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const milestonePanelRef = useRef<HTMLDivElement | null>(null)
   const sortedOpportunities = sortOpportunities(opportunities, opportunitySort, opportunitySortDirection)
   const sortedMilestones = sortMilestones(milestones, milestoneSort, milestoneSortDirection)
+  const visibleDiscoverResults = sortDiscoveryOpportunities(filterDiscoveryOpportunities(discoverResults, discoverFilters), discoverSort)
 
   useEffect(() => {
     if (centerTab !== 'stages') return
@@ -735,12 +750,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     }
   }
 
-  async function refreshAccounts() {
+  async function refreshAccounts(includeHidden = showHiddenAccounts) {
     setError('')
     setLoading(true)
     setSearchLoading(true)
     try {
-      const items = await client.listAccounts()
+      const items = await client.listAccounts({ includeHidden })
       const portfolio = await Promise.all(items.map((item) => client.listOpportunities(item.id)))
       setAccounts(items)
       setSearchOpportunities(portfolio.flat())
@@ -779,6 +794,82 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     } finally {
       setJoiningOpportunityId(null)
     }
+  }
+
+  async function leaveDealTeam(opportunityId: string) {
+      const item = discoverResults.find((candidate) => candidate.id === opportunityId)
+      if (!window.confirm(`Remove yourself from the Deal Team for "${item?.name ?? 'this opportunity'}"? It will be removed from Portfolio and downstream analysis.`)) return
+      setError('')
+      setJoiningOpportunityId(opportunityId)
+      try {
+        await client.leaveDealTeam(opportunityId)
+        setDiscoverResults((current) => current.map((candidate) =>
+          candidate.id === opportunityId ? { ...candidate, onDealTeam: false } : candidate))
+        await refreshAccounts()
+        if (account) {
+          const items = await client.listOpportunities(account.id)
+          setOpportunities(items)
+        }
+      } catch (cause) {
+        handleError(cause)
+      } finally {
+        setJoiningOpportunityId(null)
+      }
+    }
+
+  async function searchAccountCandidates() {
+      setError('')
+      setAccountSearchBusy(true)
+      try {
+        setAccountCandidates(await client.searchAccounts({ query: accountQuery, matchBy: accountMatchBy }))
+      } catch (cause) {
+        handleError(cause)
+      } finally {
+        setAccountSearchBusy(false)
+      }
+    }
+
+  async function addAccount(candidate: AccountCandidate) {
+      setError('')
+      setAccountMutationId(candidate.id)
+      try {
+        if (candidate.state === 'hidden') await client.setAccountVisibility(candidate.id, 'visible')
+        else if (candidate.state === 'not-added') await client.addAccount(candidate.id)
+        await refreshAccounts(showHiddenAccounts)
+        setAccountDialogOpen(false)
+        setAccountQuery('')
+        setAccountCandidates([])
+        setWorkspaceView('discover')
+        await loadDiscover(discoverDomain)
+      } catch (cause) {
+        handleError(cause)
+      } finally {
+        setAccountMutationId(null)
+      }
+    }
+
+  async function setAccountVisibility(item: Account, visibility: 'visible' | 'hidden') {
+      if (visibility === 'hidden' && !window.confirm(`Hide "${item.name}" from TLC Portfolio, Discovery, Plays, and downstream analysis? Deal Team membership will not be changed.`)) return
+      setError('')
+      setAccountMutationId(item.id)
+      try {
+        await client.setAccountVisibility(item.id, visibility)
+        if (visibility === 'hidden' && account?.id === item.id) {
+          closeOpportunities()
+        }
+        await refreshAccounts(showHiddenAccounts)
+        setDiscoverLoadedDomain(null)
+      } catch (cause) {
+        handleError(cause)
+      } finally {
+        setAccountMutationId(null)
+      }
+    }
+
+  async function toggleHiddenAccounts() {
+    const next = !showHiddenAccounts
+    setShowHiddenAccounts(next)
+    await refreshAccounts(next)
   }
 
   async function refreshOpportunities() {
@@ -911,7 +1002,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       <div className="command-actions">
         <span className="mode-badge">{modeLabel}</span>
         <button className="profile-button" title="Signed-in user" aria-label="Signed-in user"><Person20Regular /></button>
-        <Button appearance="subtle" icon={<Power20Regular />} disabled={exiting} onClick={() => void exitApplication()} aria-label="Exit application" title="Exit application">
+        <Button appearance="subtle" className="text-action" icon={<Power20Regular />} disabled={exiting} onClick={() => void exitApplication()} aria-label="Exit application" title="Exit application">
           <span className="exit-label">{exiting ? 'Exiting' : 'Exit'}</span>
         </Button>
       </div>
@@ -929,19 +1020,54 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
       {workspaceView === 'accounts' && <>
       <section className={`blade account-blade ${collapsed.has('accounts') ? 'collapsed' : ''} ${mobileBlade === 'accounts' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('accounts') ? undefined : bladeWidths.accounts }} aria-label="Accounts blade">
-        <BladeHeader title="Accounts" subtitle={`${accounts.length} customer accounts`} collapsed={collapsed.has('accounts')} refreshing={loading || searchLoading} onRefresh={() => void refreshAccounts()} onToggle={() => toggleBlade('accounts')} />
+        <BladeHeader title="Accounts" subtitle={`${accounts.length} customer accounts`} collapsed={collapsed.has('accounts')} refreshing={loading || searchLoading} actions={<>
+          <Tooltip content="Add customer by name or TPID" relationship="label">
+            <Button appearance="subtle" className="icon-button" icon={<Add20Regular />} onClick={() => setAccountDialogOpen(true)} aria-label="Add customer" />
+          </Tooltip>
+          <Tooltip content={showHiddenAccounts ? 'Hide hidden customers' : 'Show hidden customers'} relationship="label">
+            <Button appearance="subtle" className="icon-button" icon={showHiddenAccounts ? <EyeOff20Regular /> : <Eye20Regular />} onClick={() => void toggleHiddenAccounts()} aria-pressed={showHiddenAccounts} aria-label={showHiddenAccounts ? 'Hide hidden customers' : 'Show hidden customers'} />
+          </Tooltip>
+        </>} onRefresh={() => void refreshAccounts()} onToggle={() => toggleBlade('accounts')} />
         {!collapsed.has('accounts') && <div className="blade-body">
           <p className="blade-intro">Choose an account to open its active opportunities.</p>
           <div className="account-list">
-            {accounts.map((item) => <button key={item.id} className={`account-button ${account?.id === item.id ? 'selected' : ''}`} onClick={() => void selectAccount(item)}>
-              <span><strong>{item.name}</strong><small>{item.segment}</small></span>
-              <ChevronRight20Regular />
-            </button>)}
+            {accounts.map((item) => <div key={item.id} className={`account-row ${item.visibility === 'hidden' ? 'hidden' : ''}`}>
+              <button className={`account-button ${account?.id === item.id ? 'selected' : ''}`} disabled={item.visibility === 'hidden'} onClick={() => void selectAccount(item)}>
+                <span><strong>{item.name}</strong><small>{item.segment}{item.provenance ? ` · ${item.provenance === 'deal-team' ? 'Deal Team' : item.provenance === 'manual' ? 'Added' : 'Deal Team + Added'}` : ''}{item.visibility === 'hidden' ? ' · Hidden' : ''}</small></span>
+                <ChevronRight20Regular />
+              </button>
+              <Button appearance="subtle" className="text-action" size="small" disabled={accountMutationId === item.id} onClick={() => void setAccountVisibility(item, item.visibility === 'hidden' ? 'visible' : 'hidden')}>
+                {item.visibility === 'hidden' ? 'Unhide' : 'Hide'}
+              </Button>
+            </div>)}
           </div>
         </div>}
         {collapsed.has('accounts') && <button className="collapsed-symbol" onClick={() => toggleBlade('accounts')} aria-label="Expand Accounts"><Building20Regular /></button>}
         {!collapsed.has('accounts') && <BladeResizeHandle blade="accounts" label="Accounts blade" edge="end" width={bladeWidths.accounts} onResize={(width) => resizeBlade('accounts', width)} />}
       </section>
+
+      <Dialog open={accountDialogOpen} onOpenChange={(_, data) => { if (!accountSearchBusy && !accountMutationId) setAccountDialogOpen(data.open) }}>
+        <DialogSurface><DialogBody><DialogTitle>Add customer account</DialogTitle><DialogContent className="account-search-dialog">
+          <p>Add an account to the main account tree. Opportunities enter Portfolio only after Deal Team membership is added in Discovery.</p>
+          <div className="account-search-mode" role="group" aria-label="Search account by">
+            <Button appearance={accountMatchBy === 'name' ? 'primary' : 'secondary'} onClick={() => { setAccountMatchBy('name'); setAccountCandidates([]) }}>Account name</Button>
+            <Button appearance={accountMatchBy === 'tpid' ? 'primary' : 'secondary'} onClick={() => { setAccountMatchBy('tpid'); setAccountCandidates([]) }}>TPID</Button>
+          </div>
+          <Field label={accountMatchBy === 'name' ? 'Account name' : 'TPID'}>
+            <Input value={accountQuery} onChange={(_, data) => setAccountQuery(data.value)} onKeyDown={(event) => { if (event.key === 'Enter') void searchAccountCandidates() }} />
+          </Field>
+          <Button appearance="primary" icon={accountSearchBusy ? <Spinner size="tiny" /> : <Search20Regular />} disabled={accountSearchBusy || (accountMatchBy === 'name' ? accountQuery.trim().length < 2 : accountQuery.trim().length === 0)} onClick={() => void searchAccountCandidates()}>Search</Button>
+          <div className="account-candidate-list" aria-live="polite">
+            {!accountSearchBusy && accountCandidates.length === 0 && accountQuery && <span>No matching accounts loaded.</span>}
+            {accountCandidates.map((candidate) => <div key={candidate.id} className="account-candidate">
+              <span><strong>{candidate.name}</strong><small>{candidate.segment}{candidate.tpid ? ` · TPID ${candidate.tpid}` : ''}</small></span>
+              <Button size="small" appearance="primary" disabled={candidate.state === 'visible' || accountMutationId === candidate.id} onClick={() => void addAccount(candidate)}>
+                {candidate.state === 'visible' ? 'Already added' : candidate.state === 'hidden' ? 'Unhide' : 'Add account'}
+              </Button>
+            </div>)}
+          </div>
+        </DialogContent><DialogActions><Button disabled={accountSearchBusy || Boolean(accountMutationId)} onClick={() => setAccountDialogOpen(false)}>Close</Button></DialogActions></DialogBody></DialogSurface>
+      </Dialog>
 
       {account && <section className={`blade opportunity-blade ${collapsed.has('opportunities') ? 'collapsed' : ''} ${mobileBlade === 'opportunities' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('opportunities') ? undefined : bladeWidths.opportunities }} aria-label="Opportunities blade">
         <BladeHeader title="Opportunities" subtitle={account.name} collapsed={collapsed.has('opportunities')} refreshing={loading} actions={<Menu checkedValues={{ opportunitySort: [opportunitySort] }} positioning="below-end">
@@ -953,6 +1079,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           </MenuList></MenuPopover>
         </Menu>} onRefresh={() => void refreshOpportunities()} onToggle={() => toggleBlade('opportunities')} onClose={closeOpportunities} />
         {!collapsed.has('opportunities') && <div className="blade-body opportunity-table-shell" aria-label={`${account.name} opportunities and milestones`}>
+          {!loading && sortedOpportunities.length === 0 && <MessageBar intent="info">This account is in your account list but has no opportunities where you are currently a Deal Team member. Use Discovery to add yourself.</MessageBar>}
           <div className="opportunity-table-wrap">
             <table className="record-table opportunity-record-table" aria-label={`${account.name} opportunities`}>
               <thead>
@@ -1202,8 +1329,8 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                       <span><Person20Regular />{item.owner ?? 'Unassigned'}</span>
                       <span className={total > 0 && met === total ? 'gates-met' : 'gates-open'}>{total ? `${met}/${total} exit criteria met` : 'Evaluating exit criteria'}</span>
                       <div className="mcem-card-actions">
-                        <Button size="small" appearance="subtle" disabled={stage.id === 1} icon={<ChevronLeft20Regular />} aria-label={`Move ${item.name} to previous stage`} onClick={(event) => { event.stopPropagation(); void proposeStageMove(item, stage.id - 1) }} />
-                        <Button size="small" appearance="subtle" disabled={stage.id === 5} icon={<ChevronRight20Regular />} aria-label={`Move ${item.name} to next stage`} onClick={(event) => { event.stopPropagation(); void proposeStageMove(item, stage.id + 1) }} />
+                        <Button size="small" appearance="subtle" className="text-action" disabled={stage.id === 1} icon={<ChevronLeft20Regular />} aria-label={`Move ${item.name} to previous stage`} onClick={(event) => { event.stopPropagation(); void proposeStageMove(item, stage.id - 1) }} />
+                        <Button size="small" appearance="subtle" className="text-action" disabled={stage.id === 5} icon={<ChevronRight20Regular />} aria-label={`Move ${item.name} to next stage`} onClick={(event) => { event.stopPropagation(); void proposeStageMove(item, stage.id + 1) }} />
                       </div>
                     </article>
                   })}
@@ -1335,7 +1462,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                 {parameter && <Field label={parameter.label}><Input type="number" min={parameter.min} max={parameter.max} value={String(workflowParameters[definition.id] ?? parameter.defaultValue)} onChange={(_, data) => setWorkflowParameters((current) => ({ ...current, [definition.id]: Number(data.value) }))} /></Field>}
               </div>}
               <footer>
-                <Button appearance="subtle" aria-expanded={expanded} onClick={() => setExpandedWorkflowId(expanded ? null : definition.id)}>{expanded ? 'Hide parameters' : 'Parameters'}</Button>
+                <Button appearance="subtle" className="text-action" aria-expanded={expanded} onClick={() => setExpandedWorkflowId(expanded ? null : definition.id)}>{expanded ? 'Hide parameters' : 'Parameters'}</Button>
                 <Button appearance="primary" disabled={!workflowScope() || activeWorkflowRun?.status === 'queued' || activeWorkflowRun?.status === 'running'} onClick={() => void runWorkflow(definition)}>Run workflow</Button>
               </footer>
             </article>
@@ -1356,7 +1483,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
               </button>
             })}
           </div>
-          {selectedWorkflowRun && <Button appearance="subtle" onClick={() => setWorkflowActivityOpen(true)}>Activity details</Button>}
+          {selectedWorkflowRun && <Button appearance="subtle" className="text-action" onClick={() => setWorkflowActivityOpen(true)}>Activity details</Button>}
         </aside>
         </div>
 
@@ -1378,23 +1505,26 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
       {workspaceView === 'discover' && <section className="workflow-launcher discover-launcher" aria-label="Discover opportunities">
         <header className="workflow-launcher-header">
-          <div><p className="eyebrow">DEAL TEAM DISCOVERY</p><h1>Discover opportunities</h1><p>Find open, non-closed opportunities for your Solution Engineer domain and add yourself to the deal team in one click.</p></div>
+          <div><p className="eyebrow">DEAL TEAM DISCOVERY</p><h1>Discover opportunities</h1><p>Review all active opportunities for your visible accounts by Solution Engineer domain, then add or remove yourself from each opportunity's Deal Team.</p></div>
         </header>
 
         <div className="workflow-toolbar">
           <div className="scope-switcher" role="group" aria-label="Solution Engineer domain">
             {seDomainList.map((domain) => <button key={domain.id} className={discoverDomain === domain.id ? 'active' : ''} title={domain.description} onClick={() => void loadDiscover(domain.id)}>{domain.label}</button>)}
           </div>
-          <Button appearance="subtle" icon={<ArrowClockwise20Regular />} disabled={discoverLoading} onClick={() => void loadDiscover(discoverDomain)}>Refresh</Button>
+          <Button appearance="subtle" className="text-action" icon={<ArrowClockwise20Regular />} disabled={discoverLoading} onClick={() => void loadDiscover(discoverDomain)}>Refresh</Button>
         </div>
+
+        <DiscoveryControls customers={discoveryCustomers(discoverResults)} filters={discoverFilters} onChange={setDiscoverFilters} visibleCount={visibleDiscoverResults.length} totalCount={discoverResults.length} loading={discoverLoading} />
 
         <div className="discover-body">
           {discoverLoading && <div className="discover-loading"><Spinner size="small" label="Loading opportunities…" /></div>}
-          {!discoverLoading && discoverResults.length === 0 && <MessageBar intent="info">No open opportunities were found for this domain.</MessageBar>}
-          {!discoverLoading && discoverResults.length > 0 && <table className="record-table discover-table">
-            <thead><tr><th>Opportunity</th><th>Account</th><th>Solution area</th><th>Technical capability</th><th>Stage</th><th>Value</th><th>Closes</th><th aria-label="Action"></th></tr></thead>
+          {!discoverLoading && discoverResults.length === 0 && <MessageBar intent="info">No active opportunities were found for this domain.</MessageBar>}
+          {!discoverLoading && discoverResults.length > 0 && visibleDiscoverResults.length === 0 && <MessageBar intent="info">No opportunities match your customer filters. Clear filters to show all customers.</MessageBar>}
+          {!discoverLoading && visibleDiscoverResults.length > 0 && <table className="record-table discover-table" aria-label="Discovered opportunities">
+            <thead><tr><th scope="col">Opportunity</th><DiscoverySortHeader column="account" sort={discoverSort} onSort={(column) => setDiscoverSort((current) => toggleDiscoverySort(current, column))} /><th scope="col">Solution area</th><th scope="col">Technical capability</th><DiscoverySortHeader column="stage" sort={discoverSort} onSort={(column) => setDiscoverSort((current) => toggleDiscoverySort(current, column))} /><th scope="col">Value</th><th scope="col">Closes</th><DiscoverySortHeader column="action" sort={discoverSort} onSort={(column) => setDiscoverSort((current) => toggleDiscoverySort(current, column))} /></tr></thead>
             <tbody>
-              {discoverResults.map((item) => <tr key={item.id}>
+              {visibleDiscoverResults.map((item) => <tr key={item.id}>
                 <td><strong>{item.name}</strong></td>
                 <td>{item.accountName ?? '-'}</td>
                 <td>{item.solutionArea ?? '-'}</td>
@@ -1404,7 +1534,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                 <td>{item.closeDate}</td>
                 <td>
                   {item.onDealTeam
-                    ? <span className="deal-team-joined"><CheckmarkCircle20Filled /> On deal team</span>
+                    ? <div className="deal-team-actions"><span className="deal-team-joined"><CheckmarkCircle20Filled /> On deal team</span><Button size="small" appearance="subtle" className="text-action danger-action" disabled={joiningOpportunityId === item.id} onClick={() => void leaveDealTeam(item.id)}>Remove me</Button></div>
                     : <Button size="small" appearance="primary" disabled={joiningOpportunityId === item.id} icon={joiningOpportunityId === item.id ? <Spinner size="tiny" /> : <Person20Regular />} onClick={() => void joinDealTeam(item.id)}>Add me</Button>}
                 </td>
               </tr>)}
@@ -1448,7 +1578,7 @@ function WorkflowResult({
     {card.kind === 'timeline' && <ol className="workflow-timeline">{card.events.map((event) => <li key={`${event.at}-${event.label}`}><time dateTime={event.at}>{new Date(event.at).toLocaleString()}</time><span>{event.label}</span></li>)}</ol>}
     {card.kind === 'action-list' && <ul className="workflow-actions">{card.actions.map((action) => <li key={action.id}><span className={`priority ${action.priority.toLowerCase()}`}>{action.priority}</span><strong>{action.label}</strong></li>)}</ul>}
     {card.kind === 'exception-list' && <ul className="workflow-actions">{card.exceptions.map((exception) => <li key={exception.id}><span className={`priority ${exception.priority.toLowerCase()}`}>{exception.priority}</span><div><strong>{exception.title}</strong><p>{exception.detail}</p></div></li>)}</ul>}
-    <section className="workflow-queue" aria-label="Operational queue"><h3>Operational queue <span>{output.queueItems.length}</span></h3>{output.queueItems.length === 0 ? <p>No queued follow-up.</p> : output.queueItems.map((item) => <article key={item.id}><span className={`priority ${item.priority.toLowerCase()}`}>{item.priority}</span><div><strong>{item.title}</strong><p>{item.owner ?? 'Unassigned'}{item.dueDate ? ` · Due ${item.dueDate}` : ''}</p></div>{onSendGuidance && item.accountId && item.opportunityId && <Button appearance="subtle" icon={<Sparkle20Regular />} disabled={guidanceLoading !== null} onClick={() => onSendGuidance(item.id)}>{guidanceLoading === item.id ? 'Sending…' : 'Send to Guidance'}</Button>}</article>)}</section>
+    <section className="workflow-queue" aria-label="Operational queue"><h3>Operational queue <span>{output.queueItems.length}</span></h3>{output.queueItems.length === 0 ? <p>No queued follow-up.</p> : output.queueItems.map((item) => <article key={item.id}><span className={`priority ${item.priority.toLowerCase()}`}>{item.priority}</span><div><strong>{item.title}</strong><p>{item.owner ?? 'Unassigned'}{item.dueDate ? ` · Due ${item.dueDate}` : ''}</p></div>{onSendGuidance && item.accountId && item.opportunityId && <Button appearance="subtle" className="text-action" icon={<Sparkle20Regular />} disabled={guidanceLoading !== null} onClick={() => onSendGuidance(item.id)}>{guidanceLoading === item.id ? 'Sending…' : 'Send to Guidance'}</Button>}</article>)}</section>
   </section>
 }
 

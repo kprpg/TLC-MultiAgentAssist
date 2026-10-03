@@ -1,4 +1,19 @@
-import type { Account, DealTeamJoinResult, DiscoverableOpportunity, Milestone, MilestoneUpdate, Opportunity, OpportunityUpdate, SeDomainId } from '../../common/index.js'
+import {
+  accountSearchRequestSchema,
+  type Account,
+  type AccountCandidate,
+  type AccountListOptions,
+  type AccountSearchRequest,
+  type AccountVisibility,
+  type DealTeamJoinResult,
+  type DealTeamLeaveResult,
+  type DiscoverableOpportunity,
+  type Milestone,
+  type MilestoneUpdate,
+  type Opportunity,
+  type OpportunityUpdate,
+  type SeDomainId
+} from '../../common/index.js'
 import type { MsxConnector, OpportunityContext } from '../common/index.js'
 
 export {
@@ -10,8 +25,9 @@ export {
 } from './live.js'
 
 const accounts: Account[] = [
-  { id: 'account-contoso', name: 'Contoso Energy', segment: 'Strategic' },
-  { id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise' }
+  { id: 'account-contoso', name: 'Contoso Energy', segment: 'Strategic', tpid: '1000001' },
+  { id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise', tpid: '1000002' },
+  { id: 'account-northwind', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003' }
 ]
 
 const opportunities: Opportunity[] = [
@@ -376,6 +392,20 @@ const discoverableOpportunities: DiscoverableOpportunity[] = [
     solutionArea: 'Microsoft Services',
     technicalCapability: 'Advisory Services',
     onDealTeam: false
+  },
+  {
+    id: 'opp-discover-northwind-data',
+    accountId: 'account-northwind',
+    accountName: 'Northwind Health',
+    name: 'Clinical data platform modernization',
+    recordedStage: 1,
+    value: 2100000,
+    currency: 'USD',
+    closeDate: '2027-05-20',
+    domain: 'data',
+    solutionArea: 'Cloud and AI Platforms',
+    technicalCapability: 'Analytics',
+    onDealTeam: false
   }
 ]
 
@@ -383,21 +413,76 @@ export class FixtureMsxConnector implements MsxConnector {
   private readonly opportunities = structuredClone(opportunities)
   private readonly milestonesByOpportunity = structuredClone(milestonesByOpportunity)
   private readonly discoverable = structuredClone(discoverableOpportunities)
-  private readonly joinedOpportunityIds = new Set<string>()
+  private readonly dealTeamOpportunityIds = new Set(this.opportunities.map((opportunity) => opportunity.id))
+  private readonly manualAccountIds = new Set<string>()
+  private readonly hiddenAccountIds = new Set<string>()
 
-  async listAccounts(): Promise<Account[]> {
-    return structuredClone(accounts)
+  async listAccounts(options: AccountListOptions = {}): Promise<Account[]> {
+    const dealTeamAccountIds = new Set(
+      this.opportunities
+        .filter((opportunity) => this.dealTeamOpportunityIds.has(opportunity.id))
+        .map((opportunity) => opportunity.accountId)
+    )
+    return accounts
+      .filter((account) => dealTeamAccountIds.has(account.id) || this.manualAccountIds.has(account.id) || this.hiddenAccountIds.has(account.id))
+      .map((account) => this.mapAccount(account, dealTeamAccountIds))
+      .filter((account) => options.includeHidden || account.visibility !== 'hidden')
+      .map((account) => structuredClone(account))
+  }
+
+  async searchAccounts(input: AccountSearchRequest): Promise<AccountCandidate[]> {
+    const request = accountSearchRequestSchema.parse(input)
+    const query = request.query.toLocaleLowerCase()
+    const visibleAccounts = await this.listAccounts({ includeHidden: true })
+    const visibleById = new Map(visibleAccounts.map((account) => [account.id, account]))
+    return accounts
+      .filter((account) => request.matchBy === 'name'
+        ? account.name.toLocaleLowerCase().includes(query)
+        : account.tpid === request.query)
+      .map((account) => {
+        const existing = visibleById.get(account.id)
+        return {
+          ...(existing ?? account),
+          state: existing?.visibility === 'hidden' ? 'hidden' as const : existing ? 'visible' as const : 'not-added' as const
+        }
+      })
+  }
+
+  async addAccount(accountId: string): Promise<Account> {
+    const account = accounts.find((candidate) => candidate.id === accountId)
+    if (!account) throw new Error(`Unknown sample account: ${accountId}`)
+    this.manualAccountIds.add(accountId)
+    const added = (await this.listAccounts({ includeHidden: true })).find((candidate) => candidate.id === accountId)
+    if (!added) throw new Error('The sample account could not be added.')
+    return added
+  }
+
+  async setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account> {
+    const account = accounts.find((candidate) => candidate.id === accountId)
+    if (!account) throw new Error(`Unknown sample account: ${accountId}`)
+    if (visibility === 'hidden') this.hiddenAccountIds.add(accountId)
+    else this.hiddenAccountIds.delete(accountId)
+    const dealTeamAccountIds = new Set(
+      this.opportunities
+        .filter((opportunity) => this.dealTeamOpportunityIds.has(opportunity.id))
+        .map((opportunity) => opportunity.accountId)
+    )
+    return structuredClone(this.mapAccount(account, dealTeamAccountIds))
   }
 
   async listOpportunities(accountId: string): Promise<Opportunity[]> {
-    return structuredClone(this.opportunities.filter((opportunity) => opportunity.accountId === accountId))
+    if (this.hiddenAccountIds.has(accountId)) return []
+    return structuredClone(this.opportunities.filter((opportunity) =>
+      opportunity.accountId === accountId && this.dealTeamOpportunityIds.has(opportunity.id)))
   }
 
   async listMilestones(opportunityId: string): Promise<Milestone[]> {
+    this.assertOpportunityAccess(opportunityId)
     return structuredClone(this.milestonesByOpportunity[opportunityId] ?? [])
   }
 
   async updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone> {
+    this.assertOpportunityAccess(opportunityId)
     const milestone = this.milestonesByOpportunity[opportunityId]?.find((candidate) => candidate.id === milestoneId)
     if (!milestone) throw new Error(`Unknown sample milestone: ${milestoneId}`)
     if (update.status !== undefined) milestone.status = update.status
@@ -409,6 +494,7 @@ export class FixtureMsxConnector implements MsxConnector {
   }
 
   async updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity> {
+    this.assertOpportunityAccess(opportunityId)
     const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId)
     if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`)
     opportunity.comments = update.comments
@@ -416,6 +502,7 @@ export class FixtureMsxConnector implements MsxConnector {
   }
 
   async updateOpportunityStage(opportunityId: string, targetStage: number, auditNote: string): Promise<Opportunity> {
+    this.assertOpportunityAccess(opportunityId)
     const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId)
     if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`)
     opportunity.recordedStage = targetStage
@@ -424,6 +511,7 @@ export class FixtureMsxConnector implements MsxConnector {
   }
 
   async getOpportunityContext(opportunityId: string): Promise<OpportunityContext> {
+    this.assertOpportunityAccess(opportunityId)
     const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId)
     if (!opportunity) {
       throw new Error(`Unknown sample opportunity: ${opportunityId}`)
@@ -450,20 +538,21 @@ export class FixtureMsxConnector implements MsxConnector {
   }
 
   async discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]> {
+    const visibleAccountIds = new Set((await this.listAccounts()).map((account) => account.id))
     return this.discoverable
-      .filter((opportunity) => opportunity.domain === domain)
+      .filter((opportunity) => opportunity.domain === domain && visibleAccountIds.has(opportunity.accountId))
       .map((opportunity) => structuredClone({
         ...opportunity,
-        onDealTeam: this.joinedOpportunityIds.has(opportunity.id)
+        onDealTeam: this.dealTeamOpportunityIds.has(opportunity.id)
       }))
   }
 
   async joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult> {
     const seed = this.discoverable.find((candidate) => candidate.id === opportunityId)
     if (!seed) throw new Error(`Unknown sample opportunity: ${opportunityId}`)
-    const alreadyMember = this.joinedOpportunityIds.has(opportunityId)
+    const alreadyMember = this.dealTeamOpportunityIds.has(opportunityId)
     if (!alreadyMember) {
-      this.joinedOpportunityIds.add(opportunityId)
+      this.dealTeamOpportunityIds.add(opportunityId)
       const { domain, accountName, solutionArea, technicalCapability, onDealTeam, ...opportunity } = seed
       void domain
       void accountName
@@ -475,5 +564,28 @@ export class FixtureMsxConnector implements MsxConnector {
       }
     }
     return { opportunityId, onDealTeam: true, alreadyMember }
+  }
+
+  async leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult> {
+    const alreadyAbsent = !this.dealTeamOpportunityIds.has(opportunityId)
+    this.dealTeamOpportunityIds.delete(opportunityId)
+    return { opportunityId, onDealTeam: false, alreadyAbsent }
+  }
+
+  private assertOpportunityAccess(opportunityId: string): void {
+    const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId)
+    if (!opportunity || !this.dealTeamOpportunityIds.has(opportunityId) || this.hiddenAccountIds.has(opportunity.accountId)) {
+      throw new Error('The opportunity is not in the active sample portfolio.')
+    }
+  }
+
+  private mapAccount(account: Account, dealTeamAccountIds: ReadonlySet<string>): Account {
+    const manual = this.manualAccountIds.has(account.id)
+    const dealTeam = dealTeamAccountIds.has(account.id)
+    return {
+      ...account,
+      provenance: manual && dealTeam ? 'both' : manual ? 'manual' : 'deal-team',
+      visibility: this.hiddenAccountIds.has(account.id) ? 'hidden' : 'visible'
+    }
   }
 }

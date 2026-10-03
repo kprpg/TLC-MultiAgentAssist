@@ -36,8 +36,22 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
         switch (method) {
             case 'getCurrentUserEmail':
                 return successResponse(id, await provider.getCurrentUserEmail() ?? null)
-            case 'listAccounts':
-                return successResponse(id, await provider.listAccounts())
+            case 'listAccounts': {
+                const params = parseBridgeParams('listAccounts', parsed.data.params)
+                return successResponse(id, await provider.listAccounts(params))
+            }
+            case 'searchAccounts': {
+                const params = parseBridgeParams('searchAccounts', parsed.data.params)
+                return successResponse(id, await provider.searchAccounts(params))
+            }
+            case 'addAccount': {
+                const params = parseBridgeParams('addAccount', parsed.data.params)
+                return successResponse(id, await provider.addAccount(params.accountId))
+            }
+            case 'setAccountVisibility': {
+                const params = parseBridgeParams('setAccountVisibility', parsed.data.params)
+                return successResponse(id, await provider.setAccountVisibility(params.accountId, params.visibility))
+            }
             case 'listOpportunities': {
                 const params = parseBridgeParams('listOpportunities', parsed.data.params)
                 return successResponse(id, await provider.listOpportunities(params.accountId))
@@ -49,6 +63,10 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
             case 'joinDealTeam': {
                 const params = parseBridgeParams('joinDealTeam', parsed.data.params)
                 return successResponse(id, await provider.joinDealTeam(params.opportunityId))
+            }
+            case 'leaveDealTeam': {
+                const params = parseBridgeParams('leaveDealTeam', parsed.data.params)
+                return successResponse(id, await provider.leaveDealTeam(params.opportunityId))
             }
             case 'listMilestones': {
                 const params = parseBridgeParams('listMilestones', parsed.data.params)

@@ -1,6 +1,49 @@
 import { expect, test } from '@playwright/test'
 import { workflowDefinitions, workflowGuidanceDefinition, workflowGuidanceOutput, workflowOutput, workflowRun } from './workflow-fixtures.js'
 
+test('curates a customer from account search through Discovery and downstream visibility', async ({ page }) => {
+    await page.goto('/')
+
+    await page.getByRole('button', { name: 'Add customer' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add customer account' })
+    await dialog.getByRole('button', { name: 'TPID' }).click()
+    await dialog.getByRole('textbox', { name: 'TPID' }).fill('1000003')
+    await dialog.getByRole('button', { name: 'Search' }).click()
+    await expect(dialog).toContainText('Northwind Health')
+    await dialog.getByRole('button', { name: 'Add account' }).click()
+
+    await page.locator('.discover-launcher .scope-switcher button').filter({ hasText: /^Data$/ }).click()
+    const northwindRow = page.locator('.discover-table tbody tr').filter({ hasText: 'Clinical data platform modernization' })
+    await expect(northwindRow).toContainText('Northwind Health')
+    await northwindRow.locator('button').filter({ hasText: 'Add me' }).click()
+    await expect(northwindRow).toContainText('On deal team')
+
+    await page.locator('.rail-button[title="Accounts"]').click()
+    await page.locator('.account-button').filter({ hasText: 'Northwind Health' }).click()
+    await expect(page.locator('.opportunity-table-wrap .record-table')).toContainText('Clinical data platform modernization')
+
+    page.once('dialog', (confirmation) => confirmation.accept())
+    await page.locator('.account-row').filter({ hasText: 'Northwind Health' }).locator('button').filter({ hasText: /^Hide$/ }).click()
+    await expect(page.locator('.account-row').filter({ hasText: 'Northwind Health' })).toHaveCount(0)
+    await page.locator('button[aria-label="Show hidden customers"]').click()
+    const hiddenRow = page.locator('.account-row').filter({ hasText: 'Northwind Health' })
+    await expect(hiddenRow).toContainText('Hidden')
+    await expect(hiddenRow).toHaveCSS('opacity', '1')
+    await expect(hiddenRow.locator('button').filter({ hasText: /^Unhide$/ })).toHaveCSS('color', 'rgb(15, 108, 189)')
+    await hiddenRow.locator('button').filter({ hasText: 'Unhide' }).click()
+
+    await page.locator('.rail-button[title="Discover opportunities"]').click()
+    await page.locator('.discover-launcher .scope-switcher button').filter({ hasText: /^Data$/ }).click()
+    const joinedRow = page.locator('.discover-table tbody tr').filter({ hasText: 'Clinical data platform modernization' })
+    page.once('dialog', (confirmation) => confirmation.accept())
+    await joinedRow.locator('button').filter({ hasText: 'Remove me' }).click()
+    await expect(joinedRow.locator('button').filter({ hasText: 'Add me' })).toBeVisible()
+
+    await page.locator('.rail-button[title="Accounts"]').click()
+    await page.locator('.account-button').filter({ hasText: 'Northwind Health' }).click()
+    await expect(page.getByText('This account is in your account list but has no opportunities where you are currently a Deal Team member.')).toBeVisible()
+})
+
 test('sends an opportunity-scoped workflow exception to existing guidance', async ({ page }) => {
     const completedRun = workflowRun('WF-003', 'completed', 'complete')
     const prompt = 'Review WF-003 result using Evidence IDs: tool-call-1. Cite only these IDs.'

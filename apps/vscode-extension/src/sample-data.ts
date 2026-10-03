@@ -1,17 +1,25 @@
 import {
+    accountCandidateSchema,
+    accountSearchRequestSchema,
     accountSchema,
     agentTaskResponseSchema,
     contractVersion,
     dealTeamJoinResultSchema,
+    dealTeamLeaveResultSchema,
     discoverableOpportunitySchema,
     mcemResponseSchema,
     mcemStageTransitionResultSchema,
     milestoneSchema,
     opportunitySchema,
     type Account,
+    type AccountCandidate,
+    type AccountListOptions,
+    type AccountSearchRequest,
+    type AccountVisibility,
     type AgentCapability,
     type AgentTaskResponse,
     type DealTeamJoinResult,
+    type DealTeamLeaveResult,
     type DiscoverableOpportunity,
     type McemResponse,
     type McemStageTransitionResult,
@@ -32,8 +40,9 @@ const roleByStage = ['Account Executive', 'Specialist / SSP', 'Solution Engineer
 const criteriaLabels = ['Customer outcome', 'Decision team', 'Technical validation', 'Business case', 'Next committed step']
 
 const sampleAccounts: readonly Account[] = Object.freeze([
-    accountSchema.parse({ id: 'account-contoso', name: 'Contoso Energy', segment: 'Strategic' }),
-    accountSchema.parse({ id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise' })
+    accountSchema.parse({ id: 'account-contoso', name: 'Contoso Energy', segment: 'Strategic', tpid: '1000001' }),
+    accountSchema.parse({ id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise', tpid: '1000002' }),
+    accountSchema.parse({ id: 'account-northwind', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003' })
 ])
 
 const sampleOpportunities: readonly Opportunity[] = Object.freeze([
@@ -82,15 +91,73 @@ const sampleMilestones: readonly Milestone[] = Object.freeze(sampleOpportunities
     })
 }))
 
-export function listSampleAccounts(): Account[] {
-    return structuredClone(sampleAccounts) as Account[]
-}
-
 // Mutable session store so stage transitions persist while the workbench is open.
 const opportunityStore: Opportunity[] = structuredClone(sampleOpportunities) as Opportunity[]
+const dealTeamOpportunityIds = new Set(opportunityStore.map((opportunity) => opportunity.id))
+const manualAccountIds = new Set<string>()
+const hiddenAccountIds = new Set<string>()
+
+function dealTeamAccountIds(): Set<string> {
+    return new Set(opportunityStore
+        .filter((opportunity) => dealTeamOpportunityIds.has(opportunity.id))
+        .map((opportunity) => opportunity.accountId))
+}
+
+function mapSampleAccount(account: Account): Account {
+    const dealTeam = dealTeamAccountIds().has(account.id)
+    const manual = manualAccountIds.has(account.id)
+    return accountSchema.parse({
+        ...account,
+        provenance: dealTeam && manual ? 'both' : manual ? 'manual' : 'deal-team',
+        visibility: hiddenAccountIds.has(account.id) ? 'hidden' : 'visible'
+    })
+}
+
+export function listSampleAccounts(options: AccountListOptions = {}): Account[] {
+    const includedAccountIds = new Set([...dealTeamAccountIds(), ...manualAccountIds, ...hiddenAccountIds])
+    return sampleAccounts
+        .filter((account) => includedAccountIds.has(account.id))
+        .map(mapSampleAccount)
+        .filter((account) => options.includeHidden || account.visibility !== 'hidden')
+        .map((account) => structuredClone(account))
+}
+
+export function searchSampleAccounts(input: AccountSearchRequest): AccountCandidate[] {
+    const request = accountSearchRequestSchema.parse(input)
+    const query = request.query.toLocaleLowerCase()
+    const currentById = new Map(listSampleAccounts({ includeHidden: true }).map((account) => [account.id, account]))
+    return sampleAccounts
+        .filter((account) => request.matchBy === 'name'
+            ? account.name.toLocaleLowerCase().includes(query)
+            : account.tpid === request.query)
+        .map((account) => {
+            const current = currentById.get(account.id)
+            return accountCandidateSchema.parse({
+                ...(current ?? account),
+                state: current?.visibility === 'hidden' ? 'hidden' : current ? 'visible' : 'not-added'
+            })
+        })
+}
+
+export function addSampleAccount(accountId: string): Account {
+    const account = sampleAccounts.find((candidate) => candidate.id === accountId)
+    if (!account) throw new Error('Unknown sample account.')
+    manualAccountIds.add(accountId)
+    return mapSampleAccount(account)
+}
+
+export function setSampleAccountVisibility(accountId: string, visibility: AccountVisibility): Account {
+    const account = sampleAccounts.find((candidate) => candidate.id === accountId)
+    if (!account) throw new Error('Unknown sample account.')
+    if (visibility === 'hidden') hiddenAccountIds.add(accountId)
+    else hiddenAccountIds.delete(accountId)
+    return mapSampleAccount(account)
+}
 
 export function listSampleOpportunities(accountId: string): Opportunity[] {
-    return structuredClone(opportunityStore.filter((opportunity) => opportunity.accountId === accountId)) as Opportunity[]
+    if (hiddenAccountIds.has(accountId)) return []
+    return structuredClone(opportunityStore.filter((opportunity) =>
+        opportunity.accountId === accountId && dealTeamOpportunityIds.has(opportunity.id))) as Opportunity[]
 }
 
 export function listSampleMilestones(opportunityId: string): Milestone[] {
@@ -132,22 +199,23 @@ const sampleDiscoverableOpportunities: readonly DiscoverableOpportunity[] = Obje
     { id: 'opp-discover-d365-customer-service', accountId: 'account-fabrikam', accountName: 'Fabrikam Retail', name: 'Dynamics 365 Customer Service transformation', recordedStage: 2, value: 1_750_000, currency: 'USD', closeDate: '2027-01-28', domain: 'biz-apps', solutionArea: 'AI Business Solutions', technicalCapability: 'Customer Service', onDealTeam: false },
     { id: 'opp-discover-surface-deployment', accountId: 'account-contoso', accountName: 'Contoso Energy', name: 'Surface device deployment and management', recordedStage: 1, value: 640_000, currency: 'USD', closeDate: '2027-04-15', domain: 'devices', solutionArea: 'Windows and Devices', technicalCapability: 'Surface & Partner Devices', onDealTeam: false },
     { id: 'opp-discover-cloud-advisory', accountId: 'account-contoso', accountName: 'Contoso Energy', name: 'Cloud advisory and adoption services', recordedStage: 2, value: 850_000, currency: 'USD', closeDate: '2027-02-22', domain: 'services', solutionArea: 'Microsoft Services', technicalCapability: 'Advisory Services', onDealTeam: false }
+    ,
+    { id: 'opp-discover-northwind-data', accountId: 'account-northwind', accountName: 'Northwind Health', name: 'Clinical data platform modernization', recordedStage: 1, value: 2_100_000, currency: 'USD', closeDate: '2027-05-20', domain: 'data', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'Analytics', onDealTeam: false }
 ].map((opportunity) => discoverableOpportunitySchema.parse(opportunity)))
 
-const joinedDiscoverableIds = new Set<string>()
-
 export function discoverSampleOpportunities(domain: SeDomainId): DiscoverableOpportunity[] {
+    const visibleAccountIds = new Set(listSampleAccounts().map((account) => account.id))
     return sampleDiscoverableOpportunities
-        .filter((opportunity) => opportunity.domain === domain)
-        .map((opportunity) => discoverableOpportunitySchema.parse({ ...opportunity, onDealTeam: joinedDiscoverableIds.has(opportunity.id) }))
+        .filter((opportunity) => opportunity.domain === domain && visibleAccountIds.has(opportunity.accountId))
+        .map((opportunity) => discoverableOpportunitySchema.parse({ ...opportunity, onDealTeam: dealTeamOpportunityIds.has(opportunity.id) }))
 }
 
 export function joinSampleDealTeam(opportunityId: string): DealTeamJoinResult {
     const seed = sampleDiscoverableOpportunities.find((opportunity) => opportunity.id === opportunityId)
     if (!seed) throw new Error('Unknown sample opportunity.')
-    const alreadyMember = joinedDiscoverableIds.has(opportunityId)
+    const alreadyMember = dealTeamOpportunityIds.has(opportunityId)
     if (!alreadyMember) {
-        joinedDiscoverableIds.add(opportunityId)
+        dealTeamOpportunityIds.add(opportunityId)
         if (!opportunityStore.some((item) => item.id === opportunityId)) {
             const { domain, accountName, solutionArea, technicalCapability, onDealTeam, ...opportunity } = seed
             void domain; void accountName; void solutionArea; void technicalCapability; void onDealTeam
@@ -155,6 +223,12 @@ export function joinSampleDealTeam(opportunityId: string): DealTeamJoinResult {
         }
     }
     return dealTeamJoinResultSchema.parse({ opportunityId, onDealTeam: true, alreadyMember })
+}
+
+export function leaveSampleDealTeam(opportunityId: string): DealTeamLeaveResult {
+    const alreadyAbsent = !dealTeamOpportunityIds.has(opportunityId)
+    dealTeamOpportunityIds.delete(opportunityId)
+    return dealTeamLeaveResultSchema.parse({ opportunityId, onDealTeam: false, alreadyAbsent })
 }
 
 export function transitionSampleStage(accountId: string, opportunityId: string, targetStage: number, reason?: string): McemStageTransitionResult {

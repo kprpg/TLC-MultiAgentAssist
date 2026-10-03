@@ -31,8 +31,9 @@ const authenticationHeaders = {
 
 function runtimeStub(): WebRuntime {
     return {
-        listAccounts: vi.fn(), listOpportunities: vi.fn(), listMilestones: vi.fn(),
-        discoverOpportunities: vi.fn(), joinDealTeam: vi.fn(),
+        listAccounts: vi.fn(), searchAccounts: vi.fn(), addAccount: vi.fn(), setAccountVisibility: vi.fn(),
+        listOpportunities: vi.fn(), listMilestones: vi.fn(),
+        discoverOpportunities: vi.fn(), joinDealTeam: vi.fn(), leaveDealTeam: vi.fn(),
         updateMilestone: vi.fn(), updateOpportunity: vi.fn(), transitionOpportunityStage: vi.fn(),
         runMcemCoach: vi.fn(), runAgentTask: vi.fn()
     }

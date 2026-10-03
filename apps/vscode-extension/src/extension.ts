@@ -3,7 +3,7 @@ import { createSampleDataProvider, type ExtensionDataProvider } from './data-pro
 import { createLiveDataProvider } from './live-provider.js'
 import { WorkbenchPanel } from './webview-controller.js'
 import { acquireDelegatedToken } from './authentication.js'
-import { ConnectionTreeProvider, PlaysTreeProvider, PortfolioTreeProvider } from './tree/trees.js'
+import { ConnectionTreeProvider, PlaysTreeProvider, PortfolioTreeProvider, type PortfolioNode } from './tree/trees.js'
 import { McpHttpClient } from '../../../packages/connectors/mcp/index.js'
 
 function readMode(): 'sample' | 'live' {
@@ -144,6 +144,69 @@ export function activate(context: vscode.ExtensionContext): void {
         playsTree.refresh()
     }
 
+    const refreshWorkbench = (): void => {
+        if (!WorkbenchPanel.isOpen) return
+        WorkbenchPanel.disposeCurrent()
+        WorkbenchPanel.createOrShow(context.extensionUri, getProvider)
+    }
+
+    const addCustomer = async (): Promise<void> => {
+        const matchBy = await vscode.window.showQuickPick([
+            { label: 'Account name', value: 'name' as const, description: 'Search by partial customer name' },
+            { label: 'TPID', value: 'tpid' as const, description: 'Search by exact TPID' }
+        ], { title: 'Add customer account', placeHolder: 'Choose a search method' })
+        if (!matchBy) return
+        const query = await vscode.window.showInputBox({
+            title: `Add customer by ${matchBy.label}`,
+            prompt: matchBy.value === 'name' ? 'Enter at least two characters of the account name.' : 'Enter the exact TPID.',
+            validateInput: (value) => matchBy.value === 'name' && value.trim().length < 2 ? 'Enter at least two characters.' : value.trim() ? undefined : 'A value is required.'
+        })
+        if (!query) return
+        try {
+            const candidates = await provider.searchAccounts({ query, matchBy: matchBy.value })
+            if (candidates.length === 0) {
+                void vscode.window.showInformationMessage('No matching customer accounts were found.')
+                return
+            }
+            const picked = await vscode.window.showQuickPick(candidates.map((candidate) => ({
+                label: candidate.name,
+                description: [candidate.tpid ? `TPID ${candidate.tpid}` : undefined, candidate.segment, candidate.state === 'visible' ? 'Already added' : candidate.state === 'hidden' ? 'Hidden' : 'Available'].filter(Boolean).join(' - '),
+                candidate
+            })), { title: 'Select a customer account', placeHolder: 'Choose the account to add or unhide' })
+            if (!picked) return
+            if (picked.candidate.state === 'visible') {
+                void vscode.window.showInformationMessage(`${picked.candidate.name} is already in your Portfolio.`)
+                return
+            }
+            if (picked.candidate.state === 'hidden') await provider.setAccountVisibility(picked.candidate.id, 'visible')
+            else await provider.addAccount(picked.candidate.id)
+            refreshAll()
+            refreshWorkbench()
+            void vscode.window.showInformationMessage(`${picked.candidate.name} is now available in Portfolio and Discovery.`)
+        } catch (error) {
+            void vscode.window.showErrorMessage(`Could not add customer: ${error instanceof Error ? error.message : String(error)}`)
+        }
+    }
+
+    const setCustomerVisibility = async (node: PortfolioNode | undefined, visibility: 'visible' | 'hidden'): Promise<void> => {
+        if (!node || node.kind !== 'account') return
+        if (visibility === 'hidden') {
+            const confirmed = await vscode.window.showWarningMessage(
+                `Hide ${node.label?.toString() ?? 'this customer'} from Portfolio, Discovery, Plays, and downstream analysis? Deal Team membership will not be changed.`,
+                { modal: true },
+                'Hide customer'
+            )
+            if (confirmed !== 'Hide customer') return
+        }
+        try {
+            await provider.setAccountVisibility(node.recordId, visibility)
+            refreshAll()
+            refreshWorkbench()
+        } catch (error) {
+            void vscode.window.showErrorMessage(`Could not ${visibility === 'hidden' ? 'hide' : 'unhide'} customer: ${error instanceof Error ? error.message : String(error)}`)
+        }
+    }
+
     const swapProvider = (next: ExtensionDataProvider): void => {
         const previous = provider
         provider = next
@@ -169,7 +232,9 @@ export function activate(context: vscode.ExtensionContext): void {
             swapProvider(createLiveDataProvider(tokenProvider, account, (info) => {
                 output.appendLine(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? 'required' : 'optional'} failed: ${info.message}`)
                 if (info.required) output.show(true)
-            }, vscode.workspace.getConfiguration('tlc').get<boolean>('useFoundryAgents', true)))
+            },
+            vscode.workspace.getConfiguration('tlc').get<boolean>('useFoundryAgents', true),
+            vscode.Uri.joinPath(context.globalStorageUri, 'portfolio-preferences.json').fsPath))
             void vscode.window.showInformationMessage(`TLC Assist is now using live data for ${account} (MSX OData + Dataverse MCP).`)
         } catch (error) {
             const detail = error instanceof Error ? error.message : String(error)
@@ -186,6 +251,13 @@ export function activate(context: vscode.ExtensionContext): void {
             refreshAll()
             void vscode.window.setStatusBarMessage('TLC Assist: data refreshed', 2000)
         }),
+        vscode.commands.registerCommand('tlc.addCustomer', () => addCustomer()),
+        vscode.commands.registerCommand('tlc.toggleHiddenCustomers', () => {
+            const showing = portfolioTree.toggleHidden()
+            void vscode.window.setStatusBarMessage(`TLC Assist: hidden customers ${showing ? 'shown' : 'hidden'}`, 2000)
+        }),
+        vscode.commands.registerCommand('tlc.hideCustomer', (node?: PortfolioNode) => setCustomerVisibility(node, 'hidden')),
+        vscode.commands.registerCommand('tlc.unhideCustomer', (node?: PortfolioNode) => setCustomerVisibility(node, 'visible')),
         vscode.commands.registerCommand('tlc.runPlay', (arg?: { workflowId?: string }) => {
             const panel = WorkbenchPanel.createOrShow(context.extensionUri, getProvider)
             if (arg?.workflowId) panel.runPlay(arg.workflowId)

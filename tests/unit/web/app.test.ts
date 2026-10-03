@@ -178,6 +178,53 @@ describe('hosted web API', () => {
         expect(webRuntime.joinDealTeam).toHaveBeenCalledWith('opportunity-1')
     })
 
+    it('searches, adds, hides, and unhides customer accounts through validated routes', async () => {
+        const webRuntime = runtime()
+        const candidate = { id: 'account-2', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003', state: 'not-added' as const }
+        const account = { id: 'account-2', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003', provenance: 'manual' as const, visibility: 'visible' as const }
+        vi.mocked(webRuntime.searchAccounts).mockResolvedValue([candidate])
+        vi.mocked(webRuntime.addAccount).mockResolvedValue(account)
+        vi.mocked(webRuntime.setAccountVisibility).mockImplementation(async (_accountId, visibility) => ({ ...account, visibility }))
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => webRuntime }))
+        const writeHeaders = { ...authenticationHeaders, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' }
+
+        const searchResponse = await fetch(`${baseUrl}/api/account-candidates?matchBy=tpid&query=1000003`, { headers: authenticationHeaders })
+        const addResponse = await fetch(`${baseUrl}/api/accounts`, {
+            method: 'POST', headers: writeHeaders, body: JSON.stringify({ accountId: 'account-2' })
+        })
+        const hideResponse = await fetch(`${baseUrl}/api/accounts/account-2/visibility`, {
+            method: 'PATCH', headers: writeHeaders, body: JSON.stringify({ visibility: 'hidden' })
+        })
+        const unhideResponse = await fetch(`${baseUrl}/api/accounts/account-2/visibility`, {
+            method: 'PATCH', headers: writeHeaders, body: JSON.stringify({ visibility: 'visible' })
+        })
+
+        expect(await searchResponse.json()).toEqual([candidate])
+        expect(await addResponse.json()).toEqual(account)
+        expect(await hideResponse.json()).toMatchObject({ id: 'account-2', visibility: 'hidden' })
+        expect(await unhideResponse.json()).toMatchObject({ id: 'account-2', visibility: 'visible' })
+        expect(webRuntime.searchAccounts).toHaveBeenCalledWith({ matchBy: 'tpid', query: '1000003' })
+        expect(webRuntime.addAccount).toHaveBeenCalledWith('account-2')
+        expect(webRuntime.setAccountVisibility).toHaveBeenNthCalledWith(1, 'account-2', 'hidden')
+        expect(webRuntime.setAccountVisibility).toHaveBeenNthCalledWith(2, 'account-2', 'visible')
+    })
+
+    it('removes only the signed-in user from an opportunity Deal Team', async () => {
+        const webRuntime = runtime()
+        vi.mocked(webRuntime.leaveDealTeam).mockResolvedValue({ opportunityId: 'opportunity-1', onDealTeam: false, alreadyAbsent: false })
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => webRuntime }))
+
+        const response = await fetch(`${baseUrl}/api/opportunities/opportunity-1/deal-team`, {
+            method: 'DELETE',
+            headers: { ...authenticationHeaders, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+            body: '{}'
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ opportunityId: 'opportunity-1', onDealTeam: false, alreadyAbsent: false })
+        expect(webRuntime.leaveDealTeam).toHaveBeenCalledWith('opportunity-1')
+    })
+
     it('validates and forwards partial MSX updates', async () => {
         const webRuntime = runtime()
         vi.mocked(webRuntime.updateMilestone).mockResolvedValue({
@@ -333,9 +380,13 @@ describe('hosted web API', () => {
 function runtime(): WebRuntime {
     return {
         listAccounts: vi.fn(async () => [{ id: 'account-1', name: 'Contoso', segment: 'Live MSX' }]),
+        searchAccounts: vi.fn(async () => []),
+        addAccount: vi.fn(),
+        setAccountVisibility: vi.fn(),
         listOpportunities: vi.fn(async () => []),
         discoverOpportunities: vi.fn(async () => []),
         joinDealTeam: vi.fn(),
+        leaveDealTeam: vi.fn(),
         listMilestones: vi.fn(async () => []),
         updateMilestone: vi.fn(),
         updateOpportunity: vi.fn(),

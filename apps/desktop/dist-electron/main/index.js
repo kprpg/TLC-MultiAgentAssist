@@ -1,6 +1,6 @@
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
-import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -310,7 +310,12 @@ var workflowGuidanceHandoffSchema = z.object({
 var seDomainIds = [
 	"infra",
 	"data",
-	"ai-apps"
+	"ai-apps",
+	"security",
+	"modern-work",
+	"biz-apps",
+	"devices",
+	"services"
 ];
 var seDomainSchema = z.enum(seDomainIds);
 /**
@@ -344,11 +349,7 @@ var seDomainDefinitions = {
 			861980018,
 			861980014
 		],
-		conversationCodes: [
-			884800006,
-			884800003,
-			884800001
-		]
+		conversationCodes: [884800006, 884800001]
 	},
 	data: {
 		id: "data",
@@ -383,13 +384,84 @@ var seDomainDefinitions = {
 			861980041,
 			861980082
 		],
-		conversationCodes: [
-			8848e5,
-			884800012,
-			884800005,
-			884800014,
-			884800011
-		]
+		conversationCodes: [8848e5, 884800012]
+	},
+	security: {
+		id: "security",
+		label: "Security",
+		description: "Security, identity, threat protection, and information governance opportunities.",
+		solutionAreaCodes: [861980005],
+		technicalCapabilityCodes: [
+			861980063,
+			861980059,
+			861980054,
+			861980056,
+			861980062,
+			861980052,
+			861980061
+		],
+		conversationCodes: [884800003, 884800013]
+	},
+	"modern-work": {
+		id: "modern-work",
+		label: "Modern Work",
+		description: "Teams, collaboration, frontline, and workplace productivity opportunities.",
+		solutionAreaCodes: [],
+		technicalCapabilityCodes: [
+			861980068,
+			861980057,
+			861980058,
+			861980067,
+			861980086,
+			861980069,
+			861980065,
+			861980084,
+			861980070
+		],
+		conversationCodes: [884800004, 884800011]
+	},
+	"biz-apps": {
+		id: "biz-apps",
+		label: "BizApps / Power Platform / D365",
+		description: "Dynamics 365 and Power Platform business application opportunities.",
+		solutionAreaCodes: [394380002],
+		technicalCapabilityCodes: [
+			861980034,
+			861980050,
+			861980046,
+			861980047,
+			861980051,
+			861980078,
+			861980035,
+			861980032,
+			861980079,
+			861980080,
+			861980081,
+			861980083,
+			861980031,
+			861980033
+		],
+		conversationCodes: [884800005, 884800014]
+	},
+	devices: {
+		id: "devices",
+		label: "Devices / Mixed Reality",
+		description: "Surface, device deployment/management, and mixed reality opportunities.",
+		solutionAreaCodes: [861980012],
+		technicalCapabilityCodes: [
+			861980064,
+			861980060,
+			861980022
+		],
+		conversationCodes: [884800009]
+	},
+	services: {
+		id: "services",
+		label: "Services",
+		description: "Microsoft advisory and consulting services opportunities.",
+		solutionAreaCodes: [861980011],
+		technicalCapabilityCodes: [861980055],
+		conversationCodes: [884800008]
 	}
 };
 seDomainIds.map((id) => seDomainDefinitions[id]);
@@ -441,6 +513,49 @@ var guardedQueryRequestSchema = z.object({
 function isUnique(values) {
 	return new Set(values).size === values.length;
 }
+//#endregion
+//#region packages/common/contracts/portfolio.ts
+var accountProvenanceSchema = z.enum([
+	"deal-team",
+	"manual",
+	"both"
+]);
+var accountVisibilitySchema = z.enum(["visible", "hidden"]);
+var accountSchema = z.object({
+	id: z.string().min(1),
+	name: z.string().min(1),
+	segment: z.string().min(1),
+	tpid: z.string().min(1).optional(),
+	provenance: accountProvenanceSchema.optional(),
+	visibility: accountVisibilitySchema.optional()
+});
+var accountSearchRequestSchema = z.object({
+	query: z.string().trim().min(1).max(120),
+	matchBy: z.enum(["name", "tpid"])
+}).strict().superRefine((value, context) => {
+	if (value.matchBy === "name" && value.query.length < 2) context.addIssue({
+		code: "custom",
+		path: ["query"],
+		message: "Account name searches require at least two characters."
+	});
+});
+accountSchema.extend({ state: z.enum([
+	"not-added",
+	"visible",
+	"hidden"
+]) }).strict();
+var accountListOptionsSchema = z.object({ includeHidden: z.boolean().optional() }).strict();
+z.object({ visibility: accountVisibilitySchema }).strict();
+z.object({
+	opportunityId: z.string().min(1),
+	onDealTeam: z.literal(true),
+	alreadyMember: z.boolean()
+}).strict();
+z.object({
+	opportunityId: z.string().min(1),
+	onDealTeam: z.literal(false),
+	alreadyAbsent: z.boolean()
+}).strict();
 var dataModeSchema = z.enum(["sample", "live"]);
 var sourceStateSchema = z.enum([
 	"sample",
@@ -480,11 +595,6 @@ var authStatusSchema = z.object({
 z.object({
 	mode: dataModeSchema,
 	auth: authStatusSchema
-});
-var accountSchema = z.object({
-	id: z.string().min(1),
-	name: z.string().min(1),
-	segment: z.string().min(1)
 });
 var opportunitySchema = z.object({
 	id: z.string().min(1),
@@ -534,11 +644,6 @@ opportunitySchema.extend({
 	technicalCapability: z.string().min(1).optional(),
 	onDealTeam: z.boolean()
 });
-z.object({
-	opportunityId: z.string().min(1),
-	onDealTeam: z.literal(true),
-	alreadyMember: z.boolean()
-}).strict();
 var mcemStageTransitionRequestSchema = z.object({
 	contractVersion: z.literal("1.0"),
 	accountId: z.string().min(1),
@@ -1064,6 +1169,111 @@ async function loadFoundryEnvironment(filePath) {
 	return foundryEnvironmentSchema.parse(candidate);
 }
 //#endregion
+//#region packages/connectors/common/portfolio-preferences.ts
+var preferencesSchema = z.object({
+	manualAccountIds: z.array(z.string().min(1)),
+	hiddenAccountIds: z.array(z.string().min(1)),
+	revision: z.number().int().nonnegative()
+}).strict();
+var preferencesFileSchema = z.record(z.string().min(1), preferencesSchema);
+function emptyPreferences() {
+	return {
+		manualAccountIds: [],
+		hiddenAccountIds: [],
+		revision: 0
+	};
+}
+function updatedPreferences(current, manualAccountIds, hiddenAccountIds) {
+	const nextManual = [...manualAccountIds].sort();
+	const nextHidden = [...hiddenAccountIds].sort();
+	return {
+		manualAccountIds: nextManual,
+		hiddenAccountIds: nextHidden,
+		revision: nextManual.join("\0") !== current.manualAccountIds.join("\0") || nextHidden.join("\0") !== current.hiddenAccountIds.join("\0") ? current.revision + 1 : current.revision
+	};
+}
+var MemoryPortfolioPreferenceStore = class {
+	records = /* @__PURE__ */ new Map();
+	async read(userKey) {
+		return structuredClone(this.records.get(userKey) ?? emptyPreferences());
+	}
+	async addAccount(userKey, accountId) {
+		const current = await this.read(userKey);
+		const manual = new Set(current.manualAccountIds);
+		manual.add(accountId);
+		const next = updatedPreferences(current, manual, new Set(current.hiddenAccountIds));
+		this.records.set(userKey, next);
+		return structuredClone(next);
+	}
+	async setVisibility(userKey, accountId, visibility) {
+		const current = await this.read(userKey);
+		const hidden = new Set(current.hiddenAccountIds);
+		if (visibility === "hidden") hidden.add(accountId);
+		else hidden.delete(accountId);
+		const next = updatedPreferences(current, new Set(current.manualAccountIds), hidden);
+		this.records.set(userKey, next);
+		return structuredClone(next);
+	}
+};
+var JsonFilePortfolioPreferenceStore = class {
+	filePath;
+	mutationQueue = Promise.resolve();
+	constructor(filePath) {
+		this.filePath = filePath;
+	}
+	read(userKey) {
+		return this.withQueue(async () => {
+			const records = await this.readRecords();
+			return structuredClone(records[userKey] ?? emptyPreferences());
+		});
+	}
+	addAccount(userKey, accountId) {
+		return this.mutate(userKey, (current) => {
+			const manual = new Set(current.manualAccountIds);
+			manual.add(accountId);
+			return updatedPreferences(current, manual, new Set(current.hiddenAccountIds));
+		});
+	}
+	setVisibility(userKey, accountId, visibility) {
+		return this.mutate(userKey, (current) => {
+			const hidden = new Set(current.hiddenAccountIds);
+			if (visibility === "hidden") hidden.add(accountId);
+			else hidden.delete(accountId);
+			return updatedPreferences(current, new Set(current.manualAccountIds), hidden);
+		});
+	}
+	withQueue(operation) {
+		const result = this.mutationQueue.then(operation, operation);
+		this.mutationQueue = result.then(() => void 0, () => void 0);
+		return result;
+	}
+	mutate(userKey, update) {
+		return this.withQueue(async () => {
+			const records = await this.readRecords();
+			const next = update(records[userKey] ?? emptyPreferences());
+			records[userKey] = next;
+			await this.writeRecords(records);
+			return structuredClone(next);
+		});
+	}
+	async readRecords() {
+		let content;
+		try {
+			content = await readFile(this.filePath, "utf8");
+		} catch (error) {
+			if (error.code === "ENOENT") return {};
+			throw error;
+		}
+		return preferencesFileSchema.parse(JSON.parse(content));
+	}
+	async writeRecords(records) {
+		await mkdir(dirname(this.filePath), { recursive: true });
+		const temporaryPath = `${this.filePath}.${randomUUID()}.tmp`;
+		await writeFile(temporaryPath, `${JSON.stringify(records, null, 2)}\n`, "utf8");
+		await rename(temporaryPath, this.filePath);
+	}
+};
+//#endregion
 //#region packages/connectors/msx/live.ts
 var defaultBaseUrl = "https://microsoftsales.crm.dynamics.com/api/data/v9.2/";
 var formattedValueSuffix = "@OData.Community.Display.V1.FormattedValue";
@@ -1094,6 +1304,8 @@ function lookupAttributeName(valueField) {
 var navigationPropertyPattern = /^[A-Za-z][A-Za-z0-9_]*$/;
 function msxWriteMetadataFromEnvironment(environment) {
 	const riskDetailsField = environment["TLC_MSX_RISK_DETAILS_FIELD"]?.trim();
+	const accountTpidField = environment["TLC_MSX_ACCOUNT_TPID_FIELD"]?.trim();
+	if (accountTpidField && !navigationPropertyPattern.test(accountTpidField)) throw new Error("TLC_MSX_ACCOUNT_TPID_FIELD must be a valid Dataverse identifier.");
 	const configuredCodes = {};
 	const stageCodes = {};
 	for (const [status, variable] of [["Lost to Competitor", "TLC_MSX_STATUS_LOST_TO_COMPETITOR"], ["Hygiene/Duplicate", "TLC_MSX_STATUS_HYGIENE_DUPLICATE"]]) {
@@ -1133,6 +1345,7 @@ function msxWriteMetadataFromEnvironment(environment) {
 	}
 	return {
 		...riskDetailsField ? { riskDetailsField } : {},
+		...accountTpidField ? { accountTpidField } : {},
 		...Object.keys(configuredCodes).length > 0 ? { milestoneStatusCodes: configuredCodes } : {},
 		...Object.keys(stageCodes).length > 0 ? { stageCodes } : {},
 		...Object.keys(dealTeam).length > 0 ? { dealTeam } : {}
@@ -1151,23 +1364,77 @@ var LiveMsxConnector = class {
 	fetchImplementation;
 	performanceReporter;
 	writeMetadata;
+	preferenceStore;
 	baseUrl;
 	portfolioPromise;
 	observationPromises = /* @__PURE__ */ new Map();
 	milestonePromises = /* @__PURE__ */ new Map();
 	currentUserIdPromise;
 	dealTeamBindingsPromise;
-	constructor(tokenProvider, fetchImplementation = fetch, baseUrl = defaultBaseUrl, performanceReporter, writeMetadata = {}) {
+	constructor(tokenProvider, fetchImplementation = fetch, baseUrl = defaultBaseUrl, performanceReporter, writeMetadata = {}, preferenceStore = new MemoryPortfolioPreferenceStore()) {
 		this.tokenProvider = tokenProvider;
 		this.fetchImplementation = fetchImplementation;
 		this.performanceReporter = performanceReporter;
 		this.writeMetadata = writeMetadata;
+		this.preferenceStore = preferenceStore;
 		this.baseUrl = new URL(baseUrl);
 		if (writeMetadata.riskDetailsField && !/^[A-Za-z][A-Za-z0-9_]*$/.test(writeMetadata.riskDetailsField)) throw new Error("The MSX risk details logical field name is invalid.");
 	}
-	async listAccounts() {
+	async listAccounts(options = {}) {
 		const portfolio = await this.getPortfolio();
-		return structuredClone(portfolio.accounts);
+		return structuredClone(portfolio.accounts.filter((account) => options.includeHidden || account.visibility !== "hidden"));
+	}
+	async searchAccounts(input) {
+		const request = accountSearchRequestSchema.parse(input);
+		const escapedQuery = escapeODataStringLiteral(request.query);
+		const tpidField = this.writeMetadata.accountTpidField;
+		if (request.matchBy === "tpid" && !tpidField) throw new Error("TPID search requires TLC_MSX_ACCOUNT_TPID_FIELD to contain the verified account TPID logical field.");
+		const rows = await measurePerformance("msx.search-accounts", this.performanceReporter, () => this.requestAll("accounts", {
+			"$select": [
+				"accountid",
+				"name",
+				tpidField
+			].filter(isPresent).join(","),
+			"$filter": request.matchBy === "name" ? `statecode eq 0 and contains(name,'${escapedQuery}')` : `statecode eq 0 and ${tpidField} eq '${escapedQuery}'`,
+			"$orderby": "name asc",
+			"$top": "25"
+		}));
+		const portfolio = await this.getPortfolio();
+		const existingById = new Map(portfolio.accounts.map((account) => [account.id, account]));
+		return rows.map((row) => {
+			const existing = existingById.get(row.accountid);
+			return {
+				...existing ?? this.mapAccount(row),
+				state: existing?.visibility === "hidden" ? "hidden" : existing ? "visible" : "not-added"
+			};
+		});
+	}
+	async addAccount(accountId) {
+		this.assertAccountId(accountId);
+		if ((await this.requestByIds("accounts", "accountid", [accountId], [
+			"accountid",
+			"name",
+			this.writeMetadata.accountTpidField
+		].filter(isPresent).join(","))).length !== 1) throw new Error("The selected account is unavailable or inactive in MSX.");
+		await this.preferenceStore.addAccount(await this.getCurrentUserId(), accountId);
+		this.portfolioPromise = void 0;
+		const account = (await this.getPortfolio()).accounts.find((candidate) => candidate.id === accountId);
+		if (!account) throw new Error("The account preference was saved but the account could not be reloaded.");
+		return structuredClone(account);
+	}
+	async setAccountVisibility(accountId, visibility) {
+		this.assertAccountId(accountId);
+		const row = (await this.requestByIds("accounts", "accountid", [accountId], [
+			"accountid",
+			"name",
+			this.writeMetadata.accountTpidField
+		].filter(isPresent).join(",")))[0];
+		if (!row) throw new Error("The selected account is unavailable or inactive in MSX.");
+		const userId = await this.getCurrentUserId();
+		const preferences = await this.preferenceStore.setVisibility(userId, accountId, visibility);
+		this.portfolioPromise = void 0;
+		const account = (await this.getPortfolio()).accounts.find((candidate) => candidate.id === accountId);
+		return structuredClone(account ?? this.mapAccount(row, preferences, /* @__PURE__ */ new Set()));
 	}
 	async listOpportunities(accountId) {
 		const portfolio = await this.getPortfolio();
@@ -1264,7 +1531,7 @@ var LiveMsxConnector = class {
 		const domainMatch = [definition.technicalCapabilityCodes.map((code) => `msp_technicalcapability eq ${code}`).join(" or "), definition.conversationCodes.map((code) => `msp_conversation eq ${code}`).join(" or ")].filter(Boolean).join(" or ");
 		const domainClauses = domainMatch ? [`(${domainMatch})`] : [];
 		const portfolio = await this.getPortfolio();
-		const accountNameById = new Map(portfolio.accounts.map((account) => [account.id, account.name]));
+		const accountNameById = new Map(portfolio.accounts.filter((account) => account.visibility !== "hidden").map((account) => [account.id, account.name]));
 		const assignedAccountIds = [...accountNameById.keys()];
 		if (assignedAccountIds.length === 0) return [];
 		const dealTeamOpportunityIds = new Set(portfolio.opportunities.map((opportunity) => opportunity.id));
@@ -1330,6 +1597,39 @@ var LiveMsxConnector = class {
 			opportunityId,
 			onDealTeam: true,
 			alreadyMember: false
+		};
+	}
+	async leaveDealTeam(opportunityId) {
+		if (!guidPattern.test(opportunityId)) throw new Error("The opportunity id must be a valid MSX GUID.");
+		const dealTeam = {
+			...defaultDealTeamWriteMetadata,
+			...this.writeMetadata.dealTeam
+		};
+		const userId = await this.getCurrentUserId();
+		const existing = await this.requestAll(dealTeam.entitySet, {
+			"$select": "msp_dealteamid",
+			"$filter": `statecode eq 0 and ${dealTeam.userLookupField} eq ${userId} and ${dealTeam.opportunityLookupField} eq ${opportunityId}`,
+			"$top": "2"
+		});
+		if (existing.length === 0) {
+			this.portfolioPromise = void 0;
+			return {
+				opportunityId,
+				onDealTeam: false,
+				alreadyAbsent: true
+			};
+		}
+		if (existing.length > 1) throw new Error("MSX returned duplicate active Deal Team memberships for this user and opportunity. Resolve the duplicate rows before retrying.");
+		const membershipId = existing[0]?.msp_dealteamid;
+		if (!membershipId || !guidPattern.test(membershipId)) throw new Error("MSX returned a Deal Team membership without a valid row id.");
+		await this.delete(`${dealTeam.entitySet}(${membershipId})`);
+		this.portfolioPromise = void 0;
+		this.observationPromises.delete(opportunityId);
+		this.milestonePromises.delete(opportunityId);
+		return {
+			opportunityId,
+			onDealTeam: false,
+			alreadyAbsent: false
 		};
 	}
 	/**
@@ -1430,23 +1730,50 @@ var LiveMsxConnector = class {
 		return this.portfolioPromise;
 	}
 	async loadPortfolio() {
-		const identity = await measurePerformance("msx.identity", this.performanceReporter, () => this.requestJson("WhoAmI"));
+		const userId = await measurePerformance("msx.identity", this.performanceReporter, () => this.getCurrentUserId());
+		const preferences = await this.preferenceStore.read(userId);
 		const opportunityIds = unique((await measurePerformance("msx.deal-team", this.performanceReporter, () => this.requestAll("msp_dealteams", {
 			"$select": "_msp_parentopportunityid_value",
-			"$filter": `statecode eq 0 and _msp_dealteamuserid_value eq ${identity.UserId}`
+			"$filter": `statecode eq 0 and _msp_dealteamuserid_value eq ${userId}`
 		}))).map((row) => row._msp_parentopportunityid_value).filter(isPresent));
-		const activeOpportunities = (await measurePerformance("msx.opportunities", this.performanceReporter, () => this.requestByIds("opportunities", "opportunityid", opportunityIds, "opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description"))).filter((row) => row._parentaccountid_value);
-		const accountIds = unique(activeOpportunities.map((row) => row._parentaccountid_value).filter(isPresent));
-		const accounts = (await measurePerformance("msx.accounts", this.performanceReporter, () => this.requestByIds("accounts", "accountid", accountIds, "accountid,name"))).map((row) => ({
-			id: row.accountid,
-			name: row.name,
-			segment: "Live MSX"
-		})).sort((left, right) => left.name.localeCompare(right.name));
-		const accessibleAccountIds = new Set(accounts.map((account) => account.id));
+		const activeOpportunities = (await measurePerformance("msx.opportunities", this.performanceReporter, () => this.requestByIds("opportunities", "opportunityid", opportunityIds, "opportunityid,statecode,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description"))).filter((row) => row._parentaccountid_value && (row.statecode === void 0 || row.statecode === 0));
+		const dealTeamAccountIds = unique(activeOpportunities.map((row) => row._parentaccountid_value).filter(isPresent));
+		const accountIds = unique([
+			...dealTeamAccountIds,
+			...preferences.manualAccountIds,
+			...preferences.hiddenAccountIds
+		]);
+		const accounts = (await measurePerformance("msx.accounts", this.performanceReporter, () => this.requestByIds("accounts", "accountid", accountIds, [
+			"accountid",
+			"name",
+			this.writeMetadata.accountTpidField
+		].filter(isPresent).join(",")))).map((row) => this.mapAccount(row, preferences, new Set(dealTeamAccountIds))).sort((left, right) => left.name.localeCompare(right.name));
+		const visibleAccountIds = new Set(accounts.filter((account) => account.visibility !== "hidden").map((account) => account.id));
 		return {
 			accounts,
-			opportunities: activeOpportunities.filter((row) => row._parentaccountid_value && accessibleAccountIds.has(row._parentaccountid_value)).map((row) => this.mapOpportunity(row)).sort((left, right) => left.name.localeCompare(right.name))
+			opportunities: activeOpportunities.filter((row) => row._parentaccountid_value && visibleAccountIds.has(row._parentaccountid_value)).map((row) => this.mapOpportunity(row)).sort((left, right) => left.name.localeCompare(right.name))
 		};
+	}
+	mapAccount(row, preferences = {
+		manualAccountIds: [],
+		hiddenAccountIds: [],
+		revision: 0
+	}, dealTeamAccountIds = /* @__PURE__ */ new Set()) {
+		const manual = preferences.manualAccountIds.includes(row.accountid);
+		const dealTeam = dealTeamAccountIds.has(row.accountid);
+		const tpidField = this.writeMetadata.accountTpidField;
+		const tpid = tpidField && typeof row[tpidField] === "string" ? row[tpidField].trim() : void 0;
+		return {
+			id: row.accountid,
+			name: row.name,
+			segment: "Live MSX",
+			...tpid ? { tpid } : {},
+			...manual || dealTeam ? { provenance: manual && dealTeam ? "both" : manual ? "manual" : "deal-team" } : {},
+			visibility: preferences.hiddenAccountIds.includes(row.accountid) ? "hidden" : "visible"
+		};
+	}
+	assertAccountId(accountId) {
+		if (!guidPattern.test(accountId)) throw new Error("The account id must be a valid MSX GUID.");
 	}
 	mapOpportunity(row) {
 		const formattedStage = row[`msp_activesalesstage${formattedValueSuffix}`];
@@ -1533,6 +1860,20 @@ var LiveMsxConnector = class {
 		});
 		if (!response.ok) throw new MsxRequestError(`MSX create failed with status ${response.status}.`, response.status);
 	}
+	async delete(path) {
+		const url = new URL(path, this.baseUrl);
+		this.assertTrustedUrl(url);
+		const accessToken = await this.tokenProvider.getAccessToken();
+		const response = await this.fetchImplementation(url, {
+			method: "DELETE",
+			headers: {
+				Authorization: ["Bearer", accessToken].join(" "),
+				Accept: "application/json",
+				"If-Match": "*"
+			}
+		});
+		if (!response.ok) throw new MsxRequestError(`MSX delete failed with status ${response.status}.`, response.status);
+	}
 	assertTrustedUrl(url) {
 		if (url.origin !== this.baseUrl.origin || !url.pathname.startsWith(this.baseUrl.pathname)) throw new MsxRequestError("MSX returned an untrusted continuation URL.");
 	}
@@ -1546,6 +1887,9 @@ function isPresent(value) {
 function formattedValue(row, field) {
 	const value = row[`${field}${formattedValueSuffix}`];
 	return typeof value === "string" && value.trim() ? value.trim() : void 0;
+}
+function escapeODataStringLiteral(value) {
+	return value.replaceAll("'", "''");
 }
 function mapOpportunityObservations(opportunity, milestones) {
 	const observations = [];
@@ -1607,15 +1951,26 @@ function mapOpportunityObservations(opportunity, milestones) {
 }
 //#endregion
 //#region packages/connectors/msx/index.ts
-var accounts = [{
-	id: "account-contoso",
-	name: "Contoso Energy",
-	segment: "Strategic"
-}, {
-	id: "account-fabrikam",
-	name: "Fabrikam Retail",
-	segment: "Enterprise"
-}];
+var accounts = [
+	{
+		id: "account-contoso",
+		name: "Contoso Energy",
+		segment: "Strategic",
+		tpid: "1000001"
+	},
+	{
+		id: "account-fabrikam",
+		name: "Fabrikam Retail",
+		segment: "Enterprise",
+		tpid: "1000002"
+	},
+	{
+		id: "account-northwind",
+		name: "Northwind Health",
+		segment: "Enterprise",
+		tpid: "1000003"
+	}
+];
 var opportunities = [
 	{
 		id: "opp-grid-modernization",
@@ -2131,23 +2486,140 @@ var discoverableOpportunities = [
 		solutionArea: "Cloud and AI Platforms",
 		technicalCapability: "Modernize/New Cloud Native Apps with AKS and Azure Cosmos/Postgres DB",
 		onDealTeam: false
+	},
+	{
+		id: "opp-discover-zero-trust",
+		accountId: "account-contoso",
+		accountName: "Contoso Energy",
+		name: "Zero Trust security modernization",
+		recordedStage: 2,
+		value: 22e5,
+		currency: "USD",
+		closeDate: "2027-02-18",
+		domain: "security",
+		solutionArea: "Security",
+		technicalCapability: "Threat Protection",
+		onDealTeam: false
+	},
+	{
+		id: "opp-discover-teams-calling",
+		accountId: "account-fabrikam",
+		accountName: "Fabrikam Retail",
+		name: "Teams Phone and calling rollout",
+		recordedStage: 1,
+		value: 98e4,
+		currency: "USD",
+		closeDate: "2027-03-05",
+		domain: "modern-work",
+		technicalCapability: "Calling",
+		onDealTeam: false
+	},
+	{
+		id: "opp-discover-d365-customer-service",
+		accountId: "account-fabrikam",
+		accountName: "Fabrikam Retail",
+		name: "Dynamics 365 Customer Service transformation",
+		recordedStage: 2,
+		value: 175e4,
+		currency: "USD",
+		closeDate: "2027-01-28",
+		domain: "biz-apps",
+		solutionArea: "AI Business Solutions",
+		technicalCapability: "Customer Service",
+		onDealTeam: false
+	},
+	{
+		id: "opp-discover-surface-deployment",
+		accountId: "account-contoso",
+		accountName: "Contoso Energy",
+		name: "Surface device deployment and management",
+		recordedStage: 1,
+		value: 64e4,
+		currency: "USD",
+		closeDate: "2027-04-15",
+		domain: "devices",
+		solutionArea: "Windows and Devices",
+		technicalCapability: "Surface & Partner Devices",
+		onDealTeam: false
+	},
+	{
+		id: "opp-discover-cloud-advisory",
+		accountId: "account-contoso",
+		accountName: "Contoso Energy",
+		name: "Cloud advisory and adoption services",
+		recordedStage: 2,
+		value: 85e4,
+		currency: "USD",
+		closeDate: "2027-02-22",
+		domain: "services",
+		solutionArea: "Microsoft Services",
+		technicalCapability: "Advisory Services",
+		onDealTeam: false
+	},
+	{
+		id: "opp-discover-northwind-data",
+		accountId: "account-northwind",
+		accountName: "Northwind Health",
+		name: "Clinical data platform modernization",
+		recordedStage: 1,
+		value: 21e5,
+		currency: "USD",
+		closeDate: "2027-05-20",
+		domain: "data",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Analytics",
+		onDealTeam: false
 	}
 ];
 var FixtureMsxConnector = class {
 	opportunities = structuredClone(opportunities);
 	milestonesByOpportunity = structuredClone(milestonesByOpportunity);
 	discoverable = structuredClone(discoverableOpportunities);
-	joinedOpportunityIds = /* @__PURE__ */ new Set();
-	async listAccounts() {
-		return structuredClone(accounts);
+	dealTeamOpportunityIds = new Set(this.opportunities.map((opportunity) => opportunity.id));
+	manualAccountIds = /* @__PURE__ */ new Set();
+	hiddenAccountIds = /* @__PURE__ */ new Set();
+	async listAccounts(options = {}) {
+		const dealTeamAccountIds = new Set(this.opportunities.filter((opportunity) => this.dealTeamOpportunityIds.has(opportunity.id)).map((opportunity) => opportunity.accountId));
+		return accounts.filter((account) => dealTeamAccountIds.has(account.id) || this.manualAccountIds.has(account.id) || this.hiddenAccountIds.has(account.id)).map((account) => this.mapAccount(account, dealTeamAccountIds)).filter((account) => options.includeHidden || account.visibility !== "hidden").map((account) => structuredClone(account));
+	}
+	async searchAccounts(input) {
+		const request = accountSearchRequestSchema.parse(input);
+		const query = request.query.toLocaleLowerCase();
+		const visibleAccounts = await this.listAccounts({ includeHidden: true });
+		const visibleById = new Map(visibleAccounts.map((account) => [account.id, account]));
+		return accounts.filter((account) => request.matchBy === "name" ? account.name.toLocaleLowerCase().includes(query) : account.tpid === request.query).map((account) => {
+			const existing = visibleById.get(account.id);
+			return {
+				...existing ?? account,
+				state: existing?.visibility === "hidden" ? "hidden" : existing ? "visible" : "not-added"
+			};
+		});
+	}
+	async addAccount(accountId) {
+		if (!accounts.find((candidate) => candidate.id === accountId)) throw new Error(`Unknown sample account: ${accountId}`);
+		this.manualAccountIds.add(accountId);
+		const added = (await this.listAccounts({ includeHidden: true })).find((candidate) => candidate.id === accountId);
+		if (!added) throw new Error("The sample account could not be added.");
+		return added;
+	}
+	async setAccountVisibility(accountId, visibility) {
+		const account = accounts.find((candidate) => candidate.id === accountId);
+		if (!account) throw new Error(`Unknown sample account: ${accountId}`);
+		if (visibility === "hidden") this.hiddenAccountIds.add(accountId);
+		else this.hiddenAccountIds.delete(accountId);
+		const dealTeamAccountIds = new Set(this.opportunities.filter((opportunity) => this.dealTeamOpportunityIds.has(opportunity.id)).map((opportunity) => opportunity.accountId));
+		return structuredClone(this.mapAccount(account, dealTeamAccountIds));
 	}
 	async listOpportunities(accountId) {
-		return structuredClone(this.opportunities.filter((opportunity) => opportunity.accountId === accountId));
+		if (this.hiddenAccountIds.has(accountId)) return [];
+		return structuredClone(this.opportunities.filter((opportunity) => opportunity.accountId === accountId && this.dealTeamOpportunityIds.has(opportunity.id)));
 	}
 	async listMilestones(opportunityId) {
+		this.assertOpportunityAccess(opportunityId);
 		return structuredClone(this.milestonesByOpportunity[opportunityId] ?? []);
 	}
 	async updateMilestone(opportunityId, milestoneId, update) {
+		this.assertOpportunityAccess(opportunityId);
 		const milestone = this.milestonesByOpportunity[opportunityId]?.find((candidate) => candidate.id === milestoneId);
 		if (!milestone) throw new Error(`Unknown sample milestone: ${milestoneId}`);
 		if (update.status !== void 0) milestone.status = update.status;
@@ -2158,12 +2630,14 @@ var FixtureMsxConnector = class {
 		return structuredClone(milestone);
 	}
 	async updateOpportunity(opportunityId, update) {
+		this.assertOpportunityAccess(opportunityId);
 		const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId);
 		if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`);
 		opportunity.comments = update.comments;
 		return structuredClone(opportunity);
 	}
 	async updateOpportunityStage(opportunityId, targetStage, auditNote) {
+		this.assertOpportunityAccess(opportunityId);
 		const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId);
 		if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`);
 		opportunity.recordedStage = targetStage;
@@ -2171,6 +2645,7 @@ var FixtureMsxConnector = class {
 		return structuredClone(opportunity);
 	}
 	async getOpportunityContext(opportunityId) {
+		this.assertOpportunityAccess(opportunityId);
 		const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId);
 		if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`);
 		const account = accounts.find((candidate) => candidate.id === opportunity.accountId);
@@ -2190,17 +2665,18 @@ var FixtureMsxConnector = class {
 		};
 	}
 	async discoverOpportunities(domain) {
-		return this.discoverable.filter((opportunity) => opportunity.domain === domain).map((opportunity) => structuredClone({
+		const visibleAccountIds = new Set((await this.listAccounts()).map((account) => account.id));
+		return this.discoverable.filter((opportunity) => opportunity.domain === domain && visibleAccountIds.has(opportunity.accountId)).map((opportunity) => structuredClone({
 			...opportunity,
-			onDealTeam: this.joinedOpportunityIds.has(opportunity.id)
+			onDealTeam: this.dealTeamOpportunityIds.has(opportunity.id)
 		}));
 	}
 	async joinDealTeam(opportunityId) {
 		const seed = this.discoverable.find((candidate) => candidate.id === opportunityId);
 		if (!seed) throw new Error(`Unknown sample opportunity: ${opportunityId}`);
-		const alreadyMember = this.joinedOpportunityIds.has(opportunityId);
+		const alreadyMember = this.dealTeamOpportunityIds.has(opportunityId);
 		if (!alreadyMember) {
-			this.joinedOpportunityIds.add(opportunityId);
+			this.dealTeamOpportunityIds.add(opportunityId);
 			const { domain, accountName, solutionArea, technicalCapability, onDealTeam, ...opportunity } = seed;
 			if (!this.opportunities.some((candidate) => candidate.id === opportunityId)) this.opportunities.push(structuredClone(opportunity));
 		}
@@ -2208,6 +2684,28 @@ var FixtureMsxConnector = class {
 			opportunityId,
 			onDealTeam: true,
 			alreadyMember
+		};
+	}
+	async leaveDealTeam(opportunityId) {
+		const alreadyAbsent = !this.dealTeamOpportunityIds.has(opportunityId);
+		this.dealTeamOpportunityIds.delete(opportunityId);
+		return {
+			opportunityId,
+			onDealTeam: false,
+			alreadyAbsent
+		};
+	}
+	assertOpportunityAccess(opportunityId) {
+		const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId);
+		if (!opportunity || !this.dealTeamOpportunityIds.has(opportunityId) || this.hiddenAccountIds.has(opportunity.accountId)) throw new Error("The opportunity is not in the active sample portfolio.");
+	}
+	mapAccount(account, dealTeamAccountIds) {
+		const manual = this.manualAccountIds.has(account.id);
+		const dealTeam = dealTeamAccountIds.has(account.id);
+		return {
+			...account,
+			provenance: manual && dealTeam ? "both" : manual ? "manual" : "deal-team",
+			visibility: this.hiddenAccountIds.has(account.id) ? "hidden" : "visible"
 		};
 	}
 };
@@ -3503,10 +4001,17 @@ function renderDataverseSql(entityMapInput, queryInput, delegatedScope, maximumR
 		const userId = delegatedScope.currentUserId;
 		if (!isSafeIdentifier(userId)) throw new DataverseQueryGuardError("scope_required", "The delegated user id is missing or invalid.");
 		whereClauses.unshift(`dt.msp_dealteamuserid = '${userId}'`, "dt.statecode = 0");
+		const excludedAccountIds = [...new Set(delegatedScope.excludedAccountIds ?? [])];
+		if (excludedAccountIds.some((accountId) => !isSafeIdentifier(accountId))) throw new DataverseQueryGuardError("scope_required", "An excluded TLC account id is invalid.");
+		if (excludedAccountIds.length > 0) {
+			const ids = excludedAccountIds.map((accountId) => `'${accountId}'`).join(", ");
+			whereClauses.push(`${toSqlColumn(entity.logicalName) === "opportunity" ? "m" : "scopeop"}.parentaccountid NOT IN (${ids})`);
+		}
 	} else if (options.enforceScope !== false && entity.userScopePredicate !== void 0) whereClauses.push(renderSqlScopePredicate(entity.userScopePredicate, delegatedScope));
 	const orderBy = query.orderBy.map((order) => `${qualify(column(order.field))} ${order.direction.toUpperCase()}`);
 	let sql = `SELECT TOP ${top} ${selectColumns.join(", ")} FROM ${toSqlColumn(entity.logicalName)}`;
 	if (useJoinScope) sql += ` m JOIN msp_dealteam dt ON m.${dealTeamColumn} = dt.msp_parentopportunityid`;
+	if (useJoinScope && (delegatedScope.excludedAccountIds?.length ?? 0) > 0 && toSqlColumn(entity.logicalName) !== "opportunity") sql += ` JOIN opportunity scopeop ON m.${dealTeamColumn} = scopeop.opportunityid`;
 	if (whereClauses.length > 0) sql += ` WHERE ${whereClauses.join(" AND ")}`;
 	if (orderBy.length > 0) sql += ` ORDER BY ${orderBy.join(", ")}`;
 	return sql;
@@ -4812,7 +5317,7 @@ function createConfiguredWorkflowHost(options) {
 * portfolio through a `msp_dealteam` JOIN on their user id, which is far cheaper than enumerating
 * the portfolio and injecting a large `IN (...)` predicate. The user id is resolved once and cached.
 */
-function createDealTeamScopeResolver(resolveCurrentUserId) {
+function createDealTeamScopeResolver(resolveCurrentUserId, resolveExcludedAccountIds = async () => []) {
 	let currentUserId;
 	return async () => {
 		currentUserId ??= resolveCurrentUserId().catch((error) => {
@@ -4822,17 +5327,18 @@ function createDealTeamScopeResolver(resolveCurrentUserId) {
 		return {
 			currentUserId: await currentUserId,
 			delegatedUserAccountIds: [],
-			delegatedUserOpportunityIds: []
+			delegatedUserOpportunityIds: [],
+			excludedAccountIds: await resolveExcludedAccountIds()
 		};
 	};
 }
 /** Shared live Play host for Desktop, Web, and the VS Code extension. */
 function createLivePlayWorkflowHost(options) {
-	const { resolveCurrentUserId, maximumRows, ...configured } = options;
+	const { resolveCurrentUserId, resolveExcludedAccountIds, maximumRows, ...configured } = options;
 	return createConfiguredWorkflowHost({
 		...configured,
 		maximumRows: maximumRows ?? 100,
-		resolveDelegatedScope: createDealTeamScopeResolver(resolveCurrentUserId)
+		resolveDelegatedScope: createDealTeamScopeResolver(resolveCurrentUserId, resolveExcludedAccountIds)
 	});
 }
 //#endregion
@@ -4995,17 +5501,18 @@ var sampleMsxRows = [{
 	forecastCategory: "Best Case",
 	probability: 65
 }];
-function createSampleWorkflowHost() {
+function createSampleWorkflowHost(resolveWorkingSet) {
 	const registry = new WorkflowRegistry(initialWorkflowDefinitions);
 	return new SharedWorkflowHost(registry, new WorkflowRuntime(registry, { execute: async (step, context) => {
 		const workflowId = context.workflowId;
-		const data = step.connector === "dataverse-mcp" ? sampleRows[workflowId] : step.operation === "get_forecast_snapshot" ? {
+		const unscopedData = step.connector === "dataverse-mcp" ? sampleRows[workflowId] : step.operation === "get_forecast_snapshot" ? {
 			currency: "USD",
 			committed: 42e5,
 			bestCase: 175e4,
 			target: 7e6,
 			gap: -28e5
 		} : sampleMsxRows;
+		const data = Array.isArray(unscopedData) && resolveWorkingSet ? filterToWorkingSet(unscopedData, await resolveWorkingSet()) : unscopedData;
 		const lineage = {
 			connector: step.connector,
 			operation: step.operation,
@@ -5027,6 +5534,16 @@ function createSampleWorkflowHost() {
 		};
 	} }, { resultAssembler: new InitialWorkflowResultAssembler() }));
 }
+function filterToWorkingSet(rows, scope) {
+	const accountIds = new Set(scope.accountIds);
+	const opportunityIds = new Set(scope.opportunityIds);
+	return rows.filter((row) => {
+		const opportunityId = typeof row["opportunityId"] === "string" ? row["opportunityId"] : typeof row["id"] === "string" && row["id"].startsWith("opp-") ? row["id"] : void 0;
+		if (opportunityId) return opportunityIds.has(opportunityId);
+		const accountId = typeof row["accountId"] === "string" ? row["accountId"] : void 0;
+		return accountId ? accountIds.has(accountId) : true;
+	});
+}
 //#endregion
 //#region packages/orchestrator/index.ts
 var ThinSliceOrchestrator = class {
@@ -5040,8 +5557,19 @@ var ThinSliceOrchestrator = class {
 		this.taskAgents = taskAgents;
 		this.performanceReporter = performanceReporter;
 	}
-	listAccounts() {
-		return this.msx.listAccounts();
+	listAccounts(options) {
+		return this.msx.listAccounts(accountListOptionsSchema.parse(options ?? {}));
+	}
+	searchAccounts(request) {
+		return this.msx.searchAccounts(accountSearchRequestSchema.parse(request));
+	}
+	async addAccount(accountId) {
+		if (typeof accountId !== "string" || accountId.trim().length === 0) throw new Error("An account id is required.");
+		return this.msx.addAccount(accountId);
+	}
+	async setAccountVisibility(accountId, visibility) {
+		if (typeof accountId !== "string" || accountId.trim().length === 0) throw new Error("An account id is required.");
+		return this.msx.setAccountVisibility(accountId, accountVisibilitySchema.parse(visibility));
 	}
 	listOpportunities(accountId) {
 		return this.msx.listOpportunities(accountId);
@@ -5052,6 +5580,10 @@ var ThinSliceOrchestrator = class {
 	async joinDealTeam(opportunityId) {
 		if (typeof opportunityId !== "string" || opportunityId.trim().length === 0) throw new Error("An opportunity id is required to join a deal team.");
 		return this.msx.joinDealTeam(opportunityId);
+	}
+	async leaveDealTeam(opportunityId) {
+		if (typeof opportunityId !== "string" || opportunityId.trim().length === 0) throw new Error("An opportunity id is required to leave a deal team.");
+		return this.msx.leaveDealTeam(opportunityId);
 	}
 	listMilestones(opportunityId) {
 		return this.msx.listMilestones(opportunityId);
@@ -5785,7 +6317,8 @@ var reportPerformance = (event) => {
 	console.info(`[performance] ${JSON.stringify(event)}`);
 };
 var mcemConnector = new LocalPdfMcemGuidanceConnector(app.isPackaged ? resolve(process.resourcesPath, "docs/knowledge/MCEM Overview.pdf") : resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
-var liveMsxConnector = dataMode === "sample" ? void 0 : new LiveMsxConnector(tokenProvider, fetch, void 0, reportPerformance, msxWriteMetadataFromEnvironment(process.env));
+var portfolioPreferenceStore = new JsonFilePortfolioPreferenceStore(resolve(app.getPath("userData"), "portfolio-preferences.json"));
+var liveMsxConnector = dataMode === "sample" ? void 0 : new LiveMsxConnector(tokenProvider, fetch, void 0, reportPerformance, msxWriteMetadataFromEnvironment(process.env), portfolioPreferenceStore);
 var msxConnector = liveMsxConnector ?? new FixtureMsxConnector();
 var foundryOpenAIClient = runtimeEnvironment ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry) : void 0;
 var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object.fromEntries([
@@ -5834,11 +6367,22 @@ var configuredWorkflowHost = dataMode === "sample" ? void 0 : createLivePlayWork
 		if (!liveMsxConnector) throw new Error("Live Plays require the live MSX connection.");
 		return liveMsxConnector.getCurrentUserId();
 	},
+	resolveExcludedAccountIds: async () => {
+		if (!liveMsxConnector) return [];
+		return (await liveMsxConnector.listAccounts({ includeHidden: true })).filter((account) => account.visibility === "hidden").map((account) => account.id);
+	},
 	onStepError: (info) => {
 		console.error(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? "required" : "optional"} step failed: ${info.message}`);
 	}
 });
-var workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost();
+var workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost(async () => {
+	const accounts = await msxConnector.listAccounts();
+	const opportunities = (await Promise.all(accounts.map((account) => msxConnector.listOpportunities(account.id)))).flat();
+	return {
+		accountIds: accounts.map((account) => account.id),
+		opportunityIds: opportunities.map((opportunity) => opportunity.id)
+	};
+});
 async function getDataStatus() {
 	if (dataMode === "sample") return {
 		mode: "sample",
@@ -5876,9 +6420,21 @@ function registerIpc() {
 		assertTrustedSender(event);
 		return getDataStatus();
 	});
-	ipcMain.handle("tlc:list-accounts", (event) => {
+	ipcMain.handle("tlc:list-accounts", (event, options) => {
 		assertTrustedSender(event);
-		return orchestrator.listAccounts();
+		return orchestrator.listAccounts(accountListOptionsSchema.parse(options ?? {}));
+	});
+	ipcMain.handle("tlc:search-accounts", (event, request) => {
+		assertTrustedSender(event);
+		return orchestrator.searchAccounts(accountSearchRequestSchema.parse(request));
+	});
+	ipcMain.handle("tlc:add-account", (event, accountId) => {
+		assertTrustedSender(event);
+		return orchestrator.addAccount(z.string().min(1).max(200).parse(accountId));
+	});
+	ipcMain.handle("tlc:set-account-visibility", (event, accountId, visibility) => {
+		assertTrustedSender(event);
+		return orchestrator.setAccountVisibility(z.string().min(1).max(200).parse(accountId), accountVisibilitySchema.parse(visibility));
 	});
 	ipcMain.handle("tlc:connect-mcem", (event) => {
 		assertTrustedSender(event);
@@ -5895,6 +6451,10 @@ function registerIpc() {
 	ipcMain.handle("tlc:join-deal-team", (event, opportunityId) => {
 		assertTrustedSender(event);
 		return orchestrator.joinDealTeam(z.string().min(1).parse(opportunityId));
+	});
+	ipcMain.handle("tlc:leave-deal-team", (event, opportunityId) => {
+		assertTrustedSender(event);
+		return orchestrator.leaveDealTeam(z.string().min(1).max(200).parse(opportunityId));
 	});
 	ipcMain.handle("tlc:list-milestones", (event, opportunityId) => {
 		assertTrustedSender(event);
