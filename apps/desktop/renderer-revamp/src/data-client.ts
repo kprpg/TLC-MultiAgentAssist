@@ -40,15 +40,14 @@ import {
     type Milestone,
     type MilestoneUpdate,
     type Opportunity,
-    type OpportunityUpdate,
-    type SeDomainId
-} from '../../../../packages/common/index.js'
+    type OpportunityUpdate
+} from '../../../../packages/common/contracts/index.js'
+import type { SeDomainId } from '../../../../packages/common/configuration/se-domains.js'
 import {
     workflowRunViewSchema,
-    type StartWorkflowHostRequest,
-    type WorkflowHostOperation,
     type WorkflowRunView
-} from '../../../../packages/orchestrator/workflows/index.js'
+} from '../../../../packages/orchestrator/workflows/view-contracts.js'
+import type { StartWorkflowHostRequest, WorkflowHostOperation } from '../../../../packages/orchestrator/workflows/host.js'
 
 export interface RevampDataClient {
     readonly mode: 'desktop' | 'web-live' | 'web-sample'
