@@ -95,9 +95,8 @@ export async function createHostedWorkflowHostResolver(options: HostedRuntimeOpt
             entityMap,
             getAccessToken: async () => token.value,
             resolveCurrentUserId: () => msx.getCurrentUserId(),
-            resolveExcludedAccountIds: async () => (await msx.listAccounts({ includeHidden: true }))
-                .filter((candidate) => candidate.visibility === 'hidden')
-                .map((candidate) => candidate.id),
+            resolveExcludedAccountIds: async () =>
+                (await portfolioPreferenceStore.read(await msx.getCurrentUserId())).hiddenAccountIds,
             onStepError: (info) => {
                 console.error(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? 'required' : 'optional'} step failed: ${info.message}`)
             }
