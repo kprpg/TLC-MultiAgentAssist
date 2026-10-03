@@ -310,7 +310,7 @@ for (const theme of [
             for (const row of rows) if (row.id === message.params?.opportunityId) row.onDealTeam = onDealTeam
             result = { opportunityId: message.params?.opportunityId, onDealTeam, ...(onDealTeam ? { alreadyMember: false } : { alreadyAbsent: false }) }
           } else throw new Error(`Unexpected test request: ${message.method}`)
-          window.postMessage({ kind: 'response', id: message.id, ok: true, result }, '*')
+          window.postMessage({ kind: 'response', id: message.id, ok: true, result }, window.location.origin)
         }
       })
     })
