@@ -70,6 +70,7 @@ See the runbooks for complete prerequisites, build commands, startup modes, and 
 - [End-user frequently asked questions](docs/FAQ.md)
 - [Desktop setup and troubleshooting](docs/runbooks/desktop-app.md)
 - [Web setup and hosting](docs/runbooks/web-app.md)
+- [VS Code extension build, package, and deploy](docs/runbooks/vscode-extension.md)
 
 ## Development
 

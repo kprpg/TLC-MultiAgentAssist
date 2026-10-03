@@ -82,6 +82,22 @@ npm run --workspace apps/vscode-extension build
 npm run --workspace apps/vscode-extension package
 ```
 
+## Install into your editor
+
+To use the latest bits in your everyday VS Code / VS Code Insiders (instead of the F5
+Extension Development Host), build + package + install in one step from the repository
+root:
+
+```powershell
+npm run ext:reinstall:insiders   # VS Code Insiders
+npm run ext:reinstall            # stable VS Code (falls back to Insiders)
+```
+
+Then run **Developer: Reload Window**. The installed `.vsix` and the F5 dev host are
+independent — code edits only update the installed copy after you re-run one of these
+scripts. Full details, the manual steps, and troubleshooting are in the
+[VS Code extension runbook](../../docs/runbooks/vscode-extension.md).
+
 ## Security
 
 - Delegated-user access only; tokens never enter the webview.
