@@ -32,7 +32,10 @@ import {
   Warning20Filled
 } from '@fluentui/react-icons'
 import type { Account, AccountCandidate, AgentCapability, AgentTaskResponse, CustomerCommitment, DiscoverableOpportunity, McemResponse, Milestone, MilestoneStatus, MilestoneUpdate, Opportunity, ScopeRef, SeDomainId, WorkflowDefinition, WorkflowRun } from '../../../../packages/common/index.js'
-import { addMsxOpportunityLink, agentCapabilities, contractVersion, seDomainList } from '../../../../packages/common/index.js'
+import { contractVersion } from '../../../../packages/common/contracts/index.js'
+import { seDomainList } from '../../../../packages/common/configuration/se-domains.js'
+import { addMsxOpportunityLink } from '../../../../packages/common/sharing/opportunity-link.js'
+import { agentCapabilities } from '../../../../packages/common/types/agent-capabilities.js'
 import type { InitialWorkflowOutput } from '../../../../packages/orchestrator/workflows/index.js'
 import workflowDescriptions from '../../../../config/workflow-descriptions.json'
 import { createDataClient, stageOwner, type RevampDataClient } from './data-client.js'

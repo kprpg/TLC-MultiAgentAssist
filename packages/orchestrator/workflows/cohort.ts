@@ -6,7 +6,7 @@ import {
     workflowDefinitionSchema,
     workflowResultCardSchema,
     type WorkflowDefinition
-} from '../../common/index.js'
+} from '../../common/contracts/index.js'
 
 export const initialWorkflowIds = ['WF-001', 'WF-002', 'WF-003', 'WF-004', 'WF-005', 'WF-006', 'WF-007', 'WF-008', 'WF-009', 'WF-010', 'WF-011', 'WF-012'] as const
 export type InitialWorkflowId = typeof initialWorkflowIds[number]

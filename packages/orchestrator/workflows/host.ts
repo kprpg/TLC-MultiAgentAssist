@@ -9,10 +9,14 @@ import {
     type WorkflowGuidanceHandoff,
     type WorkflowDefinition,
     type WorkflowRun
-} from '../../common/index.js'
+} from '../../common/contracts/index.js'
 import { initialWorkflowOutputSchema } from './cohort.js'
 import { WorkflowRegistry } from './registry.js'
 import { WorkflowRuntime, WorkflowRuntimeError } from './runtime.js'
+import { workflowRunViewSchema, type WorkflowRunView } from './view-contracts.js'
+
+export { workflowRunViewSchema } from './view-contracts.js'
+export type { WorkflowRunView } from './view-contracts.js'
 
 const workflowIdSchema = z.string().regex(/^WF-[0-9]{3}$/)
 const runIdSchema = z.string().uuid()
@@ -46,16 +50,10 @@ export const listWorkflowRunsRequestSchema = z.object({
     limit: z.number().int().min(1).max(100).default(25)
 }).strict()
 
-export const workflowRunViewSchema = z.object({
-    run: workflowRunSchema,
-    output: initialWorkflowOutputSchema.optional()
-}).strict()
-
 export type ListWorkflowDefinitionsRequest = z.infer<typeof listWorkflowDefinitionsRequestSchema>
 export type StartWorkflowHostRequest = z.infer<typeof startWorkflowHostRequestSchema>
 export type WorkflowRunRequest = z.infer<typeof workflowRunRequestSchema>
 export type ListWorkflowRunsRequest = z.input<typeof listWorkflowRunsRequestSchema>
-export type WorkflowRunView = z.infer<typeof workflowRunViewSchema>
 export type WorkflowGuidanceRequest = z.infer<typeof workflowGuidanceRequestSchema>
 
 export const workflowHostOperationSchema = z.enum(['list', 'start', 'get', 'cancel', 'history', 'guidance'])
