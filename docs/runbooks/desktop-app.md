@@ -50,9 +50,10 @@ Edit `config/foundry.environment.json` with your own values:
 
 - `foundry.projectEndpoint`: copy the project endpoint from the Microsoft Foundry project overview. Its format is `https://<account>.services.ai.azure.com/api/projects/<project>`.
 - `foundry.agents`: set the deployed name, type, and invocation protocol for each of the four agents.
-- `authentication.appRegistration.tenantId`: your Microsoft Entra tenant ID.
-- `authentication.appRegistration.clientId`: the Application (client) ID of your public-client app registration.
-- `authentication.appRegistration.redirectUri`: a redirect URI configured under **Mobile and desktop applications**, normally `http://localhost`.
+- `authentication.appRegistration` (only when `authentication.mode` is `interactive-browser`; omit it for the default `azure-cli` mode, which signs in through the Azure CLI):
+  - `tenantId`: your Microsoft Entra tenant ID.
+  - `clientId`: the Application (client) ID of your public-client app registration.
+  - `redirectUri`: a redirect URI configured under **Mobile and desktop applications**, normally `http://localhost`.
 - `authentication.scopes`: resource scopes for Foundry, MSX, and Microsoft Graph. Outlook compose handoff uses the operating system mail handler and does not require a Graph mail scope.
 - `authentication.expectedUserDomain`: the domain allowed by the local identity check.
 

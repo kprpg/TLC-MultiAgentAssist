@@ -29,15 +29,16 @@ describe('runtime credentials', () => {
       scopes
     })
 
+    expect(AzureCliCredential).toHaveBeenCalledTimes(2)
     expect(AzureCliCredential).toHaveBeenNthCalledWith(1, { processTimeoutInMs: 30_000 })
     expect(AzureCliCredential).toHaveBeenNthCalledWith(2, {
       tenantId: '33333333-3333-4333-8333-333333333333',
       processTimeoutInMs: 30_000
     })
-    expect(AzureCliCredential).toHaveBeenNthCalledWith(3, { processTimeoutInMs: 30_000 })
+    expect(InteractiveBrowserCredential).not.toHaveBeenCalled()
   })
 
-  it('uses the public-client registration for Graph in Azure CLI mode when configured', () => {
+  it('ignores an app registration in Azure CLI mode and never creates an interactive credential', () => {
     createRuntimeCredentials({
       mode: 'azure-cli',
       expectedUserDomain: '@microsoft.com',
@@ -51,11 +52,7 @@ describe('runtime credentials', () => {
     })
 
     expect(AzureCliCredential).toHaveBeenCalledTimes(2)
-    expect(InteractiveBrowserCredential).toHaveBeenCalledWith({
-      tenantId: '11111111-1111-4111-8111-111111111111',
-      clientId: '22222222-2222-4222-8222-222222222222',
-      redirectUri: 'http://localhost'
-    })
+    expect(InteractiveBrowserCredential).not.toHaveBeenCalled()
   })
 
   it('uses separate home and Foundry tenants in interactive browser mode', () => {
@@ -71,14 +68,13 @@ describe('runtime credentials', () => {
       }
     })
 
+    expect(InteractiveBrowserCredential).toHaveBeenCalledTimes(2)
     expect(InteractiveBrowserCredential).toHaveBeenNthCalledWith(1, expect.objectContaining({
       tenantId: '11111111-1111-4111-8111-111111111111'
     }))
     expect(InteractiveBrowserCredential).toHaveBeenNthCalledWith(2, expect.objectContaining({
       tenantId: '33333333-3333-4333-8333-333333333333'
     }))
-    expect(InteractiveBrowserCredential).toHaveBeenNthCalledWith(3, expect.objectContaining({
-      tenantId: '11111111-1111-4111-8111-111111111111'
-    }))
+    expect(AzureCliCredential).not.toHaveBeenCalled()
   })
 })

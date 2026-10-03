@@ -5762,11 +5762,6 @@ function createRuntimeCredentials(authentication) {
 				tenantId: authentication.foundryTenantId,
 				clientId: appRegistration.clientId,
 				redirectUri: appRegistration.redirectUri
-			}),
-			graph: new InteractiveBrowserCredential({
-				tenantId: appRegistration.tenantId,
-				clientId: appRegistration.clientId,
-				redirectUri: appRegistration.redirectUri
 			})
 		};
 	}
@@ -5775,12 +5770,7 @@ function createRuntimeCredentials(authentication) {
 		foundry: new AzureCliCredential({
 			tenantId: authentication.foundryTenantId,
 			processTimeoutInMs: 3e4
-		}),
-		graph: authentication.appRegistration ? new InteractiveBrowserCredential({
-			tenantId: authentication.appRegistration.tenantId,
-			clientId: authentication.appRegistration.clientId,
-			redirectUri: authentication.appRegistration.redirectUri
-		}) : new AzureCliCredential({ processTimeoutInMs: 3e4 })
+		})
 	};
 }
 //#endregion
@@ -6302,8 +6292,7 @@ var authentication = runtimeEnvironment?.authentication;
 var fallbackCredential = new AzureCliCredential({ processTimeoutInMs: 3e4 });
 var credentials = authentication ? createRuntimeCredentials(authentication) : {
 	msx: fallbackCredential,
-	foundry: fallbackCredential,
-	graph: fallbackCredential
+	foundry: fallbackCredential
 };
 var tokenProvider = new AzureCliMsxTokenProvider({
 	credential: credentials.msx,

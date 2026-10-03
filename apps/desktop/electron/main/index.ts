@@ -76,7 +76,7 @@ const authentication = runtimeEnvironment?.authentication
 const fallbackCredential = new AzureCliCredential({ processTimeoutInMs: 30_000 })
 const credentials = authentication
   ? createRuntimeCredentials(authentication)
-  : { msx: fallbackCredential, foundry: fallbackCredential, graph: fallbackCredential }
+  : { msx: fallbackCredential, foundry: fallbackCredential }
 const tokenProvider = new AzureCliMsxTokenProvider({
   credential: credentials.msx,
   ...(authentication
