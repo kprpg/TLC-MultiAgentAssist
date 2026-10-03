@@ -1,15 +1,26 @@
 import { randomUUID } from 'node:crypto'
 import {
   addMsxOpportunityLink,
+  accountListOptionsSchema,
+  accountSearchRequestSchema,
+  accountVisibilitySchema,
   agentTaskRequestSchema,
   contractVersion,
   mcemStageTransitionRequestSchema,
   mcemStageTransitionResultSchema,
   mcemRequestSchema,
+  seDomainSchema,
   type Account,
+  type AccountCandidate,
+  type AccountListOptions,
+  type AccountSearchRequest,
+  type AccountVisibility,
   type AgentCapability,
   type AgentTaskRequest,
   type AgentTaskResponse,
+  type DealTeamJoinResult,
+  type DealTeamLeaveResult,
+  type DiscoverableOpportunity,
   type McemRequest,
   type McemResponse,
   type McemStageTransitionRequest,
@@ -18,6 +29,7 @@ import {
   type MilestoneUpdate,
   type Opportunity,
   type OpportunityUpdate,
+  type SeDomainId,
   measurePerformance,
   type PerformanceReporter
 } from '../common/index.js'
@@ -64,12 +76,48 @@ export class ThinSliceOrchestrator {
     private readonly performanceReporter?: PerformanceReporter
   ) { }
 
-  listAccounts(): Promise<Account[]> {
-    return this.msx.listAccounts()
+  listAccounts(options?: AccountListOptions): Promise<Account[]> {
+    return this.msx.listAccounts(accountListOptionsSchema.parse(options ?? {}))
+  }
+
+  searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]> {
+    return this.msx.searchAccounts(accountSearchRequestSchema.parse(request))
+  }
+
+  async addAccount(accountId: string): Promise<Account> {
+    if (typeof accountId !== 'string' || accountId.trim().length === 0) {
+      throw new Error('An account id is required.')
+    }
+    return this.msx.addAccount(accountId)
+  }
+
+  async setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account> {
+    if (typeof accountId !== 'string' || accountId.trim().length === 0) {
+      throw new Error('An account id is required.')
+    }
+    return this.msx.setAccountVisibility(accountId, accountVisibilitySchema.parse(visibility))
   }
 
   listOpportunities(accountId: string): Promise<Opportunity[]> {
     return this.msx.listOpportunities(accountId)
+  }
+
+  async discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]> {
+    return this.msx.discoverOpportunities(seDomainSchema.parse(domain))
+  }
+
+  async joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult> {
+    if (typeof opportunityId !== 'string' || opportunityId.trim().length === 0) {
+      throw new Error('An opportunity id is required to join a deal team.')
+    }
+    return this.msx.joinDealTeam(opportunityId)
+  }
+
+  async leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult> {
+    if (typeof opportunityId !== 'string' || opportunityId.trim().length === 0) {
+      throw new Error('An opportunity id is required to leave a deal team.')
+    }
+    return this.msx.leaveDealTeam(opportunityId)
   }
 
   listMilestones(opportunityId: string): Promise<Milestone[]> {

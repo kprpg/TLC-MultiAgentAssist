@@ -11,6 +11,8 @@ export type LivePlayWorkflowHostOptions =
     Omit<ConfiguredWorkflowHostOptions, 'resolveDelegatedScope' | 'maximumRows'> & {
         /** Returns the signed-in user's Dataverse systemuser id (WhoAmI `UserId`). */
         resolveCurrentUserId(): Promise<string>
+        /** Returns TLC-hidden account ids, which remain on the Deal Team but are excluded downstream. */
+        resolveExcludedAccountIds?(): Promise<readonly string[]>
         maximumRows?: number
     }
 
@@ -20,7 +22,8 @@ export type LivePlayWorkflowHostOptions =
  * the portfolio and injecting a large `IN (...)` predicate. The user id is resolved once and cached.
  */
 export function createDealTeamScopeResolver(
-    resolveCurrentUserId: () => Promise<string>
+    resolveCurrentUserId: () => Promise<string>,
+    resolveExcludedAccountIds: () => Promise<readonly string[]> = async () => []
 ): () => Promise<DataverseDelegatedScope> {
     let currentUserId: Promise<string> | undefined
     return async () => {
@@ -31,17 +34,18 @@ export function createDealTeamScopeResolver(
         return {
             currentUserId: await currentUserId,
             delegatedUserAccountIds: [],
-            delegatedUserOpportunityIds: []
+            delegatedUserOpportunityIds: [],
+            excludedAccountIds: await resolveExcludedAccountIds()
         }
     }
 }
 
 /** Shared live Play host for Desktop, Web, and the VS Code extension. */
 export function createLivePlayWorkflowHost(options: LivePlayWorkflowHostOptions): ConfiguredWorkflowHost {
-    const { resolveCurrentUserId, maximumRows, ...configured } = options
+    const { resolveCurrentUserId, resolveExcludedAccountIds, maximumRows, ...configured } = options
     return createConfiguredWorkflowHost({
         ...configured,
         maximumRows: maximumRows ?? LIVE_PLAY_ROW_LIMIT,
-        resolveDelegatedScope: createDealTeamScopeResolver(resolveCurrentUserId)
+        resolveDelegatedScope: createDealTeamScopeResolver(resolveCurrentUserId, resolveExcludedAccountIds)
     })
 }

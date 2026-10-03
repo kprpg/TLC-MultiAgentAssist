@@ -13,8 +13,20 @@ describe('live play workflow host', () => {
         expect(await resolve()).toEqual({
             currentUserId: '8a496494-f17e-e511-80e1-3863bb35ce00',
             delegatedUserAccountIds: [],
-            delegatedUserOpportunityIds: []
+            delegatedUserOpportunityIds: [],
+            excludedAccountIds: []
         })
+    })
+
+    it('refreshes TLC-hidden accounts for every play run', async () => {
+        const resolveHidden = vi.fn()
+            .mockResolvedValueOnce(['account-hidden'])
+            .mockResolvedValueOnce([])
+        const resolve = createDealTeamScopeResolver(async () => 'user-1', resolveHidden)
+
+        expect((await resolve()).excludedAccountIds).toEqual(['account-hidden'])
+        expect((await resolve()).excludedAccountIds).toEqual([])
+        expect(resolveHidden).toHaveBeenCalledTimes(2)
     })
 
     it('resolves the signed-in user id once across repeated play runs', async () => {

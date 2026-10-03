@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { milestoneUpdateSchema, opportunityUpdateSchema, scopeRefSchema } from '../../../packages/common/index.js'
+import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, milestoneUpdateSchema, opportunityUpdateSchema, scopeRefSchema, seDomainSchema } from '../../../packages/common/index.js'
 
 /**
  * Strict, discriminated message envelopes for the webview <-> extension-host bridge.
@@ -17,7 +17,13 @@ export const agentCapabilitySchema = z.enum([
 export const bridgeMethodSchema = z.enum([
     'getCurrentUserEmail',
     'listAccounts',
+    'searchAccounts',
+    'addAccount',
+    'setAccountVisibility',
     'listOpportunities',
+    'discoverOpportunities',
+    'joinDealTeam',
+    'leaveDealTeam',
     'listMilestones',
     'updateOpportunity',
     'updateMilestone',
@@ -41,8 +47,17 @@ const scopeKindSchema = z.enum(['portfolio', 'account', 'opportunity'])
 
 export const bridgeParamSchemas = {
     getCurrentUserEmail: z.void().optional(),
-    listAccounts: z.void().optional(),
+    listAccounts: accountListOptionsSchema.optional(),
+    searchAccounts: accountSearchRequestSchema,
+    addAccount: z.object({ accountId: z.string().min(1).max(200) }).strict(),
+    setAccountVisibility: z.object({
+        accountId: z.string().min(1).max(200),
+        visibility: accountVisibilitySchema
+    }).strict(),
     listOpportunities: z.object({ accountId: z.string().min(1).max(200) }).strict(),
+    discoverOpportunities: z.object({ domain: seDomainSchema }).strict(),
+    joinDealTeam: z.object({ opportunityId: z.string().min(1).max(200) }).strict(),
+    leaveDealTeam: z.object({ opportunityId: z.string().min(1).max(200) }).strict(),
     listMilestones: z.object({ opportunityId: z.string().min(1).max(200) }).strict(),
     updateOpportunity: z.object({
         opportunityId: z.string().min(1).max(200),

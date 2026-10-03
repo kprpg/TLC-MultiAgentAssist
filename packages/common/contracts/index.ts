@@ -1,7 +1,9 @@
 import { z } from 'zod'
 import { workflowAgentCapabilityValues } from './workflows.js'
+import { seDomainSchema } from '../configuration/se-domains.js'
 
 export * from './mcp.js'
+export * from './portfolio.js'
 export * from './workflows.js'
 
 export const contractVersion = '1.0' as const
@@ -34,12 +36,6 @@ export const authStatusSchema = z.object({
 export const desktopDataStatusSchema = z.object({
   mode: dataModeSchema,
   auth: authStatusSchema
-})
-
-export const accountSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  segment: z.string().min(1)
 })
 
 export const opportunitySchema = z.object({
@@ -89,6 +85,19 @@ export const milestoneUpdateSchema = z.object({
 
 export const opportunityUpdateSchema = z.object({
   comments: z.string().max(30_000)
+})
+
+/**
+ * An opportunity surfaced by SE-domain discovery. It extends the base
+ * opportunity with the domain it matched and whether the signed-in user is
+ * already on its deal team, so a client can present a one-click join action.
+ */
+export const discoverableOpportunitySchema = opportunitySchema.extend({
+  domain: seDomainSchema,
+  accountName: z.string().min(1).optional(),
+  solutionArea: z.string().min(1).optional(),
+  technicalCapability: z.string().min(1).optional(),
+  onDealTeam: z.boolean()
 })
 
 export const mcemStageTransitionRequestSchema = z.object({
@@ -227,8 +236,8 @@ export const feedbackSchema = z.object({
   comment: z.string().max(500).optional()
 })
 
-export type Account = z.infer<typeof accountSchema>
 export type Opportunity = z.infer<typeof opportunitySchema>
+export type DiscoverableOpportunity = z.infer<typeof discoverableOpportunitySchema>
 export type Milestone = z.infer<typeof milestoneSchema>
 export type MilestoneStatus = z.infer<typeof milestoneStatusSchema>
 export type CustomerCommitment = z.infer<typeof customerCommitmentSchema>

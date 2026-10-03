@@ -7,7 +7,18 @@ suite('TLC Assist extension', () => {
         assert.ok(extension, 'extension is installed in the development host')
         await extension.activate()
         const commands = await vscode.commands.getCommands(true)
-        for (const id of ['tlc.open', 'tlc.refresh', 'tlc.runPlay', 'tlc.openRun', 'tlc.showConnection', 'tlc.testLiveConnection']) {
+        for (const id of [
+            'tlc.open',
+            'tlc.refresh',
+            'tlc.addCustomer',
+            'tlc.toggleHiddenCustomers',
+            'tlc.hideCustomer',
+            'tlc.unhideCustomer',
+            'tlc.runPlay',
+            'tlc.openRun',
+            'tlc.showConnection',
+            'tlc.testLiveConnection'
+        ]) {
             assert.ok(commands.includes(id), `command ${id} is registered`)
         }
     })

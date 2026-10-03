@@ -41,4 +41,25 @@ describe('sample workflow host', () => {
         expect(view.run.state).toBe('complete')
         expect(initialWorkflowOutputSchema.parse(view.output).workflowId).toBe(workflowId)
     })
+
+    it('filters sample Play results to the current visible Deal Team working set', async () => {
+        const host = createSampleWorkflowHost(() => ({
+            accountIds: ['account-contoso'],
+            opportunityIds: ['opp-grid-modernization']
+        }))
+        const started = host.start({
+            contractVersion: '1.0',
+            workflowId: 'WF-001',
+            scope: { kind: 'portfolio' },
+            input: { asOf: '2026-09-13', staleAfterDays: 30 }
+        })
+
+        await vi.waitFor(() => {
+            expect(host.get({ contractVersion: '1.0', runId: started.runId }).run.status).toBe('completed')
+        })
+        const output = initialWorkflowOutputSchema.parse(host.get({ contractVersion: '1.0', runId: started.runId }).output)
+
+        expect(output.queueItems.every((item) => item.accountId === 'account-contoso')).toBe(true)
+        expect(output.queueItems.some((item) => item.accountId === 'account-fabrikam')).toBe(false)
+    })
 })

@@ -44,16 +44,26 @@ const sampleMsxRows = [
     { id: 'opp-ai-service', accountId: 'account-fabrikam', name: 'AI-assisted customer service', recordedStage: 2, value: 1_750_000, currency: 'USD', closeDate: '2026-12-18', forecastCategory: 'Best Case', probability: 65 }
 ]
 
-export function createSampleWorkflowHost(): SharedWorkflowHost {
+export type SamplePortfolioWorkingSet = {
+    accountIds: readonly string[]
+    opportunityIds: readonly string[]
+}
+
+export function createSampleWorkflowHost(
+    resolveWorkingSet?: () => SamplePortfolioWorkingSet | Promise<SamplePortfolioWorkingSet>
+): SharedWorkflowHost {
     const registry = new WorkflowRegistry(initialWorkflowDefinitions)
     const executor: WorkflowConnectorExecutor = {
         execute: async (step, context) => {
             const workflowId = context.workflowId as InitialWorkflowId
-            const data = step.connector === 'dataverse-mcp'
+            const unscopedData = step.connector === 'dataverse-mcp'
                 ? sampleRows[workflowId]
                 : step.operation === 'get_forecast_snapshot'
                     ? { currency: 'USD', committed: 4_200_000, bestCase: 1_750_000, target: 7_000_000, gap: -2_800_000 }
                     : sampleMsxRows
+            const data = Array.isArray(unscopedData) && resolveWorkingSet
+                ? filterToWorkingSet(unscopedData, await resolveWorkingSet())
+                : unscopedData
             const lineage: McpEvidenceLineage = {
                 connector: step.connector,
                 operation: step.operation,
@@ -71,4 +81,20 @@ export function createSampleWorkflowHost(): SharedWorkflowHost {
     return new SharedWorkflowHost(registry, new WorkflowRuntime(registry, executor, {
         resultAssembler: new InitialWorkflowResultAssembler()
     }))
+}
+
+function filterToWorkingSet(
+    rows: Array<Record<string, unknown>>,
+    scope: SamplePortfolioWorkingSet
+): Array<Record<string, unknown>> {
+    const accountIds = new Set(scope.accountIds)
+    const opportunityIds = new Set(scope.opportunityIds)
+    return rows.filter((row) => {
+        const opportunityId = typeof row['opportunityId'] === 'string'
+            ? row['opportunityId']
+            : typeof row['id'] === 'string' && row['id'].startsWith('opp-') ? row['id'] : undefined
+        if (opportunityId) return opportunityIds.has(opportunityId)
+        const accountId = typeof row['accountId'] === 'string' ? row['accountId'] : undefined
+        return accountId ? accountIds.has(accountId) : true
+    })
 }

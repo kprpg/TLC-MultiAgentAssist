@@ -108,6 +108,24 @@ describe('renderDataverseSql', () => {
         )
     })
 
+    it('excludes TLC-hidden accounts while preserving Deal Team scope', () => {
+        expect(renderDataverseSql(entityMap, query, {
+            ...delegatedScope,
+            currentUserId: '8a496494-f17e-e511-80e1-3863bb35ce00',
+            excludedAccountIds: ['account-hidden']
+        }, 50)).toBe(
+            "SELECT TOP 50 m.opportunityid, m.name FROM opportunity m JOIN msp_dealteam dt ON m.opportunityid = dt.msp_parentopportunityid WHERE dt.msp_dealteamuserid = '8a496494-f17e-e511-80e1-3863bb35ce00' AND dt.statecode = 0 AND m.estimatedclosedate <= '2026-12-31' AND m.parentaccountid NOT IN ('account-hidden') ORDER BY m.estimatedclosedate ASC"
+        )
+    })
+
+    it('rejects unsafe TLC-hidden account ids', () => {
+        expect(() => renderDataverseSql(entityMap, query, {
+            ...delegatedScope,
+            currentUserId: 'user-1',
+            excludedAccountIds: ["x') OR 1=1 --"]
+        }, 50)).toThrowError(expect.objectContaining({ code: 'scope_required' }))
+    })
+
     it('rejects an unsafe current user id in JOIN scope', () => {
         expect(() => renderDataverseSql(entityMap, query, { ...delegatedScope, currentUserId: "x' or '1'='1" }, 50))
             .toThrowError(expect.objectContaining({ code: 'scope_required' }))

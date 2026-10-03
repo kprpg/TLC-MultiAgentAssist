@@ -35,6 +35,14 @@ describe('vscode-extension message contracts', () => {
         expect(() => parseBridgeParams('listOpportunities', { accountId: 'a', hack: 1 })).toThrow()
     })
 
+    it('validates account curation and Deal Team removal messages', () => {
+        expect(parseBridgeParams('listAccounts', { includeHidden: true })).toEqual({ includeHidden: true })
+        expect(parseBridgeParams('searchAccounts', { query: 'Northwind', matchBy: 'name' })).toEqual({ query: 'Northwind', matchBy: 'name' })
+        expect(parseBridgeParams('addAccount', { accountId: 'account-northwind' })).toEqual({ accountId: 'account-northwind' })
+        expect(parseBridgeParams('setAccountVisibility', { accountId: 'account-northwind', visibility: 'hidden' })).toEqual({ accountId: 'account-northwind', visibility: 'hidden' })
+        expect(parseBridgeParams('leaveDealTeam', { opportunityId: 'opportunity-1' })).toEqual({ opportunityId: 'opportunity-1' })
+    })
+
     it('rejects an evidence url that is not a url', () => {
         expect(() => parseBridgeParams('openEvidence', { url: 'not a url' })).toThrow()
     })

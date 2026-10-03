@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, type AgentCapability } from '../../../packages/common/index.js'
 import { loadFoundryEnvironmentFromEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
 import { LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
+import { JsonFilePortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../packages/connectors/foundry/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
@@ -48,9 +49,12 @@ export async function createHostedRuntimeFactory(options: HostedRuntimeOptions =
     const guidance = new LocalPdfMcemGuidanceConnector(
         resolve(workingDirectory, environment['TLC_MCEM_GUIDANCE_PATH']?.trim() || 'docs/knowledge/MCEM Overview.pdf')
     )
+    const portfolioPreferenceStore = new JsonFilePortfolioPreferenceStore(
+        resolve(workingDirectory, environment['TLC_PORTFOLIO_PREFERENCES_PATH']?.trim() || '.tlc/portfolio-preferences.json')
+    )
 
     return ({ accessToken }: AuthenticatedRequest): WebRuntime => {
-        const msx = new LiveMsxConnector({ getAccessToken: async () => accessToken }, fetch, undefined, undefined, msxWriteMetadataFromEnvironment(environment))
+        const msx = new LiveMsxConnector({ getAccessToken: async () => accessToken }, fetch, undefined, undefined, msxWriteMetadataFromEnvironment(environment), portfolioPreferenceStore)
         return new ThinSliceOrchestrator(msx, guidance, taskAgents)
     }
 }
@@ -63,6 +67,9 @@ export async function createHostedWorkflowHostResolver(options: HostedRuntimeOpt
         loadMcpToolPolicy(resolve(workingDirectory, 'config/mcp.tool-policy.json')),
         loadDataverseEntityMap(resolve(workingDirectory, 'config/dataverse.entity-map.json'))
     ])
+    const portfolioPreferenceStore = new JsonFilePortfolioPreferenceStore(
+        resolve(workingDirectory, environment['TLC_PORTFOLIO_PREFERENCES_PATH']?.trim() || '.tlc/portfolio-preferences.json')
+    )
     const hosts = new Map<string, {
         host: WorkflowHost
         dispose(): Promise<void>
@@ -81,13 +88,15 @@ export async function createHostedWorkflowHostResolver(options: HostedRuntimeOpt
 
         await evictOldestWorkflowHost(hosts)
         const token = { value: authentication.accessToken }
-        const msx = new LiveMsxConnector({ getAccessToken: async () => token.value }, fetch, undefined, undefined, msxWriteMetadataFromEnvironment(environment))
+        const msx = new LiveMsxConnector({ getAccessToken: async () => token.value }, fetch, undefined, undefined, msxWriteMetadataFromEnvironment(environment), portfolioPreferenceStore)
         const configured = createLivePlayWorkflowHost({
             registry,
             policy,
             entityMap,
             getAccessToken: async () => token.value,
             resolveCurrentUserId: () => msx.getCurrentUserId(),
+            resolveExcludedAccountIds: async () =>
+                (await portfolioPreferenceStore.read(await msx.getCurrentUserId())).hiddenAccountIds,
             onStepError: (info) => {
                 console.error(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? 'required' : 'optional'} step failed: ${info.message}`)
             }

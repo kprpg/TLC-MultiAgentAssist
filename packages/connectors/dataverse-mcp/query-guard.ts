@@ -11,6 +11,8 @@ export type DataverseDelegatedScope = {
     delegatedUserOpportunityIds: readonly string[]
     // When set, Dataverse reads scope via a JOIN to msp_dealteam on this user's deal-team opportunities.
     currentUserId?: string
+    // TLC-hidden accounts remain in MSX Deal Teams but must not enter Plays or downstream analysis.
+    excludedAccountIds?: readonly string[]
 }
 
 // Each scopable entity's TDS column referencing the opportunity, for the msp_dealteam scope JOIN.
@@ -203,6 +205,14 @@ export function renderDataverseSql(
             throw new DataverseQueryGuardError('scope_required', 'The delegated user id is missing or invalid.')
         }
         whereClauses.unshift(`dt.msp_dealteamuserid = '${userId}'`, 'dt.statecode = 0')
+        const excludedAccountIds = [...new Set(delegatedScope.excludedAccountIds ?? [])]
+        if (excludedAccountIds.some((accountId) => !isSafeIdentifier(accountId))) {
+            throw new DataverseQueryGuardError('scope_required', 'An excluded TLC account id is invalid.')
+        }
+        if (excludedAccountIds.length > 0) {
+            const ids = excludedAccountIds.map((accountId) => `'${accountId}'`).join(', ')
+            whereClauses.push(`${toSqlColumn(entity.logicalName) === 'opportunity' ? 'm' : 'scopeop'}.parentaccountid NOT IN (${ids})`)
+        }
     } else if (options.enforceScope !== false && entity.userScopePredicate !== undefined) {
         whereClauses.push(renderSqlScopePredicate(entity.userScopePredicate, delegatedScope))
     }
@@ -210,6 +220,9 @@ export function renderDataverseSql(
 
     let sql = `SELECT TOP ${top} ${selectColumns.join(', ')} FROM ${toSqlColumn(entity.logicalName)}`
     if (useJoinScope) sql += ` m JOIN msp_dealteam dt ON m.${dealTeamColumn} = dt.msp_parentopportunityid`
+    if (useJoinScope && (delegatedScope.excludedAccountIds?.length ?? 0) > 0 && toSqlColumn(entity.logicalName) !== 'opportunity') {
+        sql += ` JOIN opportunity scopeop ON m.${dealTeamColumn} = scopeop.opportunityid`
+    }
     if (whereClauses.length > 0) sql += ` WHERE ${whereClauses.join(' AND ')}`
     if (orderBy.length > 0) sql += ` ORDER BY ${orderBy.join(', ')}`
     return sql

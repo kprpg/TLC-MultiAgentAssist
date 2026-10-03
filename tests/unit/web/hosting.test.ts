@@ -39,14 +39,14 @@ describe('hosted web static files', () => {
         expect(response.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
     })
 
-    it('leaves the live marker out in sample mode', async () => {
+    it('marks hosted sample mode so the browser uses the shared sample API runtime', async () => {
         const baseUrl = await listen('sample')
 
         const response = await fetch(baseUrl)
         const body = await response.text()
 
         expect(response.status).toBe(200)
-        expect(body).not.toContain('name="tlc-data-mode"')
+        expect(body).toContain('<meta name="tlc-data-mode" content="sample" />')
     })
 
     async function listen(dataMode: 'live' | 'sample' = 'live'): Promise<string> {

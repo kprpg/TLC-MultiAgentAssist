@@ -279,4 +279,26 @@ describe('MCEM Coach thin slice', () => {
       '**Recorded / evidence-based stage:** 3 / 2'
     ])
   })
+
+  it('discovers domain opportunities and joins a deal team through the orchestrator', async () => {
+    const orchestrator = new ThinSliceOrchestrator(new FixtureMsxConnector(), mcemConnector())
+
+    const infra = await orchestrator.discoverOpportunities('infra')
+    expect(infra.length).toBeGreaterThan(0)
+    expect(infra.every((item) => item.domain === 'infra')).toBe(true)
+
+    const target = infra[0]!
+    const join = await orchestrator.joinDealTeam(target.id)
+    expect(join).toEqual({ opportunityId: target.id, onDealTeam: true, alreadyMember: false })
+
+    const portfolio = await orchestrator.listOpportunities(target.accountId)
+    expect(portfolio.some((item) => item.id === target.id)).toBe(true)
+  })
+
+  it('rejects an unknown discovery domain and a blank deal-team id', async () => {
+    const orchestrator = new ThinSliceOrchestrator(new FixtureMsxConnector(), mcemConnector())
+
+    await expect(orchestrator.discoverOpportunities('marketing' as never)).rejects.toThrow()
+    await expect(orchestrator.joinDealTeam('  ')).rejects.toThrow('opportunity id is required')
+  })
 })

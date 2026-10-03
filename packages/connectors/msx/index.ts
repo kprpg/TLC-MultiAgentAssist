@@ -1,4 +1,19 @@
-import type { Account, Milestone, MilestoneUpdate, Opportunity, OpportunityUpdate } from '../../common/index.js'
+import {
+  accountSearchRequestSchema,
+  type Account,
+  type AccountCandidate,
+  type AccountListOptions,
+  type AccountSearchRequest,
+  type AccountVisibility,
+  type DealTeamJoinResult,
+  type DealTeamLeaveResult,
+  type DiscoverableOpportunity,
+  type Milestone,
+  type MilestoneUpdate,
+  type Opportunity,
+  type OpportunityUpdate,
+  type SeDomainId
+} from '../../common/index.js'
 import type { MsxConnector, OpportunityContext } from '../common/index.js'
 
 export {
@@ -10,8 +25,9 @@ export {
 } from './live.js'
 
 const accounts: Account[] = [
-  { id: 'account-contoso', name: 'Contoso Energy', segment: 'Strategic' },
-  { id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise' }
+  { id: 'account-contoso', name: 'Contoso Energy', segment: 'Strategic', tpid: '1000001' },
+  { id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise', tpid: '1000002' },
+  { id: 'account-northwind', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003' }
 ]
 
 const opportunities: Opportunity[] = [
@@ -223,23 +239,250 @@ const observationsByOpportunity: Record<string, OpportunityContext['observations
   ]
 }
 
+const discoverableOpportunities: DiscoverableOpportunity[] = [
+  {
+    id: 'opp-discover-hybrid-networking',
+    accountId: 'account-contoso',
+    accountName: 'Contoso Energy',
+    name: 'Hybrid networking modernization',
+    recordedStage: 2,
+    value: 1850000,
+    currency: 'USD',
+    closeDate: '2027-02-12',
+    domain: 'infra',
+    solutionArea: 'Cloud and AI Platforms',
+    technicalCapability: 'Advanced Networking',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-vmware-migration',
+    accountId: 'account-fabrikam',
+    accountName: 'Fabrikam Retail',
+    name: 'Datacenter exit to Azure VMware Solution',
+    recordedStage: 1,
+    value: 2950000,
+    currency: 'USD',
+    closeDate: '2027-04-02',
+    domain: 'infra',
+    solutionArea: 'Cloud and AI Platforms',
+    technicalCapability: 'Azure VMware Solutions',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-synapse-analytics',
+    accountId: 'account-contoso',
+    accountName: 'Contoso Energy',
+    name: 'Enterprise analytics on Synapse and Power BI',
+    recordedStage: 2,
+    value: 2100000,
+    currency: 'USD',
+    closeDate: '2027-01-22',
+    domain: 'data',
+    solutionArea: 'Cloud and AI Platforms',
+    technicalCapability: 'New Analytics with Synapse & PowerBI',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-sql-managed-instance',
+    accountId: 'account-fabrikam',
+    accountName: 'Fabrikam Retail',
+    name: 'SQL Server migration to Azure SQL MI',
+    recordedStage: 3,
+    value: 1650000,
+    currency: 'USD',
+    closeDate: '2026-12-19',
+    domain: 'data',
+    solutionArea: 'Cloud and AI Platforms',
+    technicalCapability: 'SQL Server Migration to Azure SQL MI',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-azure-ai-ml',
+    accountId: 'account-contoso',
+    accountName: 'Contoso Energy',
+    name: 'Azure AI and ML platform adoption',
+    recordedStage: 2,
+    value: 3400000,
+    currency: 'USD',
+    closeDate: '2027-02-05',
+    domain: 'ai-apps',
+    solutionArea: 'Cloud and AI Platforms',
+    technicalCapability: 'Azure AI and ML',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-cloud-native-apps',
+    accountId: 'account-fabrikam',
+    accountName: 'Fabrikam Retail',
+    name: 'Cloud-native apps on AKS and Cosmos DB',
+    recordedStage: 1,
+    value: 2750000,
+    currency: 'USD',
+    closeDate: '2027-03-27',
+    domain: 'ai-apps',
+    solutionArea: 'Cloud and AI Platforms',
+    technicalCapability: 'Modernize/New Cloud Native Apps with AKS and Azure Cosmos/Postgres DB',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-zero-trust',
+    accountId: 'account-contoso',
+    accountName: 'Contoso Energy',
+    name: 'Zero Trust security modernization',
+    recordedStage: 2,
+    value: 2200000,
+    currency: 'USD',
+    closeDate: '2027-02-18',
+    domain: 'security',
+    solutionArea: 'Security',
+    technicalCapability: 'Threat Protection',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-teams-calling',
+    accountId: 'account-fabrikam',
+    accountName: 'Fabrikam Retail',
+    name: 'Teams Phone and calling rollout',
+    recordedStage: 1,
+    value: 980000,
+    currency: 'USD',
+    closeDate: '2027-03-05',
+    domain: 'modern-work',
+    technicalCapability: 'Calling',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-d365-customer-service',
+    accountId: 'account-fabrikam',
+    accountName: 'Fabrikam Retail',
+    name: 'Dynamics 365 Customer Service transformation',
+    recordedStage: 2,
+    value: 1750000,
+    currency: 'USD',
+    closeDate: '2027-01-28',
+    domain: 'biz-apps',
+    solutionArea: 'AI Business Solutions',
+    technicalCapability: 'Customer Service',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-surface-deployment',
+    accountId: 'account-contoso',
+    accountName: 'Contoso Energy',
+    name: 'Surface device deployment and management',
+    recordedStage: 1,
+    value: 640000,
+    currency: 'USD',
+    closeDate: '2027-04-15',
+    domain: 'devices',
+    solutionArea: 'Windows and Devices',
+    technicalCapability: 'Surface & Partner Devices',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-cloud-advisory',
+    accountId: 'account-contoso',
+    accountName: 'Contoso Energy',
+    name: 'Cloud advisory and adoption services',
+    recordedStage: 2,
+    value: 850000,
+    currency: 'USD',
+    closeDate: '2027-02-22',
+    domain: 'services',
+    solutionArea: 'Microsoft Services',
+    technicalCapability: 'Advisory Services',
+    onDealTeam: false
+  },
+  {
+    id: 'opp-discover-northwind-data',
+    accountId: 'account-northwind',
+    accountName: 'Northwind Health',
+    name: 'Clinical data platform modernization',
+    recordedStage: 1,
+    value: 2100000,
+    currency: 'USD',
+    closeDate: '2027-05-20',
+    domain: 'data',
+    solutionArea: 'Cloud and AI Platforms',
+    technicalCapability: 'Analytics',
+    onDealTeam: false
+  }
+]
+
 export class FixtureMsxConnector implements MsxConnector {
   private readonly opportunities = structuredClone(opportunities)
   private readonly milestonesByOpportunity = structuredClone(milestonesByOpportunity)
+  private readonly discoverable = structuredClone(discoverableOpportunities)
+  private readonly dealTeamOpportunityIds = new Set(this.opportunities.map((opportunity) => opportunity.id))
+  private readonly manualAccountIds = new Set<string>()
+  private readonly hiddenAccountIds = new Set<string>()
 
-  async listAccounts(): Promise<Account[]> {
-    return structuredClone(accounts)
+  async listAccounts(options: AccountListOptions = {}): Promise<Account[]> {
+    const dealTeamAccountIds = new Set(
+      this.opportunities
+        .filter((opportunity) => this.dealTeamOpportunityIds.has(opportunity.id))
+        .map((opportunity) => opportunity.accountId)
+    )
+    return accounts
+      .filter((account) => dealTeamAccountIds.has(account.id) || this.manualAccountIds.has(account.id) || this.hiddenAccountIds.has(account.id))
+      .map((account) => this.mapAccount(account, dealTeamAccountIds))
+      .filter((account) => options.includeHidden || account.visibility !== 'hidden')
+      .map((account) => structuredClone(account))
+  }
+
+  async searchAccounts(input: AccountSearchRequest): Promise<AccountCandidate[]> {
+    const request = accountSearchRequestSchema.parse(input)
+    const query = request.query.toLocaleLowerCase()
+    const visibleAccounts = await this.listAccounts({ includeHidden: true })
+    const visibleById = new Map(visibleAccounts.map((account) => [account.id, account]))
+    return accounts
+      .filter((account) => request.matchBy === 'name'
+        ? account.name.toLocaleLowerCase().includes(query)
+        : account.tpid === request.query)
+      .map((account) => {
+        const existing = visibleById.get(account.id)
+        return {
+          ...(existing ?? account),
+          state: existing?.visibility === 'hidden' ? 'hidden' as const : existing ? 'visible' as const : 'not-added' as const
+        }
+      })
+  }
+
+  async addAccount(accountId: string): Promise<Account> {
+    const account = accounts.find((candidate) => candidate.id === accountId)
+    if (!account) throw new Error(`Unknown sample account: ${accountId}`)
+    this.manualAccountIds.add(accountId)
+    const added = (await this.listAccounts({ includeHidden: true })).find((candidate) => candidate.id === accountId)
+    if (!added) throw new Error('The sample account could not be added.')
+    return added
+  }
+
+  async setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account> {
+    const account = accounts.find((candidate) => candidate.id === accountId)
+    if (!account) throw new Error(`Unknown sample account: ${accountId}`)
+    if (visibility === 'hidden') this.hiddenAccountIds.add(accountId)
+    else this.hiddenAccountIds.delete(accountId)
+    const dealTeamAccountIds = new Set(
+      this.opportunities
+        .filter((opportunity) => this.dealTeamOpportunityIds.has(opportunity.id))
+        .map((opportunity) => opportunity.accountId)
+    )
+    return structuredClone(this.mapAccount(account, dealTeamAccountIds))
   }
 
   async listOpportunities(accountId: string): Promise<Opportunity[]> {
-    return structuredClone(this.opportunities.filter((opportunity) => opportunity.accountId === accountId))
+    if (this.hiddenAccountIds.has(accountId)) return []
+    return structuredClone(this.opportunities.filter((opportunity) =>
+      opportunity.accountId === accountId && this.dealTeamOpportunityIds.has(opportunity.id)))
   }
 
   async listMilestones(opportunityId: string): Promise<Milestone[]> {
+    this.assertOpportunityAccess(opportunityId)
     return structuredClone(this.milestonesByOpportunity[opportunityId] ?? [])
   }
 
   async updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone> {
+    this.assertOpportunityAccess(opportunityId)
     const milestone = this.milestonesByOpportunity[opportunityId]?.find((candidate) => candidate.id === milestoneId)
     if (!milestone) throw new Error(`Unknown sample milestone: ${milestoneId}`)
     if (update.status !== undefined) milestone.status = update.status
@@ -251,6 +494,7 @@ export class FixtureMsxConnector implements MsxConnector {
   }
 
   async updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity> {
+    this.assertOpportunityAccess(opportunityId)
     const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId)
     if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`)
     opportunity.comments = update.comments
@@ -258,6 +502,7 @@ export class FixtureMsxConnector implements MsxConnector {
   }
 
   async updateOpportunityStage(opportunityId: string, targetStage: number, auditNote: string): Promise<Opportunity> {
+    this.assertOpportunityAccess(opportunityId)
     const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId)
     if (!opportunity) throw new Error(`Unknown sample opportunity: ${opportunityId}`)
     opportunity.recordedStage = targetStage
@@ -266,6 +511,7 @@ export class FixtureMsxConnector implements MsxConnector {
   }
 
   async getOpportunityContext(opportunityId: string): Promise<OpportunityContext> {
+    this.assertOpportunityAccess(opportunityId)
     const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId)
     if (!opportunity) {
       throw new Error(`Unknown sample opportunity: ${opportunityId}`)
@@ -288,6 +534,58 @@ export class FixtureMsxConnector implements MsxConnector {
         detail: 'Sanitized fixture data; no live MSX call was made.',
         checkedAt: now
       }
+    }
+  }
+
+  async discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]> {
+    const visibleAccountIds = new Set((await this.listAccounts()).map((account) => account.id))
+    return this.discoverable
+      .filter((opportunity) => opportunity.domain === domain && visibleAccountIds.has(opportunity.accountId))
+      .map((opportunity) => structuredClone({
+        ...opportunity,
+        onDealTeam: this.dealTeamOpportunityIds.has(opportunity.id)
+      }))
+  }
+
+  async joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult> {
+    const seed = this.discoverable.find((candidate) => candidate.id === opportunityId)
+    if (!seed) throw new Error(`Unknown sample opportunity: ${opportunityId}`)
+    const alreadyMember = this.dealTeamOpportunityIds.has(opportunityId)
+    if (!alreadyMember) {
+      this.dealTeamOpportunityIds.add(opportunityId)
+      const { domain, accountName, solutionArea, technicalCapability, onDealTeam, ...opportunity } = seed
+      void domain
+      void accountName
+      void solutionArea
+      void technicalCapability
+      void onDealTeam
+      if (!this.opportunities.some((candidate) => candidate.id === opportunityId)) {
+        this.opportunities.push(structuredClone(opportunity))
+      }
+    }
+    return { opportunityId, onDealTeam: true, alreadyMember }
+  }
+
+  async leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult> {
+    const alreadyAbsent = !this.dealTeamOpportunityIds.has(opportunityId)
+    this.dealTeamOpportunityIds.delete(opportunityId)
+    return { opportunityId, onDealTeam: false, alreadyAbsent }
+  }
+
+  private assertOpportunityAccess(opportunityId: string): void {
+    const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId)
+    if (!opportunity || !this.dealTeamOpportunityIds.has(opportunityId) || this.hiddenAccountIds.has(opportunity.accountId)) {
+      throw new Error('The opportunity is not in the active sample portfolio.')
+    }
+  }
+
+  private mapAccount(account: Account, dealTeamAccountIds: ReadonlySet<string>): Account {
+    const manual = this.manualAccountIds.has(account.id)
+    const dealTeam = dealTeamAccountIds.has(account.id)
+    return {
+      ...account,
+      provenance: manual && dealTeam ? 'both' : manual ? 'manual' : 'deal-team',
+      visibility: this.hiddenAccountIds.has(account.id) ? 'hidden' : 'visible'
     }
   }
 }

@@ -94,13 +94,50 @@ Every blade has a collapse arrow in its header so you can widen the center workb
 
 ---
 
-## 3. Accounts blade — selecting an account
+## 3. Accounts blade — curating and selecting accounts
 
-The **Accounts** blade lists every customer account on which you are on the deal team. Each row shows the account name and its segment (Strategic, Enterprise, and so on).
+The **Accounts** blade initially lists the customer accounts associated with opportunities where you are currently a Deal Team member. Each row shows the account name, segment (Strategic, Enterprise, and so on), and whether the account came from Deal Team membership, manual addition, or both.
 
 Select an account either from the left blade or from the large hero cards in the center. The Opportunities blade slides in next to it, scoped to that account.
 
 ![After selecting Contoso Energy — the Opportunities blade appears with the active book of work](./media/02-account-opportunities.png)
+
+### 3.1 Adding an account by name or TPID
+
+Select **Add customer** in the Accounts blade header, choose **Account name** or **TPID**, search, and then select **Add account**. A manually added account appears immediately even when it has no Deal Team opportunities.
+
+Adding an account does **not** add all of its opportunities to your Portfolio. Open **Discover opportunities**, choose the appropriate Solution Engineer domain, and use **Add me** or **Remove me** to maintain your actual opportunity-level Deal Team memberships.
+
+The resulting working set is:
+
+- visible accounts from Deal Team membership plus manually added accounts;
+- active opportunities where you are a current Deal Team member;
+- milestones loaded only after you select an eligible opportunity.
+
+Portfolio Plays, agents, milestones, and other downstream analysis use only that Deal Team opportunity working set. A manually added account with no Deal Team opportunities remains as an empty account node so you can return to Discovery later.
+
+### 3.2 Hiding and unhiding an account
+
+Select **Hide** beside an account to exclude that customer and its opportunities, milestones, Plays, agents, and downstream analysis from TLC Assist. Hiding is a TLC preference and does not remove any MSX Deal Team membership.
+
+Select **Show hidden customers** in the Accounts blade header to display hidden rows, then select **Unhide** to restore an account and its eligible Deal Team opportunities.
+
+Across the desktop, web, and VS Code UIs, action labels and toggle controls such as **Hide**, **Unhide**, sorting, filtering, and **Comments** use the theme's accent/link color (blue in the default themes) to distinguish them from customer and opportunity data. Removal actions such as **Remove me** use red, while disabled controls are muted. Hover and keyboard-focus indicators identify clickable controls without changing their behavior.
+
+In the VS Code webview Portfolio, category and section headings — for example **Accounts**, **Opportunities**, **Milestones**, and **Next Best Actions**, plus panel eyebrows such as **ROLE BASED** and **MCEM Coach** — use a distinct teal heading color. This keeps the structural labels visually separate from both the customer/opportunity data (default text) and the blue interactive controls.
+
+In VS Code's native Portfolio toolbar, **TLC: Refresh Data**, **TLC: Add Customer Account**, and **TLC: Toggle Hidden Customers** use blue icons. Inline **Hide/Unhide Customer** actions also use blue eye icons. In this workspace, native hover text uses a high-contrast blue-on-dark palette; TLC webview popups use the same palette with semibold text. VS Code continues to control the native tooltip font, and customer and opportunity tree labels remain data text.
+
+### 3.3 Filtering and sorting Discovery
+
+The Discovery panel provides the same customer filters and column sorting in the desktop app, web app, and VS Code extension:
+
+- Select **Customers equals all** or **Add filter** to open the customer filter. Choose **equals (include)** to show only selected customers, or **does not equal (exclude)** to leave selected customers out. Search the customer list, select one or more checkboxes, and select **Apply**.
+- An include filter matches any selected customer. You can combine it with an exclude filter; excluded customers stay out even if they are also included.
+- Select an applied filter chip to edit it, its **x** to remove it, or **Clear filters** to restore all customers in the current domain. The result count shows how many opportunities match.
+- Select the **Account**, **Stage**, or **Action** column heading to sort ascending; select it again to sort descending. Account uses alphabetical order, Stage uses numeric order, and Action puts **Add me** before **Remove me / On deal team** in ascending order. The arrow indicates the active direction.
+
+Filters and sorting remain applied when you change Solution Engineer domains. In the desktop and web apps, they also remain applied when you select **Refresh**. If no opportunities match, clear or edit the customer filters. These are view-only controls: they do not hide accounts elsewhere, change Deal Team membership, or alter the Portfolio and Plays working set.
 
 ---
 

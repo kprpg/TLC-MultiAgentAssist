@@ -7,6 +7,25 @@ import { unified } from 'unified'
 const maxComposeUriLength = 16_000
 const mimeBoundary = '----tlc-agent-response-boundary'
 
+export interface EmailDraftHost {
+  writeFile(path: string, data: string, encoding: 'utf8'): Promise<void>
+  openPath(path: string): Promise<string>
+  openExternal(url: string): Promise<void>
+}
+
+export async function openOutlookDraft(request: EmailComposeRequest, draftPath: string, host: EmailDraftHost): Promise<void> {
+  await host.writeFile(draftPath, createOutlookDraftMessage(request), 'utf8')
+  const openError = await host.openPath(draftPath)
+  if (!openError) return
+
+  try {
+    await host.openExternal(createOutlookComposeUri(request))
+  } catch (fallbackError) {
+    const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+    throw new Error(`The email draft could not be opened: ${openError}. The default mail fallback also failed: ${fallbackMessage}`)
+  }
+}
+
 export function createOutlookDraftMessage(request: EmailComposeRequest): string {
   const textBody = markdownToEmailText(request.responseMarkdown)
   const htmlBody = markdownToEmailHtml(request.responseMarkdown)

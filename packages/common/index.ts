@@ -1,5 +1,6 @@
 export * from './contracts/index.js'
 export * from './configuration/dataverse-entity-map.js'
+export * from './configuration/se-domains.js'
 export * from './configuration/mcp-servers.js'
 export * from './configuration/mcp-tool-policy.js'
 export * from './configuration/workflow-descriptions.js'

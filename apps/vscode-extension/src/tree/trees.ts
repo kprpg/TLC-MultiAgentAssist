@@ -34,17 +34,19 @@ export class ConnectionTreeProvider extends RefreshEmitter implements vscode.Tre
     }
 }
 
-class PortfolioNode extends vscode.TreeItem {
+export class PortfolioNode extends vscode.TreeItem {
     constructor(
-        readonly kind: 'account' | 'opportunity',
+        readonly kind: 'account' | 'opportunity' | 'empty',
         readonly recordId: string,
         label: string,
         collapsibleState: vscode.TreeItemCollapsibleState,
-        readonly accountId?: string
+        readonly accountId?: string,
+        readonly hidden = false
     ) {
         super(label, collapsibleState)
-        this.contextValue = kind
-        this.iconPath = new vscode.ThemeIcon(kind === 'account' ? 'organization' : 'target')
+        this.contextValue = kind === 'account' ? (hidden ? 'accountHidden' : 'accountVisible') : kind
+        this.iconPath = new vscode.ThemeIcon(kind === 'account' ? (hidden ? 'eye-closed' : 'organization') : kind === 'empty' ? 'info' : 'target')
+        if (hidden) this.description = 'Hidden'
         if (kind === 'opportunity') {
             this.command = {
                 command: 'tlc.open',
@@ -58,8 +60,15 @@ class PortfolioNode extends vscode.TreeItem {
 /** Portfolio view: lazy Accounts -> Opportunities navigation. */
 export class PortfolioTreeProvider extends RefreshEmitter implements vscode.TreeDataProvider<PortfolioNode>, Refreshable {
     private readonly opportunityCache = new Map<string, PortfolioNode[]>()
+    private showHidden = false
 
     constructor(private readonly provider: () => ExtensionDataProvider) { super() }
+
+    toggleHidden(): boolean {
+        this.showHidden = !this.showHidden
+        this.refresh()
+        return this.showHidden
+    }
 
     override refresh(): void {
         this.opportunityCache.clear()
@@ -71,14 +80,25 @@ export class PortfolioTreeProvider extends RefreshEmitter implements vscode.Tree
     async getChildren(element?: PortfolioNode): Promise<PortfolioNode[]> {
         const provider = this.provider()
         if (!element) {
-            const accounts = await provider.listAccounts()
-            return accounts.map((account) => new PortfolioNode('account', account.id, account.name, vscode.TreeItemCollapsibleState.Collapsed))
+            const accounts = await provider.listAccounts({ includeHidden: this.showHidden })
+            return accounts.map((account) => new PortfolioNode(
+                'account',
+                account.id,
+                account.name,
+                account.visibility === 'hidden' ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Collapsed,
+                undefined,
+                account.visibility === 'hidden'
+            ))
         }
         if (element.kind === 'account') {
+            if (element.hidden) return []
             const cached = this.opportunityCache.get(element.recordId)
             if (cached) return cached
             const opportunities = await provider.listOpportunities(element.recordId)
             const nodes = opportunities.map((opportunity) => new PortfolioNode('opportunity', opportunity.id, opportunity.name, vscode.TreeItemCollapsibleState.None, element.recordId))
+            if (nodes.length === 0) {
+                nodes.push(new PortfolioNode('empty', `${element.recordId}:empty`, 'No Deal Team opportunities - use Discovery', vscode.TreeItemCollapsibleState.None, element.recordId))
+            }
             this.opportunityCache.set(element.recordId, nodes)
             return nodes
         }
@@ -97,7 +117,7 @@ class PlaysNode extends vscode.TreeItem {
         super(label, collapsibleState)
         this.contextValue = kind
         if (kind === 'play' && workflowId) {
-            this.iconPath = new vscode.ThemeIcon('play-circle')
+            this.iconPath = new vscode.ThemeIcon('play-circle', new vscode.ThemeColor('textLink.foreground'))
             this.command = { command: 'tlc.runPlay', title: 'Run Play', arguments: [{ workflowId }] }
         } else if (kind === 'group') {
             this.iconPath = new vscode.ThemeIcon('list-tree')

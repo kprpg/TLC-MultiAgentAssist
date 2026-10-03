@@ -108,4 +108,35 @@ describe('vscode-extension sample data provider', () => {
         expect(updated.comments).toBe('Reviewed with the account executive.')
         await provider.dispose()
     })
+
+    it('curates accounts, changes Deal Team membership, and filters Plays to visible members', async () => {
+        const provider = createSampleDataProvider()
+        const [candidate] = await provider.searchAccounts({ query: '1000003', matchBy: 'tpid' })
+        expect(candidate).toMatchObject({ id: 'account-northwind' })
+
+        await provider.addAccount('account-northwind')
+        expect(await provider.listOpportunities('account-northwind')).toEqual([])
+        const discovered = (await provider.discoverOpportunities('data')).find((item) => item.accountId === 'account-northwind')
+        expect(discovered?.onDealTeam).toBe(false)
+
+        await provider.joinDealTeam(discovered!.id)
+        expect((await provider.listOpportunities('account-northwind')).map((item) => item.id)).toContain(discovered!.id)
+        await provider.leaveDealTeam(discovered!.id)
+        expect(await provider.listOpportunities('account-northwind')).toEqual([])
+
+        await provider.setAccountVisibility('account-contoso', 'hidden')
+        try {
+            expect((await provider.listAccounts()).some((item) => item.id === 'account-contoso')).toBe(false)
+            const run = await provider.startWorkflow({ workflowId: 'WF-001', scope: { kind: 'portfolio' }, input: { asOf: '2026-09-15' } })
+            let view = await provider.getWorkflowRun(run.runId)
+            for (let attempt = 0; attempt < 50 && view.run.status !== 'completed'; attempt += 1) {
+                await new Promise((resolve) => setTimeout(resolve, 10))
+                view = await provider.getWorkflowRun(run.runId)
+            }
+            expect(view.output?.queueItems.some((item) => item.accountId === 'account-contoso')).toBe(false)
+        } finally {
+            await provider.setAccountVisibility('account-contoso', 'visible')
+            await provider.dispose()
+        }
+    })
 })

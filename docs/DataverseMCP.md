@@ -482,6 +482,19 @@ Rule set:
 4. If ask mixes broad ops + seller detail, perform Dataverse first then MSX enrichment.
 5. If latency budget exceeded, return partial deterministic output and offer "Deep analysis" action.
 
+### 12.1 Intelligent Router Design Consideration
+
+The Router should identify the execution pattern required for each request rather than assume that every request follows the same fixed agent chain. With Agents A, B, C, and D representing specialized capabilities, valid patterns can include:
+
+1. `A -> B -> C -> D`
+2. `A -> MCP -> D`
+3. `B -> C -> MCP -> D`
+4. Other sequential, conditional, parallel, or iterative combinations selected from the available agents and MCP tools.
+
+The routing decision should be expressed as an explicit execution graph based on intent, required capabilities and evidence, dependency order, authorization and approval policy, latency and cost budgets, and confidence in intermediate results. The Router should select the smallest sufficient graph, support short-circuiting and partial completion, and preserve source and handoff lineage across every node. MCP is a governed tool or data-access step in the graph, not a universal replacement for an agent.
+
+This orchestration model should consider and use something similar to  [VS Code agent harnesses](https://code.visualstudio.com/docs/agents/concepts/agent-harnesses?referrer=in-product). The intelligent Router chooses which agents and MCP steps are needed and how their outputs flow. The selected harness coordinates each stateful agent loop by preparing context and tools, applying permissions and approvals, routing tool calls to the execution environment, returning results to the model, and maintaining session state. The design should keep Router policy, agent role, harness, model, execution environment, and session target as distinct concerns so that a routing pattern can remain portable across supported harnesses.
+
 ## 13) Performance and UX Targets
 
 - Workflow card click-to-first-result: < 2 seconds (P50) for cached deterministic workflows.

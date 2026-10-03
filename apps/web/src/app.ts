@@ -3,8 +3,15 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z, ZodError } from 'zod'
 import {
     accountSchema,
+    accountCandidateSchema,
+    accountListOptionsSchema,
+    accountSearchRequestSchema,
+    accountVisibilityMutationSchema,
     agentTaskRequestSchema,
     agentTaskResponseSchema,
+    dealTeamJoinResultSchema,
+    dealTeamLeaveResultSchema,
+    discoverableOpportunitySchema,
     emailComposeRequestSchema,
     exportResponseRequestSchema,
     mcemRequestSchema,
@@ -15,9 +22,17 @@ import {
     milestoneUpdateSchema,
     opportunitySchema,
     opportunityUpdateSchema,
+    seDomainSchema,
     type Account,
+    type AccountCandidate,
+    type AccountListOptions,
+    type AccountSearchRequest,
+    type AccountVisibility,
     type AgentTaskRequest,
     type AgentTaskResponse,
+    type DealTeamJoinResult,
+    type DealTeamLeaveResult,
+    type DiscoverableOpportunity,
     type McemRequest,
     type McemResponse,
     type McemStageTransitionRequest,
@@ -25,7 +40,8 @@ import {
     type Milestone,
     type MilestoneUpdate,
     type Opportunity,
-    type OpportunityUpdate
+    type OpportunityUpdate,
+    type SeDomainId
 } from '../../../packages/common/index.js'
 import { createOutlookDraftMessage } from '../../desktop/electron/main/outlook-compose.js'
 import { createResponseDocumentBuffer } from '../../desktop/electron/main/response-document.js'
@@ -35,8 +51,14 @@ const accountIdSchema = z.string().min(1).max(200)
 const maximumBodyBytes = 1_048_576
 
 export interface WebRuntime {
-    listAccounts(): Promise<Account[]>
+    listAccounts(options?: AccountListOptions): Promise<Account[]>
+    searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
+    addAccount(accountId: string): Promise<Account>
+    setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
     listOpportunities(accountId: string): Promise<Opportunity[]>
+    discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
+    joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
+    leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult>
     listMilestones(opportunityId: string): Promise<Milestone[]>
     updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
     updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
@@ -125,7 +147,35 @@ export function buildWebApiHandler(options: WebApiOptions) {
             const runtime = await options.createRuntime(authentication)
 
             if (request.method === 'GET' && url.pathname === '/api/accounts') {
-                sendJson(response, 200, accountSchema.array().parse(await runtime.listAccounts()))
+                const options = accountListOptionsSchema.parse({
+                    ...(url.searchParams.has('includeHidden')
+                        ? { includeHidden: url.searchParams.get('includeHidden') === 'true' }
+                        : {})
+                })
+                sendJson(response, 200, accountSchema.array().parse(await runtime.listAccounts(options)))
+                return true
+            }
+
+            if (request.method === 'GET' && url.pathname === '/api/account-candidates') {
+                const search = accountSearchRequestSchema.parse({
+                    matchBy: url.searchParams.get('matchBy'),
+                    query: url.searchParams.get('query')
+                })
+                sendJson(response, 200, accountCandidateSchema.array().parse(await runtime.searchAccounts(search)))
+                return true
+            }
+
+            if (request.method === 'POST' && url.pathname === '/api/accounts') {
+                const body = z.object({ accountId: accountIdSchema }).strict().parse(await readJsonBody(request))
+                sendJson(response, 200, accountSchema.parse(await runtime.addAccount(body.accountId)))
+                return true
+            }
+
+            const accountVisibilityMatch = /^\/api\/accounts\/([^/]+)\/visibility$/.exec(url.pathname)
+            if (request.method === 'PATCH' && accountVisibilityMatch) {
+                const accountId = accountIdSchema.parse(decodeURIComponent(accountVisibilityMatch[1]!))
+                const body = accountVisibilityMutationSchema.parse(await readJsonBody(request))
+                sendJson(response, 200, accountSchema.parse(await runtime.setAccountVisibility(accountId, body.visibility)))
                 return true
             }
 
@@ -133,6 +183,25 @@ export function buildWebApiHandler(options: WebApiOptions) {
             if (request.method === 'GET' && opportunitiesMatch) {
                 const accountId = accountIdSchema.parse(decodeURIComponent(opportunitiesMatch[1]!))
                 sendJson(response, 200, opportunitySchema.array().parse(await runtime.listOpportunities(accountId)))
+                return true
+            }
+
+            const discoverMatch = /^\/api\/discover\/([^/]+)$/.exec(url.pathname)
+            if (request.method === 'GET' && discoverMatch) {
+                const domain = seDomainSchema.parse(decodeURIComponent(discoverMatch[1]!))
+                sendJson(response, 200, discoverableOpportunitySchema.array().parse(await runtime.discoverOpportunities(domain)))
+                return true
+            }
+
+            const dealTeamMatch = /^\/api\/opportunities\/([^/]+)\/deal-team$/.exec(url.pathname)
+            if (request.method === 'POST' && dealTeamMatch) {
+                const opportunityId = accountIdSchema.parse(decodeURIComponent(dealTeamMatch[1]!))
+                sendJson(response, 200, dealTeamJoinResultSchema.parse(await runtime.joinDealTeam(opportunityId)))
+                return true
+            }
+            if (request.method === 'DELETE' && dealTeamMatch) {
+                const opportunityId = accountIdSchema.parse(decodeURIComponent(dealTeamMatch[1]!))
+                sendJson(response, 200, dealTeamLeaveResultSchema.parse(await runtime.leaveDealTeam(opportunityId)))
                 return true
             }
 

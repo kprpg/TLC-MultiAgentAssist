@@ -4,7 +4,18 @@
  * the fields the UI renders; the extension host remains the schema authority.
  */
 
-export interface AccountView { id: string; name: string; segment?: string }
+export interface AccountView {
+    id: string
+    name: string
+    segment?: string
+    tpid?: string
+    provenance?: 'deal-team' | 'manual' | 'both'
+    visibility?: 'visible' | 'hidden'
+}
+
+export interface AccountCandidateView extends AccountView {
+    state: 'not-added' | 'visible' | 'hidden'
+}
 
 export interface OpportunityView {
     id: string
@@ -16,6 +27,28 @@ export interface OpportunityView {
     currency: string
     closeDate: string
     comments?: string
+}
+
+export type SeDomainView = 'infra' | 'data' | 'ai-apps' | 'security' | 'modern-work' | 'biz-apps' | 'devices' | 'services'
+
+export interface DiscoverableOpportunityView extends OpportunityView {
+    domain: SeDomainView
+    accountName?: string
+    solutionArea?: string
+    technicalCapability?: string
+    onDealTeam: boolean
+}
+
+export interface DealTeamJoinResultView {
+    opportunityId: string
+    onDealTeam: true
+    alreadyMember: boolean
+}
+
+export interface DealTeamLeaveResultView {
+    opportunityId: string
+    onDealTeam: false
+    alreadyAbsent: boolean
 }
 
 export interface MilestoneView {

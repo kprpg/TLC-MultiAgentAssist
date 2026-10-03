@@ -10,7 +10,8 @@ import mcpToolPolicyJson from '../../../config/mcp.tool-policy.json' with { type
 import dataverseEntityMapJson from '../../../config/dataverse.entity-map.json' with { type: 'json' }
 import foundryEnvironmentJson from '../../../config/foundry.environment.json' with { type: 'json' }
 import { AzureCliCredential } from '@azure/identity'
-import { LiveMsxConnector } from '../../../packages/connectors/msx/index.js'
+import { LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
+import { JsonFilePortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../packages/connectors/foundry/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
 import { createLivePlayWorkflowHost, type WorkflowStepErrorInfo } from '../../../packages/orchestrator/workflows/index.js'
@@ -54,12 +55,16 @@ export function createLiveDataProvider(
     getToken: () => Promise<string>,
     account: string,
     onStepError?: (info: WorkflowStepErrorInfo) => void,
-    useFoundryAgents = true
+    useFoundryAgents = true,
+    preferenceFilePath?: string
 ): ExtensionDataProvider {
     const registry = mcpServerRegistrySchema.parse(mcpServersJson)
     const policy = mcpToolPolicySchema.parse(mcpToolPolicyJson)
     const entityMap = dataverseEntityMapSchema.parse(dataverseEntityMapJson)
-    const msx = new LiveMsxConnector({ getAccessToken: getToken })
+    const metadata = msxWriteMetadataFromEnvironment(process.env)
+    const msx = preferenceFilePath
+        ? new LiveMsxConnector({ getAccessToken: getToken }, fetch, undefined, undefined, metadata, new JsonFilePortfolioPreferenceStore(preferenceFilePath))
+        : new LiveMsxConnector({ getAccessToken: getToken }, fetch, undefined, undefined, metadata)
     const taskAgents = (useFoundryAgents ? buildFoundryTaskAgents() : undefined) ?? buildLiveTaskAgents()
     const orchestrator = new ThinSliceOrchestrator(msx, new ExtensionMcemGuidanceConnector(), taskAgents)
 
@@ -69,6 +74,9 @@ export function createLiveDataProvider(
         entityMap,
         getAccessToken: () => getToken(),
         resolveCurrentUserId: () => msx.getCurrentUserId(),
+        resolveExcludedAccountIds: async () => (await msx.listAccounts({ includeHidden: true }))
+            .filter((candidate) => candidate.visibility === 'hidden')
+            .map((candidate) => candidate.id),
         ...(onStepError ? { onStepError } : {})
     })
     return buildLiveDataProvider({ orchestrator, host: configured.host, account, dispose: () => configured.dispose() })

@@ -19,7 +19,7 @@ export function NextBestActions({
             <div className="next-best-actions-heading">
                 <div>
                     <span className="eyebrow">ROLE BASED</span>
-                    <h3 id="next-best-actions-title">Next Best Actions</h3>
+                    <h3 id="next-best-actions-title" className="section-heading">Next Best Actions</h3>
                 </div>
                 <span className="badge" aria-label={`${recommendations.length} recommendations`}>{recommendations.length}</span>
             </div>

@@ -3,6 +3,34 @@ import { createDataClient, createWebApiClient } from '../../../apps/desktop/rend
 import { contractVersion } from '../../../packages/common/index.js'
 
 describe('revamp live web data client', () => {
+    it('uses the account-curation and Deal Team removal routes', async () => {
+        const account = { id: 'account-2', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003', provenance: 'manual', visibility: 'visible' }
+        const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+            const path = String(input)
+            const payload = path.includes('/account-candidates')
+                ? [{ ...account, state: 'not-added' }]
+                : path.endsWith('/deal-team') && init?.method === 'DELETE'
+                    ? { opportunityId: 'opportunity-2', onDealTeam: false, alreadyAbsent: false }
+                    : path.endsWith('/visibility')
+                        ? { ...account, visibility: 'hidden' }
+                        : account
+            return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
+        })
+        const client = createWebApiClient(fetcher)
+
+        await client.searchAccounts({ query: '1000003', matchBy: 'tpid' })
+        await client.addAccount('account-2')
+        await client.setAccountVisibility('account-2', 'hidden')
+        await client.leaveDealTeam('opportunity-2')
+
+        expect(fetcher.mock.calls.map(([path, init]) => [path, init?.method])).toEqual([
+            ['/api/account-candidates?matchBy=tpid&query=1000003', undefined],
+            ['/api/accounts', 'POST'],
+            ['/api/accounts/account-2/visibility', 'PATCH'],
+            ['/api/opportunities/opportunity-2/deal-team', 'DELETE']
+        ])
+    })
+
     it('uses the shared guidance envelope over the desktop IPC bridge', async () => {
         const handoff = {
             contractVersion,
@@ -89,10 +117,12 @@ describe('revamp live web data client', () => {
 
     it('downloads the rich email draft returned by the web host', async () => {
         const click = vi.fn()
-        const anchor = { href: '', download: '', click }
+        const remove = vi.fn()
+        const anchor = { href: '', download: '', style: { display: '' }, click, remove }
+        const appendChild = vi.fn()
         const createObjectURL = vi.fn(() => 'blob:email-draft')
         const revokeObjectURL = vi.fn()
-        vi.stubGlobal('document', { createElement: vi.fn(() => anchor) })
+        vi.stubGlobal('document', { createElement: vi.fn(() => anchor), body: { appendChild } })
         vi.stubGlobal('URL', { createObjectURL, revokeObjectURL })
         const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('MIME-Version: 1.0', {
             status: 200,
@@ -108,9 +138,45 @@ describe('revamp live web data client', () => {
         })).resolves.toEqual({ state: 'opened' })
 
         expect(anchor.download).toBe('Account guidance.eml')
+        expect(anchor.style.display).toBe('none')
+        expect(appendChild).toHaveBeenCalledWith(anchor)
         expect(click).toHaveBeenCalledOnce()
+        expect(remove).toHaveBeenCalledOnce()
         expect(createObjectURL).toHaveBeenCalledOnce()
-        expect(revokeObjectURL).toHaveBeenCalledWith('blob:email-draft')
+        expect(revokeObjectURL).not.toHaveBeenCalled()
+        await vi.waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('blob:email-draft'))
+        vi.unstubAllGlobals()
+    })
+
+    it('downloads the Word document returned by the web host', async () => {
+        const click = vi.fn()
+        const remove = vi.fn()
+        const anchor = { href: '', download: '', style: { display: '' }, click, remove }
+        const appendChild = vi.fn()
+        const createObjectURL = vi.fn(() => 'blob:word-document')
+        const revokeObjectURL = vi.fn()
+        vi.stubGlobal('document', { createElement: vi.fn(() => anchor), body: { appendChild } })
+        vi.stubGlobal('URL', { createObjectURL, revokeObjectURL })
+        const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('document bytes', {
+            status: 200,
+            headers: {
+                'content-type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'x-tlc-file-name': 'Account guidance.docx'
+            }
+        }))
+
+        await expect(createWebApiClient(fetcher).exportAgentResponse({
+            contractVersion,
+            responseTitle: 'Account guidance',
+            responseMarkdown: '## Guidance',
+            generatedAt: '2026-09-21T12:00:00.000Z'
+        })).resolves.toEqual({ state: 'saved', filePath: 'Account guidance.docx' })
+
+        expect(anchor.download).toBe('Account guidance.docx')
+        expect(appendChild).toHaveBeenCalledWith(anchor)
+        expect(click).toHaveBeenCalledOnce()
+        expect(remove).toHaveBeenCalledOnce()
+        await vi.waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('blob:word-document'))
         vi.unstubAllGlobals()
     })
 

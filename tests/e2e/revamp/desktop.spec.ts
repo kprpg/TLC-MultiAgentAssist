@@ -4,8 +4,50 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { workflowDefinitions, workflowOutput, workflowRun } from './workflow-fixtures.js'
 
+test('curates customer accounts through the Desktop IPC bridge', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-curation-test-'))
+    test.slow()
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_UI_MODE: '' }
+    })
+
+    try {
+        const window = await app.firstWindow()
+        await window.getByRole('button', { name: 'Add customer' }).click()
+        const dialog = window.getByRole('dialog', { name: 'Add customer account' })
+        await dialog.getByRole('button', { name: 'TPID' }).click()
+        await dialog.getByRole('textbox', { name: 'TPID' }).fill('1000003')
+        await dialog.getByRole('button', { name: 'Search' }).click()
+        await dialog.getByRole('button', { name: 'Add account' }).click()
+
+        await window.locator('.discover-launcher .scope-switcher button').filter({ hasText: /^Data$/ }).click()
+        const discoveryRow = window.locator('.discover-table tbody tr').filter({ hasText: 'Clinical data platform modernization' })
+        await discoveryRow.locator('button').filter({ hasText: 'Add me' }).click()
+        await expect(discoveryRow).toContainText('On deal team')
+
+        await window.locator('.rail-button[title="Accounts"]').click()
+        await window.locator('.account-button').filter({ hasText: 'Northwind Health' }).click()
+        await expect(window.locator('.opportunity-table-wrap .record-table')).toContainText('Clinical data platform modernization')
+
+        window.once('dialog', (confirmation) => confirmation.accept())
+        await window.locator('.account-row').filter({ hasText: 'Northwind Health' }).locator('button').filter({ hasText: /^Hide$/ }).click()
+        await expect(window.locator('.account-row').filter({ hasText: 'Northwind Health' })).toHaveCount(0)
+        await window.locator('button[aria-label="Show hidden customers"]').click()
+        const hiddenRow = window.locator('.account-row').filter({ hasText: 'Northwind Health' })
+        await expect(hiddenRow).toContainText('Hidden')
+        await expect(hiddenRow).toHaveCSS('opacity', '1')
+        await expect(hiddenRow.locator('button').filter({ hasText: /^Unhide$/ })).toHaveCSS('color', 'rgb(15, 108, 189)')
+        await hiddenRow.locator('button').filter({ hasText: 'Unhide' }).click()
+    } finally {
+        await app.close()
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
 test('opens the default desktop blade workspace through the existing IPC bridge', async () => {
     const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-revamp-test-'))
+    test.slow()
     const app = await electron.launch({
         args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
         env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_UI_MODE: '' }
@@ -63,7 +105,11 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
         await window.getByRole('button', { name: 'Workflows' }).click()
         const launcher = window.getByRole('region', { name: 'Workflow Launcher' })
         await expect(launcher.locator('.workflow-card')).toHaveCount(4)
-        await launcher.getByRole('button', { name: /Stale opportunity sweep/ }).first().click()
+        const stalePlayInfo = launcher.getByRole('button', { name: 'What does "Stale opportunity sweep" do?' })
+        await stalePlayInfo.hover()
+        await expect(window.getByRole('tooltip')).toContainText('Finds opportunities whose close date has already slipped past')
+        await expect(window.getByRole('tooltip')).toContainText('Use it to:')
+        await launcher.locator('.workflow-card').filter({ hasText: 'Stale opportunity sweep' }).getByRole('button', { name: 'Run workflow' }).click()
         await expect(launcher.getByRole('table', { name: 'Stale opportunities' })).toContainText('Northwind renewal')
         await expect(launcher.getByRole('region', { name: 'Operational queue' })).toContainText('Review Northwind renewal')
         await launcher.getByRole('button', { name: 'Activity details' }).click()
@@ -79,8 +125,13 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
         await window.getByRole('button', { name: /Contoso Energy/ }).first().click()
         await expect(window.getByRole('region', { name: 'Opportunities blade' })).toBeVisible()
         await expect(window.getByRole('region', { name: 'Opportunity workbench' }).getByRole('heading', { name: 'Contoso Energy' })).toBeVisible()
-        const opportunity = window.getByRole('region', { name: 'Opportunities blade' }).getByRole('button', { name: /^Grid operations modernization / })
-        await expect(opportunity).toContainText('Avery Johnson · Stage 3 · $4.2M · 2026-10-30')
+        const opportunitiesBlade = window.getByRole('region', { name: 'Opportunities blade' })
+        const opportunity = opportunitiesBlade.getByRole('button', { name: /^Grid operations modernization / })
+        const opportunityRow = opportunitiesBlade.getByRole('row').filter({ hasText: 'Grid operations modernization' })
+        await expect(opportunityRow.getByRole('cell').nth(0)).toContainText('Avery Johnson')
+        await expect(opportunityRow.getByRole('cell').nth(1)).toHaveText('Stage 3')
+        await expect(opportunityRow.getByRole('cell').nth(2)).toHaveText('$4.2M')
+        await expect(opportunityRow.getByRole('cell').nth(3)).toHaveText('2026-10-30')
         await opportunity.hover()
         await expect(window.getByRole('tooltip')).toContainText('Opportunity owner: Avery Johnson')
         await expect(window.getByRole('tooltip')).toContainText('Stage owner: Solution Engineer')
@@ -88,9 +139,10 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
 
         await opportunity.click()
         await expect(window.getByRole('region', { name: 'Milestones blade' })).toHaveCount(0)
-        const selectedOpportunity = window.getByRole('treeitem', { name: /Grid operations modernization/ })
-        await expect(selectedOpportunity).toHaveAttribute('aria-expanded', 'true')
-        await expect(selectedOpportunity.getByRole('group')).toContainText('Customer outcome validation')
+        await expect(opportunity).toHaveAttribute('aria-expanded', 'true')
+        const opportunityMilestones = window.getByRole('region', { name: 'Grid operations modernization milestones' })
+        await expect(opportunityMilestones).toContainText('Customer outcome validation')
+        await expect(opportunityMilestones).toBeInViewport()
         const workbench = window.getByRole('region', { name: 'Opportunity workbench' })
         await expect(workbench).toContainText('Avery Johnson · Stage 3 · $4.2M · closes 2026-10-30')
         await expect(workbench).toContainText('Evidence supports')
@@ -134,9 +186,20 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
         await window.getByRole('button', { name: 'Collapse Accounts blade header' }).click()
         await expect(window.getByRole('button', { name: 'Expand Accounts', exact: true })).toBeVisible()
         await window.getByRole('button', { name: 'Refresh Milestones' }).click()
-        await expect(selectedOpportunity.getByRole('group')).toContainText('Customer outcome validation')
+        await expect(opportunityMilestones).toContainText('Customer outcome validation')
         await window.getByRole('tab', { name: 'Multi-Agent Guidance' }).click()
         await expect(window.getByRole('tab', { name: 'Account Pulse' })).toHaveAttribute('aria-selected', 'true')
+        const agentDescriptions = {
+            'Account Pulse': 'Summarizes account health, priorities, activity, and the actions that need attention.',
+            'MCEM Coach': 'Evaluates MCEM stage evidence, exit criteria, ownership gaps, and the next best action.',
+            'Pursuit': 'Builds an opportunity pursuit view covering stakeholders, value, competition, and deal progression.',
+            'Risk & Play': 'Surfaces delivery and deal risks, then recommends the most relevant solution play and mitigations.'
+        }
+        for (const [agent, description] of Object.entries(agentDescriptions)) {
+            const info = window.getByRole('button', { name: `About ${agent}` })
+            await info.hover()
+            await expect(window.getByRole('tooltip')).toHaveText(description)
+        }
         await expect(window.locator('.agent-response')).toHaveCount(0)
         await window.getByRole('button', { name: 'What should the account team focus on this week?' }).click()
         await expect(window.locator('.agent-response')).toContainText('Grid operations modernization')

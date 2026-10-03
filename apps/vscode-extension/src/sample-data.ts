@@ -1,20 +1,33 @@
 import {
+    accountCandidateSchema,
+    accountSearchRequestSchema,
     accountSchema,
     agentTaskResponseSchema,
     contractVersion,
+    dealTeamJoinResultSchema,
+    dealTeamLeaveResultSchema,
+    discoverableOpportunitySchema,
     mcemResponseSchema,
     mcemStageTransitionResultSchema,
     milestoneSchema,
     opportunitySchema,
     type Account,
+    type AccountCandidate,
+    type AccountListOptions,
+    type AccountSearchRequest,
+    type AccountVisibility,
     type AgentCapability,
     type AgentTaskResponse,
+    type DealTeamJoinResult,
+    type DealTeamLeaveResult,
+    type DiscoverableOpportunity,
     type McemResponse,
     type McemStageTransitionResult,
     type Milestone,
     type MilestoneUpdate,
     type Opportunity,
-    type OpportunityUpdate
+    type OpportunityUpdate,
+    type SeDomainId
 } from '../../../packages/common/index.js'
 
 /**
@@ -27,8 +40,9 @@ const roleByStage = ['Account Executive', 'Specialist / SSP', 'Solution Engineer
 const criteriaLabels = ['Customer outcome', 'Decision team', 'Technical validation', 'Business case', 'Next committed step']
 
 const sampleAccounts: readonly Account[] = Object.freeze([
-    accountSchema.parse({ id: 'account-contoso', name: 'Contoso Energy', segment: 'Strategic' }),
-    accountSchema.parse({ id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise' })
+    accountSchema.parse({ id: 'account-contoso', name: 'Contoso Energy', segment: 'Strategic', tpid: '1000001' }),
+    accountSchema.parse({ id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise', tpid: '1000002' }),
+    accountSchema.parse({ id: 'account-northwind', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003' })
 ])
 
 const sampleOpportunities: readonly Opportunity[] = Object.freeze([
@@ -77,15 +91,73 @@ const sampleMilestones: readonly Milestone[] = Object.freeze(sampleOpportunities
     })
 }))
 
-export function listSampleAccounts(): Account[] {
-    return structuredClone(sampleAccounts) as Account[]
-}
-
 // Mutable session store so stage transitions persist while the workbench is open.
 const opportunityStore: Opportunity[] = structuredClone(sampleOpportunities) as Opportunity[]
+const dealTeamOpportunityIds = new Set(opportunityStore.map((opportunity) => opportunity.id))
+const manualAccountIds = new Set<string>()
+const hiddenAccountIds = new Set<string>()
+
+function dealTeamAccountIds(): Set<string> {
+    return new Set(opportunityStore
+        .filter((opportunity) => dealTeamOpportunityIds.has(opportunity.id))
+        .map((opportunity) => opportunity.accountId))
+}
+
+function mapSampleAccount(account: Account): Account {
+    const dealTeam = dealTeamAccountIds().has(account.id)
+    const manual = manualAccountIds.has(account.id)
+    return accountSchema.parse({
+        ...account,
+        provenance: dealTeam && manual ? 'both' : manual ? 'manual' : 'deal-team',
+        visibility: hiddenAccountIds.has(account.id) ? 'hidden' : 'visible'
+    })
+}
+
+export function listSampleAccounts(options: AccountListOptions = {}): Account[] {
+    const includedAccountIds = new Set([...dealTeamAccountIds(), ...manualAccountIds, ...hiddenAccountIds])
+    return sampleAccounts
+        .filter((account) => includedAccountIds.has(account.id))
+        .map(mapSampleAccount)
+        .filter((account) => options.includeHidden || account.visibility !== 'hidden')
+        .map((account) => structuredClone(account))
+}
+
+export function searchSampleAccounts(input: AccountSearchRequest): AccountCandidate[] {
+    const request = accountSearchRequestSchema.parse(input)
+    const query = request.query.toLocaleLowerCase()
+    const currentById = new Map(listSampleAccounts({ includeHidden: true }).map((account) => [account.id, account]))
+    return sampleAccounts
+        .filter((account) => request.matchBy === 'name'
+            ? account.name.toLocaleLowerCase().includes(query)
+            : account.tpid === request.query)
+        .map((account) => {
+            const current = currentById.get(account.id)
+            return accountCandidateSchema.parse({
+                ...(current ?? account),
+                state: current?.visibility === 'hidden' ? 'hidden' : current ? 'visible' : 'not-added'
+            })
+        })
+}
+
+export function addSampleAccount(accountId: string): Account {
+    const account = sampleAccounts.find((candidate) => candidate.id === accountId)
+    if (!account) throw new Error('Unknown sample account.')
+    manualAccountIds.add(accountId)
+    return mapSampleAccount(account)
+}
+
+export function setSampleAccountVisibility(accountId: string, visibility: AccountVisibility): Account {
+    const account = sampleAccounts.find((candidate) => candidate.id === accountId)
+    if (!account) throw new Error('Unknown sample account.')
+    if (visibility === 'hidden') hiddenAccountIds.add(accountId)
+    else hiddenAccountIds.delete(accountId)
+    return mapSampleAccount(account)
+}
 
 export function listSampleOpportunities(accountId: string): Opportunity[] {
-    return structuredClone(opportunityStore.filter((opportunity) => opportunity.accountId === accountId)) as Opportunity[]
+    if (hiddenAccountIds.has(accountId)) return []
+    return structuredClone(opportunityStore.filter((opportunity) =>
+        opportunity.accountId === accountId && dealTeamOpportunityIds.has(opportunity.id))) as Opportunity[]
 }
 
 export function listSampleMilestones(opportunityId: string): Milestone[] {
@@ -113,6 +185,50 @@ export function updateSampleOpportunity(opportunityId: string, update: Opportuni
 export function findSampleOpportunity(opportunityId: string): Opportunity | undefined {
     const found = opportunityStore.find((opportunity) => opportunity.id === opportunityId)
     return found ? structuredClone(found) as Opportunity : undefined
+}
+
+const sampleDiscoverableOpportunities: readonly DiscoverableOpportunity[] = Object.freeze([
+    { id: 'opp-discover-hybrid-networking', accountId: 'account-contoso', accountName: 'Contoso Energy', name: 'Hybrid networking modernization', recordedStage: 2, value: 1_850_000, currency: 'USD', closeDate: '2027-02-12', domain: 'infra', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'Advanced Networking', onDealTeam: false },
+    { id: 'opp-discover-vmware-migration', accountId: 'account-fabrikam', accountName: 'Fabrikam Retail', name: 'Datacenter exit to Azure VMware Solution', recordedStage: 1, value: 2_950_000, currency: 'USD', closeDate: '2027-04-02', domain: 'infra', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'Azure VMware Solutions', onDealTeam: false },
+    { id: 'opp-discover-synapse-analytics', accountId: 'account-contoso', accountName: 'Contoso Energy', name: 'Enterprise analytics on Synapse and Power BI', recordedStage: 2, value: 2_100_000, currency: 'USD', closeDate: '2027-01-22', domain: 'data', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'New Analytics with Synapse & PowerBI', onDealTeam: false },
+    { id: 'opp-discover-sql-managed-instance', accountId: 'account-fabrikam', accountName: 'Fabrikam Retail', name: 'SQL Server migration to Azure SQL MI', recordedStage: 3, value: 1_650_000, currency: 'USD', closeDate: '2026-12-19', domain: 'data', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'SQL Server Migration to Azure SQL MI', onDealTeam: false },
+    { id: 'opp-discover-azure-ai-ml', accountId: 'account-contoso', accountName: 'Contoso Energy', name: 'Azure AI and ML platform adoption', recordedStage: 2, value: 3_400_000, currency: 'USD', closeDate: '2027-02-05', domain: 'ai-apps', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'Azure AI and ML', onDealTeam: false },
+    { id: 'opp-discover-cloud-native-apps', accountId: 'account-fabrikam', accountName: 'Fabrikam Retail', name: 'Cloud-native apps on AKS and Cosmos DB', recordedStage: 1, value: 2_750_000, currency: 'USD', closeDate: '2027-03-27', domain: 'ai-apps', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'Modernize/New Cloud Native Apps with AKS and Azure Cosmos/Postgres DB', onDealTeam: false },
+    { id: 'opp-discover-zero-trust', accountId: 'account-contoso', accountName: 'Contoso Energy', name: 'Zero Trust security modernization', recordedStage: 2, value: 2_200_000, currency: 'USD', closeDate: '2027-02-18', domain: 'security', solutionArea: 'Security', technicalCapability: 'Threat Protection', onDealTeam: false },
+    { id: 'opp-discover-teams-calling', accountId: 'account-fabrikam', accountName: 'Fabrikam Retail', name: 'Teams Phone and calling rollout', recordedStage: 1, value: 980_000, currency: 'USD', closeDate: '2027-03-05', domain: 'modern-work', technicalCapability: 'Calling', onDealTeam: false },
+    { id: 'opp-discover-d365-customer-service', accountId: 'account-fabrikam', accountName: 'Fabrikam Retail', name: 'Dynamics 365 Customer Service transformation', recordedStage: 2, value: 1_750_000, currency: 'USD', closeDate: '2027-01-28', domain: 'biz-apps', solutionArea: 'AI Business Solutions', technicalCapability: 'Customer Service', onDealTeam: false },
+    { id: 'opp-discover-surface-deployment', accountId: 'account-contoso', accountName: 'Contoso Energy', name: 'Surface device deployment and management', recordedStage: 1, value: 640_000, currency: 'USD', closeDate: '2027-04-15', domain: 'devices', solutionArea: 'Windows and Devices', technicalCapability: 'Surface & Partner Devices', onDealTeam: false },
+    { id: 'opp-discover-cloud-advisory', accountId: 'account-contoso', accountName: 'Contoso Energy', name: 'Cloud advisory and adoption services', recordedStage: 2, value: 850_000, currency: 'USD', closeDate: '2027-02-22', domain: 'services', solutionArea: 'Microsoft Services', technicalCapability: 'Advisory Services', onDealTeam: false }
+    ,
+    { id: 'opp-discover-northwind-data', accountId: 'account-northwind', accountName: 'Northwind Health', name: 'Clinical data platform modernization', recordedStage: 1, value: 2_100_000, currency: 'USD', closeDate: '2027-05-20', domain: 'data', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'Analytics', onDealTeam: false }
+].map((opportunity) => discoverableOpportunitySchema.parse(opportunity)))
+
+export function discoverSampleOpportunities(domain: SeDomainId): DiscoverableOpportunity[] {
+    const visibleAccountIds = new Set(listSampleAccounts().map((account) => account.id))
+    return sampleDiscoverableOpportunities
+        .filter((opportunity) => opportunity.domain === domain && visibleAccountIds.has(opportunity.accountId))
+        .map((opportunity) => discoverableOpportunitySchema.parse({ ...opportunity, onDealTeam: dealTeamOpportunityIds.has(opportunity.id) }))
+}
+
+export function joinSampleDealTeam(opportunityId: string): DealTeamJoinResult {
+    const seed = sampleDiscoverableOpportunities.find((opportunity) => opportunity.id === opportunityId)
+    if (!seed) throw new Error('Unknown sample opportunity.')
+    const alreadyMember = dealTeamOpportunityIds.has(opportunityId)
+    if (!alreadyMember) {
+        dealTeamOpportunityIds.add(opportunityId)
+        if (!opportunityStore.some((item) => item.id === opportunityId)) {
+            const { domain, accountName, solutionArea, technicalCapability, onDealTeam, ...opportunity } = seed
+            void domain; void accountName; void solutionArea; void technicalCapability; void onDealTeam
+            opportunityStore.push(opportunitySchema.parse(structuredClone(opportunity)))
+        }
+    }
+    return dealTeamJoinResultSchema.parse({ opportunityId, onDealTeam: true, alreadyMember })
+}
+
+export function leaveSampleDealTeam(opportunityId: string): DealTeamLeaveResult {
+    const alreadyAbsent = !dealTeamOpportunityIds.has(opportunityId)
+    dealTeamOpportunityIds.delete(opportunityId)
+    return dealTeamLeaveResultSchema.parse({ opportunityId, onDealTeam: false, alreadyAbsent })
 }
 
 export function transitionSampleStage(accountId: string, opportunityId: string, targetStage: number, reason?: string): McemStageTransitionResult {

@@ -70,8 +70,8 @@ describe('LiveMsxConnector', () => {
     const connector = new LiveMsxConnector({ getAccessToken }, request as typeof fetch)
 
     await expect(connector.listAccounts()).resolves.toEqual([
-      { id: 'account-a', name: 'Alpha', segment: 'Live MSX' },
-      { id: 'account-b', name: 'Beta', segment: 'Live MSX' }
+      { id: 'account-a', name: 'Alpha', segment: 'Live MSX', provenance: 'deal-team', visibility: 'visible' },
+      { id: 'account-b', name: 'Beta', segment: 'Live MSX', provenance: 'deal-team', visibility: 'visible' }
     ])
     await expect(connector.listOpportunities('account-a')).resolves.toHaveLength(1)
     await expect(connector.listOpportunities('account-b')).resolves.toEqual([

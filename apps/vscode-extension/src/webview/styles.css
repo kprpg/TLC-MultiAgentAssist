@@ -1,6 +1,15 @@
 :root {
     color-scheme: light dark;
-    --tlc-tooltip-foreground: var(--vscode-editorInfo-foreground, var(--vscode-descriptionForeground));
+    --tlc-tooltip-background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background));
+    --tlc-tooltip-border: var(--vscode-editorHoverWidget-border, var(--vscode-widget-border, var(--vscode-editorWidget-border)));
+    --tlc-tooltip-foreground: var(--vscode-editorHoverWidget-foreground, var(--vscode-editorInfo-foreground, var(--vscode-descriptionForeground)));
+    --tlc-tooltip-font-weight: 600;
+    --tlc-section-heading-foreground: var(--vscode-terminal-ansiBrightCyan, #4ec9b0);
+}
+
+.section-heading {
+    color: var(--tlc-section-heading-foreground);
+    font-weight: 700;
 }
 
 body {
@@ -50,7 +59,7 @@ body {
     border: 0;
     border-radius: 4px;
     background: transparent;
-    color: var(--vscode-icon-foreground, var(--vscode-foreground));
+    color: var(--vscode-textLink-foreground);
     cursor: pointer;
 }
 
@@ -64,7 +73,6 @@ body {
 }
 
 .layout-control:not(.active) {
-    color: var(--vscode-descriptionForeground);
     opacity: 0.75;
 }
 
@@ -77,7 +85,7 @@ button {
 
 .tab {
     background: transparent;
-    color: var(--vscode-foreground);
+    color: var(--vscode-textLink-foreground);
     border: none;
     padding: 6px 12px;
     cursor: pointer;
@@ -91,6 +99,20 @@ button {
 .tab.active {
     background: var(--vscode-tab-activeBackground, var(--vscode-toolbar-hoverBackground));
     box-shadow: inset 0 -2px 0 var(--vscode-focusBorder);
+}
+
+.tab:disabled,
+.link:disabled {
+    color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+    cursor: default;
+}
+
+.tab:focus-visible,
+.link:focus-visible,
+button.secondary:focus-visible,
+.account-search-box button:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: 2px;
 }
 
 .mode-badge {
@@ -112,6 +134,89 @@ button {
     flex: 1;
     overflow: auto;
     padding: 16px;
+}
+
+.discover-panel .discover-header {
+    margin-bottom: 12px;
+}
+
+.discover-panel .discover-header h2 {
+    margin: 0 0 4px;
+}
+
+.discover-panel .discover-header p {
+    margin: 0 0 8px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.discover-note {
+    margin: 8px 0;
+    color: var(--vscode-descriptionForeground);
+}
+
+.error-text {
+    color: var(--vscode-errorForeground);
+}
+
+.deal-team-joined {
+    color: var(--vscode-charts-green, #89d185);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.deal-team-actions,
+.account-management-header,
+.account-management-header>div {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.account-management-header {
+    justify-content: space-between;
+}
+
+.account-management-header h3 {
+    margin: 0;
+}
+
+.account-search-box {
+    display: grid;
+    gap: 8px;
+    margin: 10px 0;
+    padding: 10px;
+    border: 1px solid var(--vscode-panel-border);
+}
+
+.account-search-box label,
+.account-candidates span {
+    display: grid;
+    gap: 3px;
+}
+
+.account-candidates,
+.hidden-account-list {
+    display: grid;
+    gap: 5px;
+}
+
+.account-candidates>div,
+.hidden-account-list>div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px;
+    background: var(--vscode-editorWidget-background);
+}
+
+.account-candidates small,
+.hidden-account-list small {
+    color: var(--vscode-descriptionForeground);
+}
+
+.danger-link:not(:disabled) {
+    color: var(--vscode-errorForeground);
 }
 
 .split {
@@ -293,12 +398,12 @@ ul {
     gap: 6px;
     width: 280px;
     padding: 10px 12px;
-    border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+    border: 1px solid var(--tlc-tooltip-border);
     border-radius: 4px;
-    background: var(--vscode-editorWidget-background);
+    background: var(--tlc-tooltip-background);
     color: var(--tlc-tooltip-foreground);
     box-shadow: 0 2px 8px var(--vscode-widget-shadow);
-    font-weight: 400;
+    font-weight: var(--tlc-tooltip-font-weight);
     font-size: 12px;
     text-align: left;
     white-space: normal;
@@ -316,6 +421,22 @@ ul {
 .link.active {
     font-weight: 700;
     text-decoration: underline;
+}
+
+.link:not(.record-link):not(.danger-link):not(:disabled):hover,
+button.secondary:not(:disabled):hover {
+    color: var(--vscode-textLink-activeForeground);
+    text-decoration: underline;
+}
+
+.record-link:hover {
+    text-decoration: underline;
+}
+
+.account-search-box button:not(:disabled) {
+    color: var(--vscode-textLink-foreground);
+    background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    border-color: var(--vscode-textLink-foreground);
 }
 
 .badge {
@@ -352,8 +473,15 @@ button.primary:disabled {
 }
 
 button.secondary {
-    background: var(--vscode-button-secondaryBackground);
-    color: var(--vscode-button-secondaryForeground);
+    background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    color: var(--vscode-textLink-foreground);
+    border-color: var(--vscode-textLink-foreground);
+}
+
+button.secondary:disabled {
+    color: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+    opacity: 0.6;
+    cursor: default;
 }
 
 .actions {
@@ -559,13 +687,13 @@ button.secondary {
     width: max-content;
     max-width: min(280px, calc(100vw - 32px));
     padding: 6px 8px;
-    border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+    border: 1px solid var(--tlc-tooltip-border);
     border-radius: 4px;
-    background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background));
+    background: var(--tlc-tooltip-background);
     color: var(--tlc-tooltip-foreground);
     box-shadow: 0 2px 8px var(--vscode-widget-shadow);
     font-size: 12px;
-    font-weight: 400;
+    font-weight: var(--tlc-tooltip-font-weight);
     line-height: 1.4;
     opacity: 0;
     visibility: hidden;
@@ -657,7 +785,7 @@ textarea {
     letter-spacing: 0.04em;
     font-size: 11px;
     font-weight: 700;
-    color: var(--vscode-descriptionForeground);
+    color: var(--tlc-section-heading-foreground);
 }
 
 .response-actions {
@@ -773,18 +901,89 @@ textarea {
     background: var(--vscode-list-activeSelectionBackground);
 }
 
-.record-table tr.selected .link {
+.record-table tr.selected .record-link {
     color: var(--vscode-list-activeSelectionForeground);
 }
 
 .opportunity-name-cell .link {
     display: block;
     max-width: 100%;
-    overflow: hidden;
     padding: 0;
     text-align: left;
+    color: var(--vscode-foreground);
+}
+
+.record-tooltip-anchor,
+.record-name-trigger {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.record-name-trigger {
+    outline: none;
+}
+
+.record-name-trigger:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: 2px;
+}
+
+.record-name-line {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.record-name-text,
+.record-name-line strong {
+    min-width: 0;
+    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.record-value {
+    flex: 0 0 auto;
+    color: var(--vscode-descriptionForeground);
+    font-size: 11px;
+    font-weight: 400;
+    white-space: nowrap;
+}
+
+.record-hover-tooltip {
+    position: fixed;
+    z-index: 1000;
+    display: flex;
+    width: 280px;
+    max-width: calc(100vw - 16px);
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 10px;
+    border: 1px solid var(--tlc-tooltip-border);
+    border-radius: 4px;
+    background: var(--tlc-tooltip-background);
+    color: var(--tlc-tooltip-foreground);
+    box-shadow: 0 2px 8px var(--vscode-widget-shadow);
+    font-size: 12px;
+    font-weight: var(--tlc-tooltip-font-weight);
+    line-height: 1.4;
+    pointer-events: none;
+    text-align: left;
+}
+
+.record-hover-tooltip.above {
+    transform: translate(-50%, calc(-100% - 6px));
+}
+
+.record-hover-tooltip.below {
+    transform: translate(-50%, 6px);
+}
+
+.record-hover-tooltip em {
+    font-style: normal;
+    font-weight: 600;
 }
 
 .opportunity-comments-cell {
@@ -852,18 +1051,28 @@ textarea {
     margin-top: 4px;
 }
 
-.chip-button {
-    padding: 2px 8px;
-    border-radius: 10px;
-    border: 1px solid var(--vscode-panel-border);
-    background: transparent;
-    color: var(--vscode-foreground);
+.comments-button {
+    padding: 3px 10px;
+    border: 1px solid var(--vscode-textLink-foreground);
+    border-radius: 4px;
+    background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    color: var(--vscode-textLink-foreground);
     cursor: pointer;
     font-size: 11px;
+    font-weight: 500;
+    transition: background-color 80ms ease, border-color 80ms ease;
 }
 
-.chip-button:hover {
-    background: var(--vscode-toolbar-hoverBackground);
+.comments-button:hover {
+    border-color: var(--vscode-focusBorder);
+    background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    color: var(--vscode-textLink-activeForeground);
+    text-decoration: underline;
+}
+
+.comments-button:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: 2px;
 }
 
 .record-editor {

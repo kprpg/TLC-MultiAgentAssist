@@ -1,0 +1,11 @@
+{
+    "extraKnownMarketplaces":{
+        "awesome-copilot": {
+            "source": "https://github.com/awesome-copilot"
+        }
+    },
+    "enabledPlugins": [
+        "awesome-copilot",
+        "security-best-practices@awesome-copilot"
+    ]
+}

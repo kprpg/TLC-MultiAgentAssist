@@ -370,6 +370,10 @@ body.resizing-blade .blade {
     display: flex;
 }
 
+.blade-header-actions button>span {
+    color: inherit;
+}
+
 .icon-button {
     width: 30px;
     height: 30px;
@@ -381,6 +385,33 @@ body.resizing-blade .blade {
 .collapsed-symbol:hover {
     color: var(--cp-accent);
     background: var(--cp-accent-soft);
+}
+
+.app-shell :is(.text-action, .icon-button, .tree-refresh-button, .agent-tooltip-trigger, .play-tooltip-trigger):not(:disabled) {
+    color: var(--cp-link);
+}
+
+.app-shell :is(.text-action, .icon-button, .tree-refresh-button, .agent-tooltip-trigger, .play-tooltip-trigger):not(:disabled):hover {
+    color: var(--cp-accent-hover);
+    background: var(--cp-accent-soft);
+}
+
+.app-shell .text-action:not(:disabled):hover {
+    text-decoration: underline;
+}
+
+.app-shell :is(.text-action, .icon-button, .tree-refresh-button):focus-visible {
+    outline: 2px solid var(--cp-accent);
+    outline-offset: 2px;
+}
+
+.app-shell .text-action.danger-action:not(:disabled) {
+    color: var(--cp-danger);
+}
+
+.app-shell .text-action.danger-action:not(:disabled):hover {
+    color: var(--cp-danger);
+    background: var(--cp-surface);
 }
 
 .blade-body {
@@ -502,6 +533,21 @@ body.resizing-blade .blade {
 
 .account-button {
     grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.account-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 2px;
+}
+
+.account-row.hidden .account-button {
+    opacity: 0.7;
+}
+
+.account-row .account-button:disabled {
+    cursor: default;
 }
 
 .account-button:hover,
@@ -718,6 +764,93 @@ body.resizing-blade .blade {
         var(--cp-bg);
 }
 
+.discover-body {
+    max-width: 1180px;
+    margin: 16px auto 0;
+    overflow-x: auto;
+}
+
+.discover-loading {
+    padding: 24px 0;
+}
+
+.discover-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.discover-table th,
+.discover-table td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--cp-border);
+    vertical-align: middle;
+}
+
+.discover-table th {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--cp-text-muted);
+}
+
+.deal-team-joined {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--cp-success, #107c10);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.deal-team-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.account-search-dialog {
+    display: grid;
+    gap: 12px;
+}
+
+.account-search-dialog>p {
+    margin: 0;
+    color: var(--cp-text-muted);
+}
+
+.account-search-mode {
+    display: flex;
+    gap: 8px;
+}
+
+.account-candidate-list {
+    display: grid;
+    max-height: 260px;
+    gap: 6px;
+    overflow-y: auto;
+}
+
+.account-candidate {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px;
+    border: 1px solid var(--cp-border);
+    border-radius: 6px;
+}
+
+.account-candidate strong,
+.account-candidate small {
+    display: block;
+}
+
+.account-candidate small {
+    margin-top: 2px;
+    color: var(--cp-text-muted);
+}
+
 .workflow-launcher-header {
     display: flex;
     max-width: 1180px;
@@ -801,6 +934,7 @@ body.resizing-blade .blade {
     min-height: 30px;
     padding: 4px 8px;
     background: var(--cp-surface);
+    color: var(--cp-link);
     border: 0;
     border-right: 1px solid var(--cp-border);
     cursor: pointer;
@@ -855,6 +989,8 @@ body.resizing-blade .blade {
 
 .workflow-card header {
     display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
     gap: 4px;
 }
 
@@ -866,6 +1002,23 @@ body.resizing-blade .blade {
 
 .workflow-card header strong {
     font-size: 14px;
+}
+
+.workflow-card header .play-tooltip-trigger {
+    min-width: 24px;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+}
+
+.play-tooltip-content {
+    display: grid;
+    max-width: 320px;
+    gap: 5px;
+}
+
+.play-tooltip-content span {
+    font-size: 12px;
 }
 
 .workflow-card>p {
@@ -1314,9 +1467,10 @@ body.resizing-blade .blade {
 }
 
 .center-tabs button,
-.agent-tabs button {
+.agent-tabs button[role="tab"] {
     padding: 8px 2px 7px;
     background: transparent;
+    color: var(--cp-link);
     border: 0;
     border-bottom: 2px solid transparent;
     cursor: pointer;
@@ -1325,7 +1479,7 @@ body.resizing-blade .blade {
 }
 
 .center-tabs button[aria-selected="true"],
-.agent-tabs button[aria-selected="true"] {
+.agent-tabs button[role="tab"][aria-selected="true"] {
     color: var(--cp-accent);
     border-bottom-color: var(--cp-accent);
 }
@@ -1691,9 +1845,22 @@ body.resizing-blade .blade {
     border-bottom: 1px solid var(--cp-border);
 }
 
-.guidance-view .agent-tabs button {
+.agent-tab-with-tooltip {
+    display: inline-flex;
+    align-items: center;
+}
+
+.guidance-view .agent-tabs button[role="tab"] {
     padding-top: 6px;
     padding-bottom: 5px;
+}
+
+.guidance-view .agent-tabs .agent-tooltip-trigger {
+    min-width: 22px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    color: var(--cp-text-muted);
 }
 
 .agent-prompt-suggestions {
