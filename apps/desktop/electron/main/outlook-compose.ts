@@ -22,7 +22,7 @@ export async function openOutlookDraft(request: EmailComposeRequest, draftPath: 
     await host.openExternal(createOutlookComposeUri(request))
   } catch (fallbackError) {
     const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
-    throw new Error(`The email draft could not be opened: ${openError}. The default mail fallback also failed: ${fallbackMessage}`)
+    throw new Error(`The email draft could not be opened: ${openError}. The default mail fallback also failed: ${fallbackMessage}`, { cause: fallbackError })
   }
 }
 

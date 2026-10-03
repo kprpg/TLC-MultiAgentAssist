@@ -110,4 +110,18 @@ describe('openOutlookDraft', () => {
 
     expect(host.openExternal).toHaveBeenCalledWith(expect.stringMatching(/^mailto:alex%40example\.com,casey%40example\.com\?/))
   })
+
+  it('preserves the fallback error when the default mail handler cannot be opened', async () => {
+    const fallbackError = new Error('No default mail application is configured.')
+    const host = {
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      openPath: vi.fn().mockResolvedValue('No application is associated with EML files.'),
+      openExternal: vi.fn().mockRejectedValue(fallbackError)
+    }
+
+    await expect(openOutlookDraft(request, 'C:\\Temp\\guidance.eml', host)).rejects.toMatchObject({
+      message: 'The email draft could not be opened: No application is associated with EML files. The default mail fallback also failed: No default mail application is configured.',
+      cause: fallbackError
+    })
+  })
 })
