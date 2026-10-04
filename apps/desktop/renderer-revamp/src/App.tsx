@@ -249,6 +249,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [workflowCadence, setWorkflowCadence] = useState('all')
   const [workflowMode, setWorkflowMode] = useState('all')
   const [expandedWorkflowId, setExpandedWorkflowId] = useState<string | null>(null)
+  const [expandedOpportunityId, setExpandedOpportunityId] = useState<string | null>(null)
   const [workflowAsOf, setWorkflowAsOf] = useState(() => new Date().toISOString().slice(0, 10))
   const [workflowParameters, setWorkflowParameters] = useState<Record<string, number>>({})
   const [activeWorkflowRun, setActiveWorkflowRun] = useState<WorkflowRun | null>(null)
@@ -549,6 +550,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setError('')
     setAccount(nextAccount)
     setOpportunity(null)
+    setExpandedOpportunityId(null)
     setMilestones([])
     setResult(null)
     setAgentResult(null)
@@ -571,6 +573,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       setOpportunities(searchOpportunities.filter((item) => item.accountId === nextAccount.id))
     }
     setOpportunity(nextOpportunity)
+    setExpandedOpportunityId(nextOpportunity.id)
     setOpportunityCommentsOpen(false)
     setMilestones([])
     setResult(null)
@@ -594,8 +597,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     }
   }
 
-  function selectOpportunityIfDifferent(nextOpportunity: Opportunity) {
-    if (opportunity?.id !== nextOpportunity.id) void selectOpportunity(nextOpportunity)
+  function toggleOpportunity(nextOpportunity: Opportunity) {
+    if (opportunity?.id === nextOpportunity.id) {
+      setExpandedOpportunityId((current) => current === nextOpportunity.id ? null : nextOpportunity.id)
+      return
+    }
+    void selectOpportunity(nextOpportunity)
   }
 
   function loadGuidance(nextCapability = capability) {
@@ -911,6 +918,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setAccount(null)
     setOpportunities([])
     setOpportunity(null)
+    setExpandedOpportunityId(null)
     setMilestones([])
     setResult(null)
     setAgentResult(null)
@@ -1096,7 +1104,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                         positioning="above"
                         relationship="description"
                       >
-                        <button className="opportunity-link-button" onClick={() => selectOpportunityIfDifferent(item)}>
+                        <button className="opportunity-link-button" aria-expanded={expandedOpportunityId === item.id} onClick={() => toggleOpportunity(item)}>
                           <strong>{item.name}</strong>
                           <span>{item.owner ?? 'Owner not assigned'}</span>
                         </button>
