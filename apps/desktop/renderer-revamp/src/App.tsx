@@ -90,7 +90,10 @@ const milestoneFieldLabels: Record<MilestoneField, string> = {
 }
 
 function formatMoney(value: number, currency: string): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 1 }).format(value)
+  const formatted = new Intl.NumberFormat('en-US', { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 1 }).format(value)
+  // Some ICU builds keep a trailing ".0" in compact notation (e.g. "$350.0K" instead of
+  // "$350K"). Strip it so output is stable across Node/ICU versions and host platforms.
+  return formatted.replace(/\.0(?=\D|$)/, '')
 }
 
 function stageStatus(result: McemResponse): 'advance' | 'aligned' | 'gap' {
