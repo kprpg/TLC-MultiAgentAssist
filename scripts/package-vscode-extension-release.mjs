@@ -8,7 +8,6 @@ import { fileURLToPath } from 'node:url'
 import { ZipArchive } from 'archiver'
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const extensionRoot = join(repositoryRoot, 'apps', 'vscode-extension')
 
 /**
  * The extension host bundle imports the gitignored config/foundry.environment.json at
