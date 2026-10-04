@@ -6,6 +6,8 @@
     "declarationMap": false,
     "noEmit": true,
     "allowJs": true,
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node", "vitest/globals"]
   },
   "include": [
