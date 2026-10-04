@@ -21,6 +21,7 @@
     "desktop:build": "npm run desktop:icon && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.main.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.preload.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.revamp.config.ts",
     "ext:build": "npm run --workspace apps/vscode-extension build",
     "ext:package": "npm run --workspace apps/vscode-extension package",
+    "ext:release": "node scripts/package-vscode-extension-release.mjs",
     "ext:reinstall": "npm run --workspace apps/vscode-extension install:local",
     "ext:reinstall:insiders": "npm run --workspace apps/vscode-extension install:local:insiders",
     "ext:uninstall": "npm run --workspace apps/vscode-extension uninstall:local",

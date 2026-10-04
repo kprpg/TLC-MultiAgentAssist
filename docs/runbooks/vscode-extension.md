@@ -49,6 +49,7 @@ Defined in the root [`package.json`](../../package.json):
 | --- | --- |
 | `npm run ext:build` | Builds the host bundle and the webview bundle into `apps/vscode-extension/dist`. |
 | `npm run ext:package` | Builds, then writes `apps/vscode-extension/dist/tlc-assist-vscode.vsix`. |
+| `npm run ext:release` | Seeds the Foundry env, builds, packages, and stages the release assets (`.vsix` + MCP config zip) in `release-ext/`. |
 | `npm run ext:reinstall` | Build + package + install into stable `code` (falls back to `code-insiders`). |
 | `npm run ext:reinstall:insiders` | Build + package + install into `code-insiders`. |
 | `npm run ext:uninstall` | Removes the installed extension (`tlc.tlc-assist-vscode`). |
@@ -101,6 +102,65 @@ code-insiders --list-extensions --show-versions | Select-String tlc
 
 You should see `tlc.tlc-assist-vscode@<version>`. Run **Developer: Reload Window** to
 load the new bits.
+
+## Release build (CI) and GitHub Releases
+
+The [`Build and publish VS Code extension release`](../../.github/workflows/vscode-extension-release.yml)
+workflow builds the extension, packages the `.vsix`, and publishes both the extension and a
+companion MCP configuration bundle to GitHub Releases so end users can download and install
+them. It is independent of the desktop and web release workflows and does not change the
+"latest" desktop release.
+
+### Trigger
+
+- **Tag push:** push a tag that matches `ext-v*`, for example `ext-v0.1.0`. The tag must
+  equal `ext-v<version>` where `<version>` is the `version` in
+  [`apps/vscode-extension/package.json`](../../apps/vscode-extension/package.json); the
+  workflow fails if they differ.
+
+  ```powershell
+  git tag ext-v0.1.0
+  git push origin ext-v0.1.0
+  ```
+
+- **Manual run:** start the workflow from the **Actions** tab (`workflow_dispatch`).
+  Without an input it publishes a run-specific tag such as `ext-v0.1.0-build.7`; supply a
+  `tag` input to override.
+
+### What it produces
+
+Two assets are attached to the release:
+
+| Asset | Contents |
+| --- | --- |
+| `tlc-assist-vscode-<version>.vsix` | The installable extension. Self-contained; bundles all dependencies and the embedded MCP registry and tool policy. |
+| `tlc-assist-vscode-mcp-config-<version>.zip` | Optional MCP configuration: a ready-to-use `.vscode/mcp.json` and portable `.mcp.json` for the Dataverse MCP endpoint, the reference `config/*.json` files, and an `INSTALL.md`. |
+
+The same files can be produced locally with `npm run ext:release`, which writes them to
+`release-ext/` (git-ignored). That command seeds the shared Foundry environment, builds the
+host and webview bundles, packages the `.vsix`, and stages the MCP configuration bundle.
+[`scripts/package-vscode-extension-release.mjs`](../../scripts/package-vscode-extension-release.mjs)
+implements the staging and zips the configuration bundle; the ready-to-use client MCP files
+are generated from the enabled servers in
+[`config/mcp.servers.json`](../../config/mcp.servers.json).
+
+### Foundry environment seeding
+
+The extension host bundle imports the git-ignored `config/foundry.environment.json` at
+build and type-check time. On a clean checkout (CI) this file is absent, so both the
+workflow and `npm run ext:release` seed it from the checked-in, non-secret
+[`config/foundry.environment.default.json`](../../config/foundry.environment.default.json)
+without overwriting a developer-provided file. This mirrors how packaged desktop releases
+seed the shared Foundry configuration.
+
+### Installing from the release
+
+End-user install steps and prerequisites are in the
+[VS Code extension install guide](../user-guide/VSCODE-EXTENSION-INSTALL.md). In short: the
+only requirement to install is VS Code (or Insiders) 1.90.0+ and the `.vsix`; sample mode
+needs nothing more, and live mode additionally needs a corporate Microsoft identity and (for
+Foundry agents) the Azure CLI. VSIX installs are not auto-updated, so re-install the newer
+`.vsix` to upgrade.
 
 ## Debugger (F5) vs. installed extension
 
