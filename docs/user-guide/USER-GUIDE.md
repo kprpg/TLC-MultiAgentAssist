@@ -2,45 +2,106 @@
 
 TLC Multi-Agent Assist is a role-aware account team assistant. It joins live MSX opportunity data with grounded internal knowledge and four specialized agents that translate evidence into next-best actions.
 
-This guide walks through every user-visible feature. All screenshots come from the sanitized sample dataset shipped with the product; the live experience is identical except that data is pulled from MSX for opportunities on which you are on the deal team.
+It ships as two end-user surfaces that share the same feature set — a **VS Code shell extension** and a **Windows desktop application** (the same experience is also hosted as a web app). The two surfaces differ in look and feel, so each part has its own screenshots. This guide is organized into those two parts:
+
+- **[VS Code Shell Extension](#vs-code-shell-extension)** — install, open, and use TLC Assist inside VS Code, with VS Code-specific screenshots.
+- **[Desktop Version](#desktop-version)** — install, launch, and run the Windows desktop app, with the full illustrated feature walkthrough.
+
+All screenshots come from the sanitized sample dataset shipped with the product; the live experience is identical except that data is pulled from MSX for opportunities on which you are on the deal team.
 
 ---
 
 ## Table of contents
 
-1. [Launching the app and signing in](#1-launching-the-app-and-signing-in)
-   1. [Run the desktop app with sample data](#11-run-the-desktop-app-with-sample-data)
-2. [The workspace at a glance](#2-the-workspace-at-a-glance)
-3. [Accounts blade — selecting an account](#3-accounts-blade--selecting-an-account)
-4. [Opportunities blade — reviewing your book of work](#4-opportunities-blade--reviewing-your-book-of-work)
+**[Part 1 — VS Code Shell Extension](#vs-code-shell-extension)**
+
+- [Install and open in VS Code](#install-and-open-in-vs-code)
+  - [The Discover, Portfolio, and Plays tabs](#the-discover-portfolio-and-plays-tabs)
+  - [Run the extension in sample mode](#run-the-extension-in-sample-mode)
+- [The VS Code experience](#the-vs-code-experience)
+
+**[Part 2 — Desktop Version](#desktop-version)**
+
+- [Install and launch the desktop app](#install-and-launch-the-desktop-app)
+- [Run the desktop app with sample data](#run-the-desktop-app-with-sample-data)
+1. [The workspace at a glance](#2-the-workspace-at-a-glance)
+2. [Accounts blade — curating and selecting accounts](#3-accounts-blade--curating-and-selecting-accounts)
+3. [Opportunities blade — reviewing your book of work](#4-opportunities-blade--reviewing-your-book-of-work)
    1. [Sorting opportunities](#41-sorting-opportunities)
    2. [Editing opportunity comments](#42-editing-opportunity-comments)
-5. [Milestones — drilling down inside an opportunity](#5-milestones--drilling-down-inside-an-opportunity)
+4. [Milestones — drilling down inside an opportunity](#5-milestones--drilling-down-inside-an-opportunity)
    1. [Sorting milestones](#51-sorting-milestones)
    2. [Editable milestone fields](#52-editable-milestone-fields)
-6. [MSX evidence panel](#6-msx-evidence-panel)
-7. [Agentic guidance — the four agents](#7-agentic-guidance--the-four-agents)
+5. [MSX evidence panel](#6-msx-evidence-panel)
+6. [Agentic guidance — the four agents](#7-agentic-guidance--the-four-agents)
    1. [Account Pulse](#71-account-pulse)
    2. [MCEM Coach](#72-mcem-coach)
    3. [Pursuit / Executive](#73-pursuit--executive)
    4. [Risk & Solution Play](#74-risk--solution-play)
    5. [Working with an agent response](#75-working-with-an-agent-response)
-8. [MCEM Stage Management](#8-mcem-stage-management)
-9. [Next-best actions rail](#9-next-best-actions-rail)
-10. [Search](#10-search)
-11. [Data modes and the top-right badge](#11-data-modes-and-the-top-right-badge)
-12. [Exiting the app](#12-exiting-the-app)
+7. [MCEM Stage Management](#8-mcem-stage-management)
+8. [Next-best actions rail](#9-next-best-actions-rail)
+9. [Search](#10-search)
+10. [Data modes and the top-right badge](#11-data-modes-and-the-top-right-badge)
+11. [Exiting the app](#12-exiting-the-app)
 
 ---
 
-## 1. Launching the app and signing in
+# VS Code Shell Extension
 
-- **Web** — navigate to the production URL provided by your administrator. The App Service redirects unauthenticated users to Microsoft Entra ID; sign in with your `@microsoft.com` corporate account.
-- **Desktop (Electron)** — launch **TLC Multi-Agent Assist** from the Start Menu. The app uses the Azure CLI token cached on your machine (`az login` in advance).
+TLC Assist installs as a self-contained VS Code extension and opens inside the editor. Everything in this part — accounts, opportunities, milestones, the four guidance agents, and the MCEM board — is the same feature set delivered in the [Desktop Version](#desktop-version).
 
-After sign-in you land on the empty workspace with your account portfolio in the left blade. No account is opened until you select one.
+## Install and open in VS Code
 
-### 1.1 Run the desktop app with sample data
+1. Install `tlc-assist-vscode-<version>.vsix` from the GitHub Releases page (see the [VS Code extension install guide](VSCODE-EXTENSION-INSTALL.md) for the full steps). Only **VS Code / VS Code Insiders 1.90.0+** is required — no Node.js, npm, sign-in, or network.
+2. Run **Developer: Reload Window**, then select the **TLC Assist** icon in the Activity Bar, or run **TLC: Open Assist** from the Command Palette (`Ctrl+Shift+P`).
+
+The extension starts in **sample** mode (sanitized fixtures, no network). To use live data, open **Settings** (`Ctrl+,`), set `tlc.mode` to `live`, and sign in with VS Code's built-in Microsoft account; the Foundry agents additionally use the Azure CLI (`az login`).
+
+### The Discover, Portfolio, and Plays tabs
+
+The TLC Assist view is organized into three tabs:
+
+- **Discover** — browse Solution Engineer domains and join or leave opportunity Deal Teams.
+- **Portfolio** — your accounts, opportunities, milestones, MSX evidence, and the four guidance agents, with **Email** and **Word** export on every agent response.
+- **Plays** — the operational Plays catalog in the left rail (ordered by workflow number) and the Operational Queue of results. Each queue item can be dispatched to an agent — for example **Send to Pursuit** or **Send to Risk & Play** — and the returned response can be exported with **Email** or **Word**, just like Portfolio guidance.
+
+VS Code also contributes a native **TLC Assist** tree and toolbar commands (**TLC: Refresh Data**, **TLC: Add Customer Account**, **TLC: Toggle Hidden Customers**).
+
+### Run the extension in sample mode
+
+Sample mode is the default and needs nothing else — no sign-in, no network, no Azure CLI. If you previously switched to live mode, set `tlc.mode` back to `sample` in **Settings** and run **Developer: Reload Window**. In sample mode the view loads bundled sanitized data and never calls MSX or Foundry.
+
+## The VS Code experience
+
+The VS Code extension renders TLC Assist inside the editor, so its chrome — the Activity Bar icon, the editor tab, the native tree, and the VS Code theme — looks and feels different from the standalone desktop window even though the features are the same. The screenshots below are captured from the **Extension Development Host** running in sample mode.
+
+> 📸 **Screenshot to add** — `./media/vscode/01-portfolio.png`: the TLC Assist view open on the **Portfolio** tab, showing the account portfolio, a selected opportunity, and its milestone tree.
+
+> 📸 **Screenshot to add** — `./media/vscode/02-guidance.png`: a completed **Multi-Agent Guidance** response on the Portfolio tab with the **Email** and **Word** buttons visible.
+
+> 📸 **Screenshot to add** — `./media/vscode/03-plays-queue.png`: the **Plays** tab with the catalog rail ordered by workflow number and the Operational Queue, including a **Send to Pursuit** action on a queue item.
+
+> 📸 **Screenshot to add** — `./media/vscode/04-plays-guidance.png`: a Plays queue item dispatched to an agent, showing the returned response with its **Email** and **Word** export buttons.
+
+For the full, step-by-step tour of every feature — accounts, opportunities, milestones, MSX evidence, the four agents, the MCEM board, next-best actions, and search — see the illustrated walkthrough in [Desktop Version](#desktop-version); the behavior is identical in VS Code.
+
+---
+
+# Desktop Version
+
+The Windows desktop application is a standalone Electron window that delivers the same account-team and guidance features as the VS Code extension, with its own look and feel. This part covers desktop install, launch, and sample mode, and then walks through every feature with desktop screenshots. The feature behavior is identical in the [VS Code Shell Extension](#vs-code-shell-extension).
+
+## Install and launch the desktop app
+
+1. Download the Windows installer (`TLC-MultiAgent-Assist-<version>-Windows-x64.exe`) or the portable ZIP from the [latest release](https://github.com/kprpg/TLC-MultiAgentAssist/releases/latest), unblock it, and run it. See the [complete desktop installation guide](DESKTOP-INSTALL.md) for detailed steps and troubleshooting.
+2. Launch **TLC Multi-Agent Assist** from the Start Menu. The desktop app uses the Azure CLI token cached on your machine, so run `az login` in advance for live mode.
+
+After sign-in you land on the empty workspace with your account portfolio in the left blade; no account is opened until you select one.
+
+![Landing view with an empty workbench and the account portfolio call-to-action](./media/01-landing.png)
+
+## Run the desktop app with sample data
 
 > **Use sample mode to explore the application without signing in or connecting to MSX, Foundry, Azure, or Microsoft Entra ID.** Close any running instance of TLC Multi-Agent Assist first.
 
@@ -71,11 +132,7 @@ $env:TLC_DATA_MODE = 'sample'
 & "$env:LOCALAPPDATA\Programs\TLC MultiAgent Assist\TLC MultiAgent Assist.exe"
 ```
 
-Sample mode loads bundled sanitized data. It should open the workspace directly without displaying a login dialog.
-
-![Landing view with an empty workbench and the account portfolio call-to-action](./media/01-landing.png)
-
----
+Sample mode loads bundled sanitized data and opens the workspace directly without displaying a login dialog.
 
 ## 2. The workspace at a glance
 

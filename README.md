@@ -6,11 +6,24 @@
 [![Web release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/web-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/web-release.yml)
 [![VS Code extension release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/vscode-extension-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/vscode-extension-release.yml)
 
-TLC MultiAgent Assist is a Windows desktop application that acts as an account assistant that combines live MSX opportunity context with contextual guidance provided on the opportunity to advance them forward
+TLC MultiAgent Assist is an account assistant that combines live MSX opportunity context with contextual guidance on each opportunity to advance it forward. It is available in three forms, each with its own get-started steps below:
 
-[**Install the Windows desktop app**](docs/user-guide/DESKTOP-INSTALL.md) | [Download the latest release](https://github.com/kprpg/TLC-MultiAgentAssist/releases/latest)
+- **[VS Code shell extension](#install-the-vs-code-extension)** — brings TLC Assist into VS Code or VS Code Insiders.
+- **[Windows desktop application](#install-the-desktop-app)** — a packaged Electron app with Start menu and desktop shortcuts.
+- **[Web application](#web-application)** — the same experience in the browser, hosted on Azure App Service.
 
 [Technology stack](TechStack.md)
+
+## Install the VS Code Extension
+
+TLC Assist is also available as a VS Code extension. The only requirement to install is **VS Code (or VS Code Insiders) 1.90.0 or later** plus the released `.vsix`; it is self-contained (no Node.js, npm, or native binaries) and starts in sample mode with no sign-in or network.
+
+1. Open the [VS Code extension releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=ext-v) and expand **Assets**.
+2. Download `tlc-assist-vscode-<version>.vsix`. The companion `tlc-assist-vscode-mcp-config-<version>.zip` (MCP configuration and reference files) is optional — the extension already embeds its MCP registry and tool policy.
+3. In VS Code, run **Extensions: Install from VSIX...** from the Command Palette (`Ctrl+Shift+P`) and choose the file, or from a terminal run `code --install-extension tlc-assist-vscode-<version>.vsix --force`. Confirm the publisher-trust prompt on VS Code 1.97+.
+4. Run **Developer: Reload Window**, then select the **TLC Assist** icon in the Activity Bar or run **TLC: Open Assist**.
+
+Sample mode needs nothing else. Live mode additionally requires a corporate Microsoft identity (VS Code's built-in Microsoft sign-in) and, for the Microsoft Foundry agents, the Azure CLI (`az login`). Extensions installed from a `.vsix` are not auto-updated — re-install a newer `.vsix` to upgrade. See the [complete VS Code extension install guide](docs/user-guide/VSCODE-EXTENSION-INSTALL.md) for details and the optional MCP setup.
 
 ## Install the Desktop App
 
@@ -24,17 +37,6 @@ TLC MultiAgent Assist is a Windows desktop application that acts as an account a
 6. When setup completes, leave **Run TLC MultiAgent Assist** selected and choose **Finish**.
 
 For the portable ZIP, unblock it if prompted, select **Extract All**, and run `TLC MultiAgent Assist.exe` from the extracted folder. See the [complete desktop installation guide](docs/user-guide/DESKTOP-INSTALL.md) for detailed instructions and troubleshooting links.
-
-## Install the VS Code Extension
-
-TLC Assist is also available as a VS Code extension. The only requirement to install is **VS Code (or VS Code Insiders) 1.90.0 or later** plus the released `.vsix`; it is self-contained (no Node.js, npm, or native binaries) and starts in sample mode with no sign-in or network.
-
-1. Open the [VS Code extension releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=ext-v) and expand **Assets**.
-2. Download `tlc-assist-vscode-<version>.vsix`. The companion `tlc-assist-vscode-mcp-config-<version>.zip` (MCP configuration and reference files) is optional — the extension already embeds its MCP registry and tool policy.
-3. In VS Code, run **Extensions: Install from VSIX...** from the Command Palette (`Ctrl+Shift+P`) and choose the file, or from a terminal run `code --install-extension tlc-assist-vscode-<version>.vsix --force`. Confirm the publisher-trust prompt on VS Code 1.97+.
-4. Run **Developer: Reload Window**, then select the **TLC Assist** icon in the Activity Bar or run **TLC: Open Assist**.
-
-Sample mode needs nothing else. Live mode additionally requires a corporate Microsoft identity (VS Code's built-in Microsoft sign-in) and, for the Microsoft Foundry agents, the Azure CLI (`az login`). Extensions installed from a `.vsix` are not auto-updated — re-install a newer `.vsix` to upgrade. See the [complete VS Code extension install guide](docs/user-guide/VSCODE-EXTENSION-INSTALL.md) for details and the optional MCP setup.
 
 ## Run with Sample Data
 
@@ -84,6 +86,26 @@ See the runbooks for complete prerequisites, build commands, startup modes, and 
 - [Desktop setup and troubleshooting](docs/runbooks/desktop-app.md)
 - [Web setup and hosting](docs/runbooks/web-app.md)
 - [VS Code extension build, package, and deploy](docs/runbooks/vscode-extension.md)
+
+## Web Application
+
+TLC Assist also runs as a browser-based web application that serves the same revamped UI, suited for hosting on Azure App Service.
+
+Run locally with bundled sample data (no sign-in or network):
+
+```powershell
+npm install
+npm run web:start
+```
+
+Run against live local data with an Azure CLI sign-in:
+
+```powershell
+az login
+npm run web:start:live
+```
+
+Build an Azure App Service-ready package with `npm run web:release`, or push a `web-v*` tag to publish the App Service ZIP to GitHub Releases. See the [web setup and hosting runbook](docs/runbooks/web-app.md) for full deployment details.
 
 ## Development
 
