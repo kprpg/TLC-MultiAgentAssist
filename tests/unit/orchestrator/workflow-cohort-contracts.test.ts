@@ -11,7 +11,7 @@ describe('initial workflow cohort contracts', () => {
     it('publishes one canonical, deterministic definition for each approved workflow', () => {
         expect(initialWorkflowDefinitions.map(({ id }) => id)).toEqual(initialWorkflowIds)
         expect(initialWorkflowDefinitions.map(({ executionMode }) => executionMode)).toEqual([
-            'composite', 'composite', 'composite', 'deterministic', 'composite', 'composite', 'composite', 'deterministic', 'deterministic', 'deterministic', 'deterministic', 'composite'
+            'composite', 'composite', 'composite', 'deterministic', 'composite', 'composite', 'composite', 'deterministic', 'composite', 'composite', 'deterministic', 'composite'
         ])
         expect(initialWorkflowDefinitions.every(({ auth, scope }) =>
             !auth.allowedWrite && scope === 'portfolio')).toBe(true)
@@ -24,8 +24,8 @@ describe('initial workflow cohort contracts', () => {
             ['dataverse-mcp', 'msx-mcp'],
             ['dataverse-mcp', 'msx-mcp'],
             ['dataverse-mcp'],
-            ['dataverse-mcp'],
-            ['dataverse-mcp'],
+            ['dataverse-mcp', 'msx-mcp'],
+            ['dataverse-mcp', 'msx-mcp'],
             ['dataverse-mcp'],
             ['dataverse-mcp', 'msx-mcp']
         ])

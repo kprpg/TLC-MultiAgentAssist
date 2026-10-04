@@ -112,11 +112,21 @@ export interface WorkflowResultCardView {
     title?: string
     metrics?: Array<{ label: string; value: string | number }>
     columns?: string[]
+    columnLabels?: Record<string, string>
     rows?: Array<Record<string, unknown>>
     items?: Array<{ label?: string; title?: string; detail?: string }>
 }
 
-export interface WorkflowQueueItemView { id: string; title: string; priority: string; owner?: string; accountId?: string; opportunityId?: string }
+export interface WorkflowQueueItemView {
+    id: string
+    title: string
+    priority: string
+    owner?: string
+    accountId?: string
+    accountName?: string
+    opportunityId?: string
+    opportunityName?: string
+}
 
 export interface WorkflowOutputView {
     workflowId: string
