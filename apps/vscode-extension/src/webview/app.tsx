@@ -13,7 +13,7 @@ import { suggestedPrompts } from './prompt-catalog.js'
 import { mcemStages } from './mcem-stages.js'
 import { NextBestActions } from './next-best-actions.js'
 import { PlayRoleOwners } from './play-role-owners.js'
-import { groupQueueByOpportunity, highPriorityCount, priorityClass, type QueueGroup } from './plays-grouping.js'
+import { groupQueueByOpportunity, highPriorityCount, humanizeResultCard, priorityClass, sectionPlaysByWorkflowNumber, type QueueGroup, type QueueNameResolvers } from './plays-grouping.js'
 import { AppHeader } from './app-header.js'
 import { CommentsButton } from './comments-button.js'
 import { portfolioLayoutClassName } from './portfolio-layout.js'
@@ -122,7 +122,7 @@ function ResultCard({ card }: { card: WorkflowResultCardView }): ReactElement | 
         const columns = card.columns ?? Object.keys(card.rows[0] ?? {})
         return (
             <table className="record-table">
-                <thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
+                <thead><tr>{columns.map((column) => <th key={column}>{card.columnLabels?.[column] ?? column}</th>)}</tr></thead>
                 <tbody>
                     {card.rows.map((row, index) => (
                         <tr key={index}>{columns.map((column) => <td key={column}>{String(row[column] ?? '')}</td>)}</tr>
@@ -217,7 +217,8 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
     const [runError, setRunError] = useState<string | undefined>(undefined)
     const [guidanceByItem, setGuidanceByItem] = useState<Record<string, GuidanceEntry>>({})
     const [accountNames, setAccountNames] = useState<Record<string, string>>({})
-    const [opportunityNames, setOpportunityNames] = useState<Record<string, string>>({})
+    const [opportunityIndex, setOpportunityIndex] = useState<Record<string, { name: string; accountId?: string }>>({})
+    const [note, setNote] = useState<string | undefined>(undefined)
     const [playQuery, setPlayQuery] = useState('')
     const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
     const fetchedOppAccounts = useRef<Set<string>>(new Set())
@@ -229,25 +230,40 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
         dataClient.listWorkflowDefinitions()
             .then((data) => setDefinitions({ status: 'ready', data }))
             .catch((error: Error) => setDefinitions({ status: 'error', error: error.message }))
-        dataClient.listAccounts(true)
-            .then((accounts) => setAccountNames(Object.fromEntries(accounts.map((account) => [account.id, account.name]))))
-            .catch(() => { /* account names are best-effort labels for grouping */ })
+        // Build a portfolio-wide account + opportunity name index so queue groups and record
+        // tables can render descriptive labels instead of raw ids, even for milestone/activity
+        // items that only carry an opportunity id.
+        void (async () => {
+            try {
+                const accounts = await dataClient.listAccounts(true)
+                setAccountNames(Object.fromEntries(accounts.map((account) => [account.id, account.name])))
+                accounts.forEach((account) => fetchedOppAccounts.current.add(account.id))
+                const results = await Promise.allSettled(accounts.map((account) => dataClient.listOpportunities(account.id)))
+                const index: Record<string, { name: string; accountId?: string }> = {}
+                for (const result of results) {
+                    if (result.status === 'fulfilled') {
+                        for (const opportunity of result.value) index[opportunity.id] = { name: opportunity.name, accountId: opportunity.accountId }
+                    }
+                }
+                if (Object.keys(index).length > 0) setOpportunityIndex((previous) => ({ ...previous, ...index }))
+            } catch { /* names are best-effort labels for grouping and record tables */ }
+        })()
     }, [])
 
-    // Resolve opportunity display names for the accounts referenced by a result, once per account.
+    // Resolve opportunity display names for any accounts referenced by a result but not yet indexed.
     const ensureOpportunityNames = useCallback(async (queue: WorkflowOutputView['queueItems']) => {
         const accountIds = [...new Set(queue.map((item) => item.accountId).filter((id): id is string => Boolean(id)))]
         const toFetch = accountIds.filter((id) => !fetchedOppAccounts.current.has(id))
         if (toFetch.length === 0) return
         toFetch.forEach((id) => fetchedOppAccounts.current.add(id))
         const results = await Promise.allSettled(toFetch.map((id) => dataClient.listOpportunities(id)))
-        const additions: Record<string, string> = {}
+        const additions: Record<string, { name: string; accountId?: string }> = {}
         for (const result of results) {
             if (result.status === 'fulfilled') {
-                for (const opportunity of result.value) additions[opportunity.id] = opportunity.name
+                for (const opportunity of result.value) additions[opportunity.id] = { name: opportunity.name, accountId: opportunity.accountId }
             }
         }
-        if (Object.keys(additions).length > 0) setOpportunityNames((previous) => ({ ...previous, ...additions }))
+        if (Object.keys(additions).length > 0) setOpportunityIndex((previous) => ({ ...previous, ...additions }))
     }, [])
 
     const runPlay = useCallback(async (workflowId: string) => {
@@ -315,26 +331,27 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
         }
     }, [runRequest, runPlay])
 
-    const resolvers = useMemo(() => ({
-        accountName: (id?: string) => (id ? accountNames[id] ?? id : 'Unassigned account'),
-        opportunityName: (id?: string) => (id ? opportunityNames[id] ?? id : undefined)
-    }), [accountNames, opportunityNames])
+    const resolvers = useMemo<QueueNameResolvers>(() => ({
+        accountName: (id?: string) => (id ? accountNames[id] : undefined),
+        opportunityName: (id?: string) => (id ? opportunityIndex[id]?.name : undefined),
+        accountForOpportunity: (id?: string) => {
+            const accountId = id ? opportunityIndex[id]?.accountId : undefined
+            if (!accountId) return undefined
+            const name = accountNames[accountId]
+            return name ? { id: accountId, name } : { id: accountId }
+        }
+    }), [accountNames, opportunityIndex])
 
-    const playCategories = useMemo(() => {
+    const playSections = useMemo(() => {
         const query = playQuery.trim().toLowerCase()
         const matches = (definitions.data ?? []).filter((definition) =>
             query.length === 0 || definition.name.toLowerCase().includes(query) || definition.id.toLowerCase().includes(query))
-        const byCategory = new Map<string, WorkflowDefinitionView[]>()
-        for (const definition of matches) {
-            const list = byCategory.get(definition.category) ?? []
-            list.push(definition)
-            byCategory.set(definition.category, list)
-        }
-        return [...byCategory.entries()].sort(([left], [right]) => left.localeCompare(right))
+        return sectionPlaysByWorkflowNumber(matches)
     }, [definitions, playQuery])
 
     const selectedRun = runs.find((run) => run.runId === selectedRunId)
     const groups = useMemo<QueueGroup[]>(() => (selectedRun ? groupQueueByOpportunity(selectedRun.queue, resolvers) : []), [selectedRun, resolvers])
+    const displayCard = useMemo(() => (selectedRun ? humanizeResultCard(selectedRun.card, resolvers) : undefined), [selectedRun, resolvers])
 
     // Move focus to the run header when a result is shown so screen readers announce the run context.
     useEffect(() => {
@@ -357,9 +374,9 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                         onChange={(event) => setPlayQuery(event.target.value)}
                     />
                 </div>
-                {playCategories.length === 0 && <p className="muted">No plays match "{playQuery}".</p>}
-                {playCategories.map(([category, defs]) => (
-                    <div className="play-category" key={category}>
+                {playSections.length === 0 && <p className="muted">No plays match "{playQuery}".</p>}
+                {playSections.map(({ key, category, definitions: defs }) => (
+                    <div className="play-category" key={key}>
                         <div className="play-category-title section-heading">{categoryLabel(category)}</div>
                         <ul className="play-list" role="list">
                             {defs.map((definition) => {
@@ -389,6 +406,7 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
             </section>
             <section className="plays-results" aria-label="Result">
                 {runError && <p className="error results-error">{runError}</p>}
+                {note && <p className="muted results-note" role="status">{note}</p>}
                 {selectedRun ? (
                     <>
                         <header className="run-header" tabIndex={-1} ref={runHeaderRef}>
@@ -429,7 +447,7 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                             </div>
                         )}
                         <div className="results-body">
-                            <ResultCard card={selectedRun.card} />
+                            <ResultCard card={displayCard ?? selectedRun.card} />
                             {!cardHasContent(selectedRun.card) && selectedRun.queue.length === 0 && (
                                 <p className="muted">This play returned no items for the current scope.</p>
                             )}
@@ -439,12 +457,15 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                                     {groups.map((group) => {
                                         const collapsed = Boolean(collapsedGroups[group.key])
                                         const capability = guidanceAgentFor(selectedRun.workflowId)
+                                        const accountKnown = group.accountName !== 'Unassigned account'
+                                        const primaryLabel = group.opportunityName ?? (accountKnown ? group.accountName : 'Portfolio-level items')
+                                        const showSecondaryAccount = Boolean(group.opportunityName) && accountKnown
                                         return (
                                             <div className="queue-group" key={group.key}>
                                                 <button type="button" className="queue-group-header" aria-expanded={!collapsed} onClick={() => toggleGroup(group.key)}>
                                                     <span className="disclosure" aria-hidden="true">{collapsed ? '\u25B8' : '\u25BE'}</span>
-                                                    <span className="queue-group-oppty">{group.opportunityName ?? 'Portfolio-level items'}</span>
-                                                    <span className="queue-group-account">{group.accountName}</span>
+                                                    <span className="queue-group-oppty">{primaryLabel}</span>
+                                                    {showSecondaryAccount && <span className="queue-group-account">{group.accountName}</span>}
                                                     <span className="badge count">{group.items.length}</span>
                                                 </button>
                                                 {!collapsed && (
@@ -475,7 +496,10 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                                                                                 <>
                                                                                     <div className="guidance-drawer-head">
                                                                                         <h5>{agentLabel(capability)} guidance</h5>
-                                                                                        <button type="button" className="drawer-close" aria-label="Dismiss guidance" onClick={() => dismissGuidance(key)}>&times;</button>
+                                                                                        <div className="guidance-drawer-actions">
+                                                                                            <ResponseActions title={`${agentLabel(capability)} - ${item.title}`} markdown={entry.content ?? ''} onNote={setNote} />
+                                                                                            <button type="button" className="drawer-close" aria-label="Dismiss guidance" onClick={() => dismissGuidance(key)}>&times;</button>
+                                                                                        </div>
                                                                                     </div>
                                                                                     {entry.evidenceIds && entry.evidenceIds.length > 0 && (
                                                                                         <p className="muted">Evidence cited: {entry.evidenceIds.join(', ')}</p>

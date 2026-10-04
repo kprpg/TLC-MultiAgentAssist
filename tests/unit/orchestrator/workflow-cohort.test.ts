@@ -139,6 +139,41 @@ describe('initial deterministic workflow cohort', () => {
         expect(output.card).toMatchObject({ kind: 'action-list', actions: [] })
     })
 
+    it('embeds descriptive queue labels without exposing owner identifiers', async () => {
+        const harness = createHarness()
+
+        harness.setActiveWorkflow('WF-002')
+        const milestoneRun = await harness.runtime.wait(harness.runtime.start({
+            workflowId: 'WF-002', scope: { kind: 'portfolio' }, input: input('WF-002')
+        }).runId)
+        const milestoneOutput = initialWorkflowOutputSchema.parse(harness.runtime.getResult(milestoneRun.resultRef!)?.output)
+        expect(milestoneOutput.queueItems[0]).toMatchObject({
+            accountId: 'account-1',
+            opportunityId: 'opp-1',
+            opportunityName: 'Contoso data platform'
+        })
+
+        harness.setActiveWorkflow('WF-009')
+        const ownerRun = await harness.runtime.wait(harness.runtime.start({
+            workflowId: 'WF-009', scope: { kind: 'portfolio' }, input: input('WF-009')
+        }).runId)
+        const ownerOutput = initialWorkflowOutputSchema.parse(harness.runtime.getResult(ownerRun.resultRef!)?.output)
+        expect(ownerOutput.queueItems[0]).toMatchObject({
+            title: 'Jordan Lee owns 2 active opportunities',
+            owner: 'Jordan Lee'
+        })
+
+        harness.setActiveWorkflow('WF-010')
+        const activityRun = await harness.runtime.wait(harness.runtime.start({
+            workflowId: 'WF-010', scope: { kind: 'portfolio' }, input: input('WF-010')
+        }).runId)
+        const activityOutput = initialWorkflowOutputSchema.parse(harness.runtime.getResult(activityRun.resultRef!)?.output)
+        expect(activityOutput.queueItems[0]).toMatchObject({
+            owner: 'Owner name unavailable',
+            opportunityName: 'Contoso data platform'
+        })
+    })
+
     it('surfaces optional unauthorized enrichment and required truncation as partial runs', async () => {
         const unauthorized = createHarness({ msxUnauthorized: true })
         unauthorized.setActiveWorkflow('WF-001')

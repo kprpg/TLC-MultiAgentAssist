@@ -226,31 +226,45 @@ function buildQueueItems(
 ): WorkflowQueueItem[] {
     if (workflowId === 'WF-009') {
         const threshold = input.maximumActiveItems ?? 20
-        const counts = new Map<string, number>()
+        const owners = new Map<string, { count: number; name: string }>()
         for (const record of records) {
-            const owner = text(record.ownerId) ?? 'Unassigned'
-            counts.set(owner, (counts.get(owner) ?? 0) + 1)
+            const ownerId = text(record.ownerId) ?? 'unassigned'
+            const ownerName = text(record.opportunityOwnerName)
+                ?? (ownerId === 'unassigned' ? 'Unassigned owner' : 'Owner name unavailable')
+            const current = owners.get(ownerId)
+            owners.set(ownerId, {
+                count: (current?.count ?? 0) + 1,
+                name: current?.name !== 'Owner name unavailable' ? current?.name ?? ownerName : ownerName
+            })
         }
-        return [...counts.entries()]
-            .filter(([, count]) => count > threshold)
-            .sort(([left], [right]) => left.localeCompare(right))
-            .map(([owner, count]) => ({
-                id: `${workflowId}:${owner}`, workflowId, priority: count > threshold * 2 ? 'P0' : 'P1',
-                title: `${owner} owns ${count} active opportunities`, owner, evidenceIds, status: 'new'
+        return [...owners.entries()]
+            .filter(([, owner]) => owner.count > threshold)
+            .sort(([, left], [, right]) => left.name.localeCompare(right.name))
+            .map(([ownerId, owner]) => ({
+                id: `${workflowId}:${ownerId}`, workflowId, priority: owner.count > threshold * 2 ? 'P0' : 'P1',
+                title: `${owner.name} owns ${owner.count} active opportunities`,
+                owner: owner.name,
+                evidenceIds,
+                status: 'new'
             }))
     }
     return records.map((record, index) => {
         const recordId = text(record.id) ?? `${index + 1}`
         const dueDate = date(record.targetDate) ?? date(record.dueDate) ?? date(record.closeDate)
         const opportunityId = text(record.opportunityId) ?? (opportunityScopedWorkflows.has(workflowId) ? text(record.id) : undefined)
+        const opportunityName = text(record.opportunityName)
+            ?? (opportunityScopedWorkflows.has(workflowId) ? text(record.name) : undefined)
+        const owner = queueOwnerName(workflowId, record)
         return {
             id: `${workflowId}:${recordId}`,
             workflowId,
             priority: (workflowId === 'WF-003' && Number(record.recordedStage ?? 0) >= 4) || (workflowId === 'WF-005' && record.status === 'Blocked') ? 'P0' : 'P1',
             title: queueTitle(workflowId, record),
-            ...(text(record.ownerId) ? { owner: text(record.ownerId) } : {}),
+            ...(owner ? { owner } : {}),
             ...(text(record.accountId) ? { accountId: text(record.accountId) } : {}),
+            ...(text(record.accountName) ? { accountName: text(record.accountName) } : {}),
             ...(opportunityId ? { opportunityId } : {}),
+            ...(opportunityName ? { opportunityName } : {}),
             ...(dueDate ? { dueDate } : {}),
             evidenceIds,
             status: 'new' as const
@@ -261,8 +275,14 @@ function buildQueueItems(
 // Opportunity-entity workflows surface the row id as the opportunity id so queue items can hand off to guidance.
 const opportunityScopedWorkflows = new Set<InitialWorkflowId>(['WF-001', 'WF-004', 'WF-006', 'WF-008', 'WF-011'])
 
+function queueOwnerName(workflowId: InitialWorkflowId, record: Record<string, unknown>): string | undefined {
+    return text(record.owner)
+        ?? (opportunityScopedWorkflows.has(workflowId) ? text(record.opportunityOwnerName) : undefined)
+        ?? (text(record.ownerId) ? 'Owner name unavailable' : undefined)
+}
+
 function queueTitle(workflowId: InitialWorkflowId, record: Record<string, unknown>): string {
-    const label = text(record.name) ?? text(record.subject) ?? text(record.id) ?? 'Untitled record'
+    const label = text(record.name) ?? text(record.subject) ?? 'Untitled record'
     const prefix: Record<Exclude<InitialWorkflowId, 'WF-009'>, string> = {
         'WF-001': 'Review stale opportunity',
         'WF-002': 'Triage overdue milestone',
@@ -302,7 +322,7 @@ function rows(value: unknown): Array<Record<string, unknown>> {
 }
 
 const curatedOpportunityFields = [
-    'owner', 'recordedStage', 'value', 'currency', 'closeDate', 'comments', 'forecastCategory', 'probability'
+    'recordedStage', 'value', 'currency', 'closeDate', 'comments', 'forecastCategory', 'probability'
 ] as const
 
 function reconcileRecords(
@@ -322,8 +342,10 @@ function reconcileRecords(
             const value = curated[field]
             if (value !== undefined && value !== null && value !== '') merged[field] = value
         }
-        if (!text(merged.ownerId) && text(curated.owner)) merged.ownerId = curated.owner
+        if (text(curated.name)) merged.opportunityName = curated.name
+        if (text(curated.owner)) merged.opportunityOwnerName = curated.owner
         if (!text(merged.accountId) && text(curated.accountId)) merged.accountId = curated.accountId
+        if (!text(merged.accountName) && text(curated.accountName)) merged.accountName = curated.accountName
         return merged
     })
 }

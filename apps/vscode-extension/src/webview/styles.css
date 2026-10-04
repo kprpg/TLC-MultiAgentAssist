@@ -439,6 +439,14 @@ ul {
     margin: 12px 16px 0;
 }
 
+.results-note {
+    margin: 12px 16px 0;
+    padding: 6px 10px;
+    border-left: 2px solid var(--vscode-focusBorder);
+    background: var(--vscode-editorWidget-background, transparent);
+    border-radius: 0 4px 4px 0;
+}
+
 .results-empty {
     display: grid;
     gap: 12px;
@@ -629,6 +637,12 @@ ul {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 8px;
+}
+
+.guidance-drawer-actions {
+    display: flex;
+    align-items: center;
     gap: 8px;
 }
 

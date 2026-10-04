@@ -35,7 +35,9 @@ export const workflowQueueItemSchema = z.object({
     title: z.string().min(1),
     owner: z.string().min(1).optional(),
     accountId: z.string().min(1).optional(),
+    accountName: z.string().min(1).optional(),
     opportunityId: z.string().min(1).optional(),
+    opportunityName: z.string().min(1).optional(),
     dueDate: z.string().date().optional(),
     evidenceIds: z.array(z.string().min(1)),
     status: z.literal('new')
@@ -99,10 +101,12 @@ export const initialWorkflowDefinitions: readonly WorkflowDefinition[] = Object.
         { connector: 'dataverse-mcp', operation: 'read_query', required: true }
     ]),
     createDefinition('WF-009', 'Owner workload imbalance', ['Manager'], 'ownership', 'metric-strip', [
-        { connector: 'dataverse-mcp', operation: 'read_query', required: true }
+        { connector: 'dataverse-mcp', operation: 'read_query', required: true },
+        { connector: 'msx-mcp', operation: 'list_pipeline', required: false }
     ]),
     createDefinition('WF-010', 'Activity follow-up debt', ['Seller', 'SE'], 'activity-compliance', 'action-list', [
-        { connector: 'dataverse-mcp', operation: 'read_query', required: true }
+        { connector: 'dataverse-mcp', operation: 'read_query', required: true },
+        { connector: 'msx-mcp', operation: 'list_pipeline', required: false }
     ]),
     createDefinition('WF-011', 'Opportunity dependency graph', ['Manager'], 'portfolio-hygiene', 'record-table', [
         { connector: 'dataverse-mcp', operation: 'read_query', required: true }
