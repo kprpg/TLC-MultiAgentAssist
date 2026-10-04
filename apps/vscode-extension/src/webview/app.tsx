@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState, type DragEvent, type ReactElement } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactElement } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import workflowDescriptionsJson from '../../../../config/workflow-descriptions.json' with { type: 'json' }
@@ -13,6 +13,7 @@ import { suggestedPrompts } from './prompt-catalog.js'
 import { mcemStages } from './mcem-stages.js'
 import { NextBestActions } from './next-best-actions.js'
 import { PlayRoleOwners } from './play-role-owners.js'
+import { groupQueueByOpportunity, highPriorityCount, priorityClass, type QueueGroup } from './plays-grouping.js'
 import { AppHeader } from './app-header.js'
 import { CommentsButton } from './comments-button.js'
 import { portfolioLayoutClassName } from './portfolio-layout.js'
@@ -187,121 +188,325 @@ function PlayInfoTooltip({ workflowId, name }: { workflowId: string; name: strin
     )
 }
 
+function categoryLabel(category: string): string {
+    return category.split('-').map((part) => (part ? part.charAt(0).toUpperCase() + part.slice(1) : part)).join(' ')
+}
+
+function formatRunTime(timestamp: number): string {
+    return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+interface CompletedRun {
+    runId: string
+    workflowId: string
+    workflowName: string
+    asOf: string
+    ranAt: number
+    card: WorkflowResultCardView
+    queue: WorkflowOutputView['queueItems']
+}
+
+type GuidanceEntry = { status: 'loading' | 'ready' | 'error'; title: string; evidenceIds?: string[]; content?: string; error?: string }
+
 function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: number } | undefined }): ReactElement {
     const [definitions, setDefinitions] = useState<Loadable<WorkflowDefinitionView[]>>({ status: 'idle' })
-    const [running, setRunning] = useState<string | undefined>(undefined)
-    const [output, setOutput] = useState<{ runId: string; workflowId: string; card: WorkflowResultCardView; queue: WorkflowOutputView['queueItems'] } | undefined>(undefined)
+    const [runningIds, setRunningIds] = useState<ReadonlySet<string>>(new Set())
+    const [runs, setRuns] = useState<CompletedRun[]>([])
+    const [selectedRunId, setSelectedRunId] = useState<string | undefined>(undefined)
+    const [selectedPlayId, setSelectedPlayId] = useState<string | undefined>(undefined)
     const [runError, setRunError] = useState<string | undefined>(undefined)
-    const [guidance, setGuidance] = useState<{ status: 'idle' | 'loading' | 'ready' | 'error'; itemId?: string; title?: string; evidenceIds?: string[]; content?: string; error?: string }>({ status: 'idle' })
+    const [guidanceByItem, setGuidanceByItem] = useState<Record<string, GuidanceEntry>>({})
+    const [accountNames, setAccountNames] = useState<Record<string, string>>({})
+    const [opportunityNames, setOpportunityNames] = useState<Record<string, string>>({})
+    const [playQuery, setPlayQuery] = useState('')
+    const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
+    const fetchedOppAccounts = useRef<Set<string>>(new Set())
+    const handledRunToken = useRef<number | undefined>(undefined)
+    const runHeaderRef = useRef<HTMLElement>(null)
 
     useEffect(() => {
         setDefinitions({ status: 'loading' })
         dataClient.listWorkflowDefinitions()
             .then((data) => setDefinitions({ status: 'ready', data }))
             .catch((error: Error) => setDefinitions({ status: 'error', error: error.message }))
+        dataClient.listAccounts(true)
+            .then((accounts) => setAccountNames(Object.fromEntries(accounts.map((account) => [account.id, account.name]))))
+            .catch(() => { /* account names are best-effort labels for grouping */ })
+    }, [])
+
+    // Resolve opportunity display names for the accounts referenced by a result, once per account.
+    const ensureOpportunityNames = useCallback(async (queue: WorkflowOutputView['queueItems']) => {
+        const accountIds = [...new Set(queue.map((item) => item.accountId).filter((id): id is string => Boolean(id)))]
+        const toFetch = accountIds.filter((id) => !fetchedOppAccounts.current.has(id))
+        if (toFetch.length === 0) return
+        toFetch.forEach((id) => fetchedOppAccounts.current.add(id))
+        const results = await Promise.allSettled(toFetch.map((id) => dataClient.listOpportunities(id)))
+        const additions: Record<string, string> = {}
+        for (const result of results) {
+            if (result.status === 'fulfilled') {
+                for (const opportunity of result.value) additions[opportunity.id] = opportunity.name
+            }
+        }
+        if (Object.keys(additions).length > 0) setOpportunityNames((previous) => ({ ...previous, ...additions }))
     }, [])
 
     const runPlay = useCallback(async (workflowId: string) => {
-        setRunning(workflowId)
+        if (runningIds.has(workflowId)) return
+        setSelectedPlayId(workflowId)
         setRunError(undefined)
-        setOutput(undefined)
-        setGuidance({ status: 'idle' })
+        setRunningIds((previous) => new Set(previous).add(workflowId))
+        const asOf = today()
         try {
-            const view = await dataClient.runWorkflowToCompletion(workflowId, today())
+            const view = await dataClient.runWorkflowToCompletion(workflowId, asOf)
             if (view.run.status !== 'completed' || !view.output) {
                 setRunError(playFailureMessage(view.run.status))
             } else {
-                setOutput({ runId: view.run.runId, workflowId, card: view.output.card, queue: view.output.queueItems })
+                const workflowName = definitions.data?.find((definition) => definition.id === workflowId)?.name ?? workflowId
+                const completed: CompletedRun = {
+                    runId: view.run.runId, workflowId, workflowName, asOf, ranAt: Date.now(),
+                    card: view.output.card, queue: view.output.queueItems
+                }
+                setRuns((previous) => [completed, ...previous.filter((run) => run.runId !== completed.runId)].slice(0, 12))
+                setSelectedRunId(view.run.runId)
+                void ensureOpportunityNames(view.output.queueItems)
             }
         } catch (error) {
             setRunError((error as Error).message)
         } finally {
-            setRunning(undefined)
+            setRunningIds((previous) => { const next = new Set(previous); next.delete(workflowId); return next })
+        }
+    }, [runningIds, definitions, ensureOpportunityNames])
+
+    const sendToGuidance = useCallback(async (runId: string, itemId: string, itemTitle: string, capability: AgentCapability) => {
+        const key = `${runId}:${itemId}`
+        setGuidanceByItem((previous) => ({ ...previous, [key]: { status: 'loading', title: itemTitle } }))
+        try {
+            const { handoff, response } = await dataClient.sendQueueItemToGuidance(runId, itemId, capability)
+            setGuidanceByItem((previous) => ({ ...previous, [key]: { status: 'ready', title: itemTitle, evidenceIds: handoff.context.evidenceIds, content: response.content } }))
+        } catch (error) {
+            setGuidanceByItem((previous) => ({ ...previous, [key]: { status: 'error', title: itemTitle, error: (error as Error).message } }))
         }
     }, [])
 
-    const sendToGuidance = useCallback(async (runId: string, itemId: string, itemTitle: string, capability: AgentCapability) => {
-        setGuidance({ status: 'loading', itemId, title: itemTitle })
-        try {
-            const { handoff, response } = await dataClient.sendQueueItemToGuidance(runId, itemId, capability)
-            setGuidance({ status: 'ready', itemId, title: itemTitle, evidenceIds: handoff.context.evidenceIds, content: response.content })
-        } catch (error) {
-            setGuidance({ status: 'error', itemId, title: itemTitle, error: (error as Error).message })
-        }
+    const selectPlay = useCallback((workflowId: string) => {
+        setSelectedPlayId(workflowId)
+        setRunError(undefined)
+        setSelectedRunId(runs.find((run) => run.workflowId === workflowId)?.runId)
+    }, [runs])
+
+    const selectRun = useCallback((runId: string) => {
+        setSelectedRunId(runId)
+        const run = runs.find((candidate) => candidate.runId === runId)
+        if (run) setSelectedPlayId(run.workflowId)
+    }, [runs])
+
+    const toggleGroup = useCallback((key: string) => {
+        setCollapsedGroups((previous) => ({ ...previous, [key]: !previous[key] }))
+    }, [])
+
+    const dismissGuidance = useCallback((key: string) => {
+        setGuidanceByItem((previous) => { const next = { ...previous }; delete next[key]; return next })
     }, [])
 
     useEffect(() => {
-        if (runRequest) void runPlay(runRequest.workflowId)
-    }, [runRequest?.token, runRequest, runPlay])
+        if (runRequest && runRequest.token !== handledRunToken.current) {
+            handledRunToken.current = runRequest.token
+            void runPlay(runRequest.workflowId)
+        }
+    }, [runRequest, runPlay])
+
+    const resolvers = useMemo(() => ({
+        accountName: (id?: string) => (id ? accountNames[id] ?? id : 'Unassigned account'),
+        opportunityName: (id?: string) => (id ? opportunityNames[id] ?? id : undefined)
+    }), [accountNames, opportunityNames])
+
+    const playCategories = useMemo(() => {
+        const query = playQuery.trim().toLowerCase()
+        const matches = (definitions.data ?? []).filter((definition) =>
+            query.length === 0 || definition.name.toLowerCase().includes(query) || definition.id.toLowerCase().includes(query))
+        const byCategory = new Map<string, WorkflowDefinitionView[]>()
+        for (const definition of matches) {
+            const list = byCategory.get(definition.category) ?? []
+            list.push(definition)
+            byCategory.set(definition.category, list)
+        }
+        return [...byCategory.entries()].sort(([left], [right]) => left.localeCompare(right))
+    }, [definitions, playQuery])
+
+    const selectedRun = runs.find((run) => run.runId === selectedRunId)
+    const groups = useMemo<QueueGroup[]>(() => (selectedRun ? groupQueueByOpportunity(selectedRun.queue, resolvers) : []), [selectedRun, resolvers])
+
+    // Move focus to the run header when a result is shown so screen readers announce the run context.
+    useEffect(() => {
+        if (selectedRunId) runHeaderRef.current?.focus()
+    }, [selectedRunId])
 
     if (definitions.status === 'loading' || definitions.status === 'idle') return <p className="muted">Loading plays...</p>
     if (definitions.status === 'error') return <p className="error">Could not load plays: {definitions.error}</p>
 
     return (
-        <div className="split">
-            <section className="pane">
-                <h3>Plays</h3>
-                <ul className="play-list">
-                    {definitions.data?.map((definition) => (
-                        <li key={definition.id}>
-                            <div className="play-head">
-                                <span className="play-name">{definition.name}</span>
-                                <PlayInfoTooltip workflowId={definition.id} name={definition.name} />
-                                <span className="badge">{definition.id}</span>
-                            </div>
-                            <PlayRoleOwners roles={definition.personaTargets} />
-                            <button className="primary" disabled={running !== undefined} onClick={() => void runPlay(definition.id)}>
-                                {running === definition.id ? 'Running...' : 'Run'}
-                            </button>
-                        </li>
-                    ))}
-                </ul>
+        <div className="plays-workbench">
+            <section className="plays-rail" aria-label="Plays">
+                <div className="plays-rail-search">
+                    <input
+                        type="search"
+                        className="plays-search-input"
+                        placeholder="Search plays..."
+                        aria-label="Search plays"
+                        value={playQuery}
+                        onChange={(event) => setPlayQuery(event.target.value)}
+                    />
+                </div>
+                {playCategories.length === 0 && <p className="muted">No plays match "{playQuery}".</p>}
+                {playCategories.map(([category, defs]) => (
+                    <div className="play-category" key={category}>
+                        <div className="play-category-title section-heading">{categoryLabel(category)}</div>
+                        <ul className="play-list" role="list">
+                            {defs.map((definition) => {
+                                const isRunning = runningIds.has(definition.id)
+                                const isSelected = selectedPlayId === definition.id
+                                const lastRun = runs.find((run) => run.workflowId === definition.id)
+                                return (
+                                    <li key={definition.id} className={`play-row${isSelected ? ' selected' : ''}`}>
+                                        <button type="button" className="play-select" aria-pressed={isSelected} onClick={() => selectPlay(definition.id)}>
+                                            <span className={`play-status-dot${isRunning ? ' running' : lastRun ? ' done' : ''}`} aria-hidden="true" />
+                                            <span className="play-name">{definition.name}</span>
+                                            <span className="badge">{definition.id}</span>
+                                        </button>
+                                        <PlayRoleOwners roles={definition.personaTargets} />
+                                        <div className="play-row-actions">
+                                            <PlayInfoTooltip workflowId={definition.id} name={definition.name} />
+                                            <button className="primary play-run" disabled={isRunning} onClick={() => void runPlay(definition.id)}>
+                                                {isRunning ? 'Running...' : lastRun ? 'Re-run' : 'Run'}
+                                            </button>
+                                        </div>
+                                    </li>
+                                )
+                            })}
+                        </ul>
+                    </div>
+                ))}
             </section>
-            <section className="pane">
-                <h3>Result</h3>
-                {runError && <p className="error">{runError}</p>}
-                {!output && !runError && <p className="muted">Run a play to see results.</p>}
-                {output && ((current: { runId: string; workflowId: string; card: WorkflowResultCardView; queue: WorkflowOutputView['queueItems'] }) => (
-                    <div>
-                        <h4>{definitions.data?.find((definition) => definition.id === current.workflowId)?.name ?? current.workflowId}</h4>
-                        <ResultCard card={current.card} />
-                        {!cardHasContent(current.card) && current.queue.length === 0 && (
-                            <p className="muted">This play returned no items for the current scope.</p>
+            <section className="plays-results" aria-label="Result">
+                {runError && <p className="error results-error">{runError}</p>}
+                {selectedRun ? (
+                    <>
+                        <header className="run-header" tabIndex={-1} ref={runHeaderRef}>
+                            <div className="run-header-title">
+                                <h3>{selectedRun.workflowName}</h3>
+                                <span className="badge">{selectedRun.workflowId}</span>
+                            </div>
+                            <div className="run-header-meta">
+                                <span>Portfolio</span>
+                                <span aria-hidden="true">&middot;</span>
+                                <span>as-of {selectedRun.asOf}</span>
+                                <span aria-hidden="true">&middot;</span>
+                                <span className="run-status ok">Completed</span>
+                                <span aria-hidden="true">&middot;</span>
+                                <span>{formatRunTime(selectedRun.ranAt)}</span>
+                            </div>
+                            <div className="run-metric-strip">
+                                <span className="run-metric"><strong>{selectedRun.queue.length}</strong> items</span>
+                                <span className="run-metric"><strong>{highPriorityCount(selectedRun.queue)}</strong> high priority</span>
+                                <span className="run-metric"><strong>{groups.length}</strong> opportunities</span>
+                            </div>
+                        </header>
+                        {runs.length > 1 && (
+                            <div className="run-history" role="tablist" aria-label="Recent runs">
+                                {runs.map((run) => (
+                                    <button
+                                        key={run.runId}
+                                        type="button"
+                                        role="tab"
+                                        aria-selected={run.runId === selectedRunId}
+                                        className={`run-tab${run.runId === selectedRunId ? ' active' : ''}`}
+                                        onClick={() => selectRun(run.runId)}
+                                    >
+                                        <span className="run-tab-name">{run.workflowName}</span>
+                                        <span className="run-tab-time">{formatRunTime(run.ranAt)}</span>
+                                    </button>
+                                ))}
+                            </div>
                         )}
-                        {current.queue.length > 0 && (
-                            <div className="queue">
-                                <h4>Operational queue</h4>
-                                <ul className="item-list">
-                                    {current.queue.map((item) => (
-                                        <li key={item.id} className="queue-item">
-                                            <span className="queue-item-text"><span className="badge">{item.priority}</span> {item.title}</span>
-                                            {item.accountId && item.opportunityId && (
-                                                <button
-                                                    className="send-agent"
-                                                    title={`Send this item to ${agentLabel(guidanceAgentFor(current.workflowId))}`}
-                                                    disabled={guidance.status === 'loading'}
-                                                    onClick={() => void sendToGuidance(current.runId, item.id, item.title, guidanceAgentFor(current.workflowId))}
-                                                >
-                                                    {guidance.status === 'loading' && guidance.itemId === item.id
-                                                        ? 'Sending...'
-                                                        : `Send to ${agentLabel(guidanceAgentFor(current.workflowId))}`}
+                        <div className="results-body">
+                            <ResultCard card={selectedRun.card} />
+                            {!cardHasContent(selectedRun.card) && selectedRun.queue.length === 0 && (
+                                <p className="muted">This play returned no items for the current scope.</p>
+                            )}
+                            {selectedRun.queue.length > 0 && (
+                                <div className="queue">
+                                    <h4>Operational queue</h4>
+                                    {groups.map((group) => {
+                                        const collapsed = Boolean(collapsedGroups[group.key])
+                                        const capability = guidanceAgentFor(selectedRun.workflowId)
+                                        return (
+                                            <div className="queue-group" key={group.key}>
+                                                <button type="button" className="queue-group-header" aria-expanded={!collapsed} onClick={() => toggleGroup(group.key)}>
+                                                    <span className="disclosure" aria-hidden="true">{collapsed ? '\u25B8' : '\u25BE'}</span>
+                                                    <span className="queue-group-oppty">{group.opportunityName ?? 'Portfolio-level items'}</span>
+                                                    <span className="queue-group-account">{group.accountName}</span>
+                                                    <span className="badge count">{group.items.length}</span>
                                                 </button>
-                                            )}
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
-                        {guidance.status === 'error' && <p className="error">{guidance.error}</p>}
-                        {guidance.status === 'ready' && (
-                            <div className="mcem">
-                                <h4>Guidance for: {guidance.title}</h4>
-                                <p className="muted">Evidence cited: {(guidance.evidenceIds ?? []).join(', ')}</p>
-                                <AgentMarkdown content={guidance.content ?? ''} />
-                            </div>
+                                                {!collapsed && (
+                                                    <ul className="item-list queue-items" role="list">
+                                                        {group.items.map((item) => {
+                                                            const key = `${selectedRun.runId}:${item.id}`
+                                                            const entry = guidanceByItem[key]
+                                                            return (
+                                                                <li key={item.id} className="queue-item">
+                                                                    <div className="queue-item-row">
+                                                                        <span className="queue-item-text"><span className={`badge priority ${priorityClass(item.priority)}`}>{item.priority}</span> {item.title}</span>
+                                                                        {item.accountId && item.opportunityId && (
+                                                                            <button
+                                                                                className="send-agent"
+                                                                                title={`Send this item to ${agentLabel(capability)}`}
+                                                                                disabled={entry?.status === 'loading'}
+                                                                                onClick={() => void sendToGuidance(selectedRun.runId, item.id, item.title, capability)}
+                                                                            >
+                                                                                {entry?.status === 'loading' ? 'Sending...' : `Send to ${agentLabel(capability)}`}
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                    {entry && (
+                                                                        <div className="guidance-drawer">
+                                                                            {entry.status === 'loading' && <p className="muted">Preparing {agentLabel(capability)} guidance...</p>}
+                                                                            {entry.status === 'error' && <p className="error">{entry.error}</p>}
+                                                                            {entry.status === 'ready' && (
+                                                                                <>
+                                                                                    <div className="guidance-drawer-head">
+                                                                                        <h5>{agentLabel(capability)} guidance</h5>
+                                                                                        <button type="button" className="drawer-close" aria-label="Dismiss guidance" onClick={() => dismissGuidance(key)}>&times;</button>
+                                                                                    </div>
+                                                                                    {entry.evidenceIds && entry.evidenceIds.length > 0 && (
+                                                                                        <p className="muted">Evidence cited: {entry.evidenceIds.join(', ')}</p>
+                                                                                    )}
+                                                                                    <AgentMarkdown content={entry.content ?? ''} />
+                                                                                </>
+                                                                            )}
+                                                                        </div>
+                                                                    )}
+                                                                </li>
+                                                            )
+                                                        })}
+                                                    </ul>
+                                                )}
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </>
+                ) : (
+                    <div className="results-empty">
+                        <p className="muted">{selectedPlayId ? 'Run this play to see results.' : 'Select a play and choose Run to see results.'}</p>
+                        {selectedPlayId && (
+                            <button className="primary" disabled={runningIds.has(selectedPlayId)} onClick={() => void runPlay(selectedPlayId)}>
+                                {runningIds.has(selectedPlayId) ? 'Running...' : runError ? 'Try again' : 'Run play'}
+                            </button>
                         )}
                     </div>
-                ))(output)}
+                )}
             </section>
         </div>
     )
@@ -1095,7 +1300,7 @@ export function App(): ReactElement {
                 onToggleDetails={() => setDetailsExpanded((current) => !current)}
                 onToggleActions={() => setActionsExpanded((current) => !current)}
             />
-            <main className="app-body">
+            <main className={`app-body${tab === 'plays' ? ' app-body--plays' : ''}`}>
                 {tab === 'portfolio' ? (
                     <PortfolioPanel focus={focus} accountsExpanded={accountsExpanded} detailsExpanded={detailsExpanded} actionsExpanded={actionsExpanded} />
                 ) : tab === 'discover' ? <DiscoverPanel /> : <PlaysPanel runRequest={runRequest} />}
