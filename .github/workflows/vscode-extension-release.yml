@@ -1,0 +1,112 @@
+name: Build and publish VS Code extension release
+
+on:
+  push:
+    tags:
+      - "ext-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional release tag. Defaults to ext-v<extension-version>-build.<run-number>."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  extension:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Seed shared Foundry environment
+        # The extension host bundle imports the gitignored config/foundry.environment.json
+        # at build/type-check time. Seed it from the checked-in non-secret default without
+        # overwriting a developer-provided file, matching packaged desktop releases.
+        run: cp -n config/foundry.environment.default.json config/foundry.environment.json || true
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          package_version=$(node -p "require('./apps/vscode-extension/package.json').version")
+          release_tag="$GITHUB_REF_NAME"
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ -z "$REQUESTED_TAG" ]]; then
+              release_tag="ext-v${package_version}-build.${GITHUB_RUN_NUMBER}"
+            else
+              release_tag="$(echo "$REQUESTED_TAG" | xargs)"
+            fi
+          fi
+
+          if [[ -z "$release_tag" ]]; then
+            echo "Unable to determine release tag." >&2
+            exit 1
+          fi
+
+          echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Verify release version
+        if: startsWith(github.ref, 'refs/tags/ext-v')
+        shell: bash
+        env:
+          PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
+          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+        run: |
+          if [[ "$RELEASE_TAG" != "ext-v$PACKAGE_VERSION" ]]; then
+            echo "Tag $RELEASE_TAG does not match extension package version ext-v$PACKAGE_VERSION." >&2
+            exit 1
+          fi
+
+      - name: Type-check the extension
+        run: npm run --workspace apps/vscode-extension typecheck
+
+      - name: Run extension test suites
+        run: npm test -- tests/unit/vscode-extension tests/contract/vscode-extension-bridge.contract.test.ts
+
+      - name: Build and package the extension release
+        run: npm run ext:release
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TLC-MultiAgent-Assist-VSCode-Extension
+          path: |
+            release-ext/*.vsix
+            release-ext/*.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_VERSION: ${{ steps.release.outputs.package_version }}
+          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+        run: |
+          mapfile -t artifacts < <(find release-ext -maxdepth 1 -type f \( -name '*.vsix' -o -name '*.zip' \) | sort)
+          if [[ ${#artifacts[@]} -eq 0 ]]; then
+            echo "No VS Code extension release artifacts were found." >&2
+            exit 1
+          fi
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            gh release create "$RELEASE_TAG" "${artifacts[@]}" --target "$GITHUB_SHA" --generate-notes --title "TLC MultiAgent Assist VS Code Extension v${PACKAGE_VERSION} (build ${GITHUB_RUN_NUMBER})" --latest=false
+          else
+            gh release create "$RELEASE_TAG" "${artifacts[@]}" --verify-tag --generate-notes --title "TLC MultiAgent Assist VS Code Extension $RELEASE_TAG" --latest=false
+          fi

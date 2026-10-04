@@ -4,6 +4,7 @@
 [![Nightly desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml)
 [![Desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/desktop-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/desktop-release.yml)
 [![Web release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/web-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/web-release.yml)
+[![VS Code extension release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/vscode-extension-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/vscode-extension-release.yml)
 
 TLC MultiAgent Assist is a Windows desktop application that acts as an account assistant that combines live MSX opportunity context with contextual guidance provided on the opportunity to advance them forward
 
@@ -23,6 +24,17 @@ TLC MultiAgent Assist is a Windows desktop application that acts as an account a
 6. When setup completes, leave **Run TLC MultiAgent Assist** selected and choose **Finish**.
 
 For the portable ZIP, unblock it if prompted, select **Extract All**, and run `TLC MultiAgent Assist.exe` from the extracted folder. See the [complete desktop installation guide](docs/user-guide/DESKTOP-INSTALL.md) for detailed instructions and troubleshooting links.
+
+## Install the VS Code Extension
+
+TLC Assist is also available as a VS Code extension. The only requirement to install is **VS Code (or VS Code Insiders) 1.90.0 or later** plus the released `.vsix`; it is self-contained (no Node.js, npm, or native binaries) and starts in sample mode with no sign-in or network.
+
+1. Open the [VS Code extension releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=ext-v) and expand **Assets**.
+2. Download `tlc-assist-vscode-<version>.vsix`. The companion `tlc-assist-vscode-mcp-config-<version>.zip` (MCP configuration and reference files) is optional — the extension already embeds its MCP registry and tool policy.
+3. In VS Code, run **Extensions: Install from VSIX...** from the Command Palette (`Ctrl+Shift+P`) and choose the file, or from a terminal run `code --install-extension tlc-assist-vscode-<version>.vsix --force`. Confirm the publisher-trust prompt on VS Code 1.97+.
+4. Run **Developer: Reload Window**, then select the **TLC Assist** icon in the Activity Bar or run **TLC: Open Assist**.
+
+Sample mode needs nothing else. Live mode additionally requires a corporate Microsoft identity (VS Code's built-in Microsoft sign-in) and, for the Microsoft Foundry agents, the Azure CLI (`az login`). Extensions installed from a `.vsix` are not auto-updated — re-install a newer `.vsix` to upgrade. See the [complete VS Code extension install guide](docs/user-guide/VSCODE-EXTENSION-INSTALL.md) for details and the optional MCP setup.
 
 ## Run with Sample Data
 
@@ -68,6 +80,7 @@ See the runbooks for complete prerequisites, build commands, startup modes, and 
 
 - [End-user guide](docs/user-guide/USER-GUIDE.md)
 - [End-user frequently asked questions](docs/FAQ.md)
+- [Install the VS Code extension (end user)](docs/user-guide/VSCODE-EXTENSION-INSTALL.md)
 - [Desktop setup and troubleshooting](docs/runbooks/desktop-app.md)
 - [Web setup and hosting](docs/runbooks/web-app.md)
 - [VS Code extension build, package, and deploy](docs/runbooks/vscode-extension.md)
@@ -107,5 +120,7 @@ npm run desktop:package
 Artifacts are written to `release/`. Pushing a version tag such as `v0.1.0` runs the desktop release workflow and publishes the installer and portable ZIP to GitHub Releases. Manually running the workflow publishes a visible GitHub Release with a run-specific tag such as `v0.1.0-build.2` unless a tag is supplied. Downloaded artifacts might need to be unblocked before launch. Right-click the executable, select **Properties**, and choose **Unblock**.
 
 Pushing a tag such as `web-v0.1.0` runs the web release workflow. It validates the repository, builds and smoke-tests an isolated production package, and publishes an Azure App Service-ready ZIP to GitHub Releases. Web releases are kept separate from the latest desktop release.
+
+Pushing a tag such as `ext-v0.1.0` runs the VS Code extension release workflow. It builds and packages the extension, then publishes the installable `.vsix` plus an optional MCP configuration bundle (`tlc-assist-vscode-mcp-config-<version>.zip`) to GitHub Releases. The tag must match the extension `version` in `apps/vscode-extension/package.json`. Produce the same artifacts locally with `npm run ext:release` (written to `release-ext/`). Extension releases are kept separate from the latest desktop release. See the [VS Code extension build, package, and release runbook](docs/runbooks/vscode-extension.md).
 
 Deployment details are documented in the [web app runbook](docs/runbooks/web-app.md).
