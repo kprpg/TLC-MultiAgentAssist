@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "agent": "meeting-signal-extractor",
+  "fixtures": {
+    "transcripts": ["tr-cloud-security", "tr-grid-customer"],
+    "note": "Transcripts live in the SQLite test store (packages/connectors/local-store/seed.ts)."
+  },
+  "scenarios": [
+    {
+      "id": "gap-fill-from-discovery-call",
+      "transcriptId": "tr-cloud-security",
+      "opportunityId": "opp-cloud-security-readiness",
+      "prompt": "Extract MCEM signals from the discovery call for an opportunity with empty qualification fields.",
+      "expected": [
+        "Proposes budgetAmount 900000 with evidence",
+        "Proposes budgetStatus Yes, timeline This Quarter, purchaseProcess Committee, need Must have",
+        "Proposes a new milestone for the threat-protection proof of value",
+        "Routes the Palo Alto mention to the internal qualification note and unmappedSignals"
+      ]
+    },
+    {
+      "id": "no-op-when-already-recorded",
+      "transcriptId": "tr-grid-customer",
+      "opportunityId": "opp-grid-modernization",
+      "prompt": "Extract signals from a meeting whose facts already match the opportunity record.",
+      "expected": [
+        "Drops no-op slots (budget, timeline, process already recorded)",
+        "Still proposes the agreed next-step milestone (proof of value)",
+        "Every emitted slot cites transcript evidence"
+      ]
+    },
+    {
+      "id": "sensitive-and-low-confidence-never-pre-checked",
+      "transcriptId": "tr-cloud-security",
+      "opportunityId": "opp-cloud-security-readiness",
+      "prompt": "Extract signals including sentiment and any revenue mention.",
+      "expected": [
+        "Sentiment / sensitive slots have checkedByDefault=false",
+        "Sensitive slots are flagged and blocked pending manual confirmation",
+        "No field outside MEETING_FIELD_DICTIONARY is proposed"
+      ]
+    }
+  ]
+}

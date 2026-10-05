@@ -1,5 +1,5 @@
 import * as vscode from 'vscode'
-import { createSampleDataProvider, type ExtensionDataProvider } from './data-provider.js'
+import { createLocalStoreDataProvider, createSampleDataProvider, type ExtensionDataProvider } from './data-provider.js'
 import { createLiveDataProvider } from './live-provider.js'
 import { WorkbenchPanel } from './webview-controller.js'
 import { acquireDelegatedToken } from './authentication.js'
@@ -8,6 +8,12 @@ import { McpHttpClient } from '../../../packages/connectors/mcp/index.js'
 
 function readMode(): 'sample' | 'live' {
     return vscode.workspace.getConfiguration('tlc').get<'sample' | 'live'>('mode', 'sample')
+}
+
+/** Startup default: the TLC_MODE env (set by the F5 launch configs) if present, else the tlc.mode setting. */
+function startupMode(): 'sample' | 'live' {
+    const env = (process.env['TLC_MODE'] ?? '').toLowerCase()
+    return env === 'live' || env === 'sample' ? env : readMode()
 }
 
 function dynamicsResource(): string {
@@ -110,7 +116,37 @@ async function testMcpEndpoint(output: vscode.OutputChannel, mcpUrl: string, tok
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-    let provider: ExtensionDataProvider = createSampleDataProvider()
+    // Sample data source: the in-memory fixtures, or the relational SQLite test store when
+    // `tlc.dataStore` is `sqlite` (or TLC_DATA_STORE=sqlite). Live mode is unaffected.
+    const useLocalStore = (): boolean =>
+        vscode.workspace.getConfiguration('tlc').get<'fixture' | 'sqlite'>('dataStore', 'fixture') === 'sqlite'
+        || (process.env['TLC_DATA_STORE'] ?? '').toLowerCase() === 'sqlite'
+    // Reflect the meeting-extractor settings into the environment the providers read, unless the
+    // environment already pins them (e.g. an F5 launch config). `foundry` sends transcripts to a
+    // deployed Foundry model; `deterministic` keeps the offline rules.
+    const syncMeetingExtractionEnv = (force = false): void => {
+        const config = vscode.workspace.getConfiguration('tlc')
+        if (force || !process.env['TLC_MEETING_EXTRACTOR']) {
+            process.env['TLC_MEETING_EXTRACTOR'] = config.get<'deterministic' | 'foundry'>('meetingExtractor', 'deterministic')
+        }
+        if (force || !process.env['TLC_MEETING_MODEL']) {
+            process.env['TLC_MEETING_MODEL'] = config.get<string>('meetingModel', 'gpt-6.1-sol')
+        }
+    }
+    const makeSampleProvider = (): ExtensionDataProvider => {
+        syncMeetingExtractionEnv()
+        if (useLocalStore()) {
+            try {
+                return createLocalStoreDataProvider()
+            } catch (error) {
+                // node:sqlite may be unavailable on older VS Code runtimes — fall back to fixtures.
+                void vscode.window.showWarningMessage(`TLC Assist could not open the SQLite test store (${error instanceof Error ? error.message : String(error)}). Using in-memory sample data.`)
+            }
+        }
+        return createSampleDataProvider()
+    }
+
+    let provider: ExtensionDataProvider = makeSampleProvider()
     const getProvider = (): ExtensionDataProvider => provider
 
     const connectionTree = new ConnectionTreeProvider(getProvider)
@@ -220,15 +256,16 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     // Async because live mode acquires a delegated token before building the provider.
-    const applyMode = async (): Promise<void> => {
-        if (readMode() === 'sample') {
-            if (provider.mode !== 'sample') swapProvider(createSampleDataProvider())
+    const applyMode = async (target: 'sample' | 'live'): Promise<void> => {
+        if (target === 'sample') {
+            if (provider.mode !== 'sample') swapProvider(makeSampleProvider())
             return
         }
         try {
             const resource = dynamicsResource()
             const { account } = await acquireDelegatedToken(resource, true)
             const tokenProvider = async (): Promise<string> => (await acquireDelegatedToken(resource, true)).token
+            syncMeetingExtractionEnv()
             swapProvider(createLiveDataProvider(tokenProvider, account, (info) => {
                 output.appendLine(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? 'required' : 'optional'} failed: ${info.message}`)
                 if (info.required) output.show(true)
@@ -238,9 +275,20 @@ export function activate(context: vscode.ExtensionContext): void {
             void vscode.window.showInformationMessage(`TLC Assist is now using live data for ${account} (MSX OData + Dataverse MCP).`)
         } catch (error) {
             const detail = error instanceof Error ? error.message : String(error)
-            if (provider.mode !== 'sample') swapProvider(createSampleDataProvider())
+            if (provider.mode !== 'sample') swapProvider(makeSampleProvider())
             void vscode.window.showErrorMessage(`TLC Assist could not switch to live data: ${detail}. Staying on sample data.`)
         }
+    }
+
+    // Switch immediately (with feedback) and persist the choice; the listener stays idempotent.
+    const setMode = async (mode: 'sample' | 'live'): Promise<void> => {
+        await applyMode(mode)
+        const target = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0
+            ? vscode.ConfigurationTarget.Workspace
+            : vscode.ConfigurationTarget.Global
+        try {
+            await vscode.workspace.getConfiguration('tlc').update('mode', mode, target)
+        } catch { /* settings may be read-only in some hosts; the in-session swap already happened */ }
     }
 
     context.subscriptions.push(
@@ -269,13 +317,27 @@ export function activate(context: vscode.ExtensionContext): void {
             void vscode.commands.executeCommand('tlcConnection.focus')
         }),
         vscode.commands.registerCommand('tlc.testLiveConnection', () => testLiveConnection(output)),
+        vscode.commands.registerCommand('tlc.useLiveData', () => void setMode('live')),
+        vscode.commands.registerCommand('tlc.useSampleData', () => void setMode('sample')),
         vscode.workspace.onDidChangeConfiguration((event) => {
+            if (event.affectsConfiguration('tlc.meetingExtractor') || event.affectsConfiguration('tlc.meetingModel')) {
+                syncMeetingExtractionEnv(true)
+                if (readMode() === 'sample') swapProvider(makeSampleProvider())
+                else void applyMode('live')
+                return
+            }
+            if (event.affectsConfiguration('tlc.dataStore') && readMode() === 'sample') {
+                swapProvider(makeSampleProvider())
+                return
+            }
             if (!event.affectsConfiguration('tlc.mode')) return
-            void applyMode()
+            const desired = readMode()
+            // Idempotent: skip if a command already applied this mode; apply manual setting edits.
+            if (desired !== provider.mode) void applyMode(desired)
         })
     )
 
-    if (readMode() === 'live') void applyMode()
+    if (startupMode() === 'live') void applyMode('live')
 
     if (vscode.workspace.getConfiguration('tlc').get<boolean>('openOnStartup', true)) {
         // Defer so activation and the tree views become responsive before the webview builds.

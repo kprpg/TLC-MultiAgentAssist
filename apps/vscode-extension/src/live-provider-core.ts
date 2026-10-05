@@ -2,11 +2,18 @@ import {
     contractVersion,
     workflowContractVersion,
     type AgentCapability,
+    type MeetingChangeSetApproval,
+    type MeetingChangeSetProposal,
+    type MeetingChangeSetResult,
+    type MeetingTranscript,
+    type MeetingTranscriptSummary,
     type ScopeRef
 } from '../../../packages/common/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
 import type { WorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
-import type { ExtensionDataProvider } from './data-provider.js'
+import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
+import type { MeetingExtractorFn } from '../../../packages/connectors/local-store/index.js'
+import type { ExtensionDataProvider, MeetingTranscriptSource } from './data-provider.js'
 
 export const AGENT_CAPABILITIES: readonly AgentCapability[] = ['account-pulse', 'mcem-coach', 'pursuit-executive', 'risk-solution-play']
 const LIVE_AGENT_VERSION = 'guidance-live-v1'
@@ -49,17 +56,36 @@ export function buildLiveTaskAgents(): TaskAgentRegistry {
     }])) as TaskAgentRegistry
 }
 
+/** Minimal meeting-capture surface a connector must provide (LocalStore implements it today). */
+export interface MeetingCaptureConnector {
+    listMeetingTranscripts(opportunityId?: string): Promise<MeetingTranscriptSummary[]>
+    getMeetingTranscript(transcriptId: string): Promise<MeetingTranscript | undefined>
+    proposeMeetingChangeSet(request: { opportunityId: string; transcriptId?: string; transcript?: MeetingTranscript }, extractor?: MeetingExtractorFn): Promise<MeetingChangeSetProposal>
+    applyMeetingChangeSet(input: { proposal: MeetingChangeSetProposal; approval: MeetingChangeSetApproval }): Promise<MeetingChangeSetResult>
+}
+
 export interface LiveDataProviderParts {
     orchestrator: ThinSliceOrchestrator
     host: WorkflowHost
     account: string
     dispose: () => Promise<void>
+    /** Present for the SQLite sample store; absent for fixture and (for now) live. */
+    meetingConnector?: MeetingCaptureConnector
+    /** Optional Foundry model-backed extractor; falls back to the deterministic one when absent. */
+    meetingExtractor?: MeetingExtractorFn
 }
 
 /** Assembles the provider surface from injected parts so MCEM/agent/Play wiring is unit-testable. */
-export function buildLiveDataProvider({ orchestrator, host, account, dispose }: LiveDataProviderParts): ExtensionDataProvider {
+export function buildLiveDataProvider(
+    { orchestrator, host, account, dispose, meetingConnector, meetingExtractor }: LiveDataProviderParts,
+    mode: ExtensionDataProvider['mode'] = 'live'
+): ExtensionDataProvider {
+    const requireMeeting = (): MeetingCaptureConnector => {
+        if (!meetingConnector) throw new Error('Meeting capture requires the SQLite test store (sample data) or a live Graph connection.')
+        return meetingConnector
+    }
     return {
-        mode: 'live',
+        mode,
         getCurrentUserEmail: async () => account,
         listAccounts: (options) => orchestrator.listAccounts(options),
         searchAccounts: (request) => orchestrator.searchAccounts(request),
@@ -113,6 +139,24 @@ export function buildLiveDataProvider({ orchestrator, host, account, dispose }: 
             queueItemId,
             capability
         }),
+        listMeetingTranscripts: async (opportunityId?: string) => requireMeeting().listMeetingTranscripts(opportunityId),
+        getMeetingTranscript: async (transcriptId: string) => (await requireMeeting().getMeetingTranscript(transcriptId)) ?? null,
+        proposeMeetingChangeSet: async (request: { opportunityId: string } & MeetingTranscriptSource) => {
+            const connector = requireMeeting()
+            const transcript = request.rawTranscript
+                ? parseTranscriptContent(request.rawTranscript.content, {
+                    opportunityId: request.opportunityId,
+                    ...(request.rawTranscript.format ? { format: request.rawTranscript.format } : {}),
+                    ...(request.rawTranscript.meetingType ? { meetingType: request.rawTranscript.meetingType } : {})
+                })
+                : undefined
+            return connector.proposeMeetingChangeSet({
+                opportunityId: request.opportunityId,
+                ...(request.transcriptId ? { transcriptId: request.transcriptId } : {}),
+                ...(transcript ? { transcript } : {})
+            }, meetingExtractor)
+        },
+        applyMeetingChangeSet: async (input) => requireMeeting().applyMeetingChangeSet(input),
         dispose
     }
 }

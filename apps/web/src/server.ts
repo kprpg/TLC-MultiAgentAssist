@@ -7,6 +7,8 @@ import { listenWebServer } from './listener.js'
 import { createHostedRuntimeFactory, createHostedWorkflowHostResolver } from './runtime.js'
 import { createSampleWorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import { FixtureMsxConnector } from '../../../packages/connectors/msx/index.js'
+import { createLocalStoreMsxConnector } from '../../../packages/connectors/local-store/index.js'
+import type { MsxConnector } from '../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
 import type { AgentCapability } from '../../../packages/common/index.js'
@@ -16,7 +18,10 @@ const mode = resolveWebHostMode(process.env)
 const host = process.env['HOST']?.trim() || (mode === 'easy-auth' ? '0.0.0.0' : '127.0.0.1')
 if (mode === 'azure-cli') assertLoopbackHost(host)
 const staticRoot = resolve(process.env['TLC_WEB_STATIC_ROOT']?.trim() || 'apps/desktop/dist/revamp')
-const sampleMsx = mode === 'sample' ? new FixtureMsxConnector() : undefined
+// Sample mode uses the in-memory fixture by default, or the relational SQLite test store when TLC_DATA_STORE=sqlite.
+const sampleMsx: MsxConnector | undefined = mode === 'sample'
+    ? (createLocalStoreMsxConnector() ?? new FixtureMsxConnector())
+    : undefined
 const sampleRuntime = sampleMsx
     ? new ThinSliceOrchestrator(
         sampleMsx,

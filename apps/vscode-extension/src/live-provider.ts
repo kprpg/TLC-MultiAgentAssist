@@ -10,14 +10,33 @@ import mcpToolPolicyJson from '../../../config/mcp.tool-policy.json' with { type
 import dataverseEntityMapJson from '../../../config/dataverse.entity-map.json' with { type: 'json' }
 import foundryEnvironmentJson from '../../../config/foundry.environment.json' with { type: 'json' }
 import { AzureCliCredential } from '@azure/identity'
-import { LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
+import { LiveMsxConnector, LiveMeetingCaptureConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../packages/connectors/foundry/index.js'
+import { createFoundryMeetingExtractor } from '../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
+import type { MeetingExtractorFn } from '../../../packages/connectors/local-store/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
 import { createLivePlayWorkflowHost, type WorkflowStepErrorInfo } from '../../../packages/orchestrator/workflows/index.js'
 import type { ExtensionDataProvider } from './data-provider.js'
 import { ExtensionMcemGuidanceConnector } from './mcem-guidance.js'
 import { AGENT_CAPABILITIES, buildLiveDataProvider, buildLiveTaskAgents } from './live-provider-core.js'
+
+/**
+ * Builds a Foundry model-backed meeting-signal extractor when `TLC_MEETING_EXTRACTOR=foundry`.
+ * Reads the checked-in Foundry environment and authenticates with Azure CLI (same as the agents).
+ * Model defaults to `gpt-6.1-sol`; override with `TLC_MEETING_MODEL`. Returns undefined to keep
+ * the deterministic offline extractor.
+ */
+export function buildFoundryMeetingExtractor(environment: NodeJS.ProcessEnv = process.env): MeetingExtractorFn | undefined {
+    if ((environment['TLC_MEETING_EXTRACTOR'] ?? '').toLowerCase() !== 'foundry') return undefined
+    const parsed = foundryEnvironmentSchema.safeParse(foundryEnvironmentJson)
+    if (!parsed.success) return undefined
+    const env = parsed.data
+    const credential = new AzureCliCredential({ tenantId: env.authentication.foundryTenantId, processTimeoutInMs: 30_000 })
+    const openAIClient = createFoundryOpenAIClient(env.foundry.projectEndpoint, credential)
+    const model = environment['TLC_MEETING_MODEL']?.trim() || 'gpt-6.1-sol'
+    return createFoundryMeetingExtractor({ openAIClient, model, requestTimeoutMs: env.foundry.requestTimeoutMs })
+}
 
 /** Real Foundry prompt agents (Desktop/Web parity) using the checked-in Foundry environment + Azure CLI auth. */
 function buildFoundryTaskAgents(): TaskAgentRegistry | undefined {
@@ -67,6 +86,8 @@ export function createLiveDataProvider(
         : new LiveMsxConnector({ getAccessToken: getToken }, fetch, undefined, undefined, metadata)
     const taskAgents = (useFoundryAgents ? buildFoundryTaskAgents() : undefined) ?? buildLiveTaskAgents()
     const orchestrator = new ThinSliceOrchestrator(msx, new ExtensionMcemGuidanceConnector(), taskAgents)
+    const meetingConnector = new LiveMeetingCaptureConnector(msx)
+    const meetingExtractor = buildFoundryMeetingExtractor()
 
     const configured = createLivePlayWorkflowHost({
         registry,
@@ -79,5 +100,5 @@ export function createLiveDataProvider(
             .map((candidate) => candidate.id),
         ...(onStepError ? { onStepError } : {})
     })
-    return buildLiveDataProvider({ orchestrator, host: configured.host, account, dispose: () => configured.dispose() })
+    return buildLiveDataProvider({ orchestrator, host: configured.host, account, meetingConnector, ...(meetingExtractor ? { meetingExtractor } : {}), dispose: () => configured.dispose() })
 }
