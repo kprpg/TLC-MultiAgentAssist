@@ -1,0 +1,11 @@
+{
+  "name": "@tlc/meeting-signal-extractor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Extracts MCEM signals from meeting transcripts and maps them to opportunity/milestone change-set proposals.",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

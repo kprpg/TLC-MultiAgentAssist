@@ -11,6 +11,7 @@ import {
   type FoundryEnvironment
 } from '../../../../packages/common/configuration/foundry-environment.js'
 import { FixtureMsxConnector, LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../../packages/connectors/msx/index.js'
+import { createLocalStoreMsxConnector } from '../../../../packages/connectors/local-store/index.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../../packages/connectors/foundry/index.js'
@@ -100,7 +101,8 @@ const portfolioPreferenceStore = new JsonFilePortfolioPreferenceStore(
 const liveMsxConnector = dataMode === 'sample'
   ? undefined
   : new LiveMsxConnector(tokenProvider, fetch, undefined, reportPerformance, msxWriteMetadataFromEnvironment(process.env), portfolioPreferenceStore)
-const msxConnector = liveMsxConnector ?? new FixtureMsxConnector()
+// Sample mode uses the in-memory fixture by default, or the relational SQLite test store when TLC_DATA_STORE=sqlite.
+const msxConnector = liveMsxConnector ?? createLocalStoreMsxConnector() ?? new FixtureMsxConnector()
 const foundryOpenAIClient = runtimeEnvironment
   ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry)
   : undefined

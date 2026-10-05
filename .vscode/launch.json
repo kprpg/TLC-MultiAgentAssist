@@ -12,6 +12,49 @@
       "preLaunchTask": "build-vscode-extension"
     },
     {
+      "name": "Run TLC Assist Extension (SQLite test store)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/apps/vscode-extension"
+      ],
+      "env": {
+        "TLC_MODE": "sample",
+        "TLC_DATA_STORE": "sqlite"
+      },
+      "outFiles": ["${workspaceFolder}/apps/vscode-extension/dist/**/*.cjs"],
+      "preLaunchTask": "build-vscode-extension"
+    },
+    {
+      "name": "Run TLC Assist Extension (SQLite + Foundry extraction)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/apps/vscode-extension"
+      ],
+      "env": {
+        "TLC_MODE": "sample",
+        "TLC_DATA_STORE": "sqlite",
+        "TLC_MEETING_EXTRACTOR": "foundry",
+        "TLC_MEETING_MODEL": "gpt-6.1-sol"
+      },
+      "outFiles": ["${workspaceFolder}/apps/vscode-extension/dist/**/*.cjs"],
+      "preLaunchTask": "build-vscode-extension"
+    },
+    {
+      "name": "Run TLC Assist Extension (Live MSX/Dataverse)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/apps/vscode-extension"
+      ],
+      "env": {
+        "TLC_MODE": "live"
+      },
+      "outFiles": ["${workspaceFolder}/apps/vscode-extension/dist/**/*.cjs"],
+      "preLaunchTask": "build-vscode-extension"
+    },
+    {
       "name": "TLC Assist Extension Tests",
       "type": "extensionHost",
       "request": "launch",

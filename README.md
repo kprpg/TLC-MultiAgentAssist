@@ -25,6 +25,43 @@ TLC Assist is also available as a VS Code extension. The only requirement to ins
 
 Sample mode needs nothing else. Live mode additionally requires a corporate Microsoft identity (VS Code's built-in Microsoft sign-in) and, for the Microsoft Foundry agents, the Azure CLI (`az login`). Extensions installed from a `.vsix` are not auto-updated — re-install a newer `.vsix` to upgrade. See the [complete VS Code extension install guide](docs/user-guide/VSCODE-EXTENSION-INSTALL.md) for details and the optional MCP setup.
 
+### Running the extension (sample, SQLite test store, or live)
+
+The extension has two independent toggles, set in **Settings** (search "tlc") or via environment variables / F5 launch configs:
+
+- **Mode** (`tlc.mode`): `sample` (sanitized data, no network) or `live` (MSX OData + Dataverse MCP).
+- **Sample data store** (`tlc.dataStore`): `fixture` (in-memory) or `sqlite` (the relational SQLite test store with persistent injected values). Only applies in sample mode.
+
+You can switch at runtime without restarting: open the Command Palette (`Ctrl+Shift+P`) and run **TLC: Use Live Data (MSX/Dataverse)** or **TLC: Use Sample Data** — the status bar flips between `TLC Assist: Live` and `Sample`. (The **TLC: Test Live Connection** command only *tests* connectivity; it does not switch.)
+
+#### Run in SQLite test-store mode (sample)
+
+The SQLite test store is a relational database (accounts, opportunities, milestones, stakeholders, meetings/transcripts) whose injected values persist for the session — ideal for exercising writes and the meeting-capture flow offline.
+
+- **Installed extension:** in **Settings** (search "tlc") set **`tlc.mode`** = `sample` and **`tlc.dataStore`** = `sqlite`. The change applies immediately (no reload needed). To confirm, the status bar shows `TLC Assist: Sample`.
+- **From source (F5):** press **F5** and pick **Run TLC Assist Extension (SQLite test store)**. It launches an Extension Development Host with `TLC_MODE=sample` and `TLC_DATA_STORE=sqlite`.
+- **Optional — Foundry model extraction:** to send meeting transcripts to a deployed Microsoft Foundry model instead of the offline rules, either set **`tlc.meetingExtractor`** = `foundry` (and optionally **`tlc.meetingModel`**, default `gpt-6.1-sol`), or press **F5** and pick **Run TLC Assist Extension (SQLite + Foundry extraction)**. This path signs in with the Azure CLI (`az login`); no API key is stored.
+
+#### Run in live mode (MSX / Dataverse)
+
+Live mode reads real opportunity data over MSX OData and Dataverse MCP, and (for the Foundry agents) calls Microsoft Foundry.
+
+**Debug with F5 (from source):**
+
+1. **Sign in first (outside VS Code debugging):** run `az login` in a terminal (needed for the Microsoft Foundry agents), and make sure you are signed into VS Code with your corporate Microsoft account (Accounts menu in the Activity Bar).
+2. Open **Run and Debug** (`Ctrl+Shift+D`) and choose **Run TLC Assist Extension (Live MSX/Dataverse)** from the configuration dropdown at the top.
+3. Press **F5**. This runs the `build-vscode-extension` task automatically and opens a second VS Code window (the Extension Development Host) started with `TLC_MODE=live`.
+4. In the Extension Development Host, open **TLC Assist** (Activity Bar icon or **TLC: Open Assist**). When prompted, complete the VS Code Microsoft sign-in so the extension can acquire a delegated MSX token. The status bar shows `TLC Assist: Live`.
+5. After changing extension code, rebuild and reload: re-run the task (or relaunch F5) and then **Developer: Reload Window** in the Extension Development Host so the new build loads.
+
+> If the delegated token cannot be acquired, the extension shows an error and stays on sample — check **Output → TLC Assist** in the Extension Development Host.
+
+**Meeting capture in live mode:** on an opportunity's **Overview → Milestones** header, **Meeting capture** works in live mode via **paste/upload** of a transcript. Milestone signals (commitment, risk) are written to the real milestone records for the milestones you select; other opportunity signals and recommended next steps are captured into a dated meeting note on the opportunity's comments. Writes are all-or-none (validate → apply → compensate). Set `tlc.meetingExtractor` = `foundry` to extract with a Microsoft Foundry model. (Microsoft Graph meeting acquisition is not wired yet.)
+
+**Installed extension (no debugger):** run **TLC: Use Live Data (MSX/Dataverse)** from the Command Palette, or set **`tlc.mode`** = `live` in **Settings**. The status bar shows `TLC Assist: Live`. The `tlc.dataStore` setting is ignored in live mode.
+
+**Developing with F5:** the repo's [.vscode/launch.json](.vscode/launch.json) provides the Extension Development Host configurations above — **Run TLC Assist Extension** (fixtures), **Run TLC Assist Extension (SQLite test store)**, **Run TLC Assist Extension (SQLite + Foundry extraction)**, and **Run TLC Assist Extension (Live MSX/Dataverse)** — which set `TLC_MODE`/`TLC_DATA_STORE` (and, for the Foundry config, `TLC_MEETING_EXTRACTOR`/`TLC_MEETING_MODEL`) as the startup default. After rebuilding the extension, run **Developer: Reload Window** in the Extension Development Host (or relaunch) so the new build loads.
+
 ## Install the Desktop App
 
 1. Open the [latest release](https://github.com/kprpg/TLC-MultiAgentAssist/releases/latest) and expand **Assets**.

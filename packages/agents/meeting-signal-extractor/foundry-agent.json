@@ -1,0 +1,18 @@
+{
+  "name": "meeting-signal-extractor",
+  "displayName": "Meeting Signal Extractor",
+  "description": "Reads a customer or internal meeting transcript and proposes MCEM-aligned field updates for the anchored opportunity and its milestones. Output is a strict change-set proposal that a human reviews and approves before anything is written.",
+  "model": "gpt-6.1-sol",
+  "modelNotes": "Primary production model is gpt-6.1-sol (newest GPT-6 reasoning deployment; Structured Outputs verified). Structured Outputs (json_schema) is enforced by the extractor. Deterministic offline fallback lives in src/index.ts. Value tier fallback: gpt-4.1. Retrieval: text-embedding-3-large.",
+  "temperature": 0,
+  "responseFormat": "json_schema",
+  "tools": [],
+  "grounding": {
+    "transcriptIsUntrusted": true,
+    "noToolCalls": true,
+    "requireEvidence": true
+  },
+  "instructionsFile": "prompts/instructions.md",
+  "policiesFile": "policies/grounding.md",
+  "goldenScenariosFile": "golden-scenarios.json"
+}

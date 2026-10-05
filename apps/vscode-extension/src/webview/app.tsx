@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactElement } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactElement } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import workflowDescriptionsJson from '../../../../config/workflow-descriptions.json' with { type: 'json' }
@@ -29,6 +29,10 @@ import type {
     AgentTaskView,
     DiscoverableOpportunityView,
     McemView,
+    MeetingChangeSetProposalView,
+    MeetingChangeSetResultView,
+    MeetingTranscriptSummaryView,
+    MeetingTypeView,
     MilestoneUpdateInput,
     MilestoneView,
     OpportunityView,
@@ -799,6 +803,266 @@ function MilestonesEditor({ opportunityId, currency, milestones, onChanged, onNo
     )
 }
 
+/** Toggles membership of `id` in an immutable set (returns a new set). */
+function toggleSet(previous: ReadonlySet<string>, id: string): Set<string> {
+    const next = new Set(previous)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+}
+
+/** Renders a change-set proposal as Markdown for the Email / Word export actions. */
+function meetingProposalToMarkdown(proposal: MeetingChangeSetProposalView, opportunityName: string): string {
+    const lines = [`# Meeting signals - ${opportunityName}`, '', `Meeting type: ${proposal.meetingType}`, '', '## Proposed field changes', '', '| Apply | Field | Current | Proposed | MCEM | Confidence |', '| --- | --- | --- | --- | --- | --- |']
+    for (const slot of proposal.slots) {
+        lines.push(`| ${slot.checkedByDefault && !slot.blocked ? 'yes' : 'review'} | ${slot.label} | ${slot.displayBefore ?? '(empty)'} | ${slot.displayAfter} | ${slot.mcemCriterion} | ${Math.round(slot.confidence * 100)}% |`)
+    }
+    if (proposal.newMilestones.length > 0) {
+        lines.push('', '## New milestones', '')
+        for (const milestone of proposal.newMilestones) lines.push(`- ${milestone.name}${milestone.milestoneDate ? ` (${milestone.milestoneDate})` : ''}`)
+    }
+    if (proposal.unmappedSignals.length > 0) {
+        lines.push('', '## Other signals (not injected)', '')
+        for (const signal of proposal.unmappedSignals) lines.push(`- ${signal.label}: ${signal.text}`)
+    }
+    return lines.join('\n')
+}
+
+async function readFileIntoContent(event: ChangeEvent<HTMLInputElement>, setContent: (value: string) => void, onNote: (message: string) => void): Promise<void> {
+    const file = event.target.files?.[0]
+    if (!file) return
+    try { setContent(await file.text()) }
+    catch (error) { onNote((error as Error).message) }
+}
+
+/** Modal approval panel: per-row toggle, milestone multi-select, required reason, all-or-none submit. */
+function MeetingReviewModal({ proposal, opportunityName, milestones, onClose, onApplied, onNote }: {
+    proposal: MeetingChangeSetProposalView
+    opportunityName: string
+    milestones: MilestoneView[]
+    onClose: () => void
+    onApplied: () => void
+    onNote: (message: string) => void
+}): ReactElement {
+    const [checkedSlots, setCheckedSlots] = useState<Set<string>>(() => new Set(proposal.slots.filter((slot) => slot.checkedByDefault && !slot.blocked).map((slot) => slot.slotId)))
+    const [checkedNewMilestones, setCheckedNewMilestones] = useState<Set<string>>(() => new Set(proposal.newMilestones.filter((milestone) => milestone.checkedByDefault).map((milestone) => milestone.tempId)))
+    const [selectedMilestones, setSelectedMilestones] = useState<Set<string>>(() => new Set(proposal.suggestedMilestoneIds))
+    const [reason, setReason] = useState('')
+    const [busy, setBusy] = useState(false)
+    const [result, setResult] = useState<MeetingChangeSetResultView | undefined>(undefined)
+
+    const approvedCount = checkedSlots.size + checkedNewMilestones.size
+    const canSubmit = approvedCount > 0 && reason.trim().length >= 3 && !busy
+    const summaryMarkdown = meetingProposalToMarkdown(proposal, opportunityName)
+
+    const submit = useCallback(async () => {
+        setBusy(true)
+        try {
+            const applied = await dataClient.applyMeetingChangeSet(proposal, {
+                changeSetId: proposal.changeSetId,
+                opportunityId: proposal.opportunityId,
+                approvedSlotIds: [...checkedSlots],
+                approvedNewMilestoneTempIds: [...checkedNewMilestones],
+                selectedMilestoneIds: [...selectedMilestones],
+                reason: reason.trim()
+            })
+            setResult(applied)
+            onNote(applied.state === 'applied' ? 'Meeting signals injected.' : 'Change set rolled back (a record changed since review).')
+        } catch (error) {
+            onNote((error as Error).message)
+        } finally {
+            setBusy(false)
+        }
+    }, [proposal, checkedSlots, checkedNewMilestones, selectedMilestones, reason, onNote])
+
+    return (
+        <div className="meeting-modal-backdrop" role="dialog" aria-modal="true" aria-label="Review meeting signals">
+            <div className="meeting-modal">
+                <header className="meeting-modal-header">
+                    <div>
+                        <h3>Review meeting signals</h3>
+                        <p className="muted">{opportunityName} · {proposal.meetingType} meeting · {proposal.slots.length} proposed change{proposal.slots.length === 1 ? '' : 's'}</p>
+                    </div>
+                    <ResponseActions title={`Meeting signals - ${opportunityName}`} markdown={summaryMarkdown} onNote={onNote} />
+                </header>
+
+                {!result && (
+                    <div className="meeting-modal-body">
+                        <table className="record-table meeting-review-table">
+                            <thead><tr><th>Apply</th><th>Field</th><th>Current &rarr; Proposed</th><th>MCEM</th><th>Conf.</th></tr></thead>
+                            <tbody>
+                                {proposal.slots.map((slot) => (
+                                    <tr key={slot.slotId} className={slot.blocked ? 'blocked-row' : ''}>
+                                        <td><input type="checkbox" aria-label={`Apply ${slot.label}`} disabled={slot.blocked} checked={checkedSlots.has(slot.slotId)} onChange={() => setCheckedSlots((previous) => toggleSet(previous, slot.slotId))} /></td>
+                                        <td>
+                                            <strong>{slot.label}</strong>{slot.sensitive && <span className="badge sensitive"> sensitive</span>}
+                                            <span className="muted meeting-rationale">{slot.rationale}</span>
+                                            {slot.blocked && slot.blockedReason && <span className="error meeting-rationale">{slot.blockedReason}</span>}
+                                        </td>
+                                        <td><span className="meeting-before">{slot.displayBefore ?? '(empty)'}</span> &rarr; <span className="meeting-after">{slot.displayAfter}</span></td>
+                                        <td>{slot.mcemCriterion}</td>
+                                        <td>{Math.round(slot.confidence * 100)}%<span className="muted"> · {slot.evidence.length} ref</span></td>
+                                    </tr>
+                                ))}
+                                {proposal.slots.length === 0 && <tr><td colSpan={5} className="muted">No field changes detected in this meeting.</td></tr>}
+                            </tbody>
+                        </table>
+
+                        {proposal.newMilestones.length > 0 && (
+                            <section className="meeting-section">
+                                <h4>New milestones</h4>
+                                {proposal.newMilestones.map((milestone) => (
+                                    <label key={milestone.tempId} className="meeting-check-row">
+                                        <input type="checkbox" checked={checkedNewMilestones.has(milestone.tempId)} onChange={() => setCheckedNewMilestones((previous) => toggleSet(previous, milestone.tempId))} />
+                                        <span><strong>{milestone.name}</strong>{milestone.milestoneDate ? ` · ${milestone.milestoneDate}` : ''} · {Math.round(milestone.confidence * 100)}%</span>
+                                    </label>
+                                ))}
+                            </section>
+                        )}
+
+                        {milestones.length > 0 && (
+                            <section className="meeting-section">
+                                <h4>Apply milestone changes to</h4>
+                                <p className="muted">Toggle the milestones this meeting updates. Milestone-targeted changes apply only to selected rows.</p>
+                                {milestones.map((milestone) => (
+                                    <label key={milestone.id} className="meeting-check-row">
+                                        <input type="checkbox" checked={selectedMilestones.has(milestone.id)} onChange={() => setSelectedMilestones((previous) => toggleSet(previous, milestone.id))} />
+                                        <span>{milestone.name} <span className="muted">· {milestone.status}</span></span>
+                                    </label>
+                                ))}
+                            </section>
+                        )}
+
+                        {proposal.unmappedSignals.length > 0 && (
+                            <section className="meeting-section">
+                                <h4>Other signals (not injected)</h4>
+                                <ul className="item-list">{proposal.unmappedSignals.map((signal, index) => <li key={index}><strong>{signal.label}:</strong> {signal.text}</li>)}</ul>
+                            </section>
+                        )}
+
+                        <label className="meeting-reason">Reason (required)
+                            <textarea rows={2} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Why these updates (min 3 characters)..." />
+                        </label>
+                    </div>
+                )}
+
+                {result && (
+                    <div className="meeting-modal-body">
+                        <p className={result.state === 'applied' ? 'success' : 'error'}>
+                            {result.state === 'applied' ? 'Applied' : 'Rolled back'} — {result.auditNote}
+                        </p>
+                        <ul className="item-list meeting-result-list">
+                            {result.items.map((item) => (
+                                <li key={item.id}>{item.state === 'applied' ? '✅' : item.state === 'conflict' ? '⚠' : '🚫'} {item.detail}</li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+
+                <footer className="meeting-modal-footer actions">
+                    {!result && (
+                        <>
+                            <span className="muted meeting-selected-count">{approvedCount} selected</span>
+                            <button className="secondary" disabled={busy} onClick={onClose}>Cancel</button>
+                            <button className="primary" disabled={!canSubmit} onClick={() => void submit()}>{busy ? 'Submitting...' : 'Submit (all-or-none)'}</button>
+                        </>
+                    )}
+                    {result && <button className="primary" onClick={() => (result.state === 'applied' ? onApplied() : onClose())}>{result.state === 'applied' ? 'Done' : 'Close'}</button>}
+                </footer>
+            </div>
+        </div>
+    )
+}
+
+/** Meeting-capture launcher shown in the Overview Milestones header (Teams pick or paste/upload). */
+function MeetingCaptureLauncher({ opportunityId, opportunityName, milestones, onApplied, onNote }: {
+    opportunityId: string
+    opportunityName: string
+    milestones: MilestoneView[]
+    onApplied: () => void
+    onNote: (message: string) => void
+}): ReactElement {
+    const [open, setOpen] = useState(false)
+    const [transcripts, setTranscripts] = useState<MeetingTranscriptSummaryView[]>([])
+    const [transcriptId, setTranscriptId] = useState('')
+    const [tab, setTab] = useState<'pick' | 'paste'>('pick')
+    const [pasteContent, setPasteContent] = useState('')
+    const [meetingType, setMeetingType] = useState<MeetingTypeView>('customer')
+    const [busy, setBusy] = useState(false)
+    const [proposal, setProposal] = useState<MeetingChangeSetProposalView | undefined>(undefined)
+
+    useEffect(() => {
+        setOpen(false); setProposal(undefined); setPasteContent(''); setTranscriptId(''); setTab('pick')
+        dataClient.listMeetingTranscripts(opportunityId)
+            .then((list) => { setTranscripts(list); if (list[0]) setTranscriptId(list[0].id) })
+            .catch(() => setTranscripts([]))
+    }, [opportunityId])
+
+    const canExtract = tab === 'paste' ? pasteContent.trim().length > 10 : transcriptId.length > 0
+
+    const extract = useCallback(async () => {
+        setBusy(true)
+        try {
+            const next = tab === 'paste'
+                ? await dataClient.proposeMeetingFromRaw(opportunityId, pasteContent, meetingType)
+                : await dataClient.proposeMeetingFromTranscript(opportunityId, transcriptId)
+            setProposal(next)
+        } catch (error) {
+            onNote((error as Error).message)
+        } finally {
+            setBusy(false)
+        }
+    }, [tab, opportunityId, pasteContent, meetingType, transcriptId, onNote])
+
+    return (
+        <div className="meeting-launcher">
+            <button className="secondary meeting-launch-button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>Meeting capture</button>
+            {open && (
+                <div className="meeting-launcher-panel">
+                    <div className="meeting-launcher-tabs">
+                        <button className={tab === 'pick' ? 'tab active' : 'tab'} onClick={() => setTab('pick')}>Teams meeting</button>
+                        <button className={tab === 'paste' ? 'tab active' : 'tab'} onClick={() => setTab('paste')}>Paste / upload</button>
+                    </div>
+                    {tab === 'pick' && (transcripts.length > 0 ? (
+                        <label className="meeting-field">Meeting
+                            <select value={transcriptId} onChange={(event) => setTranscriptId(event.target.value)}>
+                                {transcripts.map((transcript) => <option key={transcript.id} value={transcript.id}>{transcript.subject} ({transcript.meetingType}, {transcript.segmentCount} lines)</option>)}
+                            </select>
+                        </label>
+                    ) : <p className="muted">No linked meeting transcripts. Use Paste / upload.</p>)}
+                    {tab === 'paste' && (
+                        <div className="meeting-paste">
+                            <label className="meeting-field">Meeting type
+                                <select value={meetingType} onChange={(event) => setMeetingType(event.target.value as MeetingTypeView)}>
+                                    <option value="customer">Customer</option>
+                                    <option value="internal">Internal</option>
+                                </select>
+                            </label>
+                            <input type="file" accept=".vtt,.txt,text/vtt,text/plain" onChange={(event) => void readFileIntoContent(event, setPasteContent, onNote)} />
+                            <textarea rows={4} placeholder="Paste a Teams transcript (WebVTT) or 'Speaker: text' lines..." value={pasteContent} onChange={(event) => setPasteContent(event.target.value)} />
+                        </div>
+                    )}
+                    <div className="actions">
+                        <button className="secondary" onClick={() => setOpen(false)}>Close</button>
+                        <button className="primary" disabled={busy || !canExtract} onClick={() => void extract()}>{busy ? 'Extracting...' : 'Extract & Review'}</button>
+                    </div>
+                </div>
+            )}
+            {proposal && (
+                <MeetingReviewModal
+                    key={proposal.changeSetId}
+                    proposal={proposal}
+                    opportunityName={opportunityName}
+                    milestones={milestones}
+                    onClose={() => setProposal(undefined)}
+                    onApplied={() => { setProposal(undefined); setOpen(false); onApplied() }}
+                    onNote={onNote}
+                />
+            )}
+        </div>
+    )
+}
+
 /** MCEM board: five stage columns with draggable opportunity cards and a reason-gated move. */
 function StageBoard({ accountId, opportunities, onChanged, onNote }: { accountId: string; opportunities: OpportunityView[]; onChanged: () => void; onNote: (message: string) => void }): ReactElement {
     const [pending, setPending] = useState<{ opportunityId: string; opportunityName: string; targetStage: number } | undefined>(undefined)
@@ -1127,7 +1391,10 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
                         </nav>
                         {sub === 'overview' && (
                             <div>
-                                <h4 className="section-heading">Milestones</h4>
+                                <div className="section-heading-row">
+                                    <h4 className="section-heading">Milestones</h4>
+                                    <MeetingCaptureLauncher opportunityId={selectedOpportunity.id} opportunityName={selectedOpportunity.name} milestones={milestones} onApplied={reloadMilestones} onNote={setNote} />
+                                </div>
                                 <MilestonesEditor opportunityId={selectedOpportunity.id} currency={selectedOpportunity.currency} milestones={milestones} onChanged={reloadMilestones} onNote={setNote} />
                                 <div className="actions">
                                     <button className="primary" onClick={() => void runCoach()}>Run MCEM Coach</button>

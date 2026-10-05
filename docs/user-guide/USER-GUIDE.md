@@ -56,7 +56,23 @@ TLC Assist installs as a self-contained VS Code extension and opens inside the e
 1. Install `tlc-assist-vscode-<version>.vsix` from the GitHub Releases page (see the [VS Code extension install guide](VSCODE-EXTENSION-INSTALL.md) for the full steps). Only **VS Code / VS Code Insiders 1.90.0+** is required — no Node.js, npm, sign-in, or network.
 2. Run **Developer: Reload Window**, then select the **TLC Assist** icon in the Activity Bar, or run **TLC: Open Assist** from the Command Palette (`Ctrl+Shift+P`).
 
-The extension starts in **sample** mode (sanitized fixtures, no network). To use live data, open **Settings** (`Ctrl+,`), set `tlc.mode` to `live`, and sign in with VS Code's built-in Microsoft account; the Foundry agents additionally use the Azure CLI (`az login`).
+The extension starts in **sample** mode (sanitized fixtures, no network). To use live data, run **TLC: Use Live Data (MSX/Dataverse)** from the Command Palette (or set `tlc.mode` to `live` in **Settings**) and sign in with VS Code's built-in Microsoft account; the Foundry agents additionally use the Azure CLI (`az login`).
+
+### Switching the data source (sample, SQLite test store, or live)
+
+Two independent toggles control where data comes from:
+
+| Toggle | Setting | Values |
+| --- | --- | --- |
+| **Mode** | `tlc.mode` | `sample` (sanitized, offline) · `live` (MSX OData + Dataverse MCP) |
+| **Sample data store** | `tlc.dataStore` | `fixture` (in-memory) · `sqlite` (relational SQLite test store; injected values persist for the session). Applies only in sample mode. |
+
+- **Switch sample ⇄ live at runtime** from the Command Palette (`Ctrl+Shift+P`): **TLC: Use Live Data (MSX/Dataverse)** or **TLC: Use Sample Data**. The status bar flips between `TLC Assist: Live` and `Sample`, and the panes reload.
+- **TLC: Test Live Connection** only *verifies* connectivity to Dataverse — it does **not** switch the data source. Use **Use Live Data** to actually switch.
+- You can also set `tlc.mode` / `tlc.dataStore` in **Settings** (`Ctrl+,`, search "tlc").
+- **Live requires sign-in:** VS Code's Microsoft account (`@microsoft.com`) and, for the Foundry agents, `az login`. If the delegated token cannot be acquired, the extension shows an error toast and stays on sample — see **Output → TLC Assist** for details.
+
+> **Developing with F5?** The repo includes Extension Development Host launch configs — **Run TLC Assist Extension** (fixtures), **(SQLite test store)**, and **(Live MSX/Dataverse)** — that set the startup data source. After rebuilding the extension, run **Developer: Reload Window** in the Extension Development Host (or relaunch) so the new build loads before switching modes.
 
 ### The Discover, Portfolio, and Plays tabs
 
@@ -70,7 +86,7 @@ VS Code also contributes a native **TLC Assist** tree and toolbar commands (**TL
 
 ### Run the extension in sample mode
 
-Sample mode is the default and needs nothing else — no sign-in, no network, no Azure CLI. If you previously switched to live mode, set `tlc.mode` back to `sample` in **Settings** and run **Developer: Reload Window**. In sample mode the view loads bundled sanitized data and never calls MSX or Foundry.
+Sample mode is the default and needs nothing else — no sign-in, no network, no Azure CLI. If you previously switched to live mode, run **TLC: Use Sample Data** (or set `tlc.mode` back to `sample` in **Settings**). In sample mode the view loads bundled sanitized data (or the SQLite test store when `tlc.dataStore` is `sqlite`) and never calls MSX or Foundry.
 
 ## The VS Code experience
 

@@ -47,6 +47,24 @@ describe('vscode-extension message contracts', () => {
         expect(() => parseBridgeParams('openEvidence', { url: 'not a url' })).toThrow()
     })
 
+    it('accepts the meeting-capture methods and their params', () => {
+        expect(bridgeMethodSchema.parse('listMeetingTranscripts')).toBe('listMeetingTranscripts')
+        expect(parseBridgeParams('getMeetingTranscript', { transcriptId: 'tr-grid-customer' })).toEqual({ transcriptId: 'tr-grid-customer' })
+        expect(parseBridgeParams('proposeMeetingChangeSet', { opportunityId: 'opp-1', transcriptId: 'tr-1' })).toMatchObject({ opportunityId: 'opp-1' })
+        expect(parseBridgeParams('proposeMeetingChangeSet', { opportunityId: 'opp-1', rawTranscript: { content: 'Priya: hi', meetingType: 'customer' } }).rawTranscript?.content).toBe('Priya: hi')
+    })
+
+    it('rejects a meeting approval whose reason is too short', () => {
+        const proposal = {
+            changeSetId: 'cs-1', transcriptId: 'tr-1', opportunityId: 'opp-1', meetingType: 'customer',
+            slots: [], newMilestones: [], suggestedMilestoneIds: [], unmappedSignals: [], proposedAt: new Date().toISOString()
+        }
+        expect(() => parseBridgeParams('applyMeetingChangeSet', {
+            proposal,
+            approval: { changeSetId: 'cs-1', opportunityId: 'opp-1', approvedSlotIds: [], approvedNewMilestoneTempIds: [], selectedMilestoneIds: [], reason: 'x' }
+        })).toThrow()
+    })
+
     it('builds discriminated success and error responses', () => {
         expect(responseEnvelopeSchema.parse(successResponse('req-1', { ok: true }))).toMatchObject({ ok: true })
         expect(responseEnvelopeSchema.parse(errorResponse('req-1', 'nope', 'code'))).toMatchObject({ ok: false, error: { code: 'code' } })

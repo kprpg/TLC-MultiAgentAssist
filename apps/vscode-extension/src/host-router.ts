@@ -121,6 +121,33 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
                 const params = parseBridgeParams('prepareWorkflowGuidance', parsed.data.params)
                 return successResponse(id, await provider.prepareWorkflowGuidance(params.runId, params.queueItemId, params.capability))
             }
+            case 'listMeetingTranscripts': {
+                const params = parseBridgeParams('listMeetingTranscripts', parsed.data.params)
+                return successResponse(id, await provider.listMeetingTranscripts(params?.opportunityId))
+            }
+            case 'getMeetingTranscript': {
+                const params = parseBridgeParams('getMeetingTranscript', parsed.data.params)
+                return successResponse(id, await provider.getMeetingTranscript(params.transcriptId))
+            }
+            case 'proposeMeetingChangeSet': {
+                const params = parseBridgeParams('proposeMeetingChangeSet', parsed.data.params)
+                const rawTranscript = params.rawTranscript
+                    ? {
+                        content: params.rawTranscript.content,
+                        ...(params.rawTranscript.format ? { format: params.rawTranscript.format } : {}),
+                        ...(params.rawTranscript.meetingType ? { meetingType: params.rawTranscript.meetingType } : {})
+                    }
+                    : undefined
+                return successResponse(id, await provider.proposeMeetingChangeSet({
+                    opportunityId: params.opportunityId,
+                    ...(params.transcriptId ? { transcriptId: params.transcriptId } : {}),
+                    ...(rawTranscript ? { rawTranscript } : {})
+                }))
+            }
+            case 'applyMeetingChangeSet': {
+                const params = parseBridgeParams('applyMeetingChangeSet', parsed.data.params)
+                return successResponse(id, await provider.applyMeetingChangeSet({ proposal: params.proposal, approval: params.approval }))
+            }
             case 'openEvidence':
                 return errorResponse(id, 'openEvidence must be handled by the extension host.', 'host_only')
             case 'exportContent':

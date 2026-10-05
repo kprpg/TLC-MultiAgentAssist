@@ -133,6 +133,16 @@
         "command": "tlc.testLiveConnection",
         "title": "TLC: Test Live Connection",
         "category": "TLC Assist"
+      },
+      {
+        "command": "tlc.useLiveData",
+        "title": "TLC: Use Live Data (MSX/Dataverse)",
+        "category": "TLC Assist"
+      },
+      {
+        "command": "tlc.useSampleData",
+        "title": "TLC: Use Sample Data",
+        "category": "TLC Assist"
       }
     ],
     "menus": {
@@ -177,6 +187,29 @@
           ],
           "default": "sample",
           "markdownDescription": "Data mode. `sample` uses sanitized fixtures with no network calls. `live` requires a supported delegated Microsoft identity and is gated by the MCP tool policy."
+        },
+        "tlc.dataStore": {
+          "type": "string",
+          "enum": [
+            "fixture",
+            "sqlite"
+          ],
+          "default": "fixture",
+          "markdownDescription": "In `sample` mode, the data source. `fixture` uses the in-memory sample data. `sqlite` uses the relational SQLite test store (accounts, opportunities, milestones, stakeholders, meetings/transcripts) whose injected values persist for the session. No effect in `live` mode."
+        },
+        "tlc.meetingExtractor": {
+          "type": "string",
+          "enum": [
+            "deterministic",
+            "foundry"
+          ],
+          "default": "deterministic",
+          "markdownDescription": "How meeting-capture extracts MCEM signals from a transcript. `deterministic` uses the built-in offline rules (no network). `foundry` sends the transcript to a deployed Microsoft Foundry model (see `#tlc.meetingModel#`) using Structured Outputs, authenticated with Azure CLI. Requires the SQLite test store or a live connection."
+        },
+        "tlc.meetingModel": {
+          "type": "string",
+          "default": "gpt-6.1-sol",
+          "markdownDescription": "The Microsoft Foundry model deployment used for meeting-signal extraction when `#tlc.meetingExtractor#` is `foundry`."
         },
         "tlc.openOnStartup": {
           "type": "boolean",

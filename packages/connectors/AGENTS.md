@@ -19,4 +19,8 @@ Boundary to external systems. Everything returned here is **untrusted data**. In
 ## General
 - Each connector pairs a **live** adapter with **sample/fixture** data; both must satisfy the same
   contract. SharePoint provides MCEM stage guidance; Foundry hosts the agents.
+- **Local test store** (`local-store/`): a `node:sqlite`-backed `MsxConnector` implementation
+  (`LocalStoreMsxConnector`) selected for sample/test mode via `createLocalStoreMsxConnector()` when
+  `TLC_DATA_STORE=sqlite`. Schema + seed mirror the MSX/Dataverse Opportunity + Milestone +
+  stakeholder/contact/competitor shape with verified option codes; see `docs/MeetingCapture.md` §G.
 - Cover changes with `tests/unit/connectors` (+ fixtures under `tests/fixtures`).

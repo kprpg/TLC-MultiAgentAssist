@@ -23,6 +23,7 @@ export {
   type MsxAccessTokenProvider,
   type MsxWriteMetadata
 } from './live.js'
+export { LiveMeetingCaptureConnector, type MeetingExtractorFn as LiveMeetingExtractorFn } from './live-meeting.js'
 
 const accounts: Account[] = [
   { id: 'account-contoso', name: 'Contoso Energy', segment: 'Strategic', tpid: '1000001' },

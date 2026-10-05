@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, milestoneUpdateSchema, opportunityUpdateSchema, scopeRefSchema, seDomainSchema } from '../../../packages/common/index.js'
+import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, meetingTypeSchema, milestoneUpdateSchema, opportunityUpdateSchema, scopeRefSchema, seDomainSchema } from '../../../packages/common/index.js'
 
 /**
  * Strict, discriminated message envelopes for the webview <-> extension-host bridge.
@@ -36,6 +36,10 @@ export const bridgeMethodSchema = z.enum([
     'cancelWorkflowRun',
     'listWorkflowRuns',
     'prepareWorkflowGuidance',
+    'listMeetingTranscripts',
+    'getMeetingTranscript',
+    'proposeMeetingChangeSet',
+    'applyMeetingChangeSet',
     'openEvidence',
     'exportContent',
     'composeEmail'
@@ -101,6 +105,21 @@ export const bridgeParamSchemas = {
         runId: z.string().uuid(),
         queueItemId: z.string().min(1).max(200),
         capability: agentCapabilitySchema
+    }).strict(),
+    listMeetingTranscripts: z.object({ opportunityId: z.string().min(1).max(200).optional() }).strict().optional(),
+    getMeetingTranscript: z.object({ transcriptId: z.string().min(1).max(200) }).strict(),
+    proposeMeetingChangeSet: z.object({
+        opportunityId: z.string().min(1).max(200),
+        transcriptId: z.string().min(1).max(200).optional(),
+        rawTranscript: z.object({
+            content: z.string().min(1).max(500_000),
+            format: z.enum(['vtt', 'text']).optional(),
+            meetingType: meetingTypeSchema.optional()
+        }).strict().optional()
+    }).strict(),
+    applyMeetingChangeSet: z.object({
+        proposal: meetingChangeSetProposalSchema,
+        approval: meetingChangeSetApprovalSchema
     }).strict(),
     openEvidence: z.object({ url: z.string().url().max(2048) }).strict(),
     exportContent: z.object({

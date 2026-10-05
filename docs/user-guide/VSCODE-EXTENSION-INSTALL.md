@@ -72,13 +72,20 @@ The extension starts in **sample** mode (sanitized fixtures, no network calls).
 
 ## 4. (Optional) Switch to live mode
 
-1. Open **Settings** (`Ctrl+,`) and search for `tlc.mode`.
-2. Set it to `live`.
-3. When prompted, sign in with your authorized corporate Microsoft account (VS Code's
+1. Run **TLC: Use Live Data (MSX/Dataverse)** from the Command Palette (`Ctrl+Shift+P`) —
+   or open **Settings** (`Ctrl+,`), search `tlc.mode`, and set it to `live`. The status bar
+   switches to `TLC Assist: Live`. (The **TLC: Test Live Connection** command only *tests*
+   connectivity; it does not switch the data source.)
+2. When prompted, sign in with your authorized corporate Microsoft account (VS Code's
    built-in Microsoft sign-in).
-4. For the real Foundry agents, make sure the Azure CLI is installed and run `az login`
+3. For the real Foundry agents, make sure the Azure CLI is installed and run `az login`
    first. If you do not want to use Foundry, turn off `tlc.useFoundryAgents` to use the
    built-in deterministic guidance.
+4. Run **TLC: Use Sample Data** at any time to switch back. If the delegated token cannot be
+   acquired, the extension shows an error and stays on sample — check **Output → TLC Assist**.
+
+> **Sample data store:** in sample mode, `tlc.dataStore` selects `fixture` (in-memory) or
+> `sqlite` (a relational SQLite test store whose injected values persist for the session).
 
 See the extension [README](../../apps/vscode-extension/README.md) for the full list of
 settings and behaviors.

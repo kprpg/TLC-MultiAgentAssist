@@ -1,5 +1,6 @@
 import * as vscode from 'vscode'
 import type { ExtensionDataProvider } from '../data-provider.js'
+import { buildConnectionItems } from './connection-items.js'
 
 type Refreshable = { readonly onDidChangeTreeData: vscode.Event<void>; refresh(): void }
 
@@ -19,18 +20,12 @@ export class ConnectionTreeProvider extends RefreshEmitter implements vscode.Tre
     async getChildren(): Promise<vscode.TreeItem[]> {
         const provider = this.provider()
         const email = await provider.getCurrentUserEmail().catch(() => undefined)
-        const modeItem = new vscode.TreeItem(`Mode: ${provider.mode === 'live' ? 'Live' : 'Sample'}`)
-        modeItem.iconPath = new vscode.ThemeIcon(provider.mode === 'live' ? 'broadcast' : 'beaker')
-        modeItem.tooltip = provider.mode === 'live'
-            ? 'Live delegated data. Reads are bounded by the MCP tool policy.'
-            : 'Sanitized sample data. No network calls are made.'
-        const identityItem = new vscode.TreeItem(`Identity: ${email ?? 'Not signed in (sample)'}`)
-        identityItem.iconPath = new vscode.ThemeIcon('account')
-        const msxItem = new vscode.TreeItem('MSX: sample')
-        msxItem.iconPath = new vscode.ThemeIcon('database')
-        const mcemItem = new vscode.TreeItem('MCEM guidance: sample')
-        mcemItem.iconPath = new vscode.ThemeIcon('book')
-        return [modeItem, identityItem, msxItem, mcemItem]
+        return buildConnectionItems(provider.mode, email).map((item) => {
+            const treeItem = new vscode.TreeItem(item.label)
+            treeItem.iconPath = new vscode.ThemeIcon(item.icon)
+            if (item.tooltip) treeItem.tooltip = item.tooltip
+            return treeItem
+        })
     }
 }
 

@@ -1619,3 +1619,168 @@ textarea {
         grid-template-columns: minmax(0, 1fr);
     }
 }
+
+/* Meeting capture: launcher + review modal */
+.section-heading-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.meeting-launcher {
+    position: relative;
+}
+
+.meeting-launcher-panel {
+    position: absolute;
+    right: 0;
+    z-index: 20;
+    margin-top: 6px;
+    width: 320px;
+    max-width: 80vw;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.meeting-launcher-tabs {
+    display: flex;
+    gap: 4px;
+}
+
+.meeting-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.85em;
+}
+
+.meeting-paste {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.meeting-paste textarea,
+.meeting-reason textarea {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.meeting-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.45);
+}
+
+.meeting-modal {
+    width: 760px;
+    max-width: 96vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.meeting-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+}
+
+.meeting-modal-header h3 {
+    margin: 0 0 2px;
+}
+
+.meeting-modal-body {
+    padding: 12px 16px;
+    overflow: auto;
+}
+
+.meeting-review-table th,
+.meeting-review-table td {
+    vertical-align: top;
+}
+
+.meeting-review-table .blocked-row {
+    opacity: 0.65;
+}
+
+.meeting-rationale {
+    display: block;
+    font-size: 0.8em;
+}
+
+.meeting-before {
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
+.meeting-after {
+    font-weight: 700;
+}
+
+.badge.sensitive {
+    background: var(--vscode-inputValidation-warningBackground, #5a4600);
+    color: var(--vscode-inputValidation-warningForeground, inherit);
+}
+
+.meeting-section {
+    margin-top: 12px;
+}
+
+.meeting-section h4 {
+    margin: 0 0 6px;
+}
+
+.meeting-check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+.meeting-reason {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 12px;
+}
+
+.meeting-result-list li {
+    padding: 2px 0;
+}
+
+.meeting-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+}
+
+.meeting-selected-count {
+    margin-right: auto;
+}
+
+.success {
+    color: var(--vscode-testing-iconPassed, var(--vscode-terminal-ansiGreen, #3fb950));
+}

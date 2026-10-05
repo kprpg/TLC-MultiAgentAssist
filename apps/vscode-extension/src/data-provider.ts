@@ -12,6 +12,12 @@ import {
     type DiscoverableOpportunity,
     type McemResponse,
     type McemStageTransitionResult,
+    type MeetingChangeSetApproval,
+    type MeetingChangeSetProposal,
+    type MeetingChangeSetResult,
+    type MeetingTranscript,
+    type MeetingTranscriptSummary,
+    type MeetingType,
     type Milestone,
     type MilestoneUpdate,
     type Opportunity,
@@ -27,6 +33,11 @@ import {
     type WorkflowHost,
     type WorkflowRunView
 } from '../../../packages/orchestrator/workflows/index.js'
+import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
+import { LocalStore, LocalStoreMsxConnector } from '../../../packages/connectors/local-store/index.js'
+import { ExtensionMcemGuidanceConnector } from './mcem-guidance.js'
+import { buildLiveDataProvider, buildLiveTaskAgents } from './live-provider-core.js'
+import { buildFoundryMeetingExtractor } from './live-provider.js'
 import {
     buildSampleAgentResponse,
     buildSampleEvaluation,
@@ -44,6 +55,12 @@ import {
     updateSampleMilestone,
     updateSampleOpportunity
 } from './sample-data.js'
+
+/** A transcript source for a proposal: a seeded id or an uploaded/pasted recording. */
+export interface MeetingTranscriptSource {
+    transcriptId?: string
+    rawTranscript?: { content: string; format?: 'vtt' | 'text'; meetingType?: MeetingType }
+}
 
 /**
  * Host-neutral data surface consumed by the pure bridge router. A provider owns the
@@ -72,6 +89,10 @@ export interface ExtensionDataProvider {
     cancelWorkflowRun(runId: string): Promise<WorkflowRun>
     listWorkflowRuns(scope?: ScopeRef, limit?: number): Promise<WorkflowRun[]>
     prepareWorkflowGuidance(runId: string, queueItemId: string, capability: AgentCapability): Promise<WorkflowGuidanceHandoff>
+    listMeetingTranscripts(opportunityId?: string): Promise<MeetingTranscriptSummary[]>
+    getMeetingTranscript(transcriptId: string): Promise<MeetingTranscript | null>
+    proposeMeetingChangeSet(request: { opportunityId: string } & MeetingTranscriptSource): Promise<MeetingChangeSetProposal>
+    applyMeetingChangeSet(input: { proposal: MeetingChangeSetProposal; approval: MeetingChangeSetApproval }): Promise<MeetingChangeSetResult>
     dispose(): Promise<void>
 }
 
@@ -79,6 +100,27 @@ function opportunityForOrThrow(opportunityId: string): Opportunity {
     const opportunity = findSampleOpportunity(opportunityId)
     if (!opportunity) throw new Error('Unknown sample opportunity.')
     return opportunity
+}
+
+/**
+ * Local SQLite test-store provider (sample/test data). Portfolio, discovery, writes, MCEM
+ * evaluation, and agent guidance flow through the shared orchestrator over the relational
+ * {@link LocalStoreMsxConnector}; selected when `TLC_DATA_STORE=sqlite` or the `tlc.dataStore`
+ * setting is `sqlite`. No network calls are made.
+ */
+export function createLocalStoreDataProvider(): ExtensionDataProvider {
+    const connector = new LocalStoreMsxConnector(new LocalStore())
+    const orchestrator = new ThinSliceOrchestrator(connector, new ExtensionMcemGuidanceConnector(), buildLiveTaskAgents())
+    const host: WorkflowHost = createSampleWorkflowHost(async () => {
+        const accounts = await connector.listAccounts()
+        const opportunities = (await Promise.all(accounts.map((candidate) => connector.listOpportunities(candidate.id)))).flat()
+        return {
+            accountIds: accounts.map((candidate) => candidate.id),
+            opportunityIds: opportunities.map((candidate) => candidate.id)
+        }
+    })
+    const meetingExtractor = buildFoundryMeetingExtractor()
+    return buildLiveDataProvider({ orchestrator, host, account: 'sample.user@example.com', meetingConnector: connector, ...(meetingExtractor ? { meetingExtractor } : {}), dispose: async () => { /* in-memory store */ } }, 'sample')
 }
 
 /**
@@ -133,6 +175,10 @@ export function createSampleDataProvider(): ExtensionDataProvider {
             queueItemId,
             capability
         }),
+        listMeetingTranscripts: async () => { throw new Error('Meeting capture requires the SQLite test store (sample data) or a live Graph connection.') },
+        getMeetingTranscript: async () => { throw new Error('Meeting capture requires the SQLite test store (sample data) or a live Graph connection.') },
+        proposeMeetingChangeSet: async () => { throw new Error('Meeting capture requires the SQLite test store (sample data) or a live Graph connection.') },
+        applyMeetingChangeSet: async () => { throw new Error('Meeting capture requires the SQLite test store (sample data) or a live Graph connection.') },
         dispose: async () => { /* sample host holds no external resources */ }
     }
 }

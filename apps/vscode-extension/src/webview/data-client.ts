@@ -10,6 +10,12 @@ import type {
     GuidanceHandoffView,
     McemTransitionView,
     McemView,
+    MeetingChangeSetApprovalInput,
+    MeetingChangeSetProposalView,
+    MeetingChangeSetResultView,
+    MeetingTranscriptSummaryView,
+    MeetingTranscriptView,
+    MeetingTypeView,
     MilestoneUpdateInput,
     MilestoneView,
     OpportunityView,
@@ -47,6 +53,18 @@ export const dataClient = {
     openEvidence: (url: string) => request<null>('openEvidence', { url }),
     exportContent: (title: string, content: string) => request<{ saved: boolean }>('exportContent', { title, content }),
     composeEmail: (subject: string, title: string, body: string) => request<{ drafted: boolean }>('composeEmail', { subject, title, body }),
+
+    // Meeting capture: list/get a transcript, propose a reviewable change set, apply all-or-none.
+    listMeetingTranscripts: (opportunityId?: string) =>
+        request<MeetingTranscriptSummaryView[]>('listMeetingTranscripts', opportunityId ? { opportunityId } : {}),
+    getMeetingTranscript: (transcriptId: string) =>
+        request<MeetingTranscriptView | null>('getMeetingTranscript', { transcriptId }),
+    proposeMeetingFromTranscript: (opportunityId: string, transcriptId: string) =>
+        request<MeetingChangeSetProposalView>('proposeMeetingChangeSet', { opportunityId, transcriptId }),
+    proposeMeetingFromRaw: (opportunityId: string, content: string, meetingType: MeetingTypeView, format?: 'vtt' | 'text') =>
+        request<MeetingChangeSetProposalView>('proposeMeetingChangeSet', { opportunityId, rawTranscript: { content, meetingType, ...(format ? { format } : {}) } }),
+    applyMeetingChangeSet: (proposal: MeetingChangeSetProposalView, approval: MeetingChangeSetApprovalInput) =>
+        request<MeetingChangeSetResultView>('applyMeetingChangeSet', { proposal, approval }),
 
     // Preserve queue-item scope and evidence: prepare the handoff, then run the capability with it.
     async sendQueueItemToGuidance(runId: string, queueItemId: string, capability: AgentCapability): Promise<{ handoff: GuidanceHandoffView; response: AgentTaskView }> {

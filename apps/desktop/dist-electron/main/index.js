@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
 import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
@@ -556,6 +557,144 @@ z.object({
 	onDealTeam: z.literal(false),
 	alreadyAbsent: z.boolean()
 }).strict();
+//#endregion
+//#region packages/common/contracts/meeting.ts
+/**
+* Contracts for the meeting-signal extraction → review → injection flow.
+* See docs/MeetingCapture.md (Parts B, D, H). The transcript is untrusted input; the
+* proposal/approval/result mirror the generic change-set contract with the fields the
+* review UI needs (MCEM criterion, confidence, evidence, target kind).
+*/
+var meetingTypeSchema = z.enum(["customer", "internal"]);
+var meetingSourceSchema = z.enum([
+	"teams",
+	"upload",
+	"paste"
+]);
+var meetingTargetKindSchema = z.enum([
+	"opportunity",
+	"milestone",
+	"new-milestone"
+]);
+var meetingValueTypeSchema = z.enum([
+	"text",
+	"money",
+	"date",
+	"optionset",
+	"boolean",
+	"percent"
+]);
+var mcemCriterionSchema = z.enum([
+	"customer-outcome",
+	"decision-team",
+	"technical-validation",
+	"business-case",
+	"next-step",
+	"risk",
+	"sentiment",
+	"stage",
+	"notes"
+]);
+/** A meeting candidate shown in the launcher's picker. */
+var meetingTranscriptSummarySchema = z.object({
+	id: z.string().min(1),
+	subject: z.string().min(1),
+	occurredAt: z.string().datetime(),
+	meetingType: meetingTypeSchema,
+	source: meetingSourceSchema,
+	opportunityId: z.string().min(1).optional(),
+	opportunityName: z.string().min(1).optional(),
+	segmentCount: z.number().int().nonnegative()
+}).strict();
+var meetingTranscriptSegmentSchema = z.object({
+	segmentId: z.string().min(1),
+	startMs: z.number().int().nonnegative().optional(),
+	endMs: z.number().int().nonnegative().optional(),
+	speaker: z.string().min(1).optional(),
+	speakerRole: meetingTypeSchema.optional(),
+	text: z.string().min(1)
+}).strict();
+var meetingTranscriptSchema = z.object({
+	id: z.string().min(1),
+	opportunityId: z.string().min(1).optional(),
+	meetingType: meetingTypeSchema,
+	title: z.string().min(1).optional(),
+	source: meetingSourceSchema,
+	segments: z.array(meetingTranscriptSegmentSchema)
+}).strict();
+/** One proposed field change, rendered as a review-table row. */
+var meetingSlotSchema = z.object({
+	slotId: z.string().min(1),
+	label: z.string().min(1),
+	mcemCriterion: mcemCriterionSchema,
+	targetKind: meetingTargetKindSchema,
+	targetRecordId: z.string().min(1).optional(),
+	targetField: z.string().min(1),
+	valueType: meetingValueTypeSchema,
+	before: z.unknown().optional(),
+	after: z.unknown(),
+	displayBefore: z.string().optional(),
+	displayAfter: z.string().min(1),
+	confidence: z.number().min(0).max(1),
+	checkedByDefault: z.boolean(),
+	blocked: z.boolean(),
+	blockedReason: z.string().min(1).optional(),
+	sensitive: z.boolean(),
+	rationale: z.string().min(1),
+	evidence: z.array(z.string().min(1))
+}).strict();
+var meetingNewMilestoneSchema = z.object({
+	tempId: z.string().min(1),
+	name: z.string().min(1),
+	milestoneDate: z.string().date().optional(),
+	ownerName: z.string().min(1).optional(),
+	commitment: z.enum(["Uncommitted", "Committed"]).optional(),
+	confidence: z.number().min(0).max(1),
+	checkedByDefault: z.boolean(),
+	evidence: z.array(z.string().min(1))
+}).strict();
+var meetingUnmappedSignalSchema = z.object({
+	label: z.string().min(1),
+	text: z.string().min(1),
+	mcemCriterion: mcemCriterionSchema,
+	evidence: z.array(z.string().min(1))
+}).strict();
+var meetingChangeSetProposalSchema = z.object({
+	changeSetId: z.string().min(1),
+	transcriptId: z.string().min(1),
+	opportunityId: z.string().min(1),
+	meetingType: meetingTypeSchema,
+	slots: z.array(meetingSlotSchema),
+	newMilestones: z.array(meetingNewMilestoneSchema),
+	suggestedMilestoneIds: z.array(z.string().min(1)),
+	unmappedSignals: z.array(meetingUnmappedSignalSchema),
+	proposedAt: z.string().datetime()
+}).strict();
+var meetingChangeSetApprovalSchema = z.object({
+	changeSetId: z.string().min(1),
+	opportunityId: z.string().min(1),
+	approvedSlotIds: z.array(z.string().min(1)),
+	approvedNewMilestoneTempIds: z.array(z.string().min(1)),
+	selectedMilestoneIds: z.array(z.string().min(1)),
+	reason: z.string().trim().min(3).max(1e3)
+}).strict();
+var meetingInjectItemResultSchema = z.object({
+	id: z.string().min(1),
+	kind: z.enum(["field", "new-milestone"]),
+	state: z.enum([
+		"applied",
+		"conflict",
+		"failed",
+		"skipped"
+	]),
+	detail: z.string().min(1)
+}).strict();
+var meetingChangeSetResultSchema = z.object({
+	changeSetId: z.string().min(1),
+	state: z.enum(["applied", "rolled-back"]),
+	items: z.array(meetingInjectItemResultSchema),
+	auditNote: z.string().min(1)
+}).strict();
 var dataModeSchema = z.enum(["sample", "live"]);
 var sourceStateSchema = z.enum([
 	"sample",
@@ -637,7 +776,12 @@ var milestoneUpdateSchema = z.object({
 	comments: z.string().max(3e4).optional()
 }).refine((value) => Object.keys(value).length > 0, "At least one milestone field is required.");
 var opportunityUpdateSchema = z.object({ comments: z.string().max(3e4) });
-opportunitySchema.extend({
+/**
+* An opportunity surfaced by SE-domain discovery. It extends the base
+* opportunity with the domain it matched and whether the signed-in user is
+* already on its deal team, so a client can present a one-click join action.
+*/
+var discoverableOpportunitySchema = opportunitySchema.extend({
 	domain: seDomainSchema,
 	accountName: z.string().min(1).optional(),
 	solutionArea: z.string().min(1).optional(),
@@ -2710,6 +2854,2445 @@ var FixtureMsxConnector = class {
 	}
 };
 //#endregion
+//#region packages/agents/meeting-signal-extractor/src/index.ts
+/**
+* Meeting Signal Extractor — deterministic sample implementation.
+*
+* In production, a GPT-5 reasoning deployment with Structured Outputs returns a
+* `MeetingChangeSetProposal`. For the offline / SQLite test path this module produces the
+* same contract deterministically with transparent rules, so the extract → review → inject
+* slice can be developed and tested without a model call. Both paths obey the same
+* guardrails: dictionary-only fields, evidence on every slot, no-op drop, customer/internal
+* routing, and conservative confidence.
+*
+* See docs/MeetingCapture.md (Parts B, C, I) and prompts/instructions.md.
+*/
+/** Canonical field dictionary. The extractor may only propose fields listed here. */
+var MEETING_FIELD_DICTIONARY = {
+	budgetAmount: {
+		canonical: "budgetAmount",
+		label: "Budget amount",
+		targetKind: "opportunity",
+		msxField: "budget_amount",
+		valueType: "money",
+		mcemCriterion: "business-case",
+		sensitive: false
+	},
+	budgetStatus: {
+		canonical: "budgetStatus",
+		label: "Budget confirmed",
+		targetKind: "opportunity",
+		msxField: "budget_status",
+		valueType: "optionset",
+		optionLabels: ["Yes", "No"],
+		mcemCriterion: "business-case",
+		sensitive: false
+	},
+	estimatedValue: {
+		canonical: "estimatedValue",
+		label: "Estimated value",
+		targetKind: "opportunity",
+		msxField: "estimated_value",
+		valueType: "money",
+		mcemCriterion: "business-case",
+		sensitive: true
+	},
+	timeline: {
+		canonical: "timeline",
+		label: "Purchase timeline",
+		targetKind: "opportunity",
+		msxField: "timeline",
+		valueType: "optionset",
+		optionLabels: [
+			"Immediate",
+			"This Quarter",
+			"Next Quarter",
+			"This Year",
+			"Not known"
+		],
+		mcemCriterion: "next-step",
+		sensitive: false
+	},
+	purchaseProcess: {
+		canonical: "purchaseProcess",
+		label: "Decision process",
+		targetKind: "opportunity",
+		msxField: "purchase_process",
+		valueType: "optionset",
+		optionLabels: [
+			"Individual",
+			"Committee",
+			"Unknown"
+		],
+		mcemCriterion: "decision-team",
+		sensitive: false
+	},
+	decisionMaker: {
+		canonical: "decisionMaker",
+		label: "Decision maker identified",
+		targetKind: "opportunity",
+		msxField: "decision_maker",
+		valueType: "boolean",
+		mcemCriterion: "decision-team",
+		sensitive: false
+	},
+	need: {
+		canonical: "need",
+		label: "Customer need level",
+		targetKind: "opportunity",
+		msxField: "need",
+		valueType: "optionset",
+		optionLabels: [
+			"Must have",
+			"Should have",
+			"Good to have",
+			"No need"
+		],
+		mcemCriterion: "customer-outcome",
+		sensitive: false
+	},
+	customerNeed: {
+		canonical: "customerNeed",
+		label: "Customer need",
+		targetKind: "opportunity",
+		msxField: "customer_need",
+		valueType: "text",
+		mcemCriterion: "customer-outcome",
+		sensitive: false,
+		fillOnlyWhenEmpty: true
+	},
+	proposedSolution: {
+		canonical: "proposedSolution",
+		label: "Proposed solution",
+		targetKind: "opportunity",
+		msxField: "proposed_solution",
+		valueType: "text",
+		mcemCriterion: "technical-validation",
+		sensitive: false,
+		fillOnlyWhenEmpty: true
+	},
+	finalDecisionDate: {
+		canonical: "finalDecisionDate",
+		label: "Final decision date",
+		targetKind: "opportunity",
+		msxField: "final_decision_date",
+		valueType: "date",
+		mcemCriterion: "next-step",
+		sensitive: false
+	},
+	identifyCompetitors: {
+		canonical: "identifyCompetitors",
+		label: "Competitors identified",
+		targetKind: "opportunity",
+		msxField: "identify_competitors",
+		valueType: "boolean",
+		mcemCriterion: "risk",
+		sensitive: false
+	},
+	opportunityRating: {
+		canonical: "opportunityRating",
+		label: "Opportunity sentiment",
+		targetKind: "opportunity",
+		msxField: "opportunity_rating",
+		valueType: "optionset",
+		optionLabels: [
+			"Hot",
+			"Warm",
+			"Cold"
+		],
+		mcemCriterion: "sentiment",
+		sensitive: false
+	},
+	qualificationComments: {
+		canonical: "qualificationComments",
+		label: "Qualification note",
+		targetKind: "opportunity",
+		msxField: "qualification_comments",
+		valueType: "text",
+		mcemCriterion: "risk",
+		sensitive: false,
+		internalOnly: true,
+		append: true
+	},
+	milestoneCommitment: {
+		canonical: "milestoneCommitment",
+		label: "Milestone commitment",
+		targetKind: "milestone",
+		msxField: "commitment",
+		valueType: "optionset",
+		optionLabels: ["Uncommitted", "Committed"],
+		mcemCriterion: "next-step",
+		sensitive: false
+	},
+	milestoneRisk: {
+		canonical: "milestoneRisk",
+		label: "Milestone risk",
+		targetKind: "milestone",
+		msxField: "risk_details",
+		valueType: "text",
+		mcemCriterion: "risk",
+		sensitive: false,
+		internalOnly: true,
+		append: true
+	}
+};
+var KNOWN_COMPETITORS = [
+	"AWS",
+	"Amazon Web Services",
+	"Google Cloud",
+	"GCP",
+	"Snowflake",
+	"Databricks",
+	"Palo Alto",
+	"Oracle",
+	"IBM",
+	"SAP",
+	"ServiceNow"
+];
+/** Parse "$900,000", "900 thousand", "900k", "4 million", "4m", "2.5 million" to a number. */
+function parseMoney(text) {
+	const match = text.match(/\$?\s*([\d][\d,]*\.?\d*)\s*(million|mil|m|k|thousand)?\b/i);
+	if (!match) return null;
+	const amountRaw = match[1];
+	if (amountRaw === void 0) return null;
+	const base = Number(amountRaw.replace(/,/g, ""));
+	if (!Number.isFinite(base)) return null;
+	const unit = (match[2] ?? "").toLowerCase();
+	if (unit === "million" || unit === "mil" || unit === "m") return Math.round(base * 1e6);
+	if (unit === "thousand" || unit === "k") return Math.round(base * 1e3);
+	return Math.round(base);
+}
+function matchTimeline(text) {
+	if (/\bnext quarter\b/i.test(text)) return "Next Quarter";
+	if (/\bthis quarter\b/i.test(text)) return "This Quarter";
+	if (/\bthis (fiscal )?year\b/i.test(text)) return "This Year";
+	if (/\b(immediately|right away|asap|as soon as possible)\b/i.test(text)) return "Immediate";
+	return null;
+}
+function matchProcess(text) {
+	if (/\b(committee|steering (group|committee)|board approv)/i.test(text)) return "Committee";
+	if (/\b(sole decision|single decision[- ]maker|i will decide|i decide)\b/i.test(text)) return "Individual";
+	return null;
+}
+function matchNeed(text) {
+	if (/\bmust[- ]have\b|\bcritical\b|\bessential\b|\bnon-negotiable\b/i.test(text)) return "Must have";
+	if (/\bshould[- ]have\b/i.test(text)) return "Should have";
+	if (/\b(good to have|nice to have)\b/i.test(text)) return "Good to have";
+	return null;
+}
+function matchSentiment(text) {
+	if (/\b(excited|thrilled|love it|great fit|strong fit|very positive)\b/i.test(text)) return "Hot";
+	if (/\b(concerned|worried|frustrated|hesitant|skeptical|not convinced)\b/i.test(text)) return "Cold";
+	return null;
+}
+function findCompetitor(text) {
+	for (const name of KNOWN_COMPETITORS) if (new RegExp(`\\b${name.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\b`, "i").test(text)) return name;
+	return null;
+}
+var NEW_MILESTONE_PATTERNS = [
+	{
+		re: /\bproof of value\b|\bpov\b/i,
+		name: "Proof of value"
+	},
+	{
+		re: /\bproof of concept\b|\bpoc\b/i,
+		name: "Proof of concept"
+	},
+	{
+		re: /\bpilot\b/i,
+		name: "Pilot"
+	},
+	{
+		re: /\bworkshop\b/i,
+		name: "Workshop"
+	},
+	{
+		re: /\b(architecture|design) review\b/i,
+		name: "Architecture review"
+	}
+];
+function formatMoney(value) {
+	return `$${value.toLocaleString("en-US")}`;
+}
+function displayValue(valueType, value) {
+	if (value === null || value === void 0 || value === "") return "(empty)";
+	if (valueType === "money" && typeof value === "number") return formatMoney(value);
+	if (valueType === "boolean") return value ? "Yes" : "No";
+	return String(value);
+}
+function valuesEqual(valueType, before, after) {
+	if (valueType === "money") return Number(before) === Number(after);
+	if (valueType === "boolean") return Boolean(before) === Boolean(after);
+	return String(before ?? "").trim() === String(after ?? "").trim();
+}
+/** Deterministically extract MCEM signals from a transcript into a change-set proposal. */
+function extractMeetingSignals(ctx, options = {}) {
+	const now = options.now ? options.now() : /* @__PURE__ */ new Date();
+	const changeSetId = options.changeSetId ?? `cs-${ctx.transcript.id}`;
+	const meetingType = ctx.transcript.meetingType;
+	const candidates = [];
+	const competitorNotes = [];
+	const newMilestones = [];
+	const unmappedSignals = [];
+	const seenMilestoneNames = new Set(ctx.milestones.map((m) => m.name.toLowerCase()));
+	for (const seg of ctx.transcript.segments) {
+		const internal = seg.speakerRole === "internal";
+		const text = seg.text;
+		if (/\b(budget|spend|sign[- ]?off|approved to (buy|spend)|commit)\b/i.test(text)) {
+			const amount = parseMoney(text);
+			if (amount !== null) {
+				candidates.push({
+					canonical: "budgetAmount",
+					after: amount,
+					confidence: .82,
+					evidence: [seg.segmentId],
+					rationale: `Customer stated a budget of ${formatMoney(amount)}.`
+				});
+				if (/\b(approved|sign[- ]?off|commit|secured|allocated)\b/i.test(text)) candidates.push({
+					canonical: "budgetStatus",
+					after: "Yes",
+					confidence: .8,
+					evidence: [seg.segmentId],
+					rationale: "Customer confirmed budget is approved."
+				});
+			}
+		}
+		const timeline = matchTimeline(text);
+		if (timeline) candidates.push({
+			canonical: "timeline",
+			after: timeline,
+			confidence: .75,
+			evidence: [seg.segmentId],
+			rationale: `Customer indicated a "${timeline}" buying timeline.`
+		});
+		const process = matchProcess(text);
+		if (process) candidates.push({
+			canonical: "purchaseProcess",
+			after: process,
+			confidence: .76,
+			evidence: [seg.segmentId],
+			rationale: `Decision process described as "${process}".`
+		});
+		const need = matchNeed(text);
+		if (need) candidates.push({
+			canonical: "need",
+			after: need,
+			confidence: .72,
+			evidence: [seg.segmentId],
+			rationale: `Customer framed the need as "${need}".`
+		});
+		const sentiment = matchSentiment(text);
+		if (sentiment) candidates.push({
+			canonical: "opportunityRating",
+			after: sentiment,
+			confidence: .45,
+			evidence: [seg.segmentId],
+			rationale: `Tone suggests a "${sentiment}" sentiment.`
+		});
+		const competitor = findCompetitor(text);
+		if (competitor) {
+			competitorNotes.push({
+				name: competitor,
+				segmentId: seg.segmentId,
+				internal
+			});
+			candidates.push({
+				canonical: "identifyCompetitors",
+				after: true,
+				confidence: .78,
+				evidence: [seg.segmentId],
+				rationale: `Competitor mentioned: ${competitor}.`
+			});
+		}
+		for (const pattern of NEW_MILESTONE_PATTERNS) if (pattern.re.test(text) && !seenMilestoneNames.has(pattern.name.toLowerCase())) {
+			seenMilestoneNames.add(pattern.name.toLowerCase());
+			newMilestones.push({
+				tempId: `new-ms-${newMilestones.length + 1}`,
+				name: pattern.name,
+				confidence: internal ? .68 : .6,
+				checkedByDefault: false,
+				evidence: [seg.segmentId]
+			});
+		}
+	}
+	const internalCompetitors = competitorNotes.filter((c) => c.internal);
+	if (internalCompetitors.length > 0) {
+		const names = [...new Set(internalCompetitors.map((c) => c.name))].join(", ");
+		candidates.push({
+			canonical: "qualificationComments",
+			after: `Competitive: evaluating against ${names}.`,
+			confidence: .7,
+			evidence: internalCompetitors.map((c) => c.segmentId),
+			rationale: `Internal note: competing against ${names}.`
+		});
+		unmappedSignals.push({
+			label: "Competitor mentioned",
+			text: `Evaluating against ${names}.`,
+			mcemCriterion: "risk",
+			evidence: internalCompetitors.map((c) => c.segmentId)
+		});
+	}
+	const slots = [];
+	for (const cand of candidates) {
+		const entry = MEETING_FIELD_DICTIONARY[cand.canonical];
+		if (!entry || entry.targetKind !== "opportunity") continue;
+		if (entry.internalOnly) {
+			if (!(cand.evidence.length > 0)) continue;
+		}
+		const before = ctx.opportunity.fields[cand.canonical];
+		if (entry.append) {
+			if (String(before ?? "").toLowerCase().includes(String(cand.after).toLowerCase())) continue;
+		} else if (entry.fillOnlyWhenEmpty) {
+			if (before !== null && before !== void 0 && String(before).trim() !== "") continue;
+		} else if (valuesEqual(entry.valueType, before, cand.after)) continue;
+		if (entry.optionLabels && entry.valueType === "optionset" && !entry.optionLabels.includes(String(cand.after))) continue;
+		const blocked = entry.sensitive && cand.confidence < .9;
+		const checkedByDefault = cand.confidence >= .7 && !entry.sensitive && !blocked;
+		slots.push({
+			slotId: `slot-${slots.length + 1}-${entry.canonical}`,
+			label: entry.label,
+			mcemCriterion: entry.mcemCriterion,
+			targetKind: "opportunity",
+			targetRecordId: ctx.opportunity.id,
+			targetField: entry.canonical,
+			valueType: entry.valueType,
+			before: before ?? null,
+			after: cand.after,
+			displayBefore: displayValue(entry.valueType, before),
+			displayAfter: entry.append ? String(cand.after) : displayValue(entry.valueType, cand.after),
+			confidence: cand.confidence,
+			checkedByDefault,
+			blocked,
+			...blocked ? { blockedReason: "Sensitive field requires manual confirmation." } : {},
+			sensitive: entry.sensitive,
+			rationale: cand.rationale,
+			evidence: cand.evidence
+		});
+	}
+	const suggestedMilestoneIds = [...new Set(slots.filter((s) => s.targetKind === "milestone" && s.targetRecordId).map((s) => s.targetRecordId))];
+	const proposal = {
+		changeSetId,
+		transcriptId: ctx.transcript.id,
+		opportunityId: ctx.opportunity.id,
+		meetingType,
+		slots,
+		newMilestones,
+		suggestedMilestoneIds,
+		unmappedSignals,
+		proposedAt: now.toISOString()
+	};
+	return meetingChangeSetProposalSchema.parse(proposal);
+}
+//#endregion
+//#region packages/connectors/local-store/schema.ts
+/**
+* SQLite DDL for the local test-data store. This mirrors the MSX / Dataverse
+* Opportunity + Engagement Milestone shape (and the MCEM decision-team / risk
+* tables) closely enough to exercise meeting-signal extraction and injection.
+*
+* Single source of truth for the schema; see docs/MeetingCapture.md §G9.
+* Verified option-set codes come from a live Dataverse `describe`.
+*/
+var LOCAL_STORE_SCHEMA = `
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE account (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  segment     TEXT,
+  tpid        TEXT,
+  visibility  TEXT NOT NULL DEFAULT 'visible'
+);
+
+CREATE TABLE systemuser (
+  id        TEXT PRIMARY KEY,
+  fullname  TEXT NOT NULL,
+  initials  TEXT NOT NULL,
+  email     TEXT,
+  alias     TEXT
+);
+
+CREATE TABLE opportunity (
+  id                       TEXT PRIMARY KEY,
+  account_id               TEXT NOT NULL REFERENCES account(id),
+  name                     TEXT NOT NULL,
+  owner_id                 TEXT REFERENCES systemuser(id),
+  recorded_stage           INTEGER NOT NULL,
+  estimated_value          REAL NOT NULL DEFAULT 0,
+  currency                 TEXT NOT NULL DEFAULT 'USD',
+  estimated_close_date     TEXT NOT NULL,
+  description              TEXT,
+  -- Tier A (existing MSX columns)
+  est_completion_date      TEXT,
+  consumption_recurring    REAL,
+  solution_area            TEXT,
+  technical_capability     TEXT,
+  -- Tier B (standard D365 — verified live)
+  budget_amount            REAL,
+  budget_status            INTEGER,     -- budgetstatus: Yes 1 / No 0
+  purchase_timeframe       INTEGER,     -- purchasetimeframe: Q1 0..Next FY 4
+  timeline                 INTEGER,     -- timeline: Immediate 0..Not known 4
+  purchase_process         INTEGER,     -- purchaseprocess: Individual 0 / Committee 1 / Unknown 2
+  decision_maker           INTEGER,     -- bit
+  need                     INTEGER,     -- Must have 0..No need 3
+  customer_need            TEXT,
+  customer_pain_points     TEXT,
+  current_situation        TEXT,
+  proposed_solution        TEXT,
+  final_decision_date      TEXT,
+  identify_competitors     INTEGER,     -- bit
+  identify_customer_contacts INTEGER,   -- bit
+  close_probability        INTEGER,
+  opportunity_rating       INTEGER,     -- Hot 1 / Warm 2 / Cold 3
+  qualification_comments   TEXT,
+  primary_competitor_id    TEXT REFERENCES competitor(id),
+  other_competitor         TEXT,
+  forecast_category        INTEGER
+);
+
+CREATE TABLE engagement_milestone (
+  id                TEXT PRIMARY KEY,
+  opportunity_id    TEXT NOT NULL REFERENCES opportunity(id),
+  name              TEXT NOT NULL,
+  status            INTEGER NOT NULL,   -- On Track 861980000..Hygiene/Duplicate 861980006
+  milestone_date    TEXT,
+  owner_id          TEXT REFERENCES systemuser(id),
+  commitment        INTEGER,            -- Uncommitted 861980000 / Committed 861980003
+  monthly_use       REAL,
+  risk_details      TEXT,
+  forecast_comments TEXT,
+  conversation      TEXT,
+  customer_budget_approved INTEGER      -- Yes 606820000 / No 606820001
+);
+
+CREATE TABLE contact (
+  id         TEXT PRIMARY KEY,
+  full_name  TEXT NOT NULL,
+  job_title  TEXT,
+  email      TEXT,
+  account_id TEXT REFERENCES account(id)
+);
+
+CREATE TABLE competitor (
+  id    TEXT PRIMARY KEY,
+  name  TEXT NOT NULL
+);
+
+CREATE TABLE stakeholder (
+  id                 TEXT PRIMARY KEY,
+  opportunity_id     TEXT REFERENCES opportunity(id),
+  name               TEXT NOT NULL,
+  contact_id         TEXT REFERENCES contact(id),
+  job_role           TEXT,
+  role_optionset     INTEGER,  -- Executive Sponsor 861980000..Local Exec Sponsor 861980004
+  stakeholder_role   INTEGER,  -- Champion 606820000..Ratifier 606820004
+  relationship_level INTEGER,  -- Strong 606820000..None 606820003
+  linkedin_url       TEXT
+);
+
+CREATE TABLE opportunity_dealteam (
+  opportunity_id TEXT NOT NULL REFERENCES opportunity(id),
+  systemuser_id  TEXT NOT NULL REFERENCES systemuser(id),
+  PRIMARY KEY (opportunity_id, systemuser_id)
+);
+
+CREATE TABLE discoverable_opportunity (     -- SE-domain discovery catalog ("Add me" candidates)
+  id                   TEXT PRIMARY KEY,
+  account_id           TEXT NOT NULL REFERENCES account(id),
+  name                 TEXT NOT NULL,
+  recorded_stage       INTEGER NOT NULL,
+  value                REAL NOT NULL DEFAULT 0,
+  currency             TEXT NOT NULL DEFAULT 'USD',
+  close_date           TEXT NOT NULL,
+  domain               TEXT NOT NULL,       -- infra|data|ai-apps|security|modern-work|biz-apps|devices|services
+  solution_area        TEXT,
+  technical_capability TEXT
+);
+
+CREATE TABLE activity (                       -- MSX: activitypointer / appointment (the meeting itself)
+  id                     TEXT PRIMARY KEY,     -- MSX: activityid
+  opportunity_id         TEXT REFERENCES opportunity(id),   -- MSX: regardingobjectid (opportunity)
+  subject                TEXT NOT NULL,        -- MSX: subject
+  owner_id               TEXT REFERENCES systemuser(id),    -- MSX: ownerid
+  activity_type          TEXT,                 -- MSX: activitytypecode ('appointment','phonecall','task')
+  scheduled_start        TEXT,                 -- MSX: scheduledstart (ISO)
+  scheduled_end          TEXT,                 -- MSX: scheduledend  (ISO; the "due date" WF-007/WF-010 read)
+  status                 INTEGER,              -- MSX: statecode (Open 0, Completed 1, Canceled 2, Scheduled 3)
+  is_online_meeting      INTEGER,              -- MSX: isonlinemeeting (bit)
+  online_meeting_join_url TEXT,                -- MSX: onlinemeetingjoinurl
+  location               TEXT,                 -- MSX: location
+  description            TEXT                  -- MSX: description
+);
+
+CREATE TABLE option_value (
+  option_set TEXT NOT NULL,
+  code       INTEGER NOT NULL,
+  label      TEXT NOT NULL,
+  PRIMARY KEY (option_set, code)
+);
+
+-- Test aids (not in MSX) ---------------------------------------------------
+CREATE TABLE comment_entry (
+  id         TEXT PRIMARY KEY,
+  entity     TEXT NOT NULL,
+  record_id  TEXT NOT NULL,
+  author_id  TEXT REFERENCES systemuser(id),
+  initials   TEXT NOT NULL,
+  entry_date TEXT NOT NULL,
+  text       TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE transcript (
+  id             TEXT PRIMARY KEY,
+  opportunity_id TEXT NOT NULL REFERENCES opportunity(id),
+  activity_id    TEXT REFERENCES activity(id),   -- links the transcript to the meeting record
+  meeting_type   TEXT NOT NULL,
+  title          TEXT,
+  source         TEXT,
+  occurred_at    TEXT NOT NULL
+);
+
+CREATE TABLE transcript_segment (
+  id            TEXT PRIMARY KEY,
+  transcript_id TEXT NOT NULL REFERENCES transcript(id),
+  start_ms      INTEGER,
+  end_ms        INTEGER,
+  speaker       TEXT,
+  speaker_role  TEXT,
+  text          TEXT NOT NULL
+);
+
+CREATE INDEX idx_opportunity_account ON opportunity(account_id);
+CREATE INDEX idx_milestone_opportunity ON engagement_milestone(opportunity_id);
+CREATE INDEX idx_stakeholder_opportunity ON stakeholder(opportunity_id);
+CREATE INDEX idx_dealteam_user ON opportunity_dealteam(systemuser_id);
+CREATE INDEX idx_activity_opportunity ON activity(opportunity_id);
+CREATE INDEX idx_transcript_opportunity ON transcript(opportunity_id);
+`;
+//#endregion
+//#region packages/connectors/local-store/seed.ts
+/**
+* Canonical seed data for the local test-data store (sanitized; no real customer data).
+* Covers accounts incl. Zava + Adventure Works, opportunities across MCEM stages 1-5,
+* milestones across every pipeline status + both commitments, and the MCEM
+* decision-team / risk tables (stakeholder / contact / competitor) so meeting-signal
+* extraction and injection can be tested end to end.
+*/
+/** Verified live Dataverse option-set codes (code ↔ label). */
+var MILESTONE_STATUS = {
+	86198e4: "On Track",
+	861980001: "At Risk",
+	861980002: "Blocked",
+	861980003: "Completed",
+	861980004: "Cancelled",
+	861980005: "Lost to Competitor",
+	861980006: "Hygiene/Duplicate"
+};
+var COMMITMENT = {
+	86198e4: "Uncommitted",
+	861980003: "Committed"
+};
+var BUDGET_STATUS = {
+	1: "Yes",
+	0: "No"
+};
+var TIMELINE = {
+	0: "Immediate",
+	1: "This Quarter",
+	2: "Next Quarter",
+	3: "This Year",
+	4: "Not known"
+};
+var PURCHASE_PROCESS = {
+	0: "Individual",
+	1: "Committee",
+	2: "Unknown"
+};
+var NEED = {
+	0: "Must have",
+	1: "Should have",
+	2: "Good to have",
+	3: "No need"
+};
+var OPPORTUNITY_RATING = {
+	1: "Hot",
+	2: "Warm",
+	3: "Cold"
+};
+var STAKEHOLDER_ROLE_OPTIONSET = {
+	86198e4: "Executive Sponsor",
+	861980001: "SLT Sponsor",
+	861980002: "Technical Sponsor",
+	861980003: "Initiative / Deal Sponsor",
+	861980004: "Local Exec Sponsor"
+};
+var STAKEHOLDER_ROLE = {
+	60682e4: "Champion",
+	606820001: "Influencer",
+	606820002: "Decision Maker",
+	606820003: "User",
+	606820004: "Ratifier"
+};
+var RELATIONSHIP_LEVEL = {
+	60682e4: "Strong",
+	606820001: "Developing",
+	606820002: "Weak",
+	606820003: "None"
+};
+/** The signed-in sample user (owner + comment initials source). */
+var SAMPLE_USER_ID = "user-girish";
+var seedAccounts = [
+	{
+		id: "account-contoso",
+		name: "Contoso Energy",
+		segment: "Strategic",
+		tpid: "1000001",
+		visibility: "visible"
+	},
+	{
+		id: "account-fabrikam",
+		name: "Fabrikam Retail",
+		segment: "Enterprise",
+		tpid: "1000002",
+		visibility: "visible"
+	},
+	{
+		id: "account-northwind",
+		name: "Northwind Health",
+		segment: "Enterprise",
+		tpid: "1000003",
+		visibility: "visible"
+	},
+	{
+		id: "account-zava",
+		name: "Zava Inc.",
+		segment: "Strategic",
+		tpid: "1000004",
+		visibility: "visible"
+	},
+	{
+		id: "account-adventureworks",
+		name: "Adventure Works Cycles",
+		segment: "Enterprise",
+		tpid: "1000005",
+		visibility: "visible"
+	}
+];
+var seedSystemUsers = [
+	{
+		id: SAMPLE_USER_ID,
+		fullname: "Girish Pillai",
+		initials: "GP",
+		email: "girish.pillai@example.com",
+		alias: "gpillai"
+	},
+	{
+		id: "user-avery",
+		fullname: "Avery Johnson",
+		initials: "AJ",
+		email: "avery.johnson@example.com",
+		alias: "averyj"
+	},
+	{
+		id: "user-jordan",
+		fullname: "Jordan Lee",
+		initials: "JL",
+		email: "jordan.lee@example.com",
+		alias: "jordanl"
+	},
+	{
+		id: "user-morgan",
+		fullname: "Morgan Diaz",
+		initials: "MD",
+		email: "morgan.diaz@example.com",
+		alias: "morgand"
+	}
+];
+var seedOpportunities = [
+	{
+		id: "opp-grid-modernization",
+		account_id: "account-contoso",
+		name: "Grid operations modernization",
+		owner_id: "user-avery",
+		recorded_stage: 3,
+		estimated_value: 42e5,
+		currency: "USD",
+		estimated_close_date: "2026-10-30",
+		description: "GP 9/1/2026 Kickoff held; technical validation underway.",
+		est_completion_date: "2027-02-01",
+		consumption_recurring: 48e3,
+		solution_area: "Cloud and AI Platforms",
+		technical_capability: "Analytics",
+		budget_amount: 4e6,
+		budget_status: 1,
+		purchase_timeframe: 1,
+		timeline: 1,
+		purchase_process: 1,
+		decision_maker: 1,
+		need: 0,
+		customer_need: "Modernize grid operations telemetry.",
+		customer_pain_points: "Legacy SCADA cannot scale.",
+		current_situation: "On-prem historian at capacity.",
+		proposed_solution: "Azure data platform + analytics.",
+		final_decision_date: "2026-10-15",
+		identify_competitors: 1,
+		identify_customer_contacts: 1,
+		close_probability: 70,
+		opportunity_rating: 1,
+		qualification_comments: "Strong exec sponsorship.",
+		primary_competitor_id: "competitor-aws",
+		other_competitor: null,
+		forecast_category: 100000003
+	},
+	{
+		id: "opp-cloud-security-readiness",
+		account_id: "account-contoso",
+		name: "Cloud security readiness",
+		owner_id: null,
+		recorded_stage: 1,
+		estimated_value: 9e5,
+		currency: "USD",
+		estimated_close_date: "2027-02-26",
+		description: null,
+		est_completion_date: null,
+		consumption_recurring: null,
+		solution_area: "Security",
+		technical_capability: "Threat Protection",
+		budget_amount: null,
+		budget_status: null,
+		purchase_timeframe: null,
+		timeline: null,
+		purchase_process: null,
+		decision_maker: null,
+		need: null,
+		customer_need: null,
+		customer_pain_points: null,
+		current_situation: null,
+		proposed_solution: null,
+		final_decision_date: null,
+		identify_competitors: null,
+		identify_customer_contacts: null,
+		close_probability: 20,
+		opportunity_rating: 3,
+		qualification_comments: null,
+		primary_competitor_id: null,
+		other_competitor: null,
+		forecast_category: 100000001
+	},
+	{
+		id: "opp-data-estate-consolidation",
+		account_id: "account-contoso",
+		name: "Data estate consolidation",
+		owner_id: "user-jordan",
+		recorded_stage: 2,
+		estimated_value: 265e4,
+		currency: "USD",
+		estimated_close_date: "2027-01-29",
+		description: "JL 8/20/2026 Discovery in progress.",
+		est_completion_date: null,
+		consumption_recurring: 22e3,
+		solution_area: "Cloud and AI Platforms",
+		technical_capability: "Analytics",
+		budget_amount: 2e6,
+		budget_status: 0,
+		purchase_timeframe: 3,
+		timeline: 3,
+		purchase_process: 2,
+		decision_maker: 0,
+		need: 1,
+		customer_need: "Consolidate 6 data warehouses.",
+		customer_pain_points: null,
+		current_situation: null,
+		proposed_solution: null,
+		final_decision_date: null,
+		identify_competitors: 0,
+		identify_customer_contacts: 1,
+		close_probability: 45,
+		opportunity_rating: 2,
+		qualification_comments: null,
+		primary_competitor_id: null,
+		other_competitor: "Snowflake",
+		forecast_category: 100000002
+	},
+	{
+		id: "opp-ai-service",
+		account_id: "account-fabrikam",
+		name: "AI-assisted customer service",
+		owner_id: "user-morgan",
+		recorded_stage: 2,
+		estimated_value: 175e4,
+		currency: "USD",
+		estimated_close_date: "2026-12-18",
+		description: null,
+		est_completion_date: null,
+		consumption_recurring: 18e3,
+		solution_area: "Cloud and AI Platforms",
+		technical_capability: "Azure AI and ML",
+		budget_amount: 15e5,
+		budget_status: 1,
+		purchase_timeframe: 2,
+		timeline: 2,
+		purchase_process: 1,
+		decision_maker: 1,
+		need: 0,
+		customer_need: "Deflect 40% of tier-1 tickets.",
+		customer_pain_points: "High support cost.",
+		current_situation: null,
+		proposed_solution: "Azure OpenAI + Copilot Studio.",
+		final_decision_date: null,
+		identify_competitors: 1,
+		identify_customer_contacts: 0,
+		close_probability: 55,
+		opportunity_rating: 1,
+		qualification_comments: null,
+		primary_competitor_id: "competitor-google",
+		other_competitor: null,
+		forecast_category: 100000002
+	},
+	{
+		id: "opp-unified-commerce",
+		account_id: "account-fabrikam",
+		name: "Unified commerce platform",
+		owner_id: "user-morgan",
+		recorded_stage: 4,
+		estimated_value: 38e5,
+		currency: "USD",
+		estimated_close_date: "2026-12-11",
+		description: "MD 7/30/2026 Contract in legal review.",
+		est_completion_date: "2027-03-15",
+		consumption_recurring: 61e3,
+		solution_area: "Digital and App Innovation",
+		technical_capability: "Cloud Native Apps",
+		budget_amount: 38e5,
+		budget_status: 1,
+		purchase_timeframe: 0,
+		timeline: 0,
+		purchase_process: 1,
+		decision_maker: 1,
+		need: 0,
+		customer_need: "Single commerce backbone.",
+		customer_pain_points: "Fragmented storefronts.",
+		current_situation: "Three disparate platforms.",
+		proposed_solution: "AKS + Cosmos DB commerce platform.",
+		final_decision_date: "2026-12-01",
+		identify_competitors: 1,
+		identify_customer_contacts: 1,
+		close_probability: 85,
+		opportunity_rating: 1,
+		qualification_comments: "Economic buyer engaged.",
+		primary_competitor_id: null,
+		other_competitor: null,
+		forecast_category: 100000003
+	},
+	{
+		id: "opp-store-modernization",
+		account_id: "account-fabrikam",
+		name: "Connected store modernization",
+		owner_id: null,
+		recorded_stage: 1,
+		estimated_value: 12e5,
+		currency: "USD",
+		estimated_close_date: "2027-03-19",
+		description: null,
+		est_completion_date: null,
+		consumption_recurring: null,
+		solution_area: "Digital and App Innovation",
+		technical_capability: "IoT",
+		budget_amount: null,
+		budget_status: null,
+		purchase_timeframe: null,
+		timeline: null,
+		purchase_process: null,
+		decision_maker: null,
+		need: 2,
+		customer_need: null,
+		customer_pain_points: null,
+		current_situation: null,
+		proposed_solution: null,
+		final_decision_date: null,
+		identify_competitors: null,
+		identify_customer_contacts: null,
+		close_probability: 15,
+		opportunity_rating: 3,
+		qualification_comments: null,
+		primary_competitor_id: null,
+		other_competitor: null,
+		forecast_category: 100000001
+	},
+	{
+		id: "opp-clinical-data-platform",
+		account_id: "account-northwind",
+		name: "Clinical data platform modernization",
+		owner_id: "user-jordan",
+		recorded_stage: 5,
+		estimated_value: 21e5,
+		currency: "USD",
+		estimated_close_date: "2026-09-20",
+		description: "JL 9/20/2026 Won; onboarding to value realization.",
+		est_completion_date: "2026-11-30",
+		consumption_recurring: 35e3,
+		solution_area: "Cloud and AI Platforms",
+		technical_capability: "Analytics",
+		budget_amount: 21e5,
+		budget_status: 1,
+		purchase_timeframe: 0,
+		timeline: 0,
+		purchase_process: 1,
+		decision_maker: 1,
+		need: 0,
+		customer_need: "Unify clinical analytics.",
+		customer_pain_points: null,
+		current_situation: null,
+		proposed_solution: "Microsoft Fabric analytics.",
+		final_decision_date: "2026-09-10",
+		identify_competitors: 1,
+		identify_customer_contacts: 1,
+		close_probability: 100,
+		opportunity_rating: 1,
+		qualification_comments: null,
+		primary_competitor_id: null,
+		other_competitor: null,
+		forecast_category: 100000005
+	},
+	{
+		id: "opp-zava-ai-platform",
+		account_id: "account-zava",
+		name: "Zava AI platform foundation",
+		owner_id: "user-avery",
+		recorded_stage: 2,
+		estimated_value: 29e5,
+		currency: "USD",
+		estimated_close_date: "2027-04-02",
+		description: null,
+		est_completion_date: null,
+		consumption_recurring: 27e3,
+		solution_area: "Cloud and AI Platforms",
+		technical_capability: "Azure AI and ML",
+		budget_amount: 25e5,
+		budget_status: 0,
+		purchase_timeframe: 3,
+		timeline: 3,
+		purchase_process: 2,
+		decision_maker: 0,
+		need: 1,
+		customer_need: "Stand up an enterprise AI platform.",
+		customer_pain_points: "No governed AI foundation.",
+		current_situation: null,
+		proposed_solution: null,
+		final_decision_date: null,
+		identify_competitors: 0,
+		identify_customer_contacts: 0,
+		close_probability: 40,
+		opportunity_rating: 2,
+		qualification_comments: null,
+		primary_competitor_id: null,
+		other_competitor: null,
+		forecast_category: 100000002
+	},
+	{
+		id: "opp-zava-migration",
+		account_id: "account-zava",
+		name: "Zava datacenter exit",
+		owner_id: null,
+		recorded_stage: 1,
+		estimated_value: 16e5,
+		currency: "USD",
+		estimated_close_date: "2027-05-28",
+		description: null,
+		est_completion_date: null,
+		consumption_recurring: null,
+		solution_area: "Infrastructure",
+		technical_capability: "Migration",
+		budget_amount: null,
+		budget_status: null,
+		purchase_timeframe: null,
+		timeline: null,
+		purchase_process: null,
+		decision_maker: null,
+		need: null,
+		customer_need: null,
+		customer_pain_points: null,
+		current_situation: null,
+		proposed_solution: null,
+		final_decision_date: null,
+		identify_competitors: null,
+		identify_customer_contacts: null,
+		close_probability: 10,
+		opportunity_rating: 3,
+		qualification_comments: null,
+		primary_competitor_id: null,
+		other_competitor: null,
+		forecast_category: 100000001
+	},
+	{
+		id: "opp-aw-commerce",
+		account_id: "account-adventureworks",
+		name: "Adventure Works commerce replatform",
+		owner_id: "user-morgan",
+		recorded_stage: 3,
+		estimated_value: 31e5,
+		currency: "USD",
+		estimated_close_date: "2027-01-08",
+		description: "MD 8/15/2026 POC approved.",
+		est_completion_date: "2027-05-01",
+		consumption_recurring: 4e4,
+		solution_area: "Digital and App Innovation",
+		technical_capability: "Cloud Native Apps",
+		budget_amount: 3e6,
+		budget_status: 1,
+		purchase_timeframe: 1,
+		timeline: 1,
+		purchase_process: 1,
+		decision_maker: 1,
+		need: 0,
+		customer_need: "Replatform e-commerce.",
+		customer_pain_points: "Peak-season outages.",
+		current_situation: "Monolith on VMs.",
+		proposed_solution: "AKS microservices.",
+		final_decision_date: "2026-12-20",
+		identify_competitors: 1,
+		identify_customer_contacts: 1,
+		close_probability: 65,
+		opportunity_rating: 1,
+		qualification_comments: null,
+		primary_competitor_id: "competitor-aws",
+		other_competitor: null,
+		forecast_category: 100000003
+	}
+];
+var UNCOMMITTED = 86198e4;
+var COMMITTED = 861980003;
+var seedMilestones = [
+	{
+		id: "ms-grid-outcome",
+		opportunity_id: "opp-grid-modernization",
+		name: "Customer outcome validation",
+		status: 861980003,
+		milestone_date: "2026-07-15",
+		owner_id: "user-avery",
+		commitment: COMMITTED,
+		monthly_use: 4e3,
+		risk_details: null,
+		forecast_comments: "GP 7/15/2026 Outcome baseline agreed.",
+		conversation: null,
+		customer_budget_approved: 60682e4
+	},
+	{
+		id: "ms-grid-technical",
+		opportunity_id: "opp-grid-modernization",
+		name: "Technical validation workshop",
+		status: 86198e4,
+		milestone_date: "2026-09-20",
+		owner_id: "user-avery",
+		commitment: COMMITTED,
+		monthly_use: 4e3,
+		risk_details: null,
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: 60682e4
+	},
+	{
+		id: "ms-grid-security",
+		opportunity_id: "opp-grid-modernization",
+		name: "Security and compliance review",
+		status: 861980001,
+		milestone_date: "2026-10-05",
+		owner_id: null,
+		commitment: UNCOMMITTED,
+		monthly_use: null,
+		risk_details: "Awaiting customer security team availability.",
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: 606820001
+	},
+	{
+		id: "ms-sec-discovery",
+		opportunity_id: "opp-cloud-security-readiness",
+		name: "Security posture discovery",
+		status: 86198e4,
+		milestone_date: null,
+		owner_id: null,
+		commitment: UNCOMMITTED,
+		monthly_use: null,
+		risk_details: null,
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: null
+	},
+	{
+		id: "ms-data-signoff",
+		opportunity_id: "opp-data-estate-consolidation",
+		name: "Business case sign-off",
+		status: 861980002,
+		milestone_date: "2026-09-30",
+		owner_id: "user-jordan",
+		commitment: UNCOMMITTED,
+		monthly_use: null,
+		risk_details: "Blocked on budget approval.",
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: 606820001
+	},
+	{
+		id: "ms-data-dupe",
+		opportunity_id: "opp-data-estate-consolidation",
+		name: "Duplicate milestone",
+		status: 861980006,
+		milestone_date: "2026-08-01",
+		owner_id: "user-jordan",
+		commitment: UNCOMMITTED,
+		monthly_use: null,
+		risk_details: null,
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: null
+	},
+	{
+		id: "ms-ai-poc",
+		opportunity_id: "opp-ai-service",
+		name: "POC readiness",
+		status: 861980003,
+		milestone_date: "2026-08-10",
+		owner_id: "user-morgan",
+		commitment: COMMITTED,
+		monthly_use: 1500,
+		risk_details: null,
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: 60682e4
+	},
+	{
+		id: "ms-ai-deploy",
+		opportunity_id: "opp-ai-service",
+		name: "Deployment readiness gate",
+		status: 861980001,
+		milestone_date: "2026-11-20",
+		owner_id: "user-morgan",
+		commitment: UNCOMMITTED,
+		monthly_use: 1500,
+		risk_details: "Integration dependencies unconfirmed.",
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: 606820001
+	},
+	{
+		id: "ms-uc-design",
+		opportunity_id: "opp-unified-commerce",
+		name: "Solution design complete",
+		status: 861980003,
+		milestone_date: "2026-09-01",
+		owner_id: "user-morgan",
+		commitment: COMMITTED,
+		monthly_use: 5e3,
+		risk_details: null,
+		forecast_comments: "MD 9/1/2026 Design signed off.",
+		conversation: null,
+		customer_budget_approved: 60682e4
+	},
+	{
+		id: "ms-uc-golive",
+		opportunity_id: "opp-unified-commerce",
+		name: "Go-live readiness",
+		status: 86198e4,
+		milestone_date: "2027-02-28",
+		owner_id: "user-morgan",
+		commitment: COMMITTED,
+		monthly_use: 5e3,
+		risk_details: null,
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: 60682e4
+	},
+	{
+		id: "ms-store-scope",
+		opportunity_id: "opp-store-modernization",
+		name: "Scoping workshop",
+		status: 861980004,
+		milestone_date: "2026-08-05",
+		owner_id: null,
+		commitment: UNCOMMITTED,
+		monthly_use: null,
+		risk_details: "Customer paused initiative.",
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: 606820001
+	},
+	{
+		id: "ms-clin-value",
+		opportunity_id: "opp-clinical-data-platform",
+		name: "Value realization baseline",
+		status: 861980003,
+		milestone_date: "2026-09-15",
+		owner_id: "user-jordan",
+		commitment: COMMITTED,
+		monthly_use: 2900,
+		risk_details: null,
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: 60682e4
+	},
+	{
+		id: "ms-zava-foundation",
+		opportunity_id: "opp-zava-ai-platform",
+		name: "AI foundation design",
+		status: 86198e4,
+		milestone_date: "2027-01-15",
+		owner_id: "user-avery",
+		commitment: UNCOMMITTED,
+		monthly_use: 2200,
+		risk_details: null,
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: 606820001
+	},
+	{
+		id: "ms-zava-pilot",
+		opportunity_id: "opp-zava-ai-platform",
+		name: "Competitive pilot",
+		status: 861980005,
+		milestone_date: "2026-11-01",
+		owner_id: "user-avery",
+		commitment: UNCOMMITTED,
+		monthly_use: null,
+		risk_details: "Lost pilot to competitor; recovering.",
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: 606820001
+	},
+	{
+		id: "ms-zava-assess",
+		opportunity_id: "opp-zava-migration",
+		name: "Migration assessment",
+		status: 86198e4,
+		milestone_date: null,
+		owner_id: null,
+		commitment: UNCOMMITTED,
+		monthly_use: null,
+		risk_details: null,
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: null
+	},
+	{
+		id: "ms-aw-poc",
+		opportunity_id: "opp-aw-commerce",
+		name: "POC sign-off",
+		status: 861980003,
+		milestone_date: "2026-08-15",
+		owner_id: "user-morgan",
+		commitment: COMMITTED,
+		monthly_use: 3300,
+		risk_details: null,
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: 60682e4
+	},
+	{
+		id: "ms-aw-scale",
+		opportunity_id: "opp-aw-commerce",
+		name: "Scale readiness",
+		status: 86198e4,
+		milestone_date: "2026-12-15",
+		owner_id: "user-morgan",
+		commitment: COMMITTED,
+		monthly_use: 3300,
+		risk_details: null,
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: 60682e4
+	}
+];
+var seedContacts = [
+	{
+		id: "contact-grid-cfo",
+		full_name: "Priya Nair",
+		job_title: "CFO",
+		email: "priya.nair@contoso.example",
+		account_id: "account-contoso"
+	},
+	{
+		id: "contact-grid-cto",
+		full_name: "Daniel Reyes",
+		job_title: "CTO",
+		email: "daniel.reyes@contoso.example",
+		account_id: "account-contoso"
+	},
+	{
+		id: "contact-uc-vp",
+		full_name: "Sofia Martinez",
+		job_title: "VP Digital",
+		email: "sofia.martinez@fabrikam.example",
+		account_id: "account-fabrikam"
+	},
+	{
+		id: "contact-aw-vp",
+		full_name: "Liam OBrien",
+		job_title: "VP Engineering",
+		email: "liam.obrien@adventureworks.example",
+		account_id: "account-adventureworks"
+	}
+];
+var seedCompetitors = [
+	{
+		id: "competitor-aws",
+		name: "AWS"
+	},
+	{
+		id: "competitor-google",
+		name: "Google Cloud"
+	},
+	{
+		id: "competitor-snowflake",
+		name: "Snowflake"
+	}
+];
+var seedStakeholders = [
+	{
+		id: "stk-grid-cfo",
+		opportunity_id: "opp-grid-modernization",
+		name: "Priya Nair",
+		contact_id: "contact-grid-cfo",
+		job_role: "CFO",
+		role_optionset: 86198e4,
+		stakeholder_role: 606820002,
+		relationship_level: 60682e4,
+		linkedin_url: null
+	},
+	{
+		id: "stk-grid-cto",
+		opportunity_id: "opp-grid-modernization",
+		name: "Daniel Reyes",
+		contact_id: "contact-grid-cto",
+		job_role: "CTO",
+		role_optionset: 861980002,
+		stakeholder_role: 60682e4,
+		relationship_level: 606820001,
+		linkedin_url: null
+	},
+	{
+		id: "stk-uc-vp",
+		opportunity_id: "opp-unified-commerce",
+		name: "Sofia Martinez",
+		contact_id: "contact-uc-vp",
+		job_role: "VP Digital",
+		role_optionset: 861980003,
+		stakeholder_role: 60682e4,
+		relationship_level: 60682e4,
+		linkedin_url: null
+	},
+	{
+		id: "stk-aw-vp",
+		opportunity_id: "opp-aw-commerce",
+		name: "Liam OBrien",
+		contact_id: "contact-aw-vp",
+		job_role: "VP Engineering",
+		role_optionset: 861980002,
+		stakeholder_role: 606820001,
+		relationship_level: 606820001,
+		linkedin_url: null
+	}
+];
+/** The sample user is on the deal team for every seeded opportunity. */
+var seedDealTeam = seedOpportunities.map((opportunity) => ({
+	opportunity_id: String(opportunity["id"]),
+	systemuser_id: SAMPLE_USER_ID
+}));
+var seedOptionValues = [
+	...Object.entries(MILESTONE_STATUS).map(([code, label]) => ({
+		option_set: "msp_milestonestatus",
+		code: Number(code),
+		label
+	})),
+	...Object.entries(COMMITMENT).map(([code, label]) => ({
+		option_set: "msp_commitmentrecommendation",
+		code: Number(code),
+		label
+	})),
+	...Object.entries(BUDGET_STATUS).map(([code, label]) => ({
+		option_set: "budgetstatus",
+		code: Number(code),
+		label
+	})),
+	...Object.entries(TIMELINE).map(([code, label]) => ({
+		option_set: "timeline",
+		code: Number(code),
+		label
+	})),
+	...Object.entries(PURCHASE_PROCESS).map(([code, label]) => ({
+		option_set: "purchaseprocess",
+		code: Number(code),
+		label
+	})),
+	...Object.entries(NEED).map(([code, label]) => ({
+		option_set: "need",
+		code: Number(code),
+		label
+	})),
+	...Object.entries(OPPORTUNITY_RATING).map(([code, label]) => ({
+		option_set: "opportunityratingcode",
+		code: Number(code),
+		label
+	})),
+	...Object.entries(STAKEHOLDER_ROLE_OPTIONSET).map(([code, label]) => ({
+		option_set: "msp_roleoptionset",
+		code: Number(code),
+		label
+	})),
+	...Object.entries(STAKEHOLDER_ROLE).map(([code, label]) => ({
+		option_set: "msp_stakeholderrole",
+		code: Number(code),
+		label
+	})),
+	...Object.entries(RELATIONSHIP_LEVEL).map(([code, label]) => ({
+		option_set: "msp_relationshiplevel",
+		code: Number(code),
+		label
+	}))
+];
+/** SE-domain discovery catalog across all 8 domains ("Add me" candidates, not yet on the deal team). */
+var seedDiscoverable = [
+	{
+		id: "disc-contoso-infra",
+		account_id: "account-contoso",
+		name: "Hybrid networking modernization",
+		recorded_stage: 2,
+		value: 185e4,
+		currency: "USD",
+		close_date: "2027-03-01",
+		domain: "infra",
+		solution_area: "Cloud and AI Platforms",
+		technical_capability: "Advanced Networking"
+	},
+	{
+		id: "disc-contoso-data",
+		account_id: "account-contoso",
+		name: "Lakehouse analytics foundation",
+		recorded_stage: 1,
+		value: 125e4,
+		currency: "USD",
+		close_date: "2027-04-10",
+		domain: "data",
+		solution_area: "Cloud and AI Platforms",
+		technical_capability: "Analytics"
+	},
+	{
+		id: "disc-fabrikam-aiapps",
+		account_id: "account-fabrikam",
+		name: "Cloud-native apps modernization",
+		recorded_stage: 2,
+		value: 23e5,
+		currency: "USD",
+		close_date: "2027-02-20",
+		domain: "ai-apps",
+		solution_area: "Digital and App Innovation",
+		technical_capability: "Cloud Native Apps with AKS"
+	},
+	{
+		id: "disc-fabrikam-modernwork",
+		account_id: "account-fabrikam",
+		name: "Teams calling rollout",
+		recorded_stage: 1,
+		value: 54e4,
+		currency: "USD",
+		close_date: "2027-05-05",
+		domain: "modern-work",
+		solution_area: "Modern Work",
+		technical_capability: "Calling"
+	},
+	{
+		id: "disc-zava-security",
+		account_id: "account-zava",
+		name: "Zero trust threat protection",
+		recorded_stage: 2,
+		value: 14e5,
+		currency: "USD",
+		close_date: "2027-03-18",
+		domain: "security",
+		solution_area: "Security",
+		technical_capability: "Threat Protection"
+	},
+	{
+		id: "disc-zava-devices",
+		account_id: "account-zava",
+		name: "Surface fleet deployment",
+		recorded_stage: 1,
+		value: 48e4,
+		currency: "USD",
+		close_date: "2027-06-01",
+		domain: "devices",
+		solution_area: "Windows and Devices",
+		technical_capability: "Surface & Partner Devices"
+	},
+	{
+		id: "disc-aw-bizapps",
+		account_id: "account-adventureworks",
+		name: "D365 customer service",
+		recorded_stage: 2,
+		value: 165e4,
+		currency: "USD",
+		close_date: "2027-02-28",
+		domain: "biz-apps",
+		solution_area: "Business Applications",
+		technical_capability: "Customer Service"
+	},
+	{
+		id: "disc-aw-services",
+		account_id: "account-adventureworks",
+		name: "Cloud advisory services",
+		recorded_stage: 1,
+		value: 32e4,
+		currency: "USD",
+		close_date: "2027-04-22",
+		domain: "services",
+		solution_area: "Microsoft Services",
+		technical_capability: "Advisory Services"
+	},
+	{
+		id: "disc-northwind-data",
+		account_id: "account-northwind",
+		name: "Clinical analytics with Fabric",
+		recorded_stage: 2,
+		value: 21e5,
+		currency: "USD",
+		close_date: "2027-05-20",
+		domain: "data",
+		solution_area: "Cloud and AI Platforms",
+		technical_capability: "Analytics"
+	},
+	{
+		id: "disc-northwind-infra",
+		account_id: "account-northwind",
+		name: "Datacenter exit to Azure",
+		recorded_stage: 1,
+		value: 19e5,
+		currency: "USD",
+		close_date: "2027-06-15",
+		domain: "infra",
+		solution_area: "Infrastructure",
+		technical_capability: "Migration"
+	}
+];
+/** activitypointer / appointment statecode (verified live). */
+var ACTIVITY_STATUS = {
+	0: "Open",
+	1: "Completed",
+	2: "Canceled",
+	3: "Scheduled"
+};
+var defaultSeed = {
+	accounts: seedAccounts,
+	systemUsers: seedSystemUsers,
+	opportunities: seedOpportunities,
+	milestones: seedMilestones,
+	contacts: seedContacts,
+	competitors: seedCompetitors,
+	stakeholders: seedStakeholders,
+	dealTeam: seedDealTeam,
+	optionValues: seedOptionValues,
+	discoverable: seedDiscoverable,
+	activities: [
+		{
+			id: "act-grid-review",
+			opportunity_id: "opp-grid-modernization",
+			subject: "Executive architecture review",
+			owner_id: "user-avery",
+			activity_type: "appointment",
+			scheduled_start: "2026-10-12T15:00:00.000Z",
+			scheduled_end: "2026-10-12T16:00:00.000Z",
+			status: 3,
+			is_online_meeting: 1,
+			online_meeting_join_url: "https://teams.microsoft.com/l/meetup-join/grid-review",
+			location: "Microsoft Teams",
+			description: "Review solution architecture and decision timeline."
+		},
+		{
+			id: "act-grid-followup",
+			opportunity_id: "opp-grid-modernization",
+			subject: "Customer follow-up on security review",
+			owner_id: "user-avery",
+			activity_type: "phonecall",
+			scheduled_start: "2026-08-01T14:00:00.000Z",
+			scheduled_end: "2026-08-01T14:30:00.000Z",
+			status: 0,
+			is_online_meeting: 0,
+			online_meeting_join_url: null,
+			location: null,
+			description: "Overdue follow-up on the security and compliance review."
+		},
+		{
+			id: "act-ai-kickoff",
+			opportunity_id: "opp-ai-service",
+			subject: "AI service kickoff",
+			owner_id: "user-morgan",
+			activity_type: "appointment",
+			scheduled_start: "2026-08-10T16:00:00.000Z",
+			scheduled_end: "2026-08-10T17:00:00.000Z",
+			status: 1,
+			is_online_meeting: 1,
+			online_meeting_join_url: "https://teams.microsoft.com/l/meetup-join/ai-kickoff",
+			location: "Microsoft Teams",
+			description: "Kickoff and discovery session."
+		},
+		{
+			id: "act-cs-discovery",
+			opportunity_id: "opp-cloud-security-readiness",
+			subject: "Cloud security discovery call",
+			owner_id: "user-girish",
+			activity_type: "appointment",
+			scheduled_start: "2026-09-15T15:00:00.000Z",
+			scheduled_end: "2026-09-15T15:45:00.000Z",
+			status: 1,
+			is_online_meeting: 1,
+			online_meeting_join_url: "https://teams.microsoft.com/l/meetup-join/cs-discovery",
+			location: "Microsoft Teams",
+			description: "Qualify budget, timeline, and decision process for the security readiness initiative."
+		}
+	],
+	transcripts: [{
+		id: "tr-grid-customer",
+		opportunity_id: "opp-grid-modernization",
+		activity_id: "act-grid-review",
+		meeting_type: "customer",
+		title: "Executive architecture review",
+		source: "teams",
+		occurred_at: "2026-10-12T15:00:00.000Z"
+	}, {
+		id: "tr-cloud-security",
+		opportunity_id: "opp-cloud-security-readiness",
+		activity_id: "act-cs-discovery",
+		meeting_type: "customer",
+		title: "Cloud security discovery call",
+		source: "teams",
+		occurred_at: "2026-09-15T15:00:00.000Z"
+	}],
+	transcriptSegments: [
+		{
+			id: "seg-grid-1",
+			transcript_id: "tr-grid-customer",
+			start_ms: 12e3,
+			end_ms: 24e3,
+			speaker: "Priya Nair",
+			speaker_role: "customer",
+			text: "Our board approved the budget; we can commit around 4 million this fiscal year."
+		},
+		{
+			id: "seg-grid-2",
+			transcript_id: "tr-grid-customer",
+			start_ms: 48e3,
+			end_ms: 61e3,
+			speaker: "Daniel Reyes",
+			speaker_role: "customer",
+			text: "The decision will go through our architecture committee, and we want to decide this quarter."
+		},
+		{
+			id: "seg-grid-3",
+			transcript_id: "tr-grid-customer",
+			start_ms: 83e3,
+			end_ms: 95e3,
+			speaker: "Avery Johnson",
+			speaker_role: "internal",
+			text: "We are competing against AWS here, so the proof of value needs to land next week."
+		},
+		{
+			id: "seg-cs-1",
+			transcript_id: "tr-cloud-security",
+			start_ms: 15e3,
+			end_ms: 3e4,
+			speaker: "Priya Nair",
+			speaker_role: "customer",
+			text: "We have sign-off to spend about 900 thousand this quarter to get our cloud security posture right."
+		},
+		{
+			id: "seg-cs-2",
+			transcript_id: "tr-cloud-security",
+			start_ms: 54e3,
+			end_ms: 7e4,
+			speaker: "Daniel Reyes",
+			speaker_role: "customer",
+			text: "Our security steering committee makes the final call, and honestly this is a must-have for us this year."
+		},
+		{
+			id: "seg-cs-3",
+			transcript_id: "tr-cloud-security",
+			start_ms: 95e3,
+			end_ms: 112e3,
+			speaker: "Girish Pillai",
+			speaker_role: "internal",
+			text: "Let us schedule a threat-protection proof of value; note that Palo Alto is also in the evaluation."
+		}
+	]
+};
+//#endregion
+//#region packages/connectors/local-store/local-store.ts
+var requireModule = createRequire(import.meta.url);
+/**
+* A persistent, relational local test-data store backed by `node:sqlite` (built in; no
+* extra dependency). Applies the schema and seed, and exposes small typed query/mutation
+* helpers used by the local-store MSX connector. Defaults to an in-memory database;
+* pass a file path for a store whose injected values survive restarts.
+*/
+var LocalStore = class {
+	db;
+	constructor(options = {}) {
+		const { DatabaseSync } = requireModule("node:sqlite");
+		this.db = new DatabaseSync(options.path ?? ":memory:");
+		this.db.exec(LOCAL_STORE_SCHEMA);
+		this.load(options.seed ?? defaultSeed);
+	}
+	load(seed) {
+		const tables = [
+			["account", seed.accounts],
+			["systemuser", seed.systemUsers],
+			["competitor", seed.competitors],
+			["opportunity", seed.opportunities],
+			["engagement_milestone", seed.milestones],
+			["contact", seed.contacts],
+			["stakeholder", seed.stakeholders],
+			["opportunity_dealteam", seed.dealTeam],
+			["discoverable_opportunity", seed.discoverable],
+			["activity", seed.activities],
+			["transcript", seed.transcripts],
+			["transcript_segment", seed.transcriptSegments],
+			["option_value", seed.optionValues]
+		];
+		for (const [table, rows] of tables) for (const row of rows) this.insert(table, row);
+	}
+	insert(table, row) {
+		const columns = Object.keys(row);
+		const placeholders = columns.map(() => "?").join(", ");
+		this.db.prepare(`INSERT INTO ${table} (${columns.join(", ")}) VALUES (${placeholders})`).run(...columns.map((column) => row[column]));
+	}
+	all(sql, ...params) {
+		return this.db.prepare(sql).all(...params);
+	}
+	get(sql, ...params) {
+		return this.db.prepare(sql).get(...params);
+	}
+	run(sql, ...params) {
+		this.db.prepare(sql).run(...params);
+	}
+	/** Executes raw SQL (used for transaction control: BEGIN / COMMIT / ROLLBACK). */
+	exec(sql) {
+		this.db.exec(sql);
+	}
+	close() {
+		this.db.close();
+	}
+};
+//#endregion
+//#region packages/connectors/local-store/index.ts
+function str(value) {
+	return typeof value === "string" && value.length > 0 ? value : void 0;
+}
+function num(value) {
+	return typeof value === "number" ? value : void 0;
+}
+/** Formats a comment entry per the additive protocol: `<INITIALS> <M/D/YYYY> <text>`. */
+function formatCommentEntry(initials, text, when = /* @__PURE__ */ new Date()) {
+	return `${initials} ${`${when.getMonth() + 1}/${when.getDate()}/${when.getFullYear()}`} ${text}`;
+}
+/** Prepends a new entry to existing comments (newest-first), preserving history. */
+function prependComment(existing, entry) {
+	return existing && existing.trim().length > 0 ? `${entry}\n${existing}` : entry;
+}
+/** Reverse-maps an option label to its numeric code. */
+function reverseOption(map, label) {
+	const match = Object.entries(map).find(([, l]) => l === label);
+	return match ? Number(match[0]) : void 0;
+}
+/**
+* MSX connector backed by the relational {@link LocalStore}. Implements the same
+* contract as the live and fixture connectors, so it can be selected for sample/test
+* mode behind the existing data seam. Writes persist in the store (injected values
+* survive when a file-backed store is used).
+*/
+var LocalStoreMsxConnector = class {
+	store;
+	currentUserId;
+	manualAccountIds = /* @__PURE__ */ new Set();
+	constructor(store = new LocalStore(), currentUserId = SAMPLE_USER_ID) {
+		this.store = store;
+		this.currentUserId = currentUserId;
+	}
+	ownerName(ownerId) {
+		const id = str(ownerId);
+		if (!id) return void 0;
+		return str(this.store.get("SELECT fullname FROM systemuser WHERE id = ?", id)?.["fullname"]);
+	}
+	userInitials() {
+		return str(this.store.get("SELECT initials FROM systemuser WHERE id = ?", this.currentUserId)?.["initials"]) ?? "??";
+	}
+	dealTeamAccountIds() {
+		const rows = this.store.all(`SELECT DISTINCT o.account_id AS account_id FROM opportunity o
+       JOIN opportunity_dealteam dt ON dt.opportunity_id = o.id
+       WHERE dt.systemuser_id = ?`, this.currentUserId);
+		return new Set(rows.map((row) => String(row["account_id"])));
+	}
+	toAccount(row, dealTeam) {
+		const id = String(row["id"]);
+		const manual = this.manualAccountIds.has(id);
+		const onDealTeam = dealTeam.has(id);
+		return accountSchema.parse({
+			id,
+			name: String(row["name"]),
+			...str(row["segment"]) ? { segment: str(row["segment"]) } : {},
+			...str(row["tpid"]) ? { tpid: str(row["tpid"]) } : {},
+			provenance: manual && onDealTeam ? "both" : manual ? "manual" : "deal-team",
+			visibility: str(row["visibility"]) === "hidden" ? "hidden" : "visible"
+		});
+	}
+	toOpportunity(row) {
+		const owner = this.ownerName(row["owner_id"]);
+		const comments = str(row["description"]);
+		return opportunitySchema.parse({
+			id: String(row["id"]),
+			accountId: String(row["account_id"]),
+			name: String(row["name"]),
+			recordedStage: num(row["recorded_stage"]) ?? 1,
+			value: num(row["estimated_value"]) ?? 0,
+			currency: str(row["currency"]) ?? "USD",
+			closeDate: String(row["estimated_close_date"]),
+			...owner ? { owner } : {},
+			...comments ? { comments } : {}
+		});
+	}
+	toMilestone(row) {
+		const owner = this.ownerName(row["owner_id"]);
+		const status = MILESTONE_STATUS[num(row["status"]) ?? -1] ?? "On Track";
+		const commitmentCode = num(row["commitment"]);
+		const commitment = commitmentCode === void 0 ? void 0 : COMMITMENT[commitmentCode];
+		const targetDate = str(row["milestone_date"]);
+		const usage = num(row["monthly_use"]);
+		const risk = str(row["risk_details"]);
+		const comments = str(row["forecast_comments"]);
+		return milestoneSchema.parse({
+			id: String(row["id"]),
+			opportunityId: String(row["opportunity_id"]),
+			name: String(row["name"]),
+			status,
+			...targetDate ? { targetDate } : {},
+			...usage !== void 0 ? { estimatedMonthlyUsage: usage } : {},
+			...owner ? { owner } : {},
+			...commitment ? { commitment } : {},
+			...risk ? { riskDetails: risk } : {},
+			...comments ? { comments } : {}
+		});
+	}
+	assertOpportunityAccess(opportunityId) {
+		const row = this.store.get("SELECT * FROM opportunity WHERE id = ?", opportunityId);
+		if (!row) throw new Error(`Unknown local-store opportunity: ${opportunityId}`);
+		const onTeam = this.store.get("SELECT 1 AS present FROM opportunity_dealteam WHERE opportunity_id = ? AND systemuser_id = ?", opportunityId, this.currentUserId);
+		const account = this.store.get("SELECT visibility FROM account WHERE id = ?", String(row["account_id"]));
+		if (!onTeam || str(account?.["visibility"]) === "hidden") throw new Error("The opportunity is not in the active local-store portfolio.");
+		return row;
+	}
+	async listAccounts(options = {}) {
+		const dealTeam = this.dealTeamAccountIds();
+		return this.store.all("SELECT * FROM account ORDER BY name").map((row) => this.toAccount(row, dealTeam)).filter((account) => dealTeam.has(account.id) || this.manualAccountIds.has(account.id) || account.visibility === "hidden").filter((account) => options.includeHidden || account.visibility !== "hidden");
+	}
+	async searchAccounts(request) {
+		const query = request.query.toLocaleLowerCase();
+		const dealTeam = this.dealTeamAccountIds();
+		const visible = new Map((await this.listAccounts({ includeHidden: true })).map((account) => [account.id, account]));
+		return this.store.all("SELECT * FROM account ORDER BY name").filter((row) => request.matchBy === "name" ? String(row["name"]).toLocaleLowerCase().includes(query) : str(row["tpid"]) === request.query).map((row) => {
+			const base = this.toAccount(row, dealTeam);
+			const existing = visible.get(base.id);
+			return {
+				...existing ?? base,
+				state: existing?.visibility === "hidden" ? "hidden" : existing ? "visible" : "not-added"
+			};
+		});
+	}
+	async addAccount(accountId) {
+		const row = this.store.get("SELECT * FROM account WHERE id = ?", accountId);
+		if (!row) throw new Error(`Unknown local-store account: ${accountId}`);
+		this.manualAccountIds.add(accountId);
+		return this.toAccount(row, this.dealTeamAccountIds());
+	}
+	async setAccountVisibility(accountId, visibility) {
+		if (!this.store.get("SELECT * FROM account WHERE id = ?", accountId)) throw new Error(`Unknown local-store account: ${accountId}`);
+		this.store.run("UPDATE account SET visibility = ? WHERE id = ?", visibility, accountId);
+		const updated = this.store.get("SELECT * FROM account WHERE id = ?", accountId);
+		return this.toAccount(updated, this.dealTeamAccountIds());
+	}
+	async listOpportunities(accountId) {
+		if (str(this.store.get("SELECT visibility FROM account WHERE id = ?", accountId)?.["visibility"]) === "hidden") return [];
+		return this.store.all(`SELECT o.* FROM opportunity o
+       JOIN opportunity_dealteam dt ON dt.opportunity_id = o.id
+       WHERE o.account_id = ? AND dt.systemuser_id = ? ORDER BY o.estimated_close_date`, accountId, this.currentUserId).map((row) => this.toOpportunity(row));
+	}
+	async listMilestones(opportunityId) {
+		this.assertOpportunityAccess(opportunityId);
+		return this.store.all("SELECT * FROM engagement_milestone WHERE opportunity_id = ? ORDER BY milestone_date", opportunityId).map((row) => this.toMilestone(row));
+	}
+	async updateMilestone(opportunityId, milestoneId, update) {
+		this.assertOpportunityAccess(opportunityId);
+		if (!this.store.get("SELECT * FROM engagement_milestone WHERE id = ? AND opportunity_id = ?", milestoneId, opportunityId)) throw new Error(`Unknown local-store milestone: ${milestoneId}`);
+		if (update.status !== void 0) {
+			const code = Number(Object.entries(MILESTONE_STATUS).find(([, label]) => label === update.status)?.[0]);
+			this.store.run("UPDATE engagement_milestone SET status = ? WHERE id = ?", code, milestoneId);
+		}
+		if (update.targetDate !== void 0) this.store.run("UPDATE engagement_milestone SET milestone_date = ? WHERE id = ?", update.targetDate, milestoneId);
+		if (update.customerCommitment !== void 0) {
+			const code = update.customerCommitment === "Committed" ? 861980003 : 86198e4;
+			this.store.run("UPDATE engagement_milestone SET commitment = ? WHERE id = ?", code, milestoneId);
+		}
+		if (update.riskDetails !== void 0) this.store.run("UPDATE engagement_milestone SET risk_details = ? WHERE id = ?", update.riskDetails, milestoneId);
+		if (update.comments !== void 0) this.store.run("UPDATE engagement_milestone SET forecast_comments = ? WHERE id = ?", update.comments, milestoneId);
+		return this.toMilestone(this.store.get("SELECT * FROM engagement_milestone WHERE id = ?", milestoneId));
+	}
+	async updateOpportunity(opportunityId, update) {
+		this.assertOpportunityAccess(opportunityId);
+		this.store.run("UPDATE opportunity SET description = ? WHERE id = ?", update.comments, opportunityId);
+		return this.toOpportunity(this.store.get("SELECT * FROM opportunity WHERE id = ?", opportunityId));
+	}
+	async updateOpportunityStage(opportunityId, targetStage, auditNote) {
+		const comments = [str(this.assertOpportunityAccess(opportunityId)["description"]), auditNote].filter(Boolean).join("\n\n");
+		this.store.run("UPDATE opportunity SET recorded_stage = ?, description = ? WHERE id = ?", targetStage, comments, opportunityId);
+		return this.toOpportunity(this.store.get("SELECT * FROM opportunity WHERE id = ?", opportunityId));
+	}
+	/**
+	* Appends a comment to an opportunity using the additive protocol (newest-first prepend
+	* with an `<INITIALS> <M/D/YYYY>` prefix), preserving prior history. Intended for the
+	* meeting-inject flow and the Portfolio "type a new comment" UX.
+	*/
+	async appendOpportunityComment(opportunityId, text) {
+		const row = this.assertOpportunityAccess(opportunityId);
+		const entry = formatCommentEntry(this.userInitials(), text);
+		this.store.run("UPDATE opportunity SET description = ? WHERE id = ?", prependComment(str(row["description"]), entry), opportunityId);
+		return this.toOpportunity(this.store.get("SELECT * FROM opportunity WHERE id = ?", opportunityId));
+	}
+	async getOpportunityContext(opportunityId) {
+		const row = this.assertOpportunityAccess(opportunityId);
+		const accountRow = this.store.get("SELECT * FROM account WHERE id = ?", String(row["account_id"]));
+		const now = (/* @__PURE__ */ new Date()).toISOString();
+		return {
+			account: this.toAccount(accountRow, this.dealTeamAccountIds()),
+			opportunity: this.toOpportunity(row),
+			observations: this.buildObservations(row),
+			retrievedAt: now,
+			sourceHealth: {
+				source: "msx",
+				state: "sample",
+				detail: "Local SQLite test store; no live MSX call was made.",
+				checkedAt: now
+			}
+		};
+	}
+	buildObservations(row) {
+		const observations = [];
+		if (num(row["budget_amount"]) !== void 0) observations.push({
+			criterionId: "budget",
+			status: num(row["budget_status"]) === 1 ? "met" : "partial",
+			detail: "Budget amount is recorded on the opportunity."
+		});
+		if (str(row["final_decision_date"])) observations.push({
+			criterionId: "next-step",
+			status: "partial",
+			detail: "A final decision date is recorded."
+		});
+		if (str(row["proposed_solution"])) observations.push({
+			criterionId: "technical-validation",
+			status: "partial",
+			detail: "A proposed solution is recorded."
+		});
+		if (str(row["customer_need"])) observations.push({
+			criterionId: "customer-outcome",
+			status: "partial",
+			detail: "A customer need is recorded."
+		});
+		return observations;
+	}
+	async discoverOpportunities(domain) {
+		return this.store.all(`SELECT d.*, a.name AS account_name, a.visibility AS visibility
+       FROM discoverable_opportunity d JOIN account a ON a.id = d.account_id
+       WHERE d.domain = ? ORDER BY d.close_date`, domain).filter((row) => str(row["visibility"]) !== "hidden").map((row) => {
+			const id = String(row["id"]);
+			const onDealTeam = Boolean(this.store.get("SELECT 1 AS present FROM opportunity_dealteam WHERE opportunity_id = ? AND systemuser_id = ?", id, this.currentUserId));
+			const solutionArea = str(row["solution_area"]);
+			const technicalCapability = str(row["technical_capability"]);
+			const accountName = str(row["account_name"]);
+			return discoverableOpportunitySchema.parse({
+				id,
+				accountId: String(row["account_id"]),
+				name: String(row["name"]),
+				recordedStage: num(row["recorded_stage"]) ?? 1,
+				value: num(row["value"]) ?? 0,
+				currency: str(row["currency"]) ?? "USD",
+				closeDate: String(row["close_date"]),
+				domain,
+				onDealTeam,
+				...accountName ? { accountName } : {},
+				...solutionArea ? { solutionArea } : {},
+				...technicalCapability ? { technicalCapability } : {}
+			});
+		});
+	}
+	async joinDealTeam(opportunityId) {
+		if (!this.store.get("SELECT 1 AS present FROM opportunity WHERE id = ?", opportunityId)) {
+			const discovered = this.store.get("SELECT * FROM discoverable_opportunity WHERE id = ?", opportunityId);
+			if (!discovered) throw new Error(`Unknown local-store opportunity: ${opportunityId}`);
+			this.store.run(`INSERT INTO opportunity (id, account_id, name, recorded_stage, estimated_value, currency, estimated_close_date, solution_area, technical_capability)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, opportunityId, String(discovered["account_id"]), String(discovered["name"]), num(discovered["recorded_stage"]) ?? 1, num(discovered["value"]) ?? 0, str(discovered["currency"]) ?? "USD", String(discovered["close_date"]), str(discovered["solution_area"]) ?? null, str(discovered["technical_capability"]) ?? null);
+		}
+		const alreadyMember = Boolean(this.store.get("SELECT 1 AS present FROM opportunity_dealteam WHERE opportunity_id = ? AND systemuser_id = ?", opportunityId, this.currentUserId));
+		if (!alreadyMember) this.store.run("INSERT INTO opportunity_dealteam (opportunity_id, systemuser_id) VALUES (?, ?)", opportunityId, this.currentUserId);
+		return {
+			opportunityId,
+			onDealTeam: true,
+			alreadyMember
+		};
+	}
+	async leaveDealTeam(opportunityId) {
+		const alreadyAbsent = !this.store.get("SELECT 1 AS present FROM opportunity_dealteam WHERE opportunity_id = ? AND systemuser_id = ?", opportunityId, this.currentUserId);
+		this.store.run("DELETE FROM opportunity_dealteam WHERE opportunity_id = ? AND systemuser_id = ?", opportunityId, this.currentUserId);
+		return {
+			opportunityId,
+			onDealTeam: false,
+			alreadyAbsent
+		};
+	}
+	/** Meetings / activities linked to an opportunity (the meetings a transcript can come from). */
+	async listActivities(opportunityId) {
+		this.assertOpportunityAccess(opportunityId);
+		return this.store.all("SELECT * FROM activity WHERE opportunity_id = ? ORDER BY scheduled_end", opportunityId).map((row) => {
+			const owner = this.ownerName(row["owner_id"]);
+			const activityType = str(row["activity_type"]);
+			const scheduledStart = str(row["scheduled_start"]);
+			const scheduledEnd = str(row["scheduled_end"]);
+			const joinUrl = str(row["online_meeting_join_url"]);
+			const location = str(row["location"]);
+			const description = str(row["description"]);
+			return {
+				id: String(row["id"]),
+				opportunityId: String(row["opportunity_id"]),
+				subject: String(row["subject"]),
+				status: ACTIVITY_STATUS[num(row["status"]) ?? -1] ?? "Open",
+				isOnlineMeeting: num(row["is_online_meeting"]) === 1,
+				...owner ? { owner } : {},
+				...activityType ? { activityType } : {},
+				...scheduledStart ? { scheduledStart } : {},
+				...scheduledEnd ? { scheduledEnd } : {},
+				...joinUrl ? { onlineMeetingJoinUrl: joinUrl } : {},
+				...location ? { location } : {},
+				...description ? { description } : {}
+			};
+		});
+	}
+	/** Transcripts (with diarized segments) linked to an opportunity's meetings. */
+	async listTranscripts(opportunityId) {
+		this.assertOpportunityAccess(opportunityId);
+		return this.store.all("SELECT * FROM transcript WHERE opportunity_id = ? ORDER BY occurred_at", opportunityId).map((row) => {
+			const id = String(row["id"]);
+			const segments = this.store.all("SELECT * FROM transcript_segment WHERE transcript_id = ? ORDER BY start_ms", id).map((segment) => {
+				const startMs = num(segment["start_ms"]);
+				const endMs = num(segment["end_ms"]);
+				const speaker = str(segment["speaker"]);
+				const speakerRole = str(segment["speaker_role"]);
+				return {
+					id: String(segment["id"]),
+					text: String(segment["text"]),
+					...startMs !== void 0 ? { startMs } : {},
+					...endMs !== void 0 ? { endMs } : {},
+					...speaker ? { speaker } : {},
+					...speakerRole ? { speakerRole } : {}
+				};
+			});
+			const activityId = str(row["activity_id"]);
+			const title = str(row["title"]);
+			const source = str(row["source"]);
+			return {
+				id,
+				opportunityId: String(row["opportunity_id"]),
+				meetingType: String(row["meeting_type"]),
+				occurredAt: String(row["occurred_at"]),
+				segments,
+				...activityId ? { activityId } : {},
+				...title ? { title } : {},
+				...source ? { source } : {}
+			};
+		});
+	}
+	/** Meeting transcript candidates for the launcher picker (sample path reads seeded rows). */
+	async listMeetingTranscripts(opportunityId) {
+		if (opportunityId) this.assertOpportunityAccess(opportunityId);
+		return (opportunityId ? this.store.all(`SELECT t.*, o.name AS opp_name FROM transcript t JOIN opportunity o ON o.id = t.opportunity_id
+           WHERE t.opportunity_id = ? ORDER BY t.occurred_at DESC`, opportunityId) : this.store.all(`SELECT t.*, o.name AS opp_name FROM transcript t JOIN opportunity o ON o.id = t.opportunity_id
+           ORDER BY t.occurred_at DESC`)).map((row) => {
+			const id = String(row["id"]);
+			const count = num(this.store.get("SELECT COUNT(*) AS c FROM transcript_segment WHERE transcript_id = ?", id)?.["c"]) ?? 0;
+			const oppId = str(row["opportunity_id"]);
+			const oppName = str(row["opp_name"]);
+			return meetingTranscriptSummarySchema.parse({
+				id,
+				subject: str(row["title"]) ?? "Meeting transcript",
+				occurredAt: String(row["occurred_at"]),
+				meetingType: String(row["meeting_type"]) === "internal" ? "internal" : "customer",
+				source: str(row["source"]) === "upload" || str(row["source"]) === "paste" ? str(row["source"]) : "teams",
+				segmentCount: count,
+				...oppId ? { opportunityId: oppId } : {},
+				...oppName ? { opportunityName: oppName } : {}
+			});
+		});
+	}
+	/** Loads a seeded transcript (with diarized segments) as the canonical contract shape. */
+	async getMeetingTranscript(transcriptId) {
+		const row = this.store.get("SELECT * FROM transcript WHERE id = ?", transcriptId);
+		if (!row) return void 0;
+		const segments = this.store.all("SELECT * FROM transcript_segment WHERE transcript_id = ? ORDER BY start_ms", transcriptId).map((segment) => {
+			const startMs = num(segment["start_ms"]);
+			const endMs = num(segment["end_ms"]);
+			const speaker = str(segment["speaker"]);
+			const role = str(segment["speaker_role"]);
+			return {
+				segmentId: String(segment["id"]),
+				text: String(segment["text"]),
+				...startMs !== void 0 ? { startMs } : {},
+				...endMs !== void 0 ? { endMs } : {},
+				...speaker ? { speaker } : {},
+				...role === "internal" || role === "customer" ? { speakerRole: role } : {}
+			};
+		});
+		const oppId = str(row["opportunity_id"]);
+		const title = str(row["title"]);
+		return meetingTranscriptSchema.parse({
+			id: String(row["id"]),
+			meetingType: String(row["meeting_type"]) === "internal" ? "internal" : "customer",
+			source: str(row["source"]) === "upload" || str(row["source"]) === "paste" ? str(row["source"]) : "teams",
+			segments,
+			...oppId ? { opportunityId: oppId } : {},
+			...title ? { title } : {}
+		});
+	}
+	labelFor(canonical, code) {
+		if (code === void 0) return null;
+		switch (canonical) {
+			case "budgetStatus": return BUDGET_STATUS[code] ?? null;
+			case "timeline": return TIMELINE[code] ?? null;
+			case "purchaseProcess": return PURCHASE_PROCESS[code] ?? null;
+			case "need": return NEED[code] ?? null;
+			case "opportunityRating": return OPPORTUNITY_RATING[code] ?? null;
+			case "milestoneCommitment": return COMMITMENT[code] ?? null;
+			default: return null;
+		}
+	}
+	buildOpportunitySnapshot(row) {
+		return {
+			id: String(row["id"]),
+			name: String(row["name"]),
+			fields: {
+				budgetAmount: num(row["budget_amount"]) ?? null,
+				budgetStatus: this.labelFor("budgetStatus", num(row["budget_status"])),
+				estimatedValue: num(row["estimated_value"]) ?? null,
+				timeline: this.labelFor("timeline", num(row["timeline"])),
+				purchaseProcess: this.labelFor("purchaseProcess", num(row["purchase_process"])),
+				decisionMaker: num(row["decision_maker"]) === 1,
+				need: this.labelFor("need", num(row["need"])),
+				customerNeed: str(row["customer_need"]) ?? null,
+				proposedSolution: str(row["proposed_solution"]) ?? null,
+				finalDecisionDate: str(row["final_decision_date"]) ?? null,
+				identifyCompetitors: num(row["identify_competitors"]) === 1,
+				opportunityRating: this.labelFor("opportunityRating", num(row["opportunity_rating"])),
+				qualificationComments: str(row["qualification_comments"]) ?? null
+			}
+		};
+	}
+	buildMilestoneSnapshot(row) {
+		return {
+			id: String(row["id"]),
+			name: String(row["name"]),
+			fields: {
+				milestoneCommitment: this.labelFor("milestoneCommitment", num(row["commitment"])),
+				milestoneRisk: str(row["risk_details"]) ?? null
+			}
+		};
+	}
+	/** Produces a reviewable change-set proposal from a transcript against the live opp snapshot. */
+	async proposeMeetingChangeSet(request) {
+		const oppRow = this.assertOpportunityAccess(request.opportunityId);
+		let transcript;
+		if (request.transcript) transcript = meetingTranscriptSchema.parse(request.transcript);
+		else if (request.transcriptId) {
+			const loaded = await this.getMeetingTranscript(request.transcriptId);
+			if (!loaded) throw new Error(`Unknown local-store transcript: ${request.transcriptId}`);
+			transcript = loaded;
+		} else throw new Error("proposeMeetingChangeSet requires a transcript or transcriptId.");
+		const anchored = {
+			...transcript,
+			opportunityId: request.opportunityId
+		};
+		const opportunity = this.buildOpportunitySnapshot(oppRow);
+		const milestones = this.store.all("SELECT * FROM engagement_milestone WHERE opportunity_id = ? ORDER BY milestone_date", request.opportunityId).map((milestoneRow) => this.buildMilestoneSnapshot(milestoneRow));
+		const changeSetId = request.changeSetId ?? `cs-${request.opportunityId}-${Date.now().toString(36)}`;
+		return extractMeetingSignals({
+			transcript: anchored,
+			opportunity,
+			milestones
+		}, { changeSetId });
+	}
+	optionCodeFor(canonical, label) {
+		switch (canonical) {
+			case "budgetStatus": return reverseOption(BUDGET_STATUS, label);
+			case "timeline": return reverseOption(TIMELINE, label);
+			case "purchaseProcess": return reverseOption(PURCHASE_PROCESS, label);
+			case "need": return reverseOption(NEED, label);
+			case "opportunityRating": return reverseOption(OPPORTUNITY_RATING, label);
+			case "milestoneCommitment": return reverseOption(COMMITMENT, label);
+			default: return;
+		}
+	}
+	applyOpportunityField(opportunityId, entry, after) {
+		const column = entry.msxField;
+		if (entry.valueType === "money") this.store.run(`UPDATE opportunity SET ${column} = ? WHERE id = ?`, Number(after), opportunityId);
+		else if (entry.valueType === "boolean") this.store.run(`UPDATE opportunity SET ${column} = ? WHERE id = ?`, after ? 1 : 0, opportunityId);
+		else if (entry.valueType === "date") this.store.run(`UPDATE opportunity SET ${column} = ? WHERE id = ?`, String(after), opportunityId);
+		else if (entry.valueType === "optionset") this.store.run(`UPDATE opportunity SET ${column} = ? WHERE id = ?`, this.optionCodeFor(entry.canonical, String(after)) ?? null, opportunityId);
+		else if (entry.append) {
+			const current = str(this.store.get(`SELECT ${column} AS v FROM opportunity WHERE id = ?`, opportunityId)?.["v"]);
+			this.store.run(`UPDATE opportunity SET ${column} = ? WHERE id = ?`, prependComment(current, String(after)), opportunityId);
+		} else this.store.run(`UPDATE opportunity SET ${column} = ? WHERE id = ?`, String(after), opportunityId);
+	}
+	applyMilestoneField(milestoneId, entry, after) {
+		const column = entry.msxField;
+		if (entry.valueType === "optionset") this.store.run(`UPDATE engagement_milestone SET ${column} = ? WHERE id = ?`, this.optionCodeFor(entry.canonical, String(after)) ?? null, milestoneId);
+		else if (entry.append) {
+			const current = str(this.store.get(`SELECT ${column} AS v FROM engagement_milestone WHERE id = ?`, milestoneId)?.["v"]);
+			this.store.run(`UPDATE engagement_milestone SET ${column} = ? WHERE id = ?`, prependComment(current, String(after)), milestoneId);
+		} else this.store.run(`UPDATE engagement_milestone SET ${column} = ? WHERE id = ?`, String(after), milestoneId);
+	}
+	concurrencyMatches(entry, before, current) {
+		if (entry.valueType === "money") return (before === null || before === void 0 ? null : Number(before)) === (current === null || current === void 0 ? null : Number(current));
+		if (entry.valueType === "boolean") return Boolean(before) === Boolean(current);
+		return (before === null || before === void 0 ? "" : String(before).trim()) === (current === null || current === void 0 ? "" : String(current).trim());
+	}
+	insertNewMilestone(opportunityId, name, milestoneDate, commitment) {
+		const id = `ms-new-${opportunityId}-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+		const commitmentCode = commitment ? reverseOption(COMMITMENT, commitment) ?? null : null;
+		this.store.run(`INSERT INTO engagement_milestone (id, opportunity_id, name, status, milestone_date, owner_id, commitment)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`, id, opportunityId, name, 86198e4, milestoneDate ?? null, this.currentUserId, commitmentCode);
+		return id;
+	}
+	buildResultItems(proposal, approval, outcome) {
+		const items = [];
+		for (const slot of proposal.slots) {
+			if (!approval.approvedSlotIds.includes(slot.slotId)) continue;
+			let state;
+			let detail;
+			if (outcome.conflicts.has(slot.slotId)) {
+				state = "conflict";
+				detail = `"${slot.label}" changed since review; no update applied.`;
+			} else if (outcome.applied.has(slot.slotId)) {
+				state = "applied";
+				detail = `${slot.label}: ${slot.displayAfter}`;
+			} else if (slot.targetKind === "milestone" && slot.targetRecordId && !approval.selectedMilestoneIds.includes(slot.targetRecordId)) {
+				state = "skipped";
+				detail = `${slot.label}: milestone not selected.`;
+			} else {
+				state = "skipped";
+				detail = `${slot.label}: not applied (change set rolled back).`;
+			}
+			items.push({
+				id: slot.slotId,
+				kind: "field",
+				state,
+				detail
+			});
+		}
+		for (const milestone of proposal.newMilestones) {
+			if (!approval.approvedNewMilestoneTempIds.includes(milestone.tempId)) continue;
+			const applied = outcome.appliedMilestones?.has(milestone.tempId) ?? false;
+			items.push({
+				id: milestone.tempId,
+				kind: "new-milestone",
+				state: applied ? "applied" : "skipped",
+				detail: applied ? `Created milestone "${milestone.name}".` : `Milestone "${milestone.name}" not created (rolled back).`
+			});
+		}
+		return items;
+	}
+	/** Applies an approved change set atomically (all-or-none), with optimistic concurrency. */
+	async applyMeetingChangeSet(input) {
+		const proposal = meetingChangeSetProposalSchema.parse(input.proposal);
+		const approval = meetingChangeSetApprovalSchema.parse(input.approval);
+		if (approval.changeSetId !== proposal.changeSetId) throw new Error("Approval does not match the proposal.");
+		if (approval.opportunityId !== proposal.opportunityId) throw new Error("Approval targets a different opportunity.");
+		this.assertOpportunityAccess(proposal.opportunityId);
+		const approvedSlots = proposal.slots.filter((slot) => approval.approvedSlotIds.includes(slot.slotId));
+		const oppSnapshot = this.buildOpportunitySnapshot(this.store.get("SELECT * FROM opportunity WHERE id = ?", proposal.opportunityId));
+		const conflicts = /* @__PURE__ */ new Set();
+		for (const slot of approvedSlots) {
+			const entry = MEETING_FIELD_DICTIONARY[slot.targetField];
+			if (!entry || entry.append) continue;
+			let current;
+			if (slot.targetKind === "opportunity") current = oppSnapshot.fields[slot.targetField];
+			else if (slot.targetKind === "milestone" && slot.targetRecordId) {
+				if (!approval.selectedMilestoneIds.includes(slot.targetRecordId)) continue;
+				const milestoneRow = this.store.get("SELECT * FROM engagement_milestone WHERE id = ?", slot.targetRecordId);
+				current = milestoneRow ? this.buildMilestoneSnapshot(milestoneRow).fields[slot.targetField] : void 0;
+			} else continue;
+			if (!this.concurrencyMatches(entry, slot.before, current)) conflicts.add(slot.slotId);
+		}
+		if (conflicts.size > 0) return meetingChangeSetResultSchema.parse({
+			changeSetId: proposal.changeSetId,
+			state: "rolled-back",
+			items: this.buildResultItems(proposal, approval, {
+				conflicts,
+				applied: /* @__PURE__ */ new Set()
+			}),
+			auditNote: `Rolled back: ${conflicts.size} field(s) changed since review; no updates applied.`
+		});
+		const applied = /* @__PURE__ */ new Set();
+		const appliedMilestones = /* @__PURE__ */ new Set();
+		this.store.exec("BEGIN");
+		try {
+			for (const slot of approvedSlots) {
+				const entry = MEETING_FIELD_DICTIONARY[slot.targetField];
+				if (!entry) continue;
+				if (slot.targetKind === "opportunity") {
+					this.applyOpportunityField(proposal.opportunityId, entry, slot.after);
+					applied.add(slot.slotId);
+				} else if (slot.targetKind === "milestone" && slot.targetRecordId && approval.selectedMilestoneIds.includes(slot.targetRecordId)) {
+					this.applyMilestoneField(slot.targetRecordId, entry, slot.after);
+					applied.add(slot.slotId);
+				}
+			}
+			for (const milestone of proposal.newMilestones) {
+				if (!approval.approvedNewMilestoneTempIds.includes(milestone.tempId)) continue;
+				this.insertNewMilestone(proposal.opportunityId, milestone.name, milestone.milestoneDate, milestone.commitment);
+				appliedMilestones.add(milestone.tempId);
+			}
+			const auditNote = `Meeting inject (${proposal.meetingType}): applied ${applied.size} field update(s) and ${appliedMilestones.size} new milestone(s). Reason: ${approval.reason}`;
+			const descRow = this.store.get("SELECT description FROM opportunity WHERE id = ?", proposal.opportunityId);
+			const commentEntry = formatCommentEntry(this.userInitials(), auditNote);
+			this.store.run("UPDATE opportunity SET description = ? WHERE id = ?", prependComment(str(descRow?.["description"]), commentEntry), proposal.opportunityId);
+			this.store.exec("COMMIT");
+		} catch (error) {
+			this.store.exec("ROLLBACK");
+			throw error;
+		}
+		return meetingChangeSetResultSchema.parse({
+			changeSetId: proposal.changeSetId,
+			state: "applied",
+			items: this.buildResultItems(proposal, approval, {
+				conflicts: /* @__PURE__ */ new Set(),
+				applied,
+				appliedMilestones
+			}),
+			auditNote: `Meeting inject (${proposal.meetingType}): applied ${applied.size} field update(s) and ${appliedMilestones.size} new milestone(s). Reason: ${approval.reason}`
+		});
+	}
+};
+/**
+* Factory for sample/test mode: returns a local-store-backed connector when
+* `TLC_DATA_STORE=sqlite`, else `undefined` so the caller keeps its existing fixture.
+*/
+function createLocalStoreMsxConnector(environment = process.env) {
+	if ((environment["TLC_DATA_STORE"] ?? "").toLowerCase() !== "sqlite") return void 0;
+	const path = environment["TLC_DATA_STORE_PATH"]?.trim();
+	return new LocalStoreMsxConnector(new LocalStore(path ? { path } : {}));
+}
+//#endregion
 //#region packages/connectors/sharepoint/local-pdf.ts
 var stageCriteria = {
 	1: [
@@ -3295,7 +5878,9 @@ var workflowQueueItemSchema = z.object({
 	title: z.string().min(1),
 	owner: z.string().min(1).optional(),
 	accountId: z.string().min(1).optional(),
+	accountName: z.string().min(1).optional(),
 	opportunityId: z.string().min(1).optional(),
+	opportunityName: z.string().min(1).optional(),
 	dueDate: z.string().date().optional(),
 	evidenceIds: z.array(z.string().min(1)),
 	status: z.literal("new")
@@ -3382,11 +5967,19 @@ var initialWorkflowDefinitions = Object.freeze([
 		connector: "dataverse-mcp",
 		operation: "read_query",
 		required: true
+	}, {
+		connector: "msx-mcp",
+		operation: "list_pipeline",
+		required: false
 	}]),
 	createDefinition("WF-010", "Activity follow-up debt", ["Seller", "SE"], "activity-compliance", "action-list", [{
 		connector: "dataverse-mcp",
 		operation: "read_query",
 		required: true
+	}, {
+		connector: "msx-mcp",
+		operation: "list_pipeline",
+		required: false
 	}]),
 	createDefinition("WF-011", "Opportunity dependency graph", ["Manager"], "portfolio-hygiene", "record-table", [{
 		connector: "dataverse-mcp",
@@ -3766,17 +6359,22 @@ function buildCard(workflowId, title, records, queueItems, evidenceIds) {
 function buildQueueItems(workflowId, records, input, evidenceIds) {
 	if (workflowId === "WF-009") {
 		const threshold = input.maximumActiveItems ?? 20;
-		const counts = /* @__PURE__ */ new Map();
+		const owners = /* @__PURE__ */ new Map();
 		for (const record of records) {
-			const owner = text(record.ownerId) ?? "Unassigned";
-			counts.set(owner, (counts.get(owner) ?? 0) + 1);
+			const ownerId = text(record.ownerId) ?? "unassigned";
+			const ownerName = text(record.opportunityOwnerName) ?? (ownerId === "unassigned" ? "Unassigned owner" : "Owner name unavailable");
+			const current = owners.get(ownerId);
+			owners.set(ownerId, {
+				count: (current?.count ?? 0) + 1,
+				name: current?.name !== "Owner name unavailable" ? current?.name ?? ownerName : ownerName
+			});
 		}
-		return [...counts.entries()].filter(([, count]) => count > threshold).sort(([left], [right]) => left.localeCompare(right)).map(([owner, count]) => ({
-			id: `${workflowId}:${owner}`,
+		return [...owners.entries()].filter(([, owner]) => owner.count > threshold).sort(([, left], [, right]) => left.name.localeCompare(right.name)).map(([ownerId, owner]) => ({
+			id: `${workflowId}:${ownerId}`,
 			workflowId,
-			priority: count > threshold * 2 ? "P0" : "P1",
-			title: `${owner} owns ${count} active opportunities`,
-			owner,
+			priority: owner.count > threshold * 2 ? "P0" : "P1",
+			title: `${owner.name} owns ${owner.count} active opportunities`,
+			owner: owner.name,
 			evidenceIds,
 			status: "new"
 		}));
@@ -3785,14 +6383,18 @@ function buildQueueItems(workflowId, records, input, evidenceIds) {
 		const recordId = text(record.id) ?? `${index + 1}`;
 		const dueDate = date(record.targetDate) ?? date(record.dueDate) ?? date(record.closeDate);
 		const opportunityId = text(record.opportunityId) ?? (opportunityScopedWorkflows.has(workflowId) ? text(record.id) : void 0);
+		const opportunityName = text(record.opportunityName) ?? (opportunityScopedWorkflows.has(workflowId) ? text(record.name) : void 0);
+		const owner = queueOwnerName(workflowId, record);
 		return {
 			id: `${workflowId}:${recordId}`,
 			workflowId,
 			priority: workflowId === "WF-003" && Number(record.recordedStage ?? 0) >= 4 || workflowId === "WF-005" && record.status === "Blocked" ? "P0" : "P1",
 			title: queueTitle(workflowId, record),
-			...text(record.ownerId) ? { owner: text(record.ownerId) } : {},
+			...owner ? { owner } : {},
 			...text(record.accountId) ? { accountId: text(record.accountId) } : {},
+			...text(record.accountName) ? { accountName: text(record.accountName) } : {},
 			...opportunityId ? { opportunityId } : {},
+			...opportunityName ? { opportunityName } : {},
 			...dueDate ? { dueDate } : {},
 			evidenceIds,
 			status: "new"
@@ -3806,8 +6408,11 @@ var opportunityScopedWorkflows = /* @__PURE__ */ new Set([
 	"WF-008",
 	"WF-011"
 ]);
+function queueOwnerName(workflowId, record) {
+	return text(record.owner) ?? (opportunityScopedWorkflows.has(workflowId) ? text(record.opportunityOwnerName) : void 0) ?? (text(record.ownerId) ? "Owner name unavailable" : void 0);
+}
 function queueTitle(workflowId, record) {
-	const label = text(record.name) ?? text(record.subject) ?? text(record.id) ?? "Untitled record";
+	const label = text(record.name) ?? text(record.subject) ?? "Untitled record";
 	return `${{
 		"WF-001": "Review stale opportunity",
 		"WF-002": "Triage overdue milestone",
@@ -3840,7 +6445,6 @@ function rows(value) {
 	return Array.isArray(value) ? value.filter((record) => typeof record === "object" && record !== null && !Array.isArray(record)) : [];
 }
 var curatedOpportunityFields = [
-	"owner",
 	"recordedStage",
 	"value",
 	"currency",
@@ -3861,8 +6465,10 @@ function reconcileRecords(dataverseRecords, msxRecords) {
 			const value = curated[field];
 			if (value !== void 0 && value !== null && value !== "") merged[field] = value;
 		}
-		if (!text(merged.ownerId) && text(curated.owner)) merged.ownerId = curated.owner;
+		if (text(curated.name)) merged.opportunityName = curated.name;
+		if (text(curated.owner)) merged.opportunityOwnerName = curated.owner;
 		if (!text(merged.accountId) && text(curated.accountId)) merged.accountId = curated.accountId;
+		if (!text(merged.accountName) && text(curated.accountName)) merged.accountName = curated.accountName;
 		return merged;
 	});
 }
@@ -5108,6 +7714,12 @@ function linkedAbortController(parent) {
 	};
 }
 //#endregion
+//#region packages/orchestrator/workflows/view-contracts.ts
+var workflowRunViewSchema = z.object({
+	run: workflowRunSchema,
+	output: initialWorkflowOutputSchema.optional()
+}).strict();
+//#endregion
 //#region packages/orchestrator/workflows/host.ts
 var workflowIdSchema = z.string().regex(/^WF-[0-9]{3}$/);
 var runIdSchema = z.string().uuid();
@@ -5138,10 +7750,6 @@ var listWorkflowRunsRequestSchema = z.object({
 	contractVersion: z.literal("1.0"),
 	scope: scopeRefSchema.optional(),
 	limit: z.number().int().min(1).max(100).default(25)
-}).strict();
-var workflowRunViewSchema = z.object({
-	run: workflowRunSchema,
-	output: initialWorkflowOutputSchema.optional()
 }).strict();
 var workflowHostOperationSchema = z.enum([
 	"list",
@@ -5785,7 +8393,8 @@ async function openOutlookDraft(request, draftPath, host) {
 		await host.openExternal(createOutlookComposeUri(request));
 	} catch (fallbackError) {
 		const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-		throw new Error(`The email draft could not be opened: ${openError}. The default mail fallback also failed: ${fallbackMessage}`);
+		const openErrorDetail = openError.replace(/\s*\.?\s*$/, "");
+		throw new Error(`The email draft could not be opened: ${openErrorDetail}. The default mail fallback also failed: ${fallbackMessage}`, { cause: fallbackError });
 	}
 }
 function createOutlookDraftMessage(request) {
@@ -6308,7 +8917,7 @@ var reportPerformance = (event) => {
 var mcemConnector = new LocalPdfMcemGuidanceConnector(app.isPackaged ? resolve(process.resourcesPath, "docs/knowledge/MCEM Overview.pdf") : resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
 var portfolioPreferenceStore = new JsonFilePortfolioPreferenceStore(resolve(app.getPath("userData"), "portfolio-preferences.json"));
 var liveMsxConnector = dataMode === "sample" ? void 0 : new LiveMsxConnector(tokenProvider, fetch, void 0, reportPerformance, msxWriteMetadataFromEnvironment(process.env), portfolioPreferenceStore);
-var msxConnector = liveMsxConnector ?? new FixtureMsxConnector();
+var msxConnector = liveMsxConnector ?? createLocalStoreMsxConnector() ?? new FixtureMsxConnector();
 var foundryOpenAIClient = runtimeEnvironment ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry) : void 0;
 var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object.fromEntries([
 	"account-pulse",

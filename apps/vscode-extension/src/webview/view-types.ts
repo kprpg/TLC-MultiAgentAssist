@@ -144,3 +144,108 @@ export interface GuidanceHandoffView {
 }
 
 export type AgentCapability = 'account-pulse' | 'mcem-coach' | 'pursuit-executive' | 'risk-solution-play'
+
+// ---- Meeting capture view types ---------------------------------------------------------
+
+export type MeetingTypeView = 'customer' | 'internal'
+
+export interface MeetingTranscriptSummaryView {
+    id: string
+    subject: string
+    occurredAt: string
+    meetingType: MeetingTypeView
+    source: 'teams' | 'upload' | 'paste'
+    opportunityId?: string
+    opportunityName?: string
+    segmentCount: number
+}
+
+export interface MeetingTranscriptSegmentView {
+    segmentId: string
+    startMs?: number
+    endMs?: number
+    speaker?: string
+    speakerRole?: MeetingTypeView
+    text: string
+}
+
+export interface MeetingTranscriptView {
+    id: string
+    opportunityId?: string
+    meetingType: MeetingTypeView
+    title?: string
+    source: 'teams' | 'upload' | 'paste'
+    segments: MeetingTranscriptSegmentView[]
+}
+
+export interface MeetingSlotView {
+    slotId: string
+    label: string
+    mcemCriterion: string
+    targetKind: 'opportunity' | 'milestone' | 'new-milestone'
+    targetRecordId?: string
+    targetField: string
+    valueType: 'text' | 'money' | 'date' | 'optionset' | 'boolean' | 'percent'
+    displayBefore?: string
+    displayAfter: string
+    confidence: number
+    checkedByDefault: boolean
+    blocked: boolean
+    blockedReason?: string
+    sensitive: boolean
+    rationale: string
+    evidence: string[]
+}
+
+export interface MeetingNewMilestoneView {
+    tempId: string
+    name: string
+    milestoneDate?: string
+    ownerName?: string
+    commitment?: 'Uncommitted' | 'Committed'
+    confidence: number
+    checkedByDefault: boolean
+    evidence: string[]
+}
+
+export interface MeetingUnmappedSignalView {
+    label: string
+    text: string
+    mcemCriterion: string
+    evidence: string[]
+}
+
+export interface MeetingChangeSetProposalView {
+    changeSetId: string
+    transcriptId: string
+    opportunityId: string
+    meetingType: MeetingTypeView
+    slots: MeetingSlotView[]
+    newMilestones: MeetingNewMilestoneView[]
+    suggestedMilestoneIds: string[]
+    unmappedSignals: MeetingUnmappedSignalView[]
+    proposedAt: string
+}
+
+export interface MeetingChangeSetApprovalInput {
+    changeSetId: string
+    opportunityId: string
+    approvedSlotIds: string[]
+    approvedNewMilestoneTempIds: string[]
+    selectedMilestoneIds: string[]
+    reason: string
+}
+
+export interface MeetingInjectItemResultView {
+    id: string
+    kind: 'field' | 'new-milestone'
+    state: 'applied' | 'conflict' | 'failed' | 'skipped'
+    detail: string
+}
+
+export interface MeetingChangeSetResultView {
+    changeSetId: string
+    state: 'applied' | 'rolled-back'
+    items: MeetingInjectItemResultView[]
+    auditNote: string
+}
