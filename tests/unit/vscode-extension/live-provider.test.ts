@@ -4,6 +4,7 @@ import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
 import { createSampleWorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import type { AgentCapability } from '../../../packages/common/index.js'
 import { buildLiveDataProvider, buildLiveTaskAgents } from '../../../apps/vscode-extension/src/live-provider-core.js'
+import { buildFoundryMeetingExtractor } from '../../../apps/vscode-extension/src/live-provider.js'
 import { ExtensionMcemGuidanceConnector } from '../../../apps/vscode-extension/src/mcem-guidance.js'
 import type { ExtensionDataProvider } from '../../../apps/vscode-extension/src/data-provider.js'
 
@@ -32,6 +33,14 @@ async function firstOpportunity(provider: ExtensionDataProvider): Promise<{ acco
 }
 
 describe('live data provider (Desktop/Web parity)', () => {
+    it('keeps the offline meeting extractor unless Foundry is enabled', () => {
+        expect(buildFoundryMeetingExtractor({})).toBeUndefined()
+    })
+
+    it('builds the Foundry meeting extractor from checked-in configuration', () => {
+        expect(buildFoundryMeetingExtractor({ TLC_MEETING_EXTRACTOR: 'foundry' })).toBeTypeOf('function')
+    })
+
     it('reports live mode and the signed-in account', async () => {
         const provider = makeLiveProvider()
         expect(provider.mode).toBe('live')
