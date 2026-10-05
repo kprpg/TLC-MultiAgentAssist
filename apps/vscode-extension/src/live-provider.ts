@@ -8,7 +8,7 @@ import { foundryEnvironmentSchema } from '../../../packages/common/configuration
 import mcpServersJson from '../../../config/mcp.servers.json' with { type: 'json' }
 import mcpToolPolicyJson from '../../../config/mcp.tool-policy.json' with { type: 'json' }
 import dataverseEntityMapJson from '../../../config/dataverse.entity-map.json' with { type: 'json' }
-import foundryEnvironmentJson from '../../../config/foundry.environment.default.json' with { type: 'json' }
+import foundryEnvironmentJson from '../../../config/foundry.environment.json' with { type: 'json' }
 import { AzureCliCredential } from '@azure/identity'
 import { LiveMsxConnector, LiveMeetingCaptureConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
