@@ -5,6 +5,9 @@ the GitHub Releases page, and what is (and is not) required to run it. The exten
 the TLC MultiAgent Assist account-team operations and opportunity-guidance experience into
 VS Code.
 
+> Prefer to **build from source and install from the command line**? See the
+> [command-line build, install, and run guide](./VSCODE-EXTENSION-CLI.md).
+
 ## What you need
 
 Installing the extension requires only **VS Code** or **VS Code Insiders**, version

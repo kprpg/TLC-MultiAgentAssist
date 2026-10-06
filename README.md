@@ -5,6 +5,7 @@
 [![Desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/desktop-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/desktop-release.yml)
 [![Web release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/web-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/web-release.yml)
 [![VS Code extension release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/vscode-extension-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/vscode-extension-release.yml)
+[![Nightly VS Code extension release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly-vscode-extension.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly-vscode-extension.yml)
 
 TLC MultiAgent Assist is an account assistant that combines live MSX opportunity context with contextual guidance to help advance each opportunity. It ships as three surfaces from one codebase:
 
@@ -29,12 +30,12 @@ Requires **VS Code or VS Code Insiders 1.90.0 or later**. The extension is self-
 
 ### Install
 
-1. Open the [VS Code extension releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=ext-v) and expand **Assets**.
+1. Open the [VS Code extension releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=ext-v) and expand **Assets**. Stable builds and nightly **Pre-release** builds both appear here.
 2. Download `tlc-assist-vscode-<version>.vsix`. The companion `tlc-assist-vscode-mcp-config-<version>.zip` is optional.
 3. Install it from the Command Palette (`Ctrl+Shift+P`) with **Extensions: Install from VSIX...**, or run `code --install-extension tlc-assist-vscode-<version>.vsix --force`. Confirm the publisher-trust prompt on VS Code 1.97+.
 4. Run **Developer: Reload Window**, then open **TLC Assist** from the Activity Bar (or run **TLC: Open Assist**).
 
-`.vsix` installs are not auto-updated — re-install a newer `.vsix` to upgrade. Full walkthrough: [VS Code extension install guide](docs/user-guide/VSCODE-EXTENSION-INSTALL.md).
+`.vsix` installs are not auto-updated — re-install a newer `.vsix` to upgrade. Full walkthrough: [VS Code extension install guide](docs/user-guide/VSCODE-EXTENSION-INSTALL.md). To **build from source and install from the command line** instead, see the [command-line build, install, and run guide](docs/user-guide/VSCODE-EXTENSION-CLI.md).
 
 ### Modes and data store
 
@@ -51,7 +52,7 @@ Switch at runtime from the Command Palette: **TLC: Use Live Data (MSX/Dataverse)
 
 **Meeting capture (live mode):** on an opportunity's **Overview → Milestones** header, paste or upload a transcript. Signals for the milestones you select (commitment, risk) are written to the real milestone records; other signals and recommended next steps are captured into a dated note on the opportunity's comments. Writes are all-or-none (validate → apply → compensate). Microsoft Graph meeting acquisition is not wired yet.
 
-**Run from source (F5):** [.vscode/launch.json](.vscode/launch.json) provides Extension Development Host configurations — fixtures, SQLite test store, SQLite + Foundry extraction, and Live MSX/Dataverse — that set `TLC_MODE`/`TLC_DATA_STORE` (and the Foundry variables) at startup. After rebuilding, run **Developer: Reload Window** in the Extension Development Host so the new build loads. Build, package, and release steps: [VS Code extension runbook](docs/runbooks/vscode-extension.md).
+**Run from source (F5):** [.vscode/launch.json](.vscode/launch.json) provides Extension Development Host configurations — fixtures, SQLite test store, SQLite + Foundry extraction, and Live MSX/Dataverse. Full command-line build, install, and run steps are in the [command-line guide](docs/user-guide/VSCODE-EXTENSION-CLI.md); packaging and release details are in the [VS Code extension runbook](docs/runbooks/vscode-extension.md).
 
 ## Desktop app
 
@@ -123,7 +124,7 @@ npm install
 | Desktop (package) | `npm run desktop:package` | Windows artifacts are written to `release/`. |
 | Web (sample) | `npm run web:start` | See [Web application](#web-application). |
 | Web (live) | `az login` then `npm run web:start:live` | Uses the private Foundry environment file plus an Azure CLI sign-in. |
-| VS Code extension | **F5** in VS Code | See the launch configs under [VS Code extension](#vs-code-extension). |
+| VS Code extension | **F5** in VS Code | See the launch configs under [VS Code extension](#vs-code-extension), or the [command-line build/install/run guide](docs/user-guide/VSCODE-EXTENSION-CLI.md). |
 
 Packaged desktop releases seed the non-secret shared Foundry configuration automatically and use Azure CLI sign-in (run `az login` first). The private developer file above stays ignored and can override the shared default. Downloaded artifacts may need to be unblocked before launch (right-click → **Properties** → **Unblock**).
 
@@ -145,6 +146,7 @@ The `ext-v*` tag must match the extension `version` in `apps/vscode-extension/pa
 - [End-user guide](docs/user-guide/USER-GUIDE.md)
 - [Frequently asked questions](docs/FAQ.md)
 - [VS Code extension install (end user)](docs/user-guide/VSCODE-EXTENSION-INSTALL.md)
+- [VS Code extension — command-line build, install, and run](docs/user-guide/VSCODE-EXTENSION-CLI.md)
 - [Desktop setup and troubleshooting](docs/runbooks/desktop-app.md)
 - [Web setup and hosting](docs/runbooks/web-app.md)
 - [VS Code extension build, package, and deploy](docs/runbooks/vscode-extension.md)
