@@ -16,14 +16,19 @@ TLC MultiAgent Assist is an account assistant that combines live MSX opportunity
 
 ## Install the VS Code Extension
 
-TLC Assist is also available as a VS Code extension. The only requirement to install is **VS Code (or VS Code Insiders) 1.90.0 or later** plus the released `.vsix`; it is self-contained (no Node.js, npm, or native binaries) and starts in sample mode with no sign-in or network.
+TLC Assist is available as a VS Code extension. The only requirement to install is **VS Code (or VS Code Insiders) 1.90.0 or later** plus the released `.vsix`; it is self-contained (no Node.js, npm, or native binaries) and starts in sample mode with no sign-in or network.
 
 1. Open the [VS Code extension releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=ext-v) and expand **Assets**.
 2. Download `tlc-assist-vscode-<version>.vsix`. The companion `tlc-assist-vscode-mcp-config-<version>.zip` (MCP configuration and reference files) is optional — the extension already embeds its MCP registry and tool policy.
 3. In VS Code, run **Extensions: Install from VSIX...** from the Command Palette (`Ctrl+Shift+P`) and choose the file, or from a terminal run `code --install-extension tlc-assist-vscode-<version>.vsix --force`. Confirm the publisher-trust prompt on VS Code 1.97+.
 4. Run **Developer: Reload Window**, then select the **TLC Assist** icon in the Activity Bar or run **TLC: Open Assist**.
 
-Sample mode needs nothing else. Live mode additionally requires a corporate Microsoft identity (VS Code's built-in Microsoft sign-in) and, for the Microsoft Foundry agents, the Azure CLI (`az login`). Extensions installed from a `.vsix` are not auto-updated — re-install a newer `.vsix` to upgrade. See the [complete VS Code extension install guide](docs/user-guide/VSCODE-EXTENSION-INSTALL.md) for details and the optional MCP setup.
+**Sample mode** needs nothing else. 
+
+**Live mode** additionally requires a corporate Microsoft identity (VS Code's built-in Microsoft sign-in) and, for the Microsoft Foundry agents, the Azure CLI (`az login`). 
+For using Live Data, open Control Panel on code by using Ctrl+Shift+P and then selecting "TLC Assist: TLC Use Live Data (MSX/Dataverse)" and login using corp credentials.
+
+Extensions installed from a `.vsix` are not auto-updated — re-install a newer `.vsix` to upgrade. See the [complete VS Code extension install guide](docs/user-guide/VSCODE-EXTENSION-INSTALL.md) for details and the optional MCP setup.
 
 ### Running the extension (sample, SQLite test store, or live)
 
