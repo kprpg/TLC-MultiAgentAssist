@@ -9,7 +9,7 @@
   "dependencies": {
     "@azure/ai-projects": "^2.5.0",
     "@azure/identity": "^4.13.2",
-    "@modelcontextprotocol/sdk": "1.29.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "docx": "^9.7.1",
     "pdf-parse": "^2.4.5",
     "react-markdown": "^10.1.0",
