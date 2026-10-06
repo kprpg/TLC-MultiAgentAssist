@@ -280,6 +280,8 @@ Each milestone row shows:
 - Milestone estimated date
 - Estimated change in monthly usage (in the opportunity’s currency)
 
+Portfolio and Discovery lists omit milestones with a `Cancelled` or `Closed` status and milestones whose estimated date is strictly earlier than the calendar date four months ago. Milestones dated exactly four months ago and milestones without an estimated date remain visible. Omitted milestones remain available to grounded internal evaluation and agent guidance as historical evidence.
+
 ### 5.1 Sorting milestones
 
 The sort icon in the milestone tree header opens a menu with:

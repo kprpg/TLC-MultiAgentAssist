@@ -47,6 +47,7 @@ import { sortMilestones, type MilestoneSort } from './milestone-sort.js'
 import { workflowGuidanceCapability } from './workflow-guidance.js'
 import { DiscoveryControls, DiscoverySortHeader } from '../../../shared/discovery-controls.js'
 import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportunities, toggleDiscoverySort, type DiscoveryFilters, type DiscoverySort } from '../../../shared/discovery.js'
+import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 
 type Shell = 'desktop' | 'web'
 type WorkspaceView = 'accounts' | 'workflows' | 'discover'
@@ -280,8 +281,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const boardViewportRef = useRef<HTMLDivElement | null>(null)
   const milestonePanelRef = useRef<HTMLDivElement | null>(null)
   const sortedOpportunities = sortOpportunities(opportunities, opportunitySort, opportunitySortDirection)
-  const sortedMilestones = sortMilestones(milestones, milestoneSort, milestoneSortDirection)
+  const sortedMilestones = sortMilestones(filterVisibleMilestones(milestones), milestoneSort, milestoneSortDirection)
   const visibleDiscoverResults = sortDiscoveryOpportunities(filterDiscoveryOpportunities(discoverResults, discoverFilters), discoverSort)
+  const displayedDiscoverMilestones = (opportunityId: string): Milestone[] =>
+    filterVisibleMilestones(discoverMilestones[opportunityId] ?? [])
 
   useEffect(() => {
     if (centerTab !== 'stages') return
@@ -1713,8 +1716,8 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                 {expandedDiscoverId === item.id && <tr className="discover-milestones-row" aria-label={`${item.name} milestones`}>
                   <td colSpan={8}>
                     {discoverMilestonesLoadingId === item.id && <Spinner size="tiny" label="Loading milestones…" />}
-                    {discoverMilestonesLoadingId !== item.id && (discoverMilestones[item.id]?.length ?? 0) === 0 && <span className="muted">No milestones found for this opportunity.</span>}
-                    {(discoverMilestones[item.id] ?? []).map((milestone) => <div key={milestone.id} className="discover-milestone-item">
+                    {discoverMilestonesLoadingId !== item.id && displayedDiscoverMilestones(item.id).length === 0 && <span className="muted">No milestones found for this opportunity.</span>}
+                    {displayedDiscoverMilestones(item.id).map((milestone) => <div key={milestone.id} className="discover-milestone-item">
                       <Button
                         size="small"
                         appearance={milestone.onMilestoneTeam ? 'subtle' : 'primary'}
