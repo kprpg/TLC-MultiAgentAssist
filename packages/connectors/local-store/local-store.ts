@@ -37,6 +37,8 @@ export class LocalStore {
       ['contact', seed.contacts],
       ['stakeholder', seed.stakeholders],
       ['opportunity_dealteam', seed.dealTeam],
+      ['milestone_team_member', seed.milestoneTeam],
+      ['milestone_activity', seed.milestoneActivities],
       ['discoverable_opportunity', seed.discoverable],
       ['activity', seed.activities],
       ['transcript', seed.transcripts],

@@ -1,14 +1,19 @@
 import {
   accountSearchRequestSchema,
+  createMilestoneActivityRequestSchema,
   type Account,
   type AccountCandidate,
   type AccountListOptions,
   type AccountSearchRequest,
   type AccountVisibility,
+  type CreateMilestoneActivityRequest,
   type DealTeamJoinResult,
   type DealTeamLeaveResult,
   type DiscoverableOpportunity,
   type Milestone,
+  type MilestoneActivity,
+  type MilestoneTeamJoinResult,
+  type MilestoneTeamLeaveResult,
   type MilestoneUpdate,
   type Opportunity,
   type OpportunityUpdate,
@@ -28,7 +33,9 @@ export { LiveMeetingCaptureConnector, type MeetingExtractorFn as LiveMeetingExtr
 const accounts: Account[] = [
   { id: 'account-contoso', name: 'Contoso Energy', segment: 'Strategic', tpid: '1000001' },
   { id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise', tpid: '1000002' },
-  { id: 'account-northwind', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003' }
+  { id: 'account-northwind', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003' },
+  { id: 'account-zava', name: 'Zava Inc.', segment: 'Strategic', tpid: '1000004' },
+  { id: 'account-adventureworks', name: 'Adventure Works Cycles', segment: 'Enterprise', tpid: '1000005' }
 ]
 
 const opportunities: Opportunity[] = [
@@ -140,6 +147,35 @@ const opportunities: Opportunity[] = [
     value: 5250000,
     currency: 'USD',
     closeDate: '2026-11-13'
+  },
+  {
+    id: 'opp-zava-ai-platform',
+    accountId: 'account-zava',
+    name: 'Zava AI platform foundation',
+    owner: 'Avery Johnson',
+    recordedStage: 2,
+    value: 2900000,
+    currency: 'USD',
+    closeDate: '2027-04-02'
+  },
+  {
+    id: 'opp-zava-migration',
+    accountId: 'account-zava',
+    name: 'Zava datacenter exit',
+    recordedStage: 1,
+    value: 1600000,
+    currency: 'USD',
+    closeDate: '2027-05-28'
+  },
+  {
+    id: 'opp-aw-commerce',
+    accountId: 'account-adventureworks',
+    name: 'Adventure Works commerce replatform',
+    owner: 'Morgan Diaz',
+    recordedStage: 3,
+    value: 3100000,
+    currency: 'USD',
+    closeDate: '2027-01-08'
   }
 ]
 
@@ -237,6 +273,27 @@ const observationsByOpportunity: Record<string, OpportunityContext['observations
     { criterionId: 'technical-validation', status: 'met', detail: 'The production pilot met quality, safety, accessibility, support, and integration criteria.' },
     { criterionId: 'business-case', status: 'met', detail: 'Finance approved the deployment business case and full rollout funding.' },
     { criterionId: 'next-step', status: 'met', detail: 'The first deployment wave has a customer-approved date, scope, and accountable owners.' }
+  ],
+  'opp-zava-ai-platform': [
+    { criterionId: 'customer-outcome', status: 'met', detail: 'The customer agreed targets for model-deployment velocity and governed AI adoption.' },
+    { criterionId: 'decision-team', status: 'partial', detail: 'The platform sponsor is engaged, but procurement and security owners are not yet confirmed.' },
+    { criterionId: 'technical-validation', status: 'partial', detail: 'A reference architecture is drafted; a customer validation workshop is not yet booked.' },
+    { criterionId: 'business-case', status: 'partial', detail: 'A value hypothesis exists without an approved quantified business case.' },
+    { criterionId: 'next-step', status: 'met', detail: 'A foundation design review is scheduled with named owners.' }
+  ],
+  'opp-zava-migration': [
+    { criterionId: 'customer-outcome', status: 'partial', detail: 'Datacenter exit is the stated goal, but cost and timeline baselines are not recorded.' },
+    { criterionId: 'decision-team', status: 'missing', detail: 'The economic buyer and migration owner are not yet identified.' },
+    { criterionId: 'technical-validation', status: 'met', detail: 'An initial migration assessment of the on-premises estate is complete.' },
+    { criterionId: 'business-case', status: 'missing', detail: 'No quantified migration business case is attached to the opportunity.' },
+    { criterionId: 'next-step', status: 'partial', detail: 'A migration planning session is proposed without a confirmed customer date.' }
+  ],
+  'opp-aw-commerce': [
+    { criterionId: 'customer-outcome', status: 'met', detail: 'The customer targets fewer peak-season outages and faster checkout performance.' },
+    { criterionId: 'decision-team', status: 'met', detail: 'The economic buyer, engineering lead, and procurement path are engaged.' },
+    { criterionId: 'technical-validation', status: 'met', detail: 'An approved proof of concept validated the AKS microservices approach.' },
+    { criterionId: 'business-case', status: 'partial', detail: 'A draft business case exists; final finance approval is pending.' },
+    { criterionId: 'next-step', status: 'met', detail: 'A replatform design and delivery plan has a customer-approved date and owners.' }
   ]
 }
 
@@ -410,23 +467,78 @@ const discoverableOpportunities: DiscoverableOpportunity[] = [
   }
 ]
 
+// Each discoverable opportunity gets a milestone so a user can expand it in Discovery and join a
+// milestone team for an opportunity they have never been on the Deal Team for.
+const discoverableMilestonesByOpportunity: Record<string, Milestone[]> = Object.fromEntries(
+  discoverableOpportunities.map((opportunity) => [opportunity.id, [{
+    id: `${opportunity.id}-milestone`,
+    opportunityId: opportunity.id,
+    name: 'Customer outcome validation',
+    status: 'On Track',
+    targetDate: opportunity.closeDate,
+    owner: 'Account team',
+    commitment: 'Best case'
+  }]])
+)
+
 export class FixtureMsxConnector implements MsxConnector {
   private readonly opportunities = structuredClone(opportunities)
   private readonly milestonesByOpportunity = structuredClone(milestonesByOpportunity)
+  private readonly discoverableMilestonesByOpportunity = structuredClone(discoverableMilestonesByOpportunity)
   private readonly discoverable = structuredClone(discoverableOpportunities)
   private readonly dealTeamOpportunityIds = new Set(this.opportunities.map((opportunity) => opportunity.id))
+  // A representative subset of milestones the signed-in user is on, so both the "+" (join)
+  // and "-" (leave) states are visible in sample mode. Independent of Deal Team membership.
+  private readonly milestoneTeamIds = new Set(
+    this.opportunities
+      .filter((_opportunity, index) => index % 2 === 0)
+      .flatMap((opportunity) => (this.milestonesByOpportunity[opportunity.id] ?? []).map((milestone) => milestone.id))
+  )
   private readonly manualAccountIds = new Set<string>()
   private readonly hiddenAccountIds = new Set<string>()
+  // In-memory milestone activities (Tasks) keyed by milestone id. Seeded so the list is non-empty.
+  private readonly activitiesByMilestone: Record<string, MilestoneActivity[]> = {
+    'opp-grid-modernization-milestone': [{
+      id: 'act-grid-ms-1', milestoneId: 'opp-grid-modernization-milestone', opportunityId: 'opp-grid-modernization',
+      subject: 'Architecture design session', activityType: 'task', status: 'Open', priority: 'Normal',
+      taskCategory: 'Architecture Design Session', due: '2026-10-20', owner: 'Account team', createdBy: 'Account team'
+    }]
+  }
+  private activitySequence = 0
+
+  /** Opportunity ids in the portfolio: Deal Team membership OR milestone-team membership. */
+  private portfolioOpportunityIds(): Set<string> {
+    const ids = new Set(this.dealTeamOpportunityIds)
+    for (const [opportunityId, milestones] of Object.entries(this.milestonesByOpportunity)) {
+      if (milestones.some((milestone) => this.milestoneTeamIds.has(milestone.id))) ids.add(opportunityId)
+    }
+    return ids
+  }
+
+  /**
+   * Promotes a discoverable opportunity into the portfolio pool (without Deal Team membership) so
+   * that milestone-team membership can place it in the portfolio union. Idempotent.
+   */
+  private promoteDiscoverableOpportunity(opportunityId: string): void {
+    if (this.opportunities.some((candidate) => candidate.id === opportunityId)) return
+    const seed = this.discoverable.find((candidate) => candidate.id === opportunityId)
+    if (!seed) return
+    const { domain, accountName, solutionArea, technicalCapability, onDealTeam, ...opportunity } = seed
+    void domain; void accountName; void solutionArea; void technicalCapability; void onDealTeam
+    this.opportunities.push(structuredClone(opportunity))
+    this.milestonesByOpportunity[opportunityId] = structuredClone(this.discoverableMilestonesByOpportunity[opportunityId] ?? [])
+  }
 
   async listAccounts(options: AccountListOptions = {}): Promise<Account[]> {
-    const dealTeamAccountIds = new Set(
+    const portfolioIds = this.portfolioOpportunityIds()
+    const portfolioAccountIds = new Set(
       this.opportunities
-        .filter((opportunity) => this.dealTeamOpportunityIds.has(opportunity.id))
+        .filter((opportunity) => portfolioIds.has(opportunity.id))
         .map((opportunity) => opportunity.accountId)
     )
     return accounts
-      .filter((account) => dealTeamAccountIds.has(account.id) || this.manualAccountIds.has(account.id) || this.hiddenAccountIds.has(account.id))
-      .map((account) => this.mapAccount(account, dealTeamAccountIds))
+      .filter((account) => portfolioAccountIds.has(account.id) || this.manualAccountIds.has(account.id) || this.hiddenAccountIds.has(account.id))
+      .map((account) => this.mapAccount(account, portfolioAccountIds))
       .filter((account) => options.includeHidden || account.visibility !== 'hidden')
       .map((account) => structuredClone(account))
   }
@@ -463,23 +575,25 @@ export class FixtureMsxConnector implements MsxConnector {
     if (!account) throw new Error(`Unknown sample account: ${accountId}`)
     if (visibility === 'hidden') this.hiddenAccountIds.add(accountId)
     else this.hiddenAccountIds.delete(accountId)
-    const dealTeamAccountIds = new Set(
+    const portfolioAccountIds = new Set(
       this.opportunities
-        .filter((opportunity) => this.dealTeamOpportunityIds.has(opportunity.id))
+        .filter((opportunity) => this.portfolioOpportunityIds().has(opportunity.id))
         .map((opportunity) => opportunity.accountId)
     )
-    return structuredClone(this.mapAccount(account, dealTeamAccountIds))
+    return structuredClone(this.mapAccount(account, portfolioAccountIds))
   }
 
   async listOpportunities(accountId: string): Promise<Opportunity[]> {
     if (this.hiddenAccountIds.has(accountId)) return []
+    const portfolioIds = this.portfolioOpportunityIds()
     return structuredClone(this.opportunities.filter((opportunity) =>
-      opportunity.accountId === accountId && this.dealTeamOpportunityIds.has(opportunity.id)))
+      opportunity.accountId === accountId && portfolioIds.has(opportunity.id)))
   }
 
   async listMilestones(opportunityId: string): Promise<Milestone[]> {
     this.assertOpportunityAccess(opportunityId)
     return structuredClone(this.milestonesByOpportunity[opportunityId] ?? [])
+      .map((milestone) => ({ ...milestone, onMilestoneTeam: this.milestoneTeamIds.has(milestone.id) }))
   }
 
   async updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone> {
@@ -573,9 +687,69 @@ export class FixtureMsxConnector implements MsxConnector {
     return { opportunityId, onDealTeam: false, alreadyAbsent }
   }
 
+  async joinMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamJoinResult> {
+    const milestone = (this.milestonesByOpportunity[opportunityId] ?? this.discoverableMilestonesByOpportunity[opportunityId])
+      ?.find((candidate) => candidate.id === milestoneId)
+    if (!milestone) throw new Error(`Unknown sample milestone: ${milestoneId}`)
+    // Joining a milestone for a not-yet-portfolio opportunity brings it into the portfolio union.
+    this.promoteDiscoverableOpportunity(opportunityId)
+    const alreadyMember = this.milestoneTeamIds.has(milestoneId)
+    this.milestoneTeamIds.add(milestoneId)
+    return { opportunityId, milestoneId, onMilestoneTeam: true, alreadyMember }
+  }
+
+  async leaveMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamLeaveResult> {
+    const milestone = (this.milestonesByOpportunity[opportunityId] ?? this.discoverableMilestonesByOpportunity[opportunityId])
+      ?.find((candidate) => candidate.id === milestoneId)
+    if (!milestone) throw new Error(`Unknown sample milestone: ${milestoneId}`)
+    const alreadyAbsent = !this.milestoneTeamIds.has(milestoneId)
+    this.milestoneTeamIds.delete(milestoneId)
+    return { opportunityId, milestoneId, onMilestoneTeam: false, alreadyAbsent }
+  }
+
+  async listDiscoverableMilestones(opportunityId: string): Promise<Milestone[]> {
+    const milestones = this.milestonesByOpportunity[opportunityId] ?? this.discoverableMilestonesByOpportunity[opportunityId]
+    if (!milestones) throw new Error(`Unknown sample opportunity: ${opportunityId}`)
+    return structuredClone(milestones).map((milestone) => ({ ...milestone, onMilestoneTeam: this.milestoneTeamIds.has(milestone.id) }))
+  }
+
+  private assertSampleMilestone(opportunityId: string, milestoneId: string): void {
+    const milestone = (this.milestonesByOpportunity[opportunityId] ?? this.discoverableMilestonesByOpportunity[opportunityId])
+      ?.find((candidate) => candidate.id === milestoneId)
+    if (!milestone) throw new Error(`Unknown sample milestone: ${milestoneId}`)
+  }
+
+  async listMilestoneActivities(opportunityId: string, milestoneId: string): Promise<MilestoneActivity[]> {
+    this.assertSampleMilestone(opportunityId, milestoneId)
+    return structuredClone(this.activitiesByMilestone[milestoneId] ?? [])
+  }
+
+  async createMilestoneActivity(opportunityId: string, milestoneId: string, input: CreateMilestoneActivityRequest): Promise<MilestoneActivity> {
+    this.assertSampleMilestone(opportunityId, milestoneId)
+    const request = createMilestoneActivityRequestSchema.parse(input)
+    const activity: MilestoneActivity = {
+      id: `act-sample-${++this.activitySequence}`,
+      milestoneId,
+      opportunityId,
+      subject: request.subject,
+      activityType: 'task',
+      status: 'Open',
+      priority: request.priority,
+      owner: 'Account team',
+      createdBy: 'Account team',
+      createdOn: new Date().toISOString(),
+      ...(request.taskCategory ? { taskCategory: request.taskCategory } : {}),
+      ...(request.due ? { due: request.due } : {}),
+      ...(request.durationMinutes !== undefined ? { durationMinutes: request.durationMinutes } : {}),
+      ...(request.description ? { description: request.description } : {})
+    }
+    this.activitiesByMilestone[milestoneId] = [activity, ...(this.activitiesByMilestone[milestoneId] ?? [])]
+    return structuredClone(activity)
+  }
+
   private assertOpportunityAccess(opportunityId: string): void {
     const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId)
-    if (!opportunity || !this.dealTeamOpportunityIds.has(opportunityId) || this.hiddenAccountIds.has(opportunity.accountId)) {
+    if (!opportunity || !this.portfolioOpportunityIds().has(opportunityId) || this.hiddenAccountIds.has(opportunity.accountId)) {
       throw new Error('The opportunity is not in the active sample portfolio.')
     }
   }

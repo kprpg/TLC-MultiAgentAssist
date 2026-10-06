@@ -22,7 +22,9 @@ describe('portfolio account curation', () => {
 
     expect((await connector.listAccounts()).map((account) => account.id)).toEqual([
       'account-contoso',
-      'account-fabrikam'
+      'account-fabrikam',
+      'account-zava',
+      'account-adventureworks'
     ])
 
     const candidates = await connector.searchAccounts({ matchBy: 'name', query: 'Northwind' })

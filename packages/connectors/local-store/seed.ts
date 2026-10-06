@@ -69,7 +69,11 @@ export const seedOpportunities: readonly Row[] = [
   { id: 'opp-zava-ai-platform', account_id: 'account-zava', name: 'Zava AI platform foundation', owner_id: 'user-avery', recorded_stage: 2, estimated_value: 2_900_000, currency: 'USD', estimated_close_date: '2027-04-02', description: null, est_completion_date: null, consumption_recurring: 27_000, solution_area: 'Cloud and AI Platforms', technical_capability: 'Azure AI and ML', budget_amount: 2_500_000, budget_status: 0, purchase_timeframe: 3, timeline: 3, purchase_process: 2, decision_maker: 0, need: 1, customer_need: 'Stand up an enterprise AI platform.', customer_pain_points: 'No governed AI foundation.', current_situation: null, proposed_solution: null, final_decision_date: null, identify_competitors: 0, identify_customer_contacts: 0, close_probability: 40, opportunity_rating: 2, qualification_comments: null, primary_competitor_id: null, other_competitor: null, forecast_category: 100000002 },
   { id: 'opp-zava-migration', account_id: 'account-zava', name: 'Zava datacenter exit', owner_id: null, recorded_stage: 1, estimated_value: 1_600_000, currency: 'USD', estimated_close_date: '2027-05-28', description: null, est_completion_date: null, consumption_recurring: null, solution_area: 'Infrastructure', technical_capability: 'Migration', budget_amount: null, budget_status: null, purchase_timeframe: null, timeline: null, purchase_process: null, decision_maker: null, need: null, customer_need: null, customer_pain_points: null, current_situation: null, proposed_solution: null, final_decision_date: null, identify_competitors: null, identify_customer_contacts: null, close_probability: 10, opportunity_rating: 3, qualification_comments: null, primary_competitor_id: null, other_competitor: null, forecast_category: 100000001 },
   // Adventure Works
-  { id: 'opp-aw-commerce', account_id: 'account-adventureworks', name: 'Adventure Works commerce replatform', owner_id: 'user-morgan', recorded_stage: 3, estimated_value: 3_100_000, currency: 'USD', estimated_close_date: '2027-01-08', description: 'MD 8/15/2026 POC approved.', est_completion_date: '2027-05-01', consumption_recurring: 40_000, solution_area: 'Digital and App Innovation', technical_capability: 'Cloud Native Apps', budget_amount: 3_000_000, budget_status: 1, purchase_timeframe: 1, timeline: 1, purchase_process: 1, decision_maker: 1, need: 0, customer_need: 'Replatform e-commerce.', customer_pain_points: 'Peak-season outages.', current_situation: 'Monolith on VMs.', proposed_solution: 'AKS microservices.', final_decision_date: '2026-12-20', identify_competitors: 1, identify_customer_contacts: 1, close_probability: 65, opportunity_rating: 1, qualification_comments: null, primary_competitor_id: 'competitor-aws', other_competitor: null, forecast_category: 100000003 }
+  { id: 'opp-aw-commerce', account_id: 'account-adventureworks', name: 'Adventure Works commerce replatform', owner_id: 'user-morgan', recorded_stage: 3, estimated_value: 3_100_000, currency: 'USD', estimated_close_date: '2027-01-08', description: 'MD 8/15/2026 POC approved.', est_completion_date: '2027-05-01', consumption_recurring: 40_000, solution_area: 'Digital and App Innovation', technical_capability: 'Cloud Native Apps', budget_amount: 3_000_000, budget_status: 1, purchase_timeframe: 1, timeline: 1, purchase_process: 1, decision_maker: 1, need: 0, customer_need: 'Replatform e-commerce.', customer_pain_points: 'Peak-season outages.', current_situation: 'Monolith on VMs.', proposed_solution: 'AKS microservices.', final_decision_date: '2026-12-20', identify_competitors: 1, identify_customer_contacts: 1, close_probability: 65, opportunity_rating: 1, qualification_comments: null, primary_competitor_id: 'competitor-aws', other_competitor: null, forecast_category: 100000003 },
+  // Showcase: milestone-team-only (NOT on the Deal Team, but a milestone membership keeps it in the Portfolio).
+  { id: 'opp-ms-only-showcase', account_id: 'account-contoso', name: 'Milestone-only workstream (no Deal Team)', owner_id: 'user-avery', recorded_stage: 2, estimated_value: 1_350_000, currency: 'USD', estimated_close_date: '2027-03-30', description: null, est_completion_date: null, consumption_recurring: 12_000, solution_area: 'Cloud and AI Platforms', technical_capability: 'Analytics', budget_amount: null, budget_status: null, purchase_timeframe: null, timeline: null, purchase_process: null, decision_maker: null, need: null, customer_need: null, customer_pain_points: null, current_situation: null, proposed_solution: null, final_decision_date: null, identify_competitors: null, identify_customer_contacts: null, close_probability: 40, opportunity_rating: 2, qualification_comments: null, primary_competitor_id: null, other_competitor: null, forecast_category: 100000002 },
+  // Showcase: greenfield discovery candidate. Present in the opportunity table (so it can enter the Portfolio on milestone join) and in the discovery catalog, but with NO Deal Team and NO milestone membership — the user expands it in Discovery and joins its milestone team.
+  { id: 'disc-contoso-greenfield', account_id: 'account-contoso', name: 'Greenfield AI expansion (join a milestone in Discovery)', owner_id: null, recorded_stage: 2, estimated_value: 2_050_000, currency: 'USD', estimated_close_date: '2027-04-18', description: null, est_completion_date: null, consumption_recurring: null, solution_area: 'Cloud and AI Platforms', technical_capability: 'Azure AI and ML', budget_amount: null, budget_status: null, purchase_timeframe: null, timeline: null, purchase_process: null, decision_maker: null, need: null, customer_need: null, customer_pain_points: null, current_situation: null, proposed_solution: null, final_decision_date: null, identify_competitors: null, identify_customer_contacts: null, close_probability: 30, opportunity_rating: 2, qualification_comments: null, primary_competitor_id: null, other_competitor: null, forecast_category: 100000002 }
 ]
 
 const UNCOMMITTED = 861980000
@@ -103,7 +107,11 @@ export const seedMilestones: readonly Row[] = [
   { id: 'ms-zava-assess', opportunity_id: 'opp-zava-migration', name: 'Migration assessment', status: 861980000, milestone_date: null, owner_id: null, commitment: UNCOMMITTED, monthly_use: null, risk_details: null, forecast_comments: null, conversation: null, customer_budget_approved: null },
   // opp-aw-commerce (at risk + on track)
   { id: 'ms-aw-poc', opportunity_id: 'opp-aw-commerce', name: 'POC sign-off', status: 861980003, milestone_date: '2026-08-15', owner_id: 'user-morgan', commitment: COMMITTED, monthly_use: 3300, risk_details: null, forecast_comments: null, conversation: null, customer_budget_approved: 606820000 },
-  { id: 'ms-aw-scale', opportunity_id: 'opp-aw-commerce', name: 'Scale readiness', status: 861980000, milestone_date: '2026-12-15', owner_id: 'user-morgan', commitment: COMMITTED, monthly_use: 3300, risk_details: null, forecast_comments: null, conversation: null, customer_budget_approved: 606820000 }
+  { id: 'ms-aw-scale', opportunity_id: 'opp-aw-commerce', name: 'Scale readiness', status: 861980000, milestone_date: '2026-12-15', owner_id: 'user-morgan', commitment: COMMITTED, monthly_use: 3300, risk_details: null, forecast_comments: null, conversation: null, customer_budget_approved: 606820000 },
+  // Showcase: milestone-team-only opportunity — the user is on this milestone team (seedMilestoneTeam) but not the Deal Team.
+  { id: 'ms-only-review', opportunity_id: 'opp-ms-only-showcase', name: 'Executive alignment review', status: 861980000, milestone_date: '2027-01-20', owner_id: 'user-avery', commitment: COMMITTED, monthly_use: 1200, risk_details: null, forecast_comments: null, conversation: null, customer_budget_approved: 606820000 },
+  // Showcase: greenfield discovery milestone — no membership, so the user can join it from Discovery.
+  { id: 'ms-greenfield-outcome', opportunity_id: 'disc-contoso-greenfield', name: 'Customer outcome validation', status: 861980000, milestone_date: '2027-02-10', owner_id: null, commitment: UNCOMMITTED, monthly_use: null, risk_details: null, forecast_comments: null, conversation: null, customer_budget_approved: null }
 ]
 
 export const seedContacts: readonly Row[] = [
@@ -126,11 +134,40 @@ export const seedStakeholders: readonly Row[] = [
   { id: 'stk-aw-vp', opportunity_id: 'opp-aw-commerce', name: 'Liam OBrien', contact_id: 'contact-aw-vp', job_role: 'VP Engineering', role_optionset: 861980002, stakeholder_role: 606820001, relationship_level: 606820001, linkedin_url: null }
 ]
 
-/** The sample user is on the deal team for every seeded opportunity. */
-export const seedDealTeam: readonly Row[] = seedOpportunities.map((opportunity) => ({
-  opportunity_id: String(opportunity['id']),
-  systemuser_id: SAMPLE_USER_ID
-}))
+/**
+ * The sample user is on the Deal Team for every seeded opportunity EXCEPT the showcase opportunities:
+ * `opp-ms-only-showcase` (milestone-team-only → portfolio union without Deal Team) and
+ * `disc-contoso-greenfield` (a Discovery candidate the user joins via a milestone, not the Deal Team).
+ */
+export const DEAL_TEAM_EXCLUDED_OPPORTUNITY_IDS: ReadonlySet<string> = new Set([
+  'opp-ms-only-showcase',
+  'disc-contoso-greenfield'
+])
+
+export const seedDealTeam: readonly Row[] = seedOpportunities
+  .filter((opportunity) => !DEAL_TEAM_EXCLUDED_OPPORTUNITY_IDS.has(String(opportunity['id'])))
+  .map((opportunity) => ({
+    opportunity_id: String(opportunity['id']),
+    systemuser_id: SAMPLE_USER_ID
+  }))
+
+/**
+ * The sample user is on the milestone team for a representative subset of milestones, so both
+ * the join ("+") and leave ("-") states are visible in the SQLite sample store. Independent of
+ * Deal Team membership. `ms-only-review` belongs to an opportunity the user is NOT on the Deal Team
+ * for, so that opportunity appears in the Portfolio solely through milestone-team membership.
+ */
+export const seedMilestoneTeam: readonly Row[] = (['ms-grid-outcome', 'ms-grid-technical', 'ms-ai-poc', 'ms-uc-design', 'ms-only-review'] as const)
+  .map((milestoneId) => {
+    const milestone = seedMilestones.find((candidate) => candidate['id'] === milestoneId)!
+    return { milestone_id: milestoneId, systemuser_id: SAMPLE_USER_ID, opportunity_id: String(milestone['opportunity_id']) }
+  })
+
+/** A couple of Activities (Tasks) regarding milestones, so the Activities list is non-empty in the SQLite store. */
+export const seedMilestoneActivities: readonly Row[] = [
+  { id: 'act-grid-outcome-1', milestone_id: 'ms-grid-outcome', opportunity_id: 'opp-grid-modernization', subject: 'Architecture design session', activity_type: 'task', status: 'Open', priority: 'Normal', task_category: 'Architecture Design Session', due: '2026-07-10', duration_minutes: 60, description: 'Whiteboard the target data platform.', owner_id: SAMPLE_USER_ID, created_by: SAMPLE_USER_ID, created_on: '2026-06-20T17:00:00.000Z' },
+  { id: 'act-grid-technical-1', milestone_id: 'ms-grid-technical', opportunity_id: 'opp-grid-modernization', subject: 'Technical validation workshop prep', activity_type: 'task', status: 'Completed', priority: 'High', task_category: 'Technical Workshop', due: '2026-09-15', duration_minutes: 30, description: null, owner_id: SAMPLE_USER_ID, created_by: SAMPLE_USER_ID, created_on: '2026-09-01T17:00:00.000Z' }
+]
 
 export const seedOptionValues: readonly Row[] = [
   ...Object.entries(MILESTONE_STATUS).map(([code, label]) => ({ option_set: 'msp_milestonestatus', code: Number(code), label })),
@@ -156,7 +193,9 @@ export const seedDiscoverable: readonly Row[] = [
   { id: 'disc-aw-bizapps', account_id: 'account-adventureworks', name: 'D365 customer service', recorded_stage: 2, value: 1_650_000, currency: 'USD', close_date: '2027-02-28', domain: 'biz-apps', solution_area: 'Business Applications', technical_capability: 'Customer Service' },
   { id: 'disc-aw-services', account_id: 'account-adventureworks', name: 'Cloud advisory services', recorded_stage: 1, value: 320_000, currency: 'USD', close_date: '2027-04-22', domain: 'services', solution_area: 'Microsoft Services', technical_capability: 'Advisory Services' },
   { id: 'disc-northwind-data', account_id: 'account-northwind', name: 'Clinical analytics with Fabric', recorded_stage: 2, value: 2_100_000, currency: 'USD', close_date: '2027-05-20', domain: 'data', solution_area: 'Cloud and AI Platforms', technical_capability: 'Analytics' },
-  { id: 'disc-northwind-infra', account_id: 'account-northwind', name: 'Datacenter exit to Azure', recorded_stage: 1, value: 1_900_000, currency: 'USD', close_date: '2027-06-15', domain: 'infra', solution_area: 'Infrastructure', technical_capability: 'Migration' }
+  { id: 'disc-northwind-infra', account_id: 'account-northwind', name: 'Datacenter exit to Azure', recorded_stage: 1, value: 1_900_000, currency: 'USD', close_date: '2027-06-15', domain: 'infra', solution_area: 'Infrastructure', technical_capability: 'Migration' },
+  // Showcase: greenfield candidate whose milestones can be expanded and joined in Discovery (its opportunity row exists so it can enter the Portfolio on milestone join).
+  { id: 'disc-contoso-greenfield', account_id: 'account-contoso', name: 'Greenfield AI expansion (join a milestone in Discovery)', recorded_stage: 2, value: 2_050_000, currency: 'USD', close_date: '2027-04-18', domain: 'ai-apps', solution_area: 'Cloud and AI Platforms', technical_capability: 'Azure AI and ML' }
 ]
 
 /** activitypointer / appointment statecode (verified live). */
@@ -194,6 +233,8 @@ export interface LocalStoreSeed {
   competitors: readonly Row[]
   stakeholders: readonly Row[]
   dealTeam: readonly Row[]
+  milestoneTeam: readonly Row[]
+  milestoneActivities: readonly Row[]
   optionValues: readonly Row[]
   discoverable: readonly Row[]
   activities: readonly Row[]
@@ -210,6 +251,8 @@ export const defaultSeed: LocalStoreSeed = {
   competitors: seedCompetitors,
   stakeholders: seedStakeholders,
   dealTeam: seedDealTeam,
+  milestoneTeam: seedMilestoneTeam,
+  milestoneActivities: seedMilestoneActivities,
   optionValues: seedOptionValues,
   discoverable: seedDiscoverable,
   activities: seedActivities,

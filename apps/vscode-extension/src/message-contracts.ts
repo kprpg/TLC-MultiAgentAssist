@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, meetingTypeSchema, milestoneUpdateSchema, opportunityUpdateSchema, scopeRefSchema, seDomainSchema } from '../../../packages/common/index.js'
+import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, createMilestoneActivityRequestSchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, meetingTypeSchema, milestoneUpdateSchema, opportunityUpdateSchema, scopeRefSchema, seDomainSchema } from '../../../packages/common/index.js'
 
 /**
  * Strict, discriminated message envelopes for the webview <-> extension-host bridge.
@@ -24,7 +24,12 @@ export const bridgeMethodSchema = z.enum([
     'discoverOpportunities',
     'joinDealTeam',
     'leaveDealTeam',
+    'joinMilestoneTeam',
+    'leaveMilestoneTeam',
     'listMilestones',
+    'listDiscoverableMilestones',
+    'listMilestoneActivities',
+    'createMilestoneActivity',
     'updateOpportunity',
     'updateMilestone',
     'runMcemCoach',
@@ -62,7 +67,12 @@ export const bridgeParamSchemas = {
     discoverOpportunities: z.object({ domain: seDomainSchema }).strict(),
     joinDealTeam: z.object({ opportunityId: z.string().min(1).max(200) }).strict(),
     leaveDealTeam: z.object({ opportunityId: z.string().min(1).max(200) }).strict(),
+    joinMilestoneTeam: z.object({ opportunityId: z.string().min(1).max(200), milestoneId: z.string().min(1).max(200) }).strict(),
+    leaveMilestoneTeam: z.object({ opportunityId: z.string().min(1).max(200), milestoneId: z.string().min(1).max(200) }).strict(),
     listMilestones: z.object({ opportunityId: z.string().min(1).max(200) }).strict(),
+    listDiscoverableMilestones: z.object({ opportunityId: z.string().min(1).max(200) }).strict(),
+    listMilestoneActivities: z.object({ opportunityId: z.string().min(1).max(200), milestoneId: z.string().min(1).max(200) }).strict(),
+    createMilestoneActivity: z.object({ opportunityId: z.string().min(1).max(200), milestoneId: z.string().min(1).max(200), request: createMilestoneActivityRequestSchema }).strict(),
     updateOpportunity: z.object({
         opportunityId: z.string().min(1).max(200),
         update: opportunityUpdateSchema

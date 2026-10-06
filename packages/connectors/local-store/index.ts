@@ -7,12 +7,14 @@ import {
   meetingTranscriptSchema,
   meetingTranscriptSummarySchema,
   milestoneSchema,
+  createMilestoneActivityRequestSchema,
   opportunitySchema,
   type Account,
   type AccountCandidate,
   type AccountListOptions,
   type AccountSearchRequest,
   type AccountVisibility,
+  type CreateMilestoneActivityRequest,
   type DealTeamJoinResult,
   type DealTeamLeaveResult,
   type DiscoverableOpportunity,
@@ -23,6 +25,9 @@ import {
   type MeetingTranscript,
   type MeetingTranscriptSummary,
   type Milestone,
+  type MilestoneActivity,
+  type MilestoneTeamJoinResult,
+  type MilestoneTeamLeaveResult,
   type MilestoneUpdate,
   type Opportunity,
   type OpportunityUpdate,
@@ -37,6 +42,7 @@ import {
   type FieldDictionaryEntry,
   type MeetingExtractionContext
 } from '../../agents/meeting-signal-extractor/src/index.js'
+import { randomUUID } from 'node:crypto'
 import { LocalStore } from './local-store.js'
 import {
   ACTIVITY_STATUS,
@@ -153,10 +159,14 @@ export class LocalStoreMsxConnector implements MsxConnector {
 
   private dealTeamAccountIds(): Set<string> {
     const rows = this.store.all(
-      `SELECT DISTINCT o.account_id AS account_id FROM opportunity o
+      `SELECT o.account_id AS account_id FROM opportunity o
        JOIN opportunity_dealteam dt ON dt.opportunity_id = o.id
-       WHERE dt.systemuser_id = ?`,
-      this.currentUserId
+       WHERE dt.systemuser_id = ?
+       UNION
+       SELECT o.account_id AS account_id FROM opportunity o
+       JOIN milestone_team_member mt ON mt.opportunity_id = o.id
+       WHERE mt.systemuser_id = ?`,
+      this.currentUserId, this.currentUserId
     )
     return new Set(rows.map((row) => String(row['account_id'])))
   }
@@ -218,8 +228,10 @@ export class LocalStoreMsxConnector implements MsxConnector {
     const row = this.store.get('SELECT * FROM opportunity WHERE id = ?', opportunityId)
     if (!row) throw new Error(`Unknown local-store opportunity: ${opportunityId}`)
     const onTeam = this.store.get(
-      'SELECT 1 AS present FROM opportunity_dealteam WHERE opportunity_id = ? AND systemuser_id = ?',
-      opportunityId, this.currentUserId
+      `SELECT 1 AS present FROM opportunity_dealteam WHERE opportunity_id = ? AND systemuser_id = ?
+       UNION
+       SELECT 1 AS present FROM milestone_team_member WHERE opportunity_id = ? AND systemuser_id = ?`,
+      opportunityId, this.currentUserId, opportunityId, this.currentUserId
     )
     const account = this.store.get('SELECT visibility FROM account WHERE id = ?', String(row['account_id']))
     if (!onTeam || str(account?.['visibility']) === 'hidden') {
@@ -274,16 +286,87 @@ export class LocalStoreMsxConnector implements MsxConnector {
     if (str(this.store.get('SELECT visibility FROM account WHERE id = ?', accountId)?.['visibility']) === 'hidden') return []
     return this.store.all(
       `SELECT o.* FROM opportunity o
-       JOIN opportunity_dealteam dt ON dt.opportunity_id = o.id
-       WHERE o.account_id = ? AND dt.systemuser_id = ? ORDER BY o.estimated_close_date`,
-      accountId, this.currentUserId
+       WHERE o.account_id = ? AND (
+         EXISTS (SELECT 1 FROM opportunity_dealteam dt WHERE dt.opportunity_id = o.id AND dt.systemuser_id = ?)
+         OR EXISTS (SELECT 1 FROM milestone_team_member mt WHERE mt.opportunity_id = o.id AND mt.systemuser_id = ?)
+       )
+       ORDER BY o.estimated_close_date`,
+      accountId, this.currentUserId, this.currentUserId
     ).map((row) => this.toOpportunity(row))
   }
 
   async listMilestones(opportunityId: string): Promise<Milestone[]> {
     this.assertOpportunityAccess(opportunityId)
+    const memberMilestoneIds = new Set(this.store.all(
+      'SELECT milestone_id FROM milestone_team_member WHERE opportunity_id = ? AND systemuser_id = ?',
+      opportunityId, this.currentUserId
+    ).map((row) => String(row['milestone_id'])))
     return this.store.all('SELECT * FROM engagement_milestone WHERE opportunity_id = ? ORDER BY milestone_date', opportunityId)
-      .map((row) => this.toMilestone(row))
+      .map((row) => ({ ...this.toMilestone(row), onMilestoneTeam: memberMilestoneIds.has(String(row['id'])) }))
+  }
+
+  async listDiscoverableMilestones(opportunityId: string): Promise<Milestone[]> {
+    // No portfolio gate: lists milestones for an opportunity in the user's account scope so a
+    // milestone team can be joined without Deal Team membership. Returns [] for a discovery
+    // candidate that has not yet been promoted into the store.
+    const memberMilestoneIds = new Set(this.store.all(
+      'SELECT milestone_id FROM milestone_team_member WHERE opportunity_id = ? AND systemuser_id = ?',
+      opportunityId, this.currentUserId
+    ).map((row) => String(row['milestone_id'])))
+    return this.store.all('SELECT * FROM engagement_milestone WHERE opportunity_id = ? ORDER BY milestone_date', opportunityId)
+      .map((row) => ({ ...this.toMilestone(row), onMilestoneTeam: memberMilestoneIds.has(String(row['id'])) }))
+  }
+
+  private toMilestoneActivity(row: Record<string, unknown>): MilestoneActivity {
+    const owner = this.ownerName(row['owner_id'])
+    const createdBy = this.ownerName(row['created_by'])
+    const priority = str(row['priority'])
+    const taskCategory = str(row['task_category'])
+    const due = str(row['due'])
+    const duration = num(row['duration_minutes'])
+    const description = str(row['description'])
+    const createdOn = str(row['created_on'])
+    return {
+      id: String(row['id']),
+      milestoneId: String(row['milestone_id']),
+      opportunityId: String(row['opportunity_id']),
+      subject: String(row['subject']),
+      activityType: str(row['activity_type']) ?? 'task',
+      status: str(row['status']) ?? 'Open',
+      ...(priority === 'Low' || priority === 'Normal' || priority === 'High' ? { priority } : {}),
+      ...(taskCategory ? { taskCategory } : {}),
+      ...(due ? { due } : {}),
+      ...(duration !== undefined ? { durationMinutes: duration } : {}),
+      ...(description ? { description } : {}),
+      ...(owner ? { owner } : {}),
+      ...(createdBy ? { createdBy } : {}),
+      ...(createdOn ? { createdOn } : {})
+    }
+  }
+
+  private assertMilestoneInOpportunity(opportunityId: string, milestoneId: string): void {
+    const row = this.store.get('SELECT 1 AS present FROM engagement_milestone WHERE id = ? AND opportunity_id = ?', milestoneId, opportunityId)
+    if (!row) throw new Error(`Unknown local-store milestone: ${milestoneId}`)
+  }
+
+  async listMilestoneActivities(opportunityId: string, milestoneId: string): Promise<MilestoneActivity[]> {
+    this.assertMilestoneInOpportunity(opportunityId, milestoneId)
+    return this.store.all('SELECT * FROM milestone_activity WHERE milestone_id = ? ORDER BY created_on DESC', milestoneId)
+      .map((row) => this.toMilestoneActivity(row))
+  }
+
+  async createMilestoneActivity(opportunityId: string, milestoneId: string, input: CreateMilestoneActivityRequest): Promise<MilestoneActivity> {
+    this.assertMilestoneInOpportunity(opportunityId, milestoneId)
+    const request = createMilestoneActivityRequestSchema.parse(input)
+    const id = `act-${randomUUID()}`
+    this.store.run(
+      `INSERT INTO milestone_activity (id, milestone_id, opportunity_id, subject, activity_type, status, priority, task_category, due, duration_minutes, description, owner_id, created_by, created_on)
+       VALUES (?, ?, ?, ?, 'task', 'Open', ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id, milestoneId, opportunityId, request.subject, request.priority,
+      request.taskCategory ?? null, request.due ?? null, request.durationMinutes ?? null,
+      request.description ?? null, this.currentUserId, this.currentUserId, new Date().toISOString()
+    )
+    return this.toMilestoneActivity(this.store.get('SELECT * FROM milestone_activity WHERE id = ?', id)!)
   }
 
   async updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone> {
@@ -431,6 +514,31 @@ export class LocalStoreMsxConnector implements MsxConnector {
     )
     this.store.run('DELETE FROM opportunity_dealteam WHERE opportunity_id = ? AND systemuser_id = ?', opportunityId, this.currentUserId)
     return { opportunityId, onDealTeam: false, alreadyAbsent }
+  }
+
+  async joinMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamJoinResult> {
+    const milestone = this.store.get('SELECT 1 AS present FROM engagement_milestone WHERE id = ? AND opportunity_id = ?', milestoneId, opportunityId)
+    if (!milestone) throw new Error(`Unknown local-store milestone: ${milestoneId}`)
+    const alreadyMember = Boolean(this.store.get(
+      'SELECT 1 AS present FROM milestone_team_member WHERE milestone_id = ? AND systemuser_id = ?',
+      milestoneId, this.currentUserId
+    ))
+    if (!alreadyMember) {
+      this.store.run(
+        'INSERT INTO milestone_team_member (milestone_id, systemuser_id, opportunity_id) VALUES (?, ?, ?)',
+        milestoneId, this.currentUserId, opportunityId
+      )
+    }
+    return { opportunityId, milestoneId, onMilestoneTeam: true, alreadyMember }
+  }
+
+  async leaveMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamLeaveResult> {
+    const alreadyAbsent = !this.store.get(
+      'SELECT 1 AS present FROM milestone_team_member WHERE milestone_id = ? AND systemuser_id = ?',
+      milestoneId, this.currentUserId
+    )
+    this.store.run('DELETE FROM milestone_team_member WHERE milestone_id = ? AND systemuser_id = ?', milestoneId, this.currentUserId)
+    return { opportunityId, milestoneId, onMilestoneTeam: false, alreadyAbsent }
   }
 
   /** Meetings / activities linked to an opportunity (the meetings a transcript can come from). */

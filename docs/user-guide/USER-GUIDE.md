@@ -161,7 +161,7 @@ The workspace is organized into vertical *blades*:
 | **Accounts blade**                 | Your account portfolio.                                                                                   |
 | **Opportunities blade**            | The active opportunities under the selected account, plus a milestone tree once an opportunity is opened. |
 | **Workbench** (center)             | Detail view of the selected opportunity — MSX evidence, agent guidance, or MCEM stage board.              |
-| **Next best actions rail** (right) | Role-based prioritized next steps derived from the current evidence.                                      |
+| **Next best actions rail** (right) | Role-based prioritized next steps derived from the opportunity's stage, exit-criteria evidence, and milestone health (status and customer commitment). |
 
 Every blade has a collapse arrow in its header so you can widen the center workbench during long tasks; the collapse states persist between sessions.
 
@@ -179,15 +179,32 @@ Select an account either from the left blade or from the large hero cards in the
 
 Select **Add customer** in the Accounts blade header, choose **Account name** or **TPID**, search, and then select **Add account**. A manually added account appears immediately even when it has no Deal Team opportunities.
 
-Adding an account does **not** add all of its opportunities to your Portfolio. Open **Discover opportunities**, choose the appropriate Solution Engineer domain, and use **Add me** or **Remove me** to maintain your actual opportunity-level Deal Team memberships.
+Adding an account does **not** add all of its opportunities to your Portfolio. Open **Discover opportunities**, choose the appropriate Solution Engineer domain, and use **Add me** or **Remove me** to maintain your actual opportunity-level Deal Team memberships. You can also **expand an opportunity in Discovery** (the chevron beside its name) to list its milestones and use the **+ / −** toggle to join a milestone team without joining the Deal Team — joining a milestone brings that opportunity into your Portfolio.
 
 The resulting working set is:
 
 - visible accounts from Deal Team membership plus manually added accounts;
-- active opportunities where you are a current Deal Team member;
+- active opportunities where you are a current Deal Team member **or** a member of at least one of the opportunity's milestone teams;
 - milestones loaded only after you select an eligible opportunity.
 
-Portfolio Plays, agents, milestones, and other downstream analysis use only that Deal Team opportunity working set. A manually added account with no Deal Team opportunities remains as an empty account node so you can return to Discovery later.
+Portfolio Plays, agents, milestones, and other downstream analysis use that opportunity working set. A manually added account with no Deal Team or milestone-team opportunities remains as an empty account node so you can return to Discovery later.
+
+### 3.1a Joining or leaving a milestone team
+
+Opportunity Deal Team membership and milestone-team membership are **independent**. You can be on an opportunity's Deal Team without being on any of its milestone teams, and you can be on a milestone team without being on the opportunity's Deal Team.
+
+Each milestone under an opportunity shows a compact **+ / −** toggle beside the milestone name:
+
+- **+** adds you to that milestone's team.
+- **−** removes you from that milestone's team (with a short confirmation, because it may change your Portfolio).
+
+Joining a milestone team brings the parent opportunity into your Portfolio even if you are not on its Deal Team. Leaving the Deal Team keeps the opportunity in your Portfolio as long as you remain on at least one of its milestone teams; the opportunity leaves your Portfolio only once you have left both the Deal Team and all of its milestone teams. Milestone-team membership is tracked per signed-in user and is separate from the milestone's **Owner**, which is never changed by the toggle. The toggle behaves identically across the desktop, web, and VS Code UIs.
+
+> In live mode, the milestone **+ / −** toggle adds or removes you from the milestone's Dataverse **Access Team** (the "Milestone Team" tab in MSX), using the standard `AddUserToRecordTeam` / `RemoveUserFromRecordTeam` actions. The "Milestone Team" access-team template is discovered automatically, so **no configuration is required**. If that access team is not set up in the environment, the toggle reports a short, clear message instead of appearing to succeed. Sample mode needs no configuration.
+
+### 3.1b Adding an Activity (Task) to a milestone
+
+Each milestone can carry **Activities** (Tasks), mirroring the MSX milestone **Activities** tab. On the desktop and web UIs, open the milestone's **Actions** menu and choose **Activities**; in the VS Code webview, select **Activities** beside the milestone. The panel lists existing tasks and offers a **New task** form (Subject, Task Category, Due, Priority, Duration, Description). The task owner defaults to you, and the task is linked to the milestone (its **Regarding** record). In live mode this creates a Task in MSX; in sample mode it is kept in the local sample store.
 
 ### 3.2 Hiding and unhiding an account
 

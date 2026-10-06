@@ -1,6 +1,7 @@
-import type { Account, AccountCandidate, AccountListOptions, AccountSearchRequest, AccountVisibility, DealTeamJoinResult, DealTeamLeaveResult, DiscoverableOpportunity, Milestone, MilestoneUpdate, Opportunity, OpportunityUpdate, SeDomainId, SourceHealth } from '../../common/index.js'
+import type { Account, AccountCandidate, AccountListOptions, AccountSearchRequest, AccountVisibility, CreateMilestoneActivityRequest, DealTeamJoinResult, DealTeamLeaveResult, DiscoverableOpportunity, Milestone, MilestoneActivity, MilestoneTeamJoinResult, MilestoneTeamLeaveResult, MilestoneUpdate, Opportunity, OpportunityUpdate, SeDomainId, SourceHealth } from '../../common/index.js'
 
 export * from './portfolio-preferences.js'
+export * from './milestone-membership.js'
 
 export interface CriterionObservation {
   criterionId: string
@@ -12,6 +13,8 @@ export interface OpportunityContext {
   account: Account
   opportunity: Opportunity
   observations: CriterionObservation[]
+  /** The opportunity's milestones, used to ground stage recommendations. */
+  milestones?: Milestone[]
   retrievedAt: string
   sourceHealth: SourceHealth
 }
@@ -55,6 +58,25 @@ export interface MsxConnector {
   joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
   /** Removes only the signed-in user's active membership for an opportunity. */
   leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult>
+  /**
+   * Adds the signed-in user to a milestone's team. Independent of opportunity Deal
+   * Team membership: a user can be on a milestone team without being on the opportunity
+   * Deal Team, and vice versa.
+   */
+  joinMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamJoinResult>
+  /** Removes only the signed-in user from a milestone's team. */
+  leaveMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamLeaveResult>
+  /**
+   * Lists the milestones of a discoverable opportunity (one in the user's visible account
+   * scope) without requiring Deal Team / portfolio membership, so a user can join a
+   * milestone team for an opportunity they have never been on. Each milestone carries the
+   * user's current `onMilestoneTeam` state.
+   */
+  listDiscoverableMilestones(opportunityId: string): Promise<Milestone[]>
+  /** Lists the Activities (Tasks) associated with a milestone via `regardingobjectid`. */
+  listMilestoneActivities(opportunityId: string, milestoneId: string): Promise<MilestoneActivity[]>
+  /** Creates a Task regarding a milestone; the owner defaults to the signed-in user. */
+  createMilestoneActivity(opportunityId: string, milestoneId: string, request: CreateMilestoneActivityRequest): Promise<MilestoneActivity>
 }
 
 export interface McemGuidanceConnector {

@@ -62,7 +62,6 @@ function buildFoundryTaskAgents(): TaskAgentRegistry | undefined {
         })
     }])) as TaskAgentRegistry
 }
-
 /**
  * Live provider (Desktop/Web parity). Portfolio, writes, MCEM evaluation, and agent guidance
  * flow through the shared orchestrator over the delegated MSX OData connection; Plays flow

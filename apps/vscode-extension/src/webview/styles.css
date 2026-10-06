@@ -1404,6 +1404,108 @@ textarea {
     margin-top: 5px;
 }
 
+.milestone-name-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.milestone-activities-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 8px 0;
+}
+
+.milestone-activities-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.milestone-activity-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 8px;
+    border: 1px solid var(--vscode-panel-border, #8884);
+    border-radius: 4px;
+}
+
+.milestone-activity-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border-top: 1px solid var(--vscode-panel-border, #8884);
+    padding-top: 8px;
+}
+
+.milestone-activity-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 11px;
+}
+
+.discover-name-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.discover-expand {
+    flex: 0 0 auto;
+    border: none;
+    background: transparent;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+    padding: 0 2px;
+    font-size: 11px;
+    line-height: 1;
+}
+
+.discover-milestones-row td {
+    background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+}
+
+.discover-milestone-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+.milestone-team-toggle {
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    line-height: 18px;
+    padding: 0;
+    border: 1px solid var(--vscode-button-border, var(--vscode-contrastBorder, transparent));
+    border-radius: 4px;
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.milestone-team-toggle.is-member {
+    background: transparent;
+    color: var(--vscode-foreground);
+    border-color: var(--vscode-contrastBorder, var(--vscode-panel-border, #8884));
+}
+
+.milestone-team-toggle:hover:not(:disabled) {
+    background: var(--vscode-button-hoverBackground);
+    color: var(--vscode-button-foreground);
+}
+
+.milestone-team-toggle:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
 .table-field-button {
     padding: 0;
     border: 0;

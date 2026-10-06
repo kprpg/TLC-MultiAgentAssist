@@ -294,3 +294,249 @@ describe('FixtureMsxConnector discovery', () => {
     }
   })
 })
+
+describe('FixtureMsxConnector milestone team membership', () => {
+  const opportunityId = 'opp-grid-modernization'
+
+  it('toggles onMilestoneTeam independently and idempotently', async () => {
+    const connector = new FixtureMsxConnector()
+    const milestone = (await connector.listMilestones(opportunityId))[0]!
+
+    // Normalize to a known-member starting state, then leave and rejoin.
+    await connector.joinMilestoneTeam(opportunityId, milestone.id)
+    expect((await connector.listMilestones(opportunityId)).find((item) => item.id === milestone.id)?.onMilestoneTeam).toBe(true)
+
+    const left = await connector.leaveMilestoneTeam(opportunityId, milestone.id)
+    expect(left).toEqual({ opportunityId, milestoneId: milestone.id, onMilestoneTeam: false, alreadyAbsent: false })
+    expect((await connector.listMilestones(opportunityId)).find((item) => item.id === milestone.id)?.onMilestoneTeam).toBe(false)
+    // Leaving again is idempotent.
+    expect((await connector.leaveMilestoneTeam(opportunityId, milestone.id)).alreadyAbsent).toBe(true)
+
+    const joined = await connector.joinMilestoneTeam(opportunityId, milestone.id)
+    expect(joined).toEqual({ opportunityId, milestoneId: milestone.id, onMilestoneTeam: true, alreadyMember: false })
+  })
+
+  it('rejects joining an unknown milestone', async () => {
+    const connector = new FixtureMsxConnector()
+    await expect(connector.joinMilestoneTeam(opportunityId, 'nope')).rejects.toThrow(/Unknown sample milestone/)
+  })
+
+  it('keeps a milestone-only opportunity in the portfolio after leaving the deal team', async () => {
+    const connector = new FixtureMsxConnector()
+    const milestone = (await connector.listMilestones(opportunityId))[0]!
+    await connector.joinMilestoneTeam(opportunityId, milestone.id)
+
+    await connector.leaveDealTeam(opportunityId)
+    // Retained via milestone-team membership even though the user left the Deal Team.
+    expect((await connector.listOpportunities('account-contoso')).some((item) => item.id === opportunityId)).toBe(true)
+
+    // Removing the last milestone membership removes the opportunity from the portfolio.
+    for (const item of await connector.listMilestones(opportunityId)) {
+      await connector.leaveMilestoneTeam(opportunityId, item.id)
+    }
+    expect((await connector.listOpportunities('account-contoso')).some((item) => item.id === opportunityId)).toBe(false)
+  })
+
+  it('joins a milestone for a discoverable opportunity (greenfield) without joining the Deal Team', async () => {
+    const connector = new FixtureMsxConnector()
+    const discovered = (await connector.discoverOpportunities('infra'))[0]!
+    expect(discovered.onDealTeam).toBe(false)
+
+    const milestones = await connector.listDiscoverableMilestones(discovered.id)
+    expect(milestones.length).toBeGreaterThan(0)
+    expect(milestones.every((item) => item.onMilestoneTeam === false)).toBe(true)
+
+    const target = milestones[0]!
+    const result = await connector.joinMilestoneTeam(discovered.id, target.id)
+    expect(result).toEqual({ opportunityId: discovered.id, milestoneId: target.id, onMilestoneTeam: true, alreadyMember: false })
+
+    // The opportunity enters the portfolio via milestone membership, but the user is NOT on its Deal Team.
+    expect((await connector.listOpportunities(discovered.accountId)).some((item) => item.id === discovered.id)).toBe(true)
+    expect((await connector.discoverOpportunities('infra')).find((item) => item.id === discovered.id)?.onDealTeam).toBe(false)
+    expect((await connector.listDiscoverableMilestones(discovered.id)).find((item) => item.id === target.id)?.onMilestoneTeam).toBe(true)
+  })
+})
+
+describe('LiveMsxConnector milestone team membership (Dataverse access team)', () => {
+  const opportunityGuid = validGuid
+  const milestoneGuid = '00000000-0000-4000-8000-000000000a01'
+  const templateGuid = '00000000-0000-4000-8000-000000000c03'
+
+  it('adds the signed-in user to the milestone access team on join (AddUserToRecordTeam) and is idempotent', async () => {
+    const posted: Array<{ path: string; body: Record<string, unknown> }> = []
+    let isMember = false
+    const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input))
+      const method = init?.method ?? 'GET'
+      if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+      if (url.pathname.endsWith('/msp_engagementmilestones')) return json({ value: [{ msp_engagementmilestoneid: milestoneGuid, msp_name: 'Pilot' }] })
+      if (url.pathname.endsWith('/teamtemplates')) return json({ value: [{ teamtemplateid: templateGuid }] })
+      if (url.pathname.endsWith('/teams') && method === 'GET') return json({ value: isMember ? [{ _regardingobjectid_value: milestoneGuid }] : [] })
+      if (url.pathname.endsWith('/Microsoft.Dynamics.CRM.AddUserToRecordTeam') && method === 'POST') {
+        posted.push({ path: url.pathname, body: JSON.parse(String(init?.body)) })
+        isMember = true
+        return new Response(null, { status: 204 })
+      }
+      throw new Error(`Unexpected request: ${url} ${method}`)
+    })
+    const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch)
+
+    const joined = await connector.joinMilestoneTeam(opportunityGuid, milestoneGuid)
+    expect(joined).toEqual({ opportunityId: opportunityGuid, milestoneId: milestoneGuid, onMilestoneTeam: true, alreadyMember: false })
+    expect(posted[0]!.path).toContain('/systemusers(user-id)/Microsoft.Dynamics.CRM.AddUserToRecordTeam')
+    expect(posted[0]!.body).toEqual({
+      Record: { '@odata.type': 'Microsoft.Dynamics.CRM.msp_engagementmilestone', msp_engagementmilestoneid: milestoneGuid },
+      TeamTemplate: { '@odata.type': 'Microsoft.Dynamics.CRM.teamtemplate', teamtemplateid: templateGuid }
+    })
+
+    // Second join finds the user already on the access team → alreadyMember, no duplicate action.
+    expect((await connector.joinMilestoneTeam(opportunityGuid, milestoneGuid)).alreadyMember).toBe(true)
+    expect(posted).toHaveLength(1)
+  })
+
+  it('removes the signed-in user from the milestone access team on leave (RemoveUserFromRecordTeam) and is idempotent', async () => {
+    const posted: string[] = []
+    let isMember = true
+    const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input))
+      const method = init?.method ?? 'GET'
+      if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+      if (url.pathname.endsWith('/teamtemplates')) return json({ value: [{ teamtemplateid: templateGuid }] })
+      if (url.pathname.endsWith('/teams') && method === 'GET') {
+        const filter = url.searchParams.get('$filter') ?? ''
+        expect(filter).toContain(`_teamtemplateid_value eq ${templateGuid}`)
+        expect(filter).toContain('systemuserid eq user-id')
+        // Membership is read via the all-teams query, never a per-record regardingobjectid filter
+        // (Dataverse does not reliably support filtering the polymorphic team.regardingobjectid).
+        expect(filter).not.toContain('_regardingobjectid_value eq')
+        return json({ value: isMember ? [{ _regardingobjectid_value: milestoneGuid }] : [] })
+      }
+      if (url.pathname.endsWith('/Microsoft.Dynamics.CRM.RemoveUserFromRecordTeam') && method === 'POST') {
+        posted.push(url.pathname)
+        isMember = false
+        return new Response(null, { status: 204 })
+      }
+      throw new Error(`Unexpected request: ${url} ${method}`)
+    })
+    const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch)
+
+    const left = await connector.leaveMilestoneTeam(opportunityGuid, milestoneGuid)
+    expect(left).toEqual({ opportunityId: opportunityGuid, milestoneId: milestoneGuid, onMilestoneTeam: false, alreadyAbsent: false })
+    expect(posted).toHaveLength(1)
+    expect(posted[0]).toContain('/systemusers(user-id)/Microsoft.Dynamics.CRM.RemoveUserFromRecordTeam')
+    // Idempotent when the user is already off the team.
+    expect((await connector.leaveMilestoneTeam(opportunityGuid, milestoneGuid)).alreadyAbsent).toBe(true)
+  })
+
+  it('throws an actionable error when the Milestone Team access team is not set up (no silent success)', async () => {
+    const actionPosts: string[] = []
+    const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input))
+      const method = init?.method ?? 'GET'
+      if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+      if (url.pathname.endsWith('/msp_engagementmilestones')) return json({ value: [{ msp_engagementmilestoneid: milestoneGuid, msp_name: 'Pilot' }] })
+      if (url.pathname.endsWith('/teamtemplates')) return json({ value: [] })
+      if (method === 'POST') { actionPosts.push(url.pathname); return new Response(null, { status: 204 }) }
+      throw new Error(`Unexpected request: ${url} ${method}`)
+    })
+    const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch)
+    await expect(connector.joinMilestoneTeam(opportunityGuid, milestoneGuid)).rejects.toThrow(/not set up in this MSX environment/)
+    await expect(connector.leaveMilestoneTeam(opportunityGuid, milestoneGuid)).rejects.toThrow(/not set up in this MSX environment/)
+    // Nothing was written to MSX.
+    expect(actionPosts).toHaveLength(0)
+  })
+
+  it('rejects non-GUID ids and milestones not in the opportunity', async () => {
+    const request = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+      if (url.pathname.endsWith('/msp_engagementmilestones')) return json({ value: [] })
+      if (url.pathname.endsWith('/teamtemplates')) return json({ value: [{ teamtemplateid: templateGuid }] })
+      if (url.pathname.endsWith('/teams')) return json({ value: [] })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch)
+    await expect(connector.joinMilestoneTeam('not-a-guid', milestoneGuid)).rejects.toThrow(/GUID/)
+    await expect(connector.joinMilestoneTeam(opportunityGuid, 'not-a-guid')).rejects.toThrow(/GUID/)
+    await expect(connector.joinMilestoneTeam(opportunityGuid, milestoneGuid)).rejects.toThrow(/not in the selected opportunity/)
+  })
+
+  it('reflects access-team membership in onMilestoneTeam and lists discoverable milestones without a portfolio gate', async () => {
+    const request = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+      if (url.pathname.endsWith('/msp_engagementmilestones')) return json({ value: [{ msp_engagementmilestoneid: milestoneGuid, msp_name: 'Pilot' }] })
+      if (url.pathname.endsWith('/teamtemplates')) return json({ value: [{ teamtemplateid: templateGuid }] })
+      if (url.pathname.endsWith('/teams')) return json({ value: [{ _regardingobjectid_value: milestoneGuid }] })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch)
+    const milestones = await connector.listDiscoverableMilestones(opportunityGuid)
+    expect(milestones.map((item) => item.id)).toEqual([milestoneGuid])
+    expect(milestones[0]!.onMilestoneTeam).toBe(true)
+    await expect(connector.listDiscoverableMilestones('not-a-guid')).rejects.toThrow(/GUID/)
+  })
+
+  it('unions access-team milestone opportunities into the portfolio', async () => {
+    const request = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+      if (url.pathname.endsWith('/msp_dealteams')) return json({ value: [] })
+      if (url.pathname.endsWith('/teamtemplates')) return json({ value: [{ teamtemplateid: templateGuid }] })
+      if (url.pathname.endsWith('/teams')) return json({ value: [{ _regardingobjectid_value: milestoneGuid }] })
+      if (url.pathname.endsWith('/msp_engagementmilestones')) return json({ value: [{ msp_engagementmilestoneid: milestoneGuid, _msp_opportunityid_value: opportunityGuid }] })
+      if (url.pathname.endsWith('/opportunities')) return json({ value: [{ opportunityid: opportunityGuid, _parentaccountid_value: 'account-x', name: 'Milestone-only deal', msp_activesalesstage: 2, estimatedvalue: 1000, estimatedclosedate: '2027-01-01' }] })
+      if (url.pathname.endsWith('/accounts')) return json({ value: [{ accountid: 'account-x', name: 'Acct X' }] })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch)
+
+    const opportunities = await connector.listOpportunities('account-x')
+    expect(opportunities.map((item) => item.id)).toContain(opportunityGuid)
+  })
+
+  it('discovers the Milestone Team template id by name once and caches it', async () => {
+    const templateQueries: string[] = []
+    let isMember = false
+    const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input))
+      const method = init?.method ?? 'GET'
+      if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+      if (url.pathname.endsWith('/msp_engagementmilestones')) return json({ value: [{ msp_engagementmilestoneid: milestoneGuid, msp_name: 'Pilot' }] })
+      if (url.pathname.endsWith('/teamtemplates')) {
+        templateQueries.push(url.searchParams.get('$filter') ?? '')
+        return json({ value: [{ teamtemplateid: templateGuid }] })
+      }
+      if (url.pathname.endsWith('/teams') && method === 'GET') return json({ value: isMember ? [{ _regardingobjectid_value: milestoneGuid }] : [] })
+      if (url.pathname.endsWith('/Microsoft.Dynamics.CRM.AddUserToRecordTeam') && method === 'POST') { isMember = true; return new Response(null, { status: 204 }) }
+      throw new Error(`Unexpected request: ${url} ${method}`)
+    })
+    const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch)
+
+    await connector.joinMilestoneTeam(opportunityGuid, milestoneGuid)
+    await connector.joinMilestoneTeam(opportunityGuid, milestoneGuid)
+    expect(templateQueries).toHaveLength(1)
+    expect(templateQueries[0]).toContain("teamtemplatename eq 'Milestone Team'")
+  })
+
+  it('uses an explicit team template id when configured, skipping name discovery', async () => {
+    const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input))
+      const method = init?.method ?? 'GET'
+      if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+      if (url.pathname.endsWith('/msp_engagementmilestones')) return json({ value: [{ msp_engagementmilestoneid: milestoneGuid, msp_name: 'Pilot' }] })
+      if (url.pathname.endsWith('/teams') && method === 'GET') return json({ value: [] })
+      if (url.pathname.endsWith('/Microsoft.Dynamics.CRM.AddUserToRecordTeam') && method === 'POST') {
+        expect(JSON.parse(String(init?.body))).toMatchObject({ TeamTemplate: { teamtemplateid: templateGuid } })
+        return new Response(null, { status: 204 })
+      }
+      throw new Error(`Unexpected request: ${url} ${method}`)
+    })
+    const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch, undefined, undefined, { milestoneTeam: { templateName: 'Milestone Team', templateId: templateGuid } })
+    const joined = await connector.joinMilestoneTeam(opportunityGuid, milestoneGuid)
+    expect(joined.onMilestoneTeam).toBe(true)
+    // No /teamtemplates discovery call was made.
+    expect(request.mock.calls.some(([input]) => String(input).includes('/teamtemplates'))).toBe(false)
+  })
+})
+

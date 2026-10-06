@@ -19,6 +19,10 @@ import {
     mcemStageTransitionRequestSchema,
     mcemStageTransitionResultSchema,
     milestoneSchema,
+    milestoneActivitySchema,
+    createMilestoneActivityRequestSchema,
+    milestoneTeamJoinResultSchema,
+    milestoneTeamLeaveResultSchema,
     milestoneUpdateSchema,
     opportunitySchema,
     opportunityUpdateSchema,
@@ -30,6 +34,7 @@ import {
     type AccountVisibility,
     type AgentTaskRequest,
     type AgentTaskResponse,
+    type CreateMilestoneActivityRequest,
     type DealTeamJoinResult,
     type DealTeamLeaveResult,
     type DiscoverableOpportunity,
@@ -38,6 +43,9 @@ import {
     type McemStageTransitionRequest,
     type McemStageTransitionResult,
     type Milestone,
+    type MilestoneActivity,
+    type MilestoneTeamJoinResult,
+    type MilestoneTeamLeaveResult,
     type MilestoneUpdate,
     type Opportunity,
     type OpportunityUpdate,
@@ -59,7 +67,12 @@ export interface WebRuntime {
     discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
     joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
     leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult>
+    joinMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamJoinResult>
+    leaveMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamLeaveResult>
     listMilestones(opportunityId: string): Promise<Milestone[]>
+    listDiscoverableMilestones(opportunityId: string): Promise<Milestone[]>
+    listMilestoneActivities(opportunityId: string, milestoneId: string): Promise<MilestoneActivity[]>
+    createMilestoneActivity(opportunityId: string, milestoneId: string, request: CreateMilestoneActivityRequest): Promise<MilestoneActivity>
     updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
     updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
     transitionOpportunityStage(request: McemStageTransitionRequest): Promise<McemStageTransitionResult>
@@ -193,6 +206,13 @@ export function buildWebApiHandler(options: WebApiOptions) {
                 return true
             }
 
+            const discoverMilestonesMatch = /^\/api\/discover\/opportunities\/([^/]+)\/milestones$/.exec(url.pathname)
+            if (request.method === 'GET' && discoverMilestonesMatch) {
+                const opportunityId = accountIdSchema.parse(decodeURIComponent(discoverMilestonesMatch[1]!))
+                sendJson(response, 200, milestoneSchema.array().parse(await runtime.listDiscoverableMilestones(opportunityId)))
+                return true
+            }
+
             const dealTeamMatch = /^\/api\/opportunities\/([^/]+)\/deal-team$/.exec(url.pathname)
             if (request.method === 'POST' && dealTeamMatch) {
                 const opportunityId = accountIdSchema.parse(decodeURIComponent(dealTeamMatch[1]!))
@@ -218,6 +238,31 @@ export function buildWebApiHandler(options: WebApiOptions) {
                 const milestoneId = accountIdSchema.parse(decodeURIComponent(milestoneUpdateMatch[2]!))
                 const update = milestoneUpdateSchema.parse(await readJsonBody(request))
                 sendJson(response, 200, milestoneSchema.parse(await runtime.updateMilestone(opportunityId, milestoneId, update)))
+                return true
+            }
+
+            const milestoneTeamMatch = /^\/api\/opportunities\/([^/]+)\/milestones\/([^/]+)\/team\/me$/.exec(url.pathname)
+            if (milestoneTeamMatch && (request.method === 'POST' || request.method === 'DELETE')) {
+                const opportunityId = accountIdSchema.parse(decodeURIComponent(milestoneTeamMatch[1]!))
+                const milestoneId = accountIdSchema.parse(decodeURIComponent(milestoneTeamMatch[2]!))
+                if (request.method === 'POST') {
+                    sendJson(response, 200, milestoneTeamJoinResultSchema.parse(await runtime.joinMilestoneTeam(opportunityId, milestoneId)))
+                } else {
+                    sendJson(response, 200, milestoneTeamLeaveResultSchema.parse(await runtime.leaveMilestoneTeam(opportunityId, milestoneId)))
+                }
+                return true
+            }
+
+            const milestoneActivitiesMatch = /^\/api\/opportunities\/([^/]+)\/milestones\/([^/]+)\/activities$/.exec(url.pathname)
+            if (milestoneActivitiesMatch && (request.method === 'GET' || request.method === 'POST')) {
+                const opportunityId = accountIdSchema.parse(decodeURIComponent(milestoneActivitiesMatch[1]!))
+                const milestoneId = accountIdSchema.parse(decodeURIComponent(milestoneActivitiesMatch[2]!))
+                if (request.method === 'GET') {
+                    sendJson(response, 200, milestoneActivitySchema.array().parse(await runtime.listMilestoneActivities(opportunityId, milestoneId)))
+                } else {
+                    const createRequest = createMilestoneActivityRequestSchema.parse(await readJsonBody(request))
+                    sendJson(response, 200, milestoneActivitySchema.parse(await runtime.createMilestoneActivity(opportunityId, milestoneId, createRequest)))
+                }
                 return true
             }
 
