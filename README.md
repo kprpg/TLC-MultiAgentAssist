@@ -6,127 +6,92 @@
 [![Web release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/web-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/web-release.yml)
 [![VS Code extension release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/vscode-extension-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/vscode-extension-release.yml)
 
-TLC MultiAgent Assist is an account assistant that combines live MSX opportunity context with contextual guidance on each opportunity to advance it forward. It is available in three forms, each with its own get-started steps below:
+TLC MultiAgent Assist is an account assistant that combines live MSX opportunity context with contextual guidance to help advance each opportunity. It ships as three surfaces from one codebase:
 
-- **[VS Code shell extension](#install-the-vs-code-extension)** — brings TLC Assist into VS Code or VS Code Insiders.
-- **[Windows desktop application](#install-the-desktop-app)** — a packaged Electron app with Start menu and desktop shortcuts.
-- **[Web application](#web-application)** — the same experience in the browser, hosted on Azure App Service.
+| Surface | What it is | Get started |
+| --- | --- | --- |
+| **VS Code extension** | TLC Assist inside VS Code or VS Code Insiders. | [Install](#vs-code-extension) |
+| **Windows desktop app** | A packaged Electron app with Start menu and desktop shortcuts. | [Install](#desktop-app) |
+| **Web application** | The same UI in the browser, hosted on Azure App Service. | [Run](#web-application) |
 
-[Technology stack](TechStack.md)
+## Data modes
 
-## Install the VS Code Extension
+Every surface runs in one of two modes:
 
-TLC Assist is also available as a VS Code extension. The only requirement to install is **VS Code (or VS Code Insiders) 1.90.0 or later** plus the released `.vsix`; it is self-contained (no Node.js, npm, or native binaries) and starts in sample mode with no sign-in or network.
+- **Sample mode** (default) — bundled sanitized data. No sign-in, no network; explore without touching MSX, Foundry, Azure, or Microsoft Entra ID.
+- **Live mode** — real opportunity data over **MSX OData** and **Dataverse MCP**, plus Microsoft Foundry agents. Requires a corporate Microsoft identity and, for the Foundry agents, the Azure CLI (`az login`).
+
+See [Documentation](#documentation) for the full user guide, FAQ, and runbooks.
+
+## VS Code extension
+
+Requires **VS Code or VS Code Insiders 1.90.0 or later**. The extension is self-contained (no Node.js, npm, or native binaries), embeds its own MCP registry and tool policy, and starts in sample mode.
+
+### Install
 
 1. Open the [VS Code extension releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=ext-v) and expand **Assets**.
-2. Download `tlc-assist-vscode-<version>.vsix`. The companion `tlc-assist-vscode-mcp-config-<version>.zip` (MCP configuration and reference files) is optional — the extension already embeds its MCP registry and tool policy.
-3. In VS Code, run **Extensions: Install from VSIX...** from the Command Palette (`Ctrl+Shift+P`) and choose the file, or from a terminal run `code --install-extension tlc-assist-vscode-<version>.vsix --force`. Confirm the publisher-trust prompt on VS Code 1.97+.
-4. Run **Developer: Reload Window**, then select the **TLC Assist** icon in the Activity Bar or run **TLC: Open Assist**.
+2. Download `tlc-assist-vscode-<version>.vsix`. The companion `tlc-assist-vscode-mcp-config-<version>.zip` is optional.
+3. Install it from the Command Palette (`Ctrl+Shift+P`) with **Extensions: Install from VSIX...**, or run `code --install-extension tlc-assist-vscode-<version>.vsix --force`. Confirm the publisher-trust prompt on VS Code 1.97+.
+4. Run **Developer: Reload Window**, then open **TLC Assist** from the Activity Bar (or run **TLC: Open Assist**).
 
-Sample mode needs nothing else. Live mode additionally requires a corporate Microsoft identity (VS Code's built-in Microsoft sign-in) and, for the Microsoft Foundry agents, the Azure CLI (`az login`). Extensions installed from a `.vsix` are not auto-updated — re-install a newer `.vsix` to upgrade. See the [complete VS Code extension install guide](docs/user-guide/VSCODE-EXTENSION-INSTALL.md) for details and the optional MCP setup.
+`.vsix` installs are not auto-updated — re-install a newer `.vsix` to upgrade. Full walkthrough: [VS Code extension install guide](docs/user-guide/VSCODE-EXTENSION-INSTALL.md).
 
-### Running the extension (sample, SQLite test store, or live)
+### Modes and data store
 
-The extension has two independent toggles, set in **Settings** (search "tlc") or via environment variables / F5 launch configs:
+Two independent toggles, set in **Settings** (search "tlc") or via the F5 launch configs:
 
-- **Mode** (`tlc.mode`): `sample` (sanitized data, no network) or `live` (MSX OData + Dataverse MCP).
-- **Sample data store** (`tlc.dataStore`): `fixture` (in-memory) or `sqlite` (the relational SQLite test store with persistent injected values). Only applies in sample mode.
+- **`tlc.mode`** — `sample` or `live`.
+- **`tlc.dataStore`** — `fixture` (in-memory) or `sqlite` (a persistent relational test store). Applies to sample mode only; ignored in live mode.
 
-You can switch at runtime without restarting: open the Command Palette (`Ctrl+Shift+P`) and run **TLC: Use Live Data (MSX/Dataverse)** or **TLC: Use Sample Data** — the status bar flips between `TLC Assist: Live` and `Sample`. (The **TLC: Test Live Connection** command only *tests* connectivity; it does not switch.)
+Switch at runtime from the Command Palette: **TLC: Use Live Data (MSX/Dataverse)** or **TLC: Use Sample Data**. The status bar flips between `TLC Assist: Live` and `Sample`. (**TLC: Test Live Connection** only tests connectivity; it does not switch.)
 
-#### Run in SQLite test-store mode (sample)
+- **SQLite test store** — a relational database (accounts, opportunities, milestones, stakeholders, meetings/transcripts) whose injected values persist for the session, ideal for exercising writes and meeting capture offline. Set `tlc.dataStore` = `sqlite`, or press **F5** and pick **Run TLC Assist Extension (SQLite test store)**.
+- **Live mode** — sign in first: run `az login` (for the Foundry agents) and sign into VS Code with your corporate Microsoft account (for the delegated MSX token). Then run **TLC: Use Live Data (MSX/Dataverse)** or set `tlc.mode` = `live`. If the delegated token cannot be acquired, the extension shows an error and stays on sample — check **Output → TLC Assist**.
+- **Foundry meeting extraction** — set `tlc.meetingExtractor` = `foundry` (optional `tlc.meetingModel`, default `gpt-6.1-sol`) to extract transcript signals with a deployed Foundry model instead of the offline rules. Uses `az login`; no API key is stored.
 
-The SQLite test store is a relational database (accounts, opportunities, milestones, stakeholders, meetings/transcripts) whose injected values persist for the session — ideal for exercising writes and the meeting-capture flow offline.
+**Meeting capture (live mode):** on an opportunity's **Overview → Milestones** header, paste or upload a transcript. Signals for the milestones you select (commitment, risk) are written to the real milestone records; other signals and recommended next steps are captured into a dated note on the opportunity's comments. Writes are all-or-none (validate → apply → compensate). Microsoft Graph meeting acquisition is not wired yet.
 
-- **Installed extension:** in **Settings** (search "tlc") set **`tlc.mode`** = `sample` and **`tlc.dataStore`** = `sqlite`. The change applies immediately (no reload needed). To confirm, the status bar shows `TLC Assist: Sample`.
-- **From source (F5):** press **F5** and pick **Run TLC Assist Extension (SQLite test store)**. It launches an Extension Development Host with `TLC_MODE=sample` and `TLC_DATA_STORE=sqlite`.
-- **Optional — Foundry model extraction:** to send meeting transcripts to a deployed Microsoft Foundry model instead of the offline rules, either set **`tlc.meetingExtractor`** = `foundry` (and optionally **`tlc.meetingModel`**, default `gpt-6.1-sol`), or press **F5** and pick **Run TLC Assist Extension (SQLite + Foundry extraction)**. This path signs in with the Azure CLI (`az login`); no API key is stored.
+**Run from source (F5):** [.vscode/launch.json](.vscode/launch.json) provides Extension Development Host configurations — fixtures, SQLite test store, SQLite + Foundry extraction, and Live MSX/Dataverse — that set `TLC_MODE`/`TLC_DATA_STORE` (and the Foundry variables) at startup. After rebuilding, run **Developer: Reload Window** in the Extension Development Host so the new build loads. Build, package, and release steps: [VS Code extension runbook](docs/runbooks/vscode-extension.md).
 
-#### Run in live mode (MSX / Dataverse)
+## Desktop app
 
-Live mode reads real opportunity data over MSX OData and Dataverse MCP, and (for the Foundry agents) calls Microsoft Foundry.
-
-**Debug with F5 (from source):**
-
-1. **Sign in first (outside VS Code debugging):** run `az login` in a terminal (needed for the Microsoft Foundry agents), and make sure you are signed into VS Code with your corporate Microsoft account (Accounts menu in the Activity Bar).
-2. Open **Run and Debug** (`Ctrl+Shift+D`) and choose **Run TLC Assist Extension (Live MSX/Dataverse)** from the configuration dropdown at the top.
-3. Press **F5**. This runs the `build-vscode-extension` task automatically and opens a second VS Code window (the Extension Development Host) started with `TLC_MODE=live`.
-4. In the Extension Development Host, open **TLC Assist** (Activity Bar icon or **TLC: Open Assist**). When prompted, complete the VS Code Microsoft sign-in so the extension can acquire a delegated MSX token. The status bar shows `TLC Assist: Live`.
-5. After changing extension code, rebuild and reload: re-run the task (or relaunch F5) and then **Developer: Reload Window** in the Extension Development Host so the new build loads.
-
-> If the delegated token cannot be acquired, the extension shows an error and stays on sample — check **Output → TLC Assist** in the Extension Development Host.
-
-**Meeting capture in live mode:** on an opportunity's **Overview → Milestones** header, **Meeting capture** works in live mode via **paste/upload** of a transcript. Milestone signals (commitment, risk) are written to the real milestone records for the milestones you select; other opportunity signals and recommended next steps are captured into a dated meeting note on the opportunity's comments. Writes are all-or-none (validate → apply → compensate). Set `tlc.meetingExtractor` = `foundry` to extract with a Microsoft Foundry model. (Microsoft Graph meeting acquisition is not wired yet.)
-
-**Installed extension (no debugger):** run **TLC: Use Live Data (MSX/Dataverse)** from the Command Palette, or set **`tlc.mode`** = `live` in **Settings**. The status bar shows `TLC Assist: Live`. The `tlc.dataStore` setting is ignored in live mode.
-
-**Developing with F5:** the repo's [.vscode/launch.json](.vscode/launch.json) provides the Extension Development Host configurations above — **Run TLC Assist Extension** (fixtures), **Run TLC Assist Extension (SQLite test store)**, **Run TLC Assist Extension (SQLite + Foundry extraction)**, and **Run TLC Assist Extension (Live MSX/Dataverse)** — which set `TLC_MODE`/`TLC_DATA_STORE` (and, for the Foundry config, `TLC_MEETING_EXTRACTOR`/`TLC_MEETING_MODEL`) as the startup default. After rebuilding the extension, run **Developer: Reload Window** in the Extension Development Host (or relaunch) so the new build loads.
-
-## Install the Desktop App
+### Install
 
 1. Open the [latest release](https://github.com/kprpg/TLC-MultiAgentAssist/releases/latest) and expand **Assets**.
-2. Download one of the Windows x64 files:
-   - `TLC-MultiAgent-Assist-<version>-Windows-x64.exe` - recommended installer with Start menu and desktop shortcuts.
-   - `TLC-MultiAgent-Assist-<version>-Windows-x64.zip` - portable build for users without installation access.
-3. If Microsoft Edge warns that the file is not commonly downloaded, open **Downloads**, select **More actions** (**...**) beside the file, then select **Keep** and **Keep anyway**. Continue only if the file came from this repository's GitHub Releases page.
-4. Open the download folder, right-click the `.exe`, select **Properties**, select **Unblock** if it is available, and then select **Apply**.
-5. Double-click the installer. Choose **Only for me** for a per-user installation or **Anyone who uses this computer** for an all-users installation, then select **Next**.
-6. When setup completes, leave **Run TLC MultiAgent Assist** selected and choose **Finish**.
+2. Download a Windows x64 file:
+   - `TLC-MultiAgent-Assist-<version>-Windows-x64.exe` — recommended installer with Start menu and desktop shortcuts.
+   - `TLC-MultiAgent-Assist-<version>-Windows-x64.zip` — portable build for users without installation access.
+3. If the browser or Windows flags the download, choose to keep it, then right-click the file → **Properties** → **Unblock** → **Apply**. Continue only if the file came from this repository's GitHub Releases page.
+4. Run the installer and choose **Only for me** or **Anyone who uses this computer**, then finish setup. For the portable ZIP, **Extract All** and run `TLC MultiAgent Assist.exe` from the extracted folder.
 
-For the portable ZIP, unblock it if prompted, select **Extract All**, and run `TLC MultiAgent Assist.exe` from the extracted folder. See the [complete desktop installation guide](docs/user-guide/DESKTOP-INSTALL.md) for detailed instructions and troubleshooting links.
+Detailed steps and troubleshooting: [desktop installation guide](docs/user-guide/DESKTOP-INSTALL.md).
 
-## Run with Sample Data
+### Run in sample mode
 
-> **Explore the desktop app without signing in or connecting to MSX, Foundry, Azure, or Microsoft Entra ID.** Close any running instance of TLC MultiAgent Assist before starting sample mode.
-
-From **Windows Command Prompt** (`cmd.exe`) at the repository root, run:
+Close any running instance first. From **Command Prompt** (`cmd.exe`), launch the installed app with sample data:
 
 ```cmd
-set "TLC_DATA_MODE=sample" && ".\release\win-unpacked\TLC MultiAgent Assist.exe"
+set "TLC_DATA_MODE=sample" && "%LOCALAPPDATA%\Programs\TLC MultiAgent Assist\TLC MultiAgent Assist.exe"
 ```
 
-After downloading the `.exe` from the GitHub Release page and installing it, replace `<UserName>` with your Windows user name and run this command from **Windows Command Prompt** (`cmd.exe`):
-
-```cmd
-set "TLC_DATA_MODE=sample" && "C:\Users\<UserName>\AppData\Local\Programs\TLC MultiAgent Assist\TLC MultiAgent Assist.exe"
-```
-
-For the portable ZIP, extract it, open Command Prompt in the extracted folder, and run:
-
-```cmd
-set "TLC_DATA_MODE=sample" && "TLC MultiAgent Assist.exe"
-```
-
-The quotes around `TLC_DATA_MODE=sample` are required. Without them, a space before `&&` becomes part of the value and the app starts in live mode. In sample mode, the app loads bundled sanitized data and does not display a login dialog.
-
-PowerShell users can launch the installed app with:
+Or from **PowerShell**:
 
 ```powershell
 $env:TLC_DATA_MODE = 'sample'
 & "$env:LOCALAPPDATA\Programs\TLC MultiAgent Assist\TLC MultiAgent Assist.exe"
 ```
 
-## First Run
+For other builds, replace the executable path: the portable ZIP runs `"TLC MultiAgent Assist.exe"` from its extracted folder, and a local build runs `".\release\win-unpacked\TLC MultiAgent Assist.exe"`. The quotes around `TLC_DATA_MODE=sample` are required — without them a trailing space becomes part of the value and the app starts in live mode. In sample mode the app loads bundled sanitized data and shows no login dialog.
 
-1. Start TLC MultiAgent Assist.
-2. Sign in with your authorized corporate identity when prompted.
+### First run (live mode)
 
-Packaged releases include the default Foundry project and agent configuration, so no endpoint setup is required for normal use.
+Start the app and sign in with your authorized corporate identity when prompted. Packaged releases include the default Foundry project and agent configuration, so no endpoint setup is required for normal use.
 
-To use your own Foundry project instead, edit `%APPDATA%\@tlc\desktop\foundry.environment.json` and replace the `foundry.projectEndpoint` and `foundry.agents` values. This per-user file overrides the bundled defaults and is preserved during upgrades. It must never contain client secrets, access tokens, API keys, or credential-bearing connection strings.
+To use your own Foundry project, edit `%APPDATA%\@tlc\desktop\foundry.environment.json` and replace the `foundry.projectEndpoint` and `foundry.agents` values. This per-user file overrides the bundled defaults, is preserved during upgrades, and must never contain client secrets, access tokens, API keys, or credential-bearing connection strings.
 
-See the runbooks for complete prerequisites, build commands, startup modes, and authentication details:
+## Web application
 
-- [End-user guide](docs/user-guide/USER-GUIDE.md)
-- [End-user frequently asked questions](docs/FAQ.md)
-- [Install the VS Code extension (end user)](docs/user-guide/VSCODE-EXTENSION-INSTALL.md)
-- [Desktop setup and troubleshooting](docs/runbooks/desktop-app.md)
-- [Web setup and hosting](docs/runbooks/web-app.md)
-- [VS Code extension build, package, and deploy](docs/runbooks/vscode-extension.md)
-
-## Web Application
-
-TLC Assist also runs as a browser-based web application that serves the same revamped UI, suited for hosting on Azure App Service.
+TLC Assist also runs as a browser-based app that serves the same UI, suited for hosting on Azure App Service.
 
 Run locally with bundled sample data (no sign-in or network):
 
@@ -142,44 +107,44 @@ az login
 npm run web:start:live
 ```
 
-Build an Azure App Service-ready package with `npm run web:release`, or push a `web-v*` tag to publish the App Service ZIP to GitHub Releases. See the [web setup and hosting runbook](docs/runbooks/web-app.md) for full deployment details.
+Build an Azure App Service-ready package with `npm run web:release`, or push a `web-v*` tag to publish the ZIP to GitHub Releases. Full deployment details: [web setup and hosting runbook](docs/runbooks/web-app.md).
 
 ## Development
 
-Desktop:
-
 ```powershell
 npm install
-Copy-Item config/foundry.environment.example.json config/foundry.environment.json
-npm run desktop:start
 ```
 
-Packaged desktop releases seed the non-secret shared Foundry configuration automatically and use Azure CLI sign-in (run `az login` first). The private developer file above remains ignored and can override the shared default.
+### Run from source
 
-Web with sample data:
+| Target | Command | Notes |
+| --- | --- | --- |
+| Desktop (sample) | `npm run desktop:start` | First copy the Foundry config: `Copy-Item config/foundry.environment.example.json config/foundry.environment.json`. |
+| Desktop (package) | `npm run desktop:package` | Windows artifacts are written to `release/`. |
+| Web (sample) | `npm run web:start` | See [Web application](#web-application). |
+| Web (live) | `az login` then `npm run web:start:live` | Uses the private Foundry environment file plus an Azure CLI sign-in. |
+| VS Code extension | **F5** in VS Code | See the launch configs under [VS Code extension](#vs-code-extension). |
 
-```powershell
-npm install
-npm run web:start
-```
+Packaged desktop releases seed the non-secret shared Foundry configuration automatically and use Azure CLI sign-in (run `az login` first). The private developer file above stays ignored and can override the shared default. Downloaded artifacts may need to be unblocked before launch (right-click → **Properties** → **Unblock**).
 
-Web with live local data uses the same private environment file plus an Azure CLI sign-in:
+### Release workflows
 
-```powershell
-az login
-npm run web:start:live
-```
+Pushing a version tag runs the matching workflow and publishes to GitHub Releases. Each release stream is kept separate from the others.
 
-Create local Windows release artifacts with:
+| Tag | Workflow | Publishes | Local equivalent |
+| --- | --- | --- | --- |
+| `v0.1.0` | Desktop release | Installer + portable ZIP | `npm run desktop:package` |
+| `web-v0.1.0` | Web release | Azure App Service ZIP (validated and smoke-tested) | `npm run web:release` |
+| `ext-v0.1.0` | VS Code extension release | `.vsix` + optional MCP config bundle | `npm run ext:release` |
 
-```powershell
-npm run desktop:package
-```
+The `ext-v*` tag must match the extension `version` in `apps/vscode-extension/package.json`. Manually running the desktop workflow publishes a run-specific tag such as `v0.1.0-build.2` unless a tag is supplied.
 
-Artifacts are written to `release/`. Pushing a version tag such as `v0.1.0` runs the desktop release workflow and publishes the installer and portable ZIP to GitHub Releases. Manually running the workflow publishes a visible GitHub Release with a run-specific tag such as `v0.1.0-build.2` unless a tag is supplied. Downloaded artifacts might need to be unblocked before launch. Right-click the executable, select **Properties**, and choose **Unblock**.
+## Documentation
 
-Pushing a tag such as `web-v0.1.0` runs the web release workflow. It validates the repository, builds and smoke-tests an isolated production package, and publishes an Azure App Service-ready ZIP to GitHub Releases. Web releases are kept separate from the latest desktop release.
-
-Pushing a tag such as `ext-v0.1.0` runs the VS Code extension release workflow. It builds and packages the extension, then publishes the installable `.vsix` plus an optional MCP configuration bundle (`tlc-assist-vscode-mcp-config-<version>.zip`) to GitHub Releases. The tag must match the extension `version` in `apps/vscode-extension/package.json`. Produce the same artifacts locally with `npm run ext:release` (written to `release-ext/`). Extension releases are kept separate from the latest desktop release. See the [VS Code extension build, package, and release runbook](docs/runbooks/vscode-extension.md).
-
-Deployment details are documented in the [web app runbook](docs/runbooks/web-app.md).
+- [Technology stack](TechStack.md)
+- [End-user guide](docs/user-guide/USER-GUIDE.md)
+- [Frequently asked questions](docs/FAQ.md)
+- [VS Code extension install (end user)](docs/user-guide/VSCODE-EXTENSION-INSTALL.md)
+- [Desktop setup and troubleshooting](docs/runbooks/desktop-app.md)
+- [Web setup and hosting](docs/runbooks/web-app.md)
+- [VS Code extension build, package, and deploy](docs/runbooks/vscode-extension.md)
