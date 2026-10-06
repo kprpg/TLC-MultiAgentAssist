@@ -493,6 +493,11 @@ test('edits milestone fields and opportunity comments with save and cancel', asy
     await expect(page.getByRole('textbox', { name: 'Milestone Comments' })).toBeVisible()
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
 
+    await openMilestoneEditor('Milestone Status')
+    await page.getByRole('combobox').selectOption({ label: 'Cancelled' })
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(editMilestone).toHaveCount(0)
+
     const opportunitiesBlade = page.getByRole('region', { name: 'Opportunities blade' })
     const openOpportunityComments = async () => {
         await page.getByRole('button', { name: 'Edit Grid operations modernization' }).click()

@@ -22,6 +22,7 @@ import { RecordTooltip } from './record-tooltip.js'
 import { sortMilestones, sortOpportunities, type MilestoneSort, type OpportunitySort, type SortDirection } from './sorting.js'
 import { DiscoveryControls, DiscoverySortHeader } from '../../../shared/discovery-controls.js'
 import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportunities, toggleDiscoverySort, type DiscoveryFilters, type DiscoverySort } from '../../../shared/discovery.js'
+import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 import type {
     AccountCandidateView,
     AccountView,
@@ -777,7 +778,7 @@ function MilestonesEditor({ opportunityId, currency, milestones, onChanged, onNo
     const [membershipBusyId, setMembershipBusyId] = useState<string | undefined>(undefined)
     const [activitiesForId, setActivitiesForId] = useState<string | undefined>(undefined)
 
-    const sorted = sortMilestones(milestones, sortBy, direction)
+    const sorted = sortMilestones(filterVisibleMilestones(milestones), sortBy, direction)
 
     const toggleMilestoneTeam = useCallback(async (milestone: MilestoneView) => {
         const joining = milestone.onMilestoneTeam !== true
@@ -1592,6 +1593,8 @@ function DiscoverPanel(): ReactElement {
     const [milestoneBusyId, setMilestoneBusyId] = useState<string | undefined>(undefined)
     const opportunities = items.data ?? []
     const visibleOpportunities = sortDiscoveryOpportunities(filterDiscoveryOpportunities(opportunities, filters), sort)
+    const displayedDiscoverMilestones = (opportunityId: string): MilestoneView[] =>
+        filterVisibleMilestones(discoverMilestones[opportunityId] ?? [])
 
     useEffect(() => {
         let active = true
@@ -1712,8 +1715,8 @@ function DiscoverPanel(): ReactElement {
                                     <tr className="discover-milestones-row" aria-label={`${item.name} milestones`}>
                                         <td colSpan={5}>
                                             {milestonesLoadingId === item.id && <span className="muted">Loading milestones…</span>}
-                                            {milestonesLoadingId !== item.id && (discoverMilestones[item.id]?.length ?? 0) === 0 && <span className="muted">No milestones found for this opportunity.</span>}
-                                            {(discoverMilestones[item.id] ?? []).map((milestone) => (
+                                            {milestonesLoadingId !== item.id && displayedDiscoverMilestones(item.id).length === 0 && <span className="muted">No milestones found for this opportunity.</span>}
+                                            {displayedDiscoverMilestones(item.id).map((milestone) => (
                                                 <div key={milestone.id} className="discover-milestone-item">
                                                     <button
                                                         type="button"
