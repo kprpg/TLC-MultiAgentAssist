@@ -83,7 +83,7 @@ async function verifyPortfolioActionColors(page: Page, host: 'desktop' | 'web' |
 async function verifyDiscoveryControls(page: Page, host: 'desktop' | 'web' | 'vscode', accent = 'rgb(15, 108, 189)', danger = 'rgb(209, 52, 56)'): Promise<void> {
   const panel = page.getByRole('region', { name: 'Discover opportunities' })
   const table = panel.getByRole('table', { name: 'Discovered opportunities' })
-  const names = table.locator('tbody > tr > td:first-child')
+  const names = table.locator('tbody > tr:not(.discover-milestones-row) > td:first-child strong')
   await expect(names).toHaveText(['Zulu renewal', 'Alpha analysis', 'Beta platform', 'Alpha infrastructure'])
   await expect(panel.getByText('Showing 4 of 4 opportunities', { exact: true })).toBeVisible()
 

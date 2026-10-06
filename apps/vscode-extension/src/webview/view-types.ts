@@ -62,6 +62,47 @@ export interface MilestoneView {
     estimatedMonthlyUsage?: number
     riskDetails?: string
     comments?: string
+    onMilestoneTeam?: boolean
+}
+
+export interface MilestoneTeamJoinResultView {
+    opportunityId: string
+    milestoneId: string
+    onMilestoneTeam: true
+    alreadyMember: boolean
+}
+
+export interface MilestoneTeamLeaveResultView {
+    opportunityId: string
+    milestoneId: string
+    onMilestoneTeam: false
+    alreadyAbsent: boolean
+}
+
+export interface MilestoneActivityView {
+    id: string
+    milestoneId: string
+    opportunityId: string
+    subject: string
+    activityType: string
+    status: string
+    priority?: 'Low' | 'Normal' | 'High'
+    taskCategory?: string
+    due?: string
+    durationMinutes?: number
+    description?: string
+    owner?: string
+    createdBy?: string
+    createdOn?: string
+}
+
+export interface CreateMilestoneActivityInput {
+    subject: string
+    taskCategory?: string
+    description?: string
+    due?: string
+    priority?: 'Low' | 'Normal' | 'High'
+    durationMinutes?: number
 }
 
 export interface MilestoneUpdateInput {

@@ -471,6 +471,94 @@ body.resizing-blade .blade {
     vertical-align: top;
 }
 
+.milestone-name-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.milestone-activities-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.milestone-activities-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.milestone-activity-item {
+    padding: 8px;
+    border: 1px solid var(--cp-border);
+    border-radius: 6px;
+}
+
+.activity-type-pill {
+    font-size: 10px;
+    text-transform: uppercase;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: var(--cp-surface-soft);
+    color: var(--cp-text-muted);
+}
+
+.milestone-activity-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-top: 1px solid var(--cp-border);
+    padding-top: 12px;
+}
+
+.milestone-name-cell .milestone-team-toggle {
+    flex: 0 0 auto;
+    min-width: 24px;
+    padding: 0 4px;
+}
+
+.discover-name-cell {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.discover-expand {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--cp-text-muted);
+    cursor: pointer;
+    padding: 0;
+}
+
+.discover-expand svg {
+    transition: transform 0.15s ease;
+}
+
+.discover-milestones-row td {
+    background: var(--cp-surface-soft);
+}
+
+.discover-milestone-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+.discover-milestone-item .milestone-team-toggle {
+    flex: 0 0 auto;
+    min-width: 24px;
+    padding: 0 4px;
+}
+
 .opportunity-table-wrap .record-table tr:last-child td,
 .milestone-table-wrap .record-table tr:last-child td {
     border-bottom: 0;

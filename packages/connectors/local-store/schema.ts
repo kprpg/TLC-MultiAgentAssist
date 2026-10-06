@@ -109,6 +109,30 @@ CREATE TABLE opportunity_dealteam (
   PRIMARY KEY (opportunity_id, systemuser_id)
 );
 
+CREATE TABLE milestone_team_member (        -- app-owned milestone-team membership (independent of deal team)
+  milestone_id   TEXT NOT NULL REFERENCES engagement_milestone(id),
+  systemuser_id  TEXT NOT NULL REFERENCES systemuser(id),
+  opportunity_id TEXT NOT NULL REFERENCES opportunity(id),
+  PRIMARY KEY (milestone_id, systemuser_id)
+);
+
+CREATE TABLE milestone_activity (           -- Activity (Task) regarding a milestone (MSX: task.regardingobjectid)
+  id               TEXT PRIMARY KEY,
+  milestone_id     TEXT NOT NULL REFERENCES engagement_milestone(id),
+  opportunity_id   TEXT NOT NULL REFERENCES opportunity(id),
+  subject          TEXT NOT NULL,
+  activity_type    TEXT NOT NULL DEFAULT 'task',
+  status           TEXT NOT NULL DEFAULT 'Open',   -- Open / Completed / Canceled
+  priority         TEXT,                           -- Low / Normal / High
+  task_category    TEXT,
+  due              TEXT,
+  duration_minutes INTEGER,
+  description      TEXT,
+  owner_id         TEXT REFERENCES systemuser(id),
+  created_by       TEXT REFERENCES systemuser(id),
+  created_on       TEXT
+);
+
 CREATE TABLE discoverable_opportunity (     -- SE-domain discovery catalog ("Add me" candidates)
   id                   TEXT PRIMARY KEY,
   account_id           TEXT NOT NULL REFERENCES account(id),
@@ -180,6 +204,8 @@ CREATE INDEX idx_opportunity_account ON opportunity(account_id);
 CREATE INDEX idx_milestone_opportunity ON engagement_milestone(opportunity_id);
 CREATE INDEX idx_stakeholder_opportunity ON stakeholder(opportunity_id);
 CREATE INDEX idx_dealteam_user ON opportunity_dealteam(systemuser_id);
+CREATE INDEX idx_milestoneteam_user ON milestone_team_member(systemuser_id);
+CREATE INDEX idx_milestone_activity_milestone ON milestone_activity(milestone_id);
 CREATE INDEX idx_activity_opportunity ON activity(opportunity_id);
 CREATE INDEX idx_transcript_opportunity ON transcript(opportunity_id);
 `

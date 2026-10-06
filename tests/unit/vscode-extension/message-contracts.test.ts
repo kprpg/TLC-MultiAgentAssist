@@ -43,6 +43,15 @@ describe('vscode-extension message contracts', () => {
         expect(parseBridgeParams('leaveDealTeam', { opportunityId: 'opportunity-1' })).toEqual({ opportunityId: 'opportunity-1' })
     })
 
+    it('validates milestone-team membership messages and rejects missing ids', () => {
+        expect(bridgeMethodSchema.parse('joinMilestoneTeam')).toBe('joinMilestoneTeam')
+        expect(bridgeMethodSchema.parse('leaveMilestoneTeam')).toBe('leaveMilestoneTeam')
+        expect(parseBridgeParams('joinMilestoneTeam', { opportunityId: 'opp-1', milestoneId: 'ms-1' })).toEqual({ opportunityId: 'opp-1', milestoneId: 'ms-1' })
+        expect(parseBridgeParams('leaveMilestoneTeam', { opportunityId: 'opp-1', milestoneId: 'ms-1' })).toEqual({ opportunityId: 'opp-1', milestoneId: 'ms-1' })
+        expect(() => parseBridgeParams('joinMilestoneTeam', { opportunityId: 'opp-1' })).toThrow()
+        expect(() => parseBridgeParams('leaveMilestoneTeam', { opportunityId: 'opp-1', milestoneId: 'ms-1', hack: 1 })).toThrow()
+    })
+
     it('rejects an evidence url that is not a url', () => {
         expect(() => parseBridgeParams('openEvidence', { url: 'not a url' })).toThrow()
     })

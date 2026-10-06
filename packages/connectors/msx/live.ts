@@ -1,5 +1,6 @@
 import {
   accountSearchRequestSchema,
+  createMilestoneActivityRequestSchema,
   customerCommitmentSchema,
   getSeDomainDefinition,
   measurePerformance,
@@ -11,12 +12,17 @@ import {
   type AccountListOptions,
   type AccountSearchRequest,
   type AccountVisibility,
+  type CreateMilestoneActivityRequest,
   type CustomerCommitment,
   type DealTeamJoinResult,
   type DealTeamLeaveResult,
   type DiscoverableOpportunity,
   type Milestone,
+  type MilestoneActivity,
+  type MilestoneActivityPriority,
   type MilestoneStatus,
+  type MilestoneTeamJoinResult,
+  type MilestoneTeamLeaveResult,
   type MilestoneUpdate,
   type Opportunity,
   type OpportunityUpdate,
@@ -87,6 +93,18 @@ interface RelationshipMetadataRow {
   ReferencingEntityNavigationPropertyName?: string
 }
 
+interface TaskRow {
+  activityid: string
+  subject?: string
+  statecode?: number
+  prioritycode?: number
+  scheduledend?: string
+  actualdurationminutes?: number
+  description?: string
+  createdon?: string
+  [key: string]: unknown
+}
+
 interface MilestoneRow {
   msp_engagementmilestoneid: string
   msp_name?: string
@@ -134,6 +152,35 @@ export const defaultDealTeamWriteMetadata: MsxDealTeamWriteMetadata = {
   opportunityLookupField: '_msp_parentopportunityid_value'
 }
 
+/**
+ * Live milestone-team membership is the standard Dataverse **Access Team** behind the "Milestone
+ * Team" subgrid on the milestone form. Membership is managed with the `AddUserToRecordTeam` /
+ * `RemoveUserFromRecordTeam` actions against the auto-created access team whose **team template** is
+ * discovered at runtime by name (default "Milestone Team"), so no per-field configuration is needed.
+ */
+export interface MsxMilestoneTeamAccessMetadata {
+  /** Access-team template name shown on the milestone form (default "Milestone Team"). */
+  templateName: string
+  /** Optional explicit team template id; when set, name-based discovery is skipped. */
+  templateId?: string
+}
+
+export const DEFAULT_MILESTONE_TEAM_TEMPLATE_NAME = 'Milestone Team'
+
+/** Applies the default template name to a partial milestone-team access-team config. */
+export function resolveMilestoneTeamAccessMetadata(
+  partial: Partial<MsxMilestoneTeamAccessMetadata> | undefined
+): MsxMilestoneTeamAccessMetadata {
+  return {
+    templateName: partial?.templateName?.trim() || DEFAULT_MILESTONE_TEAM_TEMPLATE_NAME,
+    ...(partial?.templateId ? { templateId: partial.templateId } : {})
+  }
+}
+
+export const MILESTONE_TEAM_NOT_CONFIGURED_MESSAGE =
+  'The Milestone Team is not set up in this MSX environment, so your change was not saved. ' +
+  'Ask your administrator to enable the Milestone Team access team on the milestone form.'
+
 /** Derives a lookup attribute logical name (e.g. `msp_dealteamuserid`) from its `_x_value` field. */
 function lookupAttributeName(valueField: string): string {
   return valueField.replace(/^_/, '').replace(/_value$/, '')
@@ -145,7 +192,18 @@ export interface MsxWriteMetadata {
   milestoneStatusCodes?: Partial<Record<MilestoneStatus, number>>
   stageCodes?: Partial<Record<1 | 2 | 3 | 4 | 5, number>>
   dealTeam?: Partial<MsxDealTeamWriteMetadata>
+  milestoneTeam?: Partial<MsxMilestoneTeamAccessMetadata>
+  /** Logical name of the task "Task Category" option-set field, if configured for this environment. */
+  taskCategoryField?: string
+  /** Map of Task Category label -> option-set code, used to write the category on a created task. */
+  taskCategoryCodes?: Record<string, number>
 }
+
+/** Dataverse task `prioritycode`: Low 0 / Normal 1 / High 2. */
+const taskPriorityCodes: Record<MilestoneActivityPriority, number> = { Low: 0, Normal: 1, High: 2 }
+const taskPriorityByCode: Record<number, MilestoneActivityPriority> = { 0: 'Low', 1: 'Normal', 2: 'High' }
+/** Dataverse task `statecode`: Open 0 / Completed 1 / Canceled 2. */
+const taskStatusByState: Record<number, string> = { 0: 'Open', 1: 'Completed', 2: 'Canceled' }
 
 const navigationPropertyPattern = /^[A-Za-z][A-Za-z0-9_]*$/
 
@@ -189,12 +247,46 @@ export function msxWriteMetadataFromEnvironment(environment: NodeJS.ProcessEnv):
     if (!navigationPropertyPattern.test(rawValue)) throw new Error(`${variable} must be a valid Dataverse identifier.`)
     dealTeam[key] = rawValue
   }
+  const milestoneTeam: Partial<MsxMilestoneTeamAccessMetadata> = {}
+  const milestoneTeamTemplateName = environment['TLC_MSX_MILESTONE_TEAM_TEMPLATE_NAME']?.trim()
+  if (milestoneTeamTemplateName) milestoneTeam.templateName = milestoneTeamTemplateName
+  const milestoneTeamTemplateId = environment['TLC_MSX_MILESTONE_TEAM_TEMPLATE_ID']?.trim()
+  if (milestoneTeamTemplateId) {
+    if (!guidPattern.test(milestoneTeamTemplateId)) throw new Error('TLC_MSX_MILESTONE_TEAM_TEMPLATE_ID must be a valid GUID.')
+    milestoneTeam.templateId = milestoneTeamTemplateId
+  }
+  const taskCategoryField = environment['TLC_MSX_TASK_CATEGORY_FIELD']?.trim()
+  if (taskCategoryField && !navigationPropertyPattern.test(taskCategoryField)) {
+    throw new Error('TLC_MSX_TASK_CATEGORY_FIELD must be a valid Dataverse identifier.')
+  }
+  let taskCategoryCodes: Record<string, number> | undefined
+  const rawTaskCategoryCodes = environment['TLC_MSX_TASK_CATEGORY_CODES']?.trim()
+  if (rawTaskCategoryCodes) {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(rawTaskCategoryCodes)
+    } catch {
+      throw new Error('TLC_MSX_TASK_CATEGORY_CODES must be a JSON object mapping category labels to integer codes.')
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new Error('TLC_MSX_TASK_CATEGORY_CODES must be a JSON object mapping category labels to integer codes.')
+    }
+    const codes: Record<string, number> = {}
+    for (const [label, code] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!Number.isSafeInteger(code)) throw new Error(`TLC_MSX_TASK_CATEGORY_CODES["${label}"] must be an integer option code.`)
+      codes[label] = code as number
+    }
+    taskCategoryCodes = codes
+  }
   return {
     ...(riskDetailsField ? { riskDetailsField } : {}),
     ...(accountTpidField ? { accountTpidField } : {}),
     ...(Object.keys(configuredCodes).length > 0 ? { milestoneStatusCodes: configuredCodes } : {}),
     ...(Object.keys(stageCodes).length > 0 ? { stageCodes } : {}),
-    ...(Object.keys(dealTeam).length > 0 ? { dealTeam } : {})
+    ...(Object.keys(dealTeam).length > 0 ? { dealTeam } : {}),
+    ...(Object.keys(milestoneTeam).length > 0 ? { milestoneTeam } : {}),
+    ...(taskCategoryField ? { taskCategoryField } : {}),
+    ...(taskCategoryCodes ? { taskCategoryCodes } : {})
   }
 }
 
@@ -215,6 +307,7 @@ export class LiveMsxConnector implements MsxConnector {
   private readonly milestonePromises = new Map<string, Promise<MilestoneRow[]>>()
   private currentUserIdPromise: Promise<string> | undefined
   private dealTeamBindingsPromise: Promise<{ userNavigationProperty: string; opportunityNavigationProperty: string }> | undefined
+  private milestoneTeamTemplateIdPromise: Promise<string> | undefined
 
   constructor(
     private readonly tokenProvider: MsxAccessTokenProvider,
@@ -306,6 +399,20 @@ export class LiveMsxConnector implements MsxConnector {
     if (!portfolio.opportunities.some((opportunity) => opportunity.id === opportunityId)) {
       throw new Error('The opportunity is not in the signed-in user’s active MSX portfolio.')
     }
+    return this.mapMilestoneRows(opportunityId, await this.milestoneTeamMilestoneIds())
+  }
+
+  async listDiscoverableMilestones(opportunityId: string): Promise<Milestone[]> {
+    if (!guidPattern.test(opportunityId)) {
+      throw new Error('The opportunity id must be a valid MSX GUID.')
+    }
+    // No portfolio gate: discovery surfaces opportunities in the user's assigned accounts, and the
+    // delegated token already scopes what is readable. This lets a user inspect and join a milestone
+    // team for an opportunity they are not (yet) on the Deal Team for.
+    return this.mapMilestoneRows(opportunityId, await this.milestoneTeamMilestoneIds())
+  }
+
+  private async mapMilestoneRows(opportunityId: string, memberMilestoneIds: ReadonlySet<string>): Promise<Milestone[]> {
     return (await this.getMilestoneRows(opportunityId)).map((row) => ({
       id: row.msp_engagementmilestoneid,
       opportunityId,
@@ -318,8 +425,46 @@ export class LiveMsxConnector implements MsxConnector {
       ...(this.writeMetadata.riskDetailsField && typeof row[this.writeMetadata.riskDetailsField] === 'string'
         ? { riskDetails: row[this.writeMetadata.riskDetailsField] as string }
         : {}),
-      ...(typeof row.msp_forecastcomments === 'string' ? { comments: row.msp_forecastcomments } : {})
+      ...(typeof row.msp_forecastcomments === 'string' ? { comments: row.msp_forecastcomments } : {}),
+      onMilestoneTeam: memberMilestoneIds.has(row.msp_engagementmilestoneid)
     }))
+  }
+
+  /**
+   * Milestone ids whose access team (the "Milestone Team" subgrid) currently includes the signed-in
+   * user, read from the Dataverse `teams`/`teammembership` tables. Empty when the Milestone Team
+   * access-team template is not set up in this environment.
+   */
+  private async milestoneTeamMemberships(): Promise<Array<{ milestoneId: string }>> {
+    const templateId = await this.resolveMilestoneTeamTemplateId().catch(() => undefined)
+    if (!templateId) return []
+    const userId = await this.getCurrentUserId()
+    const teams = await this.requestAll<{ _regardingobjectid_value?: string }>('teams', {
+      '$select': '_regardingobjectid_value',
+      '$filter': `teamtype eq 1 and _teamtemplateid_value eq ${templateId} and teammembership_association/any(member:member/systemuserid eq ${userId})`
+    })
+    return unique(teams.map((team) => team._regardingobjectid_value).filter(isPresent)).map((milestoneId) => ({ milestoneId }))
+  }
+
+  /** The signed-in user's milestone-team milestone ids, read from MSX. */
+  private async milestoneTeamMilestoneIds(): Promise<Set<string>> {
+    return new Set((await this.milestoneTeamMemberships()).map((membership) => membership.milestoneId))
+  }
+
+  /**
+   * Parent opportunity ids of the signed-in user's milestone-team memberships (for the portfolio
+   * union), resolved from the member milestone rows.
+   */
+  private async milestoneTeamOpportunityIds(): Promise<string[]> {
+    const memberships = await this.milestoneTeamMemberships()
+    if (memberships.length === 0) return []
+    const milestoneRows = await this.requestByIds<{ msp_engagementmilestoneid: string; _msp_opportunityid_value?: string }>(
+      'msp_engagementmilestones',
+      'msp_engagementmilestoneid',
+      unique(memberships.map((membership) => membership.milestoneId)),
+      'msp_engagementmilestoneid,_msp_opportunityid_value'
+    )
+    return unique(milestoneRows.map((row) => row._msp_opportunityid_value).filter(isPresent))
   }
 
   async updateMilestone(opportunityId: string, milestoneId: string, input: MilestoneUpdate): Promise<Milestone> {
@@ -527,11 +672,164 @@ export class LiveMsxConnector implements MsxConnector {
     return { opportunityId, onDealTeam: false, alreadyAbsent: false }
   }
 
+  async joinMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamJoinResult> {
+    if (!guidPattern.test(opportunityId)) {
+      throw new Error('The opportunity id must be a valid MSX GUID.')
+    }
+    if (!guidPattern.test(milestoneId)) {
+      throw new Error('The milestone id must be a valid MSX GUID.')
+    }
+    const milestones = await this.getMilestoneRows(opportunityId)
+    if (!milestones.some((milestone) => milestone.msp_engagementmilestoneid === milestoneId)) {
+      throw new Error('The milestone is not in the selected opportunity.')
+    }
+    const userId = await this.getCurrentUserId()
+    const templateId = await this.resolveMilestoneTeamTemplateId()
+    if (await this.isMilestoneTeamMember(milestoneId)) {
+      this.invalidateMilestoneTeamCaches(opportunityId)
+      return { opportunityId, milestoneId, onMilestoneTeam: true, alreadyMember: true }
+    }
+    await this.post(`systemusers(${userId})/Microsoft.Dynamics.CRM.AddUserToRecordTeam`, this.recordTeamActionBody(milestoneId, templateId))
+    this.invalidateMilestoneTeamCaches(opportunityId)
+    return { opportunityId, milestoneId, onMilestoneTeam: true, alreadyMember: false }
+  }
+
+  async leaveMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamLeaveResult> {
+    if (!guidPattern.test(opportunityId)) {
+      throw new Error('The opportunity id must be a valid MSX GUID.')
+    }
+    if (!guidPattern.test(milestoneId)) {
+      throw new Error('The milestone id must be a valid MSX GUID.')
+    }
+    const userId = await this.getCurrentUserId()
+    const templateId = await this.resolveMilestoneTeamTemplateId()
+    if (!(await this.isMilestoneTeamMember(milestoneId))) {
+      this.invalidateMilestoneTeamCaches(opportunityId)
+      return { opportunityId, milestoneId, onMilestoneTeam: false, alreadyAbsent: true }
+    }
+    await this.post(`systemusers(${userId})/Microsoft.Dynamics.CRM.RemoveUserFromRecordTeam`, this.recordTeamActionBody(milestoneId, templateId))
+    this.invalidateMilestoneTeamCaches(opportunityId)
+    return { opportunityId, milestoneId, onMilestoneTeam: false, alreadyAbsent: false }
+  }
+
+  async listMilestoneActivities(opportunityId: string, milestoneId: string): Promise<MilestoneActivity[]> {
+    if (!guidPattern.test(milestoneId)) {
+      throw new Error('The milestone id must be a valid MSX GUID.')
+    }
+    const categoryField = this.writeMetadata.taskCategoryField
+    const rows = await this.requestAll<TaskRow>('tasks', {
+      '$select': ['activityid', 'subject', 'statecode', 'prioritycode', 'scheduledend', 'actualdurationminutes', 'description', '_ownerid_value', 'createdon', '_createdby_value', categoryField].filter(isPresent).join(','),
+      '$filter': `_regardingobjectid_value eq ${milestoneId}`,
+      '$orderby': 'createdon desc'
+    })
+    return rows.map((row) => this.toMilestoneActivity(row, opportunityId, milestoneId))
+  }
+
+  async createMilestoneActivity(opportunityId: string, milestoneId: string, input: CreateMilestoneActivityRequest): Promise<MilestoneActivity> {
+    if (!guidPattern.test(opportunityId)) {
+      throw new Error('The opportunity id must be a valid MSX GUID.')
+    }
+    if (!guidPattern.test(milestoneId)) {
+      throw new Error('The milestone id must be a valid MSX GUID.')
+    }
+    const request = createMilestoneActivityRequestSchema.parse(input)
+    const milestones = await this.getMilestoneRows(opportunityId)
+    if (!milestones.some((milestone) => milestone.msp_engagementmilestoneid === milestoneId)) {
+      throw new Error('The milestone is not in the selected opportunity.')
+    }
+    const userId = await this.getCurrentUserId()
+    const categoryField = this.writeMetadata.taskCategoryField
+    const categoryCode = request.taskCategory ? this.writeMetadata.taskCategoryCodes?.[request.taskCategory] : undefined
+    const body: Record<string, unknown> = {
+      subject: request.subject,
+      prioritycode: taskPriorityCodes[request.priority],
+      'regardingobjectid_msp_engagementmilestone@odata.bind': `/msp_engagementmilestones(${milestoneId})`,
+      'ownerid@odata.bind': `/systemusers(${userId})`,
+      ...(request.description !== undefined ? { description: request.description } : {}),
+      ...(request.due ? { scheduledend: request.due } : {}),
+      ...(request.durationMinutes !== undefined ? { actualdurationminutes: request.durationMinutes } : {}),
+      ...(categoryField && categoryCode !== undefined ? { [categoryField]: categoryCode } : {})
+    }
+    const created = await this.postReturningEntity<TaskRow>('tasks', body)
+    return this.toMilestoneActivity(created, opportunityId, milestoneId)
+  }
+
+  private toMilestoneActivity(row: TaskRow, opportunityId: string, milestoneId: string): MilestoneActivity {
+    const categoryField = this.writeMetadata.taskCategoryField
+    const priority = typeof row.prioritycode === 'number' ? taskPriorityByCode[row.prioritycode] : undefined
+    const category = categoryField ? formattedValue(row, categoryField) : undefined
+    return {
+      id: row.activityid,
+      milestoneId,
+      opportunityId,
+      subject: row.subject?.trim() || 'Untitled task',
+      activityType: 'task',
+      status: typeof row.statecode === 'number' ? (taskStatusByState[row.statecode] ?? 'Open') : 'Open',
+      ...(priority ? { priority } : {}),
+      ...(category ? { taskCategory: category } : {}),
+      ...(row.scheduledend ? { due: row.scheduledend.slice(0, 10) } : {}),
+      ...(typeof row.actualdurationminutes === 'number' ? { durationMinutes: row.actualdurationminutes } : {}),
+      ...(typeof row.description === 'string' && row.description.length > 0 ? { description: row.description } : {}),
+      ...(formattedValue(row, '_ownerid_value') ? { owner: formattedValue(row, '_ownerid_value') } : {}),
+      ...(formattedValue(row, '_createdby_value') ? { createdBy: formattedValue(row, '_createdby_value') } : {}),
+      ...(row.createdon ? { createdOn: row.createdon } : {})
+    }
+  }
+
+  private resolveMilestoneTeamTemplateId(): Promise<string> {
+    const configured = resolveMilestoneTeamAccessMetadata(this.writeMetadata.milestoneTeam)
+    if (configured.templateId && guidPattern.test(configured.templateId)) {
+      return Promise.resolve(configured.templateId)
+    }
+    this.milestoneTeamTemplateIdPromise ??= this.discoverMilestoneTeamTemplateId(configured.templateName).catch((error: unknown) => {
+      this.milestoneTeamTemplateIdPromise = undefined
+      throw error
+    })
+    return this.milestoneTeamTemplateIdPromise
+  }
+
+  /** Finds the "Milestone Team" access-team template id by name (cached for the connector's lifetime). */
+  private async discoverMilestoneTeamTemplateId(templateName: string): Promise<string> {
+    const rows = await this.requestAll<{ teamtemplateid?: string }>('teamtemplates', {
+      '$select': 'teamtemplateid,teamtemplatename',
+      '$filter': `teamtemplatename eq '${escapeODataStringLiteral(templateName)}'`,
+      '$top': '2'
+    })
+    if (rows.length > 1) {
+      throw new Error(`MSX has multiple access-team templates named "${templateName}". Set TLC_MSX_MILESTONE_TEAM_TEMPLATE_ID to the correct team template id.`)
+    }
+    const templateId = rows[0]?.teamtemplateid
+    if (typeof templateId !== 'string' || !guidPattern.test(templateId)) {
+      throw new Error(MILESTONE_TEAM_NOT_CONFIGURED_MESSAGE)
+    }
+    return templateId
+  }
+
   /**
-   * Resolves the single-valued navigation property names used to bind a deal-team row to the
-   * systemuser and opportunity. Prefers explicit configuration, then live relationship metadata,
-   * then a conventional fallback derived from the lookup field names. The metadata lookup is cached.
+   * True when the milestone's access team currently includes the signed-in user. Uses the same
+   * membership read as `onMilestoneTeam` (the all-teams query that only `$select`s
+   * `_regardingobjectid_value`) rather than a per-record `_regardingobjectid_value` **filter**, which
+   * Dataverse does not reliably support on the polymorphic `team.regardingobjectid` lookup. This also
+   * keeps the join/leave decision consistent with what the UI shows.
    */
+  private async isMilestoneTeamMember(milestoneId: string): Promise<boolean> {
+    return (await this.milestoneTeamMilestoneIds()).has(milestoneId)
+  }
+
+  /** Body for the AddUserToRecordTeam / RemoveUserFromRecordTeam bound actions. */
+  private recordTeamActionBody(milestoneId: string, templateId: string): Record<string, unknown> {
+    return {
+      Record: { '@odata.type': 'Microsoft.Dynamics.CRM.msp_engagementmilestone', msp_engagementmilestoneid: milestoneId },
+      TeamTemplate: { '@odata.type': 'Microsoft.Dynamics.CRM.teamtemplate', teamtemplateid: templateId }
+    }
+  }
+
+  private invalidateMilestoneTeamCaches(opportunityId: string): void {
+    this.portfolioPromise = undefined
+    this.observationPromises.delete(opportunityId)
+    this.milestonePromises.delete(opportunityId)
+  }
+
   private resolveDealTeamBindings(dealTeam: MsxDealTeamWriteMetadata): Promise<{ userNavigationProperty: string; opportunityNavigationProperty: string }> {
     if (dealTeam.userNavigationProperty && dealTeam.opportunityNavigationProperty) {
       return Promise.resolve({
@@ -639,9 +937,11 @@ export class LiveMsxConnector implements MsxConnector {
       '$select': '_msp_parentopportunityid_value',
       '$filter': `statecode eq 0 and _msp_dealteamuserid_value eq ${userId}`
     }))
-    const opportunityIds = unique(
-      dealTeamRows.map((row) => row._msp_parentopportunityid_value).filter(isPresent)
-    )
+    const milestoneOpportunityIds = await this.milestoneTeamOpportunityIds()
+    const opportunityIds = unique([
+      ...dealTeamRows.map((row) => row._msp_parentopportunityid_value).filter(isPresent),
+      ...milestoneOpportunityIds
+    ])
     const opportunityRows = await measurePerformance('msx.opportunities', this.performanceReporter, () => this.requestByIds<OpportunityRow>(
       'opportunities',
       'opportunityid',
@@ -807,6 +1107,27 @@ export class LiveMsxConnector implements MsxConnector {
     if (!response.ok) {
       throw new MsxRequestError(`MSX create failed with status ${response.status}.`, response.status)
     }
+  }
+
+  /** POSTs and returns the created row (via `Prefer: return=representation`). */
+  private async postReturningEntity<T>(path: string, body: Record<string, unknown>): Promise<T> {
+    const url = new URL(path, this.baseUrl)
+    this.assertTrustedUrl(url)
+    const accessToken = await this.tokenProvider.getAccessToken()
+    const response = await this.fetchImplementation(url, {
+      method: 'POST',
+      headers: {
+        Authorization: ['Bearer', accessToken].join(' '),
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Prefer: 'return=representation'
+      },
+      body: JSON.stringify(body)
+    })
+    if (!response.ok) {
+      throw new MsxRequestError(`MSX create failed with status ${response.status}.`, response.status)
+    }
+    return await response.json() as T
   }
 
   private async delete(path: string): Promise<void> {

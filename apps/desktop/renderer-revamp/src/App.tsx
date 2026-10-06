@@ -29,10 +29,11 @@ import {
   Search20Regular,
   ArrowSort20Regular,
   Sparkle20Regular,
+  Subtract20Regular,
   Warning20Filled
 } from '@fluentui/react-icons'
-import type { Account, AccountCandidate, AgentCapability, AgentTaskResponse, CustomerCommitment, DiscoverableOpportunity, McemResponse, Milestone, MilestoneStatus, MilestoneUpdate, Opportunity, ScopeRef, SeDomainId, WorkflowDefinition, WorkflowRun } from '../../../../packages/common/index.js'
-import { contractVersion } from '../../../../packages/common/contracts/index.js'
+import type { Account, AccountCandidate, AgentCapability, AgentTaskResponse, CustomerCommitment, DiscoverableOpportunity, McemResponse, Milestone, MilestoneActivity, MilestoneStatus, MilestoneUpdate, Opportunity, ScopeRef, SeDomainId, TaskCategory, WorkflowDefinition, WorkflowRun } from '../../../../packages/common/index.js'
+import { contractVersion, taskCategorySchema } from '../../../../packages/common/contracts/index.js'
 import { seDomainList } from '../../../../packages/common/configuration/se-domains.js'
 import { addMsxOpportunityLink } from '../../../../packages/common/sharing/opportunity-link.js'
 import { agentCapabilities } from '../../../../packages/common/types/agent-capabilities.js'
@@ -79,6 +80,10 @@ const bladeWidthLimits: Record<Blade, { min: number; max: number }> = {
 }
 
 const milestoneStatuses: MilestoneStatus[] = ['On Track', 'At Risk', 'Blocked', 'Completed', 'Cancelled', 'Lost to Competitor', 'Hygiene/Duplicate']
+const taskCategories = taskCategorySchema.options
+const activityPriorities = ['Low', 'Normal', 'High'] as const
+interface ActivityForm { subject: string; taskCategory: string; due: string; priority: 'Low' | 'Normal' | 'High'; durationMinutes: string; description: string }
+const emptyActivityForm: ActivityForm = { subject: '', taskCategory: '', due: '', priority: 'Normal', durationMinutes: '', description: '' }
 const customerCommitments: CustomerCommitment[] = ['Uncommitted', 'Committed']
 const workflowDescriptionById = workflowDescriptions.descriptions as Record<string, WorkflowDescription>
 const milestoneFieldLabels: Record<MilestoneField, string> = {
@@ -222,6 +227,15 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [discoverLoading, setDiscoverLoading] = useState(false)
   const [discoverLoadedDomain, setDiscoverLoadedDomain] = useState<SeDomainId | null>(null)
   const [joiningOpportunityId, setJoiningOpportunityId] = useState<string | null>(null)
+  const [milestoneTeamBusyId, setMilestoneTeamBusyId] = useState<string | null>(null)
+  const [activitiesMilestone, setActivitiesMilestone] = useState<Milestone | null>(null)
+  const [activities, setActivities] = useState<MilestoneActivity[]>([])
+  const [activitiesLoading, setActivitiesLoading] = useState(false)
+  const [activityForm, setActivityForm] = useState<ActivityForm>(emptyActivityForm)
+  const [savingActivity, setSavingActivity] = useState(false)
+  const [expandedDiscoverId, setExpandedDiscoverId] = useState<string | null>(null)
+  const [discoverMilestones, setDiscoverMilestones] = useState<Record<string, Milestone[]>>({})
+  const [discoverMilestonesLoadingId, setDiscoverMilestonesLoadingId] = useState<string | null>(null)
   const [accountDialogOpen, setAccountDialogOpen] = useState(false)
   const [accountMatchBy, setAccountMatchBy] = useState<'name' | 'tpid'>('name')
   const [accountQuery, setAccountQuery] = useState('')
@@ -823,6 +837,112 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       }
     }
 
+  async function joinMilestoneTeam(milestone: Milestone) {
+    setError('')
+    setMilestoneTeamBusyId(milestone.id)
+    try {
+      await client.joinMilestoneTeam(milestone.opportunityId, milestone.id)
+      setMilestones((current) => current.map((item) => item.id === milestone.id ? { ...item, onMilestoneTeam: true } : item))
+      await refreshAccounts(showHiddenAccounts)
+    } catch (cause) {
+      handleError(cause)
+    } finally {
+      setMilestoneTeamBusyId(null)
+    }
+  }
+
+  async function leaveMilestoneTeam(milestone: Milestone) {
+    if (!window.confirm(`Remove yourself from the team for milestone "${milestone.name}"? If this is your only membership on the opportunity, the opportunity will leave your Portfolio.`)) return
+    setError('')
+    setMilestoneTeamBusyId(milestone.id)
+    try {
+      await client.leaveMilestoneTeam(milestone.opportunityId, milestone.id)
+      setMilestones((current) => current.map((item) => item.id === milestone.id ? { ...item, onMilestoneTeam: false } : item))
+      await refreshAccounts(showHiddenAccounts)
+    } catch (cause) {
+      handleError(cause)
+    } finally {
+      setMilestoneTeamBusyId(null)
+    }
+  }
+
+  async function toggleDiscoverExpand(opportunityId: string) {
+    if (expandedDiscoverId === opportunityId) {
+      setExpandedDiscoverId(null)
+      return
+    }
+    setExpandedDiscoverId(opportunityId)
+    if (discoverMilestones[opportunityId]) return
+    setError('')
+    setDiscoverMilestonesLoadingId(opportunityId)
+    try {
+      const items = await client.listDiscoverableMilestones(opportunityId)
+      setDiscoverMilestones((current) => ({ ...current, [opportunityId]: items }))
+    } catch (cause) {
+      handleError(cause)
+    } finally {
+      setDiscoverMilestonesLoadingId(null)
+    }
+  }
+
+  async function toggleDiscoverMilestone(opportunityId: string, milestone: Milestone) {
+    const joining = milestone.onMilestoneTeam !== true
+    if (!joining && !window.confirm(`Remove yourself from the team for milestone "${milestone.name}"? If this is your only membership on the opportunity, the opportunity will leave your Portfolio.`)) return
+    setError('')
+    setMilestoneTeamBusyId(milestone.id)
+    try {
+      if (joining) await client.joinMilestoneTeam(opportunityId, milestone.id)
+      else await client.leaveMilestoneTeam(opportunityId, milestone.id)
+      setDiscoverMilestones((current) => ({
+        ...current,
+        [opportunityId]: (current[opportunityId] ?? []).map((item) => item.id === milestone.id ? { ...item, onMilestoneTeam: joining } : item)
+      }))
+      await refreshAccounts(showHiddenAccounts)
+    } catch (cause) {
+      handleError(cause)
+    } finally {
+      setMilestoneTeamBusyId(null)
+    }
+  }
+
+  async function openMilestoneActivities(milestone: Milestone) {
+    setActivitiesMilestone(milestone)
+    setActivityForm(emptyActivityForm)
+    setActivities([])
+    setActivitiesLoading(true)
+    setError('')
+    try {
+      setActivities(await client.listMilestoneActivities(milestone.opportunityId, milestone.id))
+    } catch (cause) {
+      handleError(cause)
+    } finally {
+      setActivitiesLoading(false)
+    }
+  }
+
+  async function createMilestoneActivity() {
+    if (!activitiesMilestone || activityForm.subject.trim().length === 0) return
+    setSavingActivity(true)
+    setError('')
+    try {
+      const duration = activityForm.durationMinutes.trim().length > 0 ? Number(activityForm.durationMinutes) : undefined
+      const created = await client.createMilestoneActivity(activitiesMilestone.opportunityId, activitiesMilestone.id, {
+        subject: activityForm.subject.trim(),
+        priority: activityForm.priority,
+        ...(activityForm.taskCategory ? { taskCategory: activityForm.taskCategory as TaskCategory } : {}),
+        ...(activityForm.due ? { due: activityForm.due } : {}),
+        ...(duration !== undefined && Number.isFinite(duration) ? { durationMinutes: duration } : {}),
+        ...(activityForm.description.trim() ? { description: activityForm.description.trim() } : {})
+      })
+      setActivities((current) => [created, ...current])
+      setActivityForm(emptyActivityForm)
+    } catch (cause) {
+      handleError(cause)
+    } finally {
+      setSavingActivity(false)
+    }
+  }
+
   async function searchAccountCandidates() {
       setError('')
       setAccountSearchBusy(true)
@@ -1075,6 +1195,32 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         </DialogContent><DialogActions><Button disabled={accountSearchBusy || Boolean(accountMutationId)} onClick={() => setAccountDialogOpen(false)}>Close</Button></DialogActions></DialogBody></DialogSurface>
       </Dialog>
 
+      <Dialog open={activitiesMilestone !== null} onOpenChange={(_, data) => { if (!data.open) setActivitiesMilestone(null) }}>
+        <DialogSurface><DialogBody><DialogTitle>Activities — {activitiesMilestone?.name}</DialogTitle><DialogContent className="milestone-activities-dialog">
+          <div className="milestone-activities-list" aria-label="Milestone activities" aria-busy={activitiesLoading}>
+            {activitiesLoading && <Spinner size="tiny" label="Loading activities…" />}
+            {!activitiesLoading && activities.length === 0 && <p className="muted">No activities yet. Create a task below.</p>}
+            {activities.map((activity) => <div key={activity.id} className="milestone-activity-item">
+              <div><strong>{activity.subject}</strong> <span className="activity-type-pill">{activity.activityType}</span></div>
+              <small>{activity.status}{activity.priority ? ` · ${activity.priority}` : ''}{activity.taskCategory ? ` · ${activity.taskCategory}` : ''}{activity.due ? ` · Due ${activity.due}` : ''}</small>
+              {activity.description && <p className="muted">{activity.description}</p>}
+            </div>)}
+          </div>
+          <div className="milestone-activity-form" aria-label="New task">
+            <h4>New task</h4>
+            <Field label="Subject" required><Input value={activityForm.subject} onChange={(_, data) => setActivityForm((current) => ({ ...current, subject: data.value }))} /></Field>
+            <Field label="Task Category"><select value={activityForm.taskCategory} onChange={(event) => setActivityForm((current) => ({ ...current, taskCategory: event.target.value }))}><option value="">--Select--</option>{taskCategories.map((category) => <option key={category} value={category}>{category}</option>)}</select></Field>
+            <Field label="Due"><Input type="date" value={activityForm.due} onChange={(_, data) => setActivityForm((current) => ({ ...current, due: data.value }))} /></Field>
+            <Field label="Priority"><select value={activityForm.priority} onChange={(event) => setActivityForm((current) => ({ ...current, priority: event.target.value as ActivityForm['priority'] }))}>{activityPriorities.map((priority) => <option key={priority} value={priority}>{priority}</option>)}</select></Field>
+            <Field label="Duration (minutes)"><Input type="number" min={1} value={activityForm.durationMinutes} onChange={(_, data) => setActivityForm((current) => ({ ...current, durationMinutes: data.value }))} /></Field>
+            <Field label="Description"><Textarea resize="vertical" value={activityForm.description} onChange={(_, data) => setActivityForm((current) => ({ ...current, description: data.value }))} /></Field>
+          </div>
+        </DialogContent><DialogActions>
+          <Button disabled={savingActivity} onClick={() => setActivitiesMilestone(null)}>Close</Button>
+          <Button appearance="primary" disabled={savingActivity || activityForm.subject.trim().length === 0} onClick={() => void createMilestoneActivity()}>{savingActivity ? 'Creating…' : 'Create task'}</Button>
+        </DialogActions></DialogBody></DialogSurface>
+      </Dialog>
+
       {account && <section className={`blade opportunity-blade ${collapsed.has('opportunities') ? 'collapsed' : ''} ${mobileBlade === 'opportunities' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('opportunities') ? undefined : bladeWidths.opportunities }} aria-label="Opportunities blade">
         <BladeHeader title="Opportunities" subtitle={account.name} collapsed={collapsed.has('opportunities')} refreshing={loading} actions={<Menu checkedValues={{ opportunitySort: [opportunitySort] }} positioning="below-end">
           <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button" icon={<ArrowSort20Regular />} aria-label="Sort opportunities" title={`Sort opportunities by ${opportunitySort === 'closeDate' ? 'Close Date' : opportunitySort === 'stage' ? 'Stage' : 'Value'} (${opportunitySortDirection})`} /></MenuTrigger>
@@ -1165,7 +1311,20 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
               <tbody>
                 {sortedMilestones.map((milestone) => <Fragment key={milestone.id}>
                   <tr>
-                    <td><strong>{milestone.name}</strong></td>
+                    <td><span className="milestone-name-cell">
+                      <Button
+                        size="small"
+                        appearance={milestone.onMilestoneTeam ? 'subtle' : 'primary'}
+                        className="milestone-team-toggle"
+                        disabled={milestoneTeamBusyId === milestone.id}
+                        icon={milestoneTeamBusyId === milestone.id ? <Spinner size="tiny" /> : milestone.onMilestoneTeam ? <Subtract20Regular /> : <Add20Regular />}
+                        title={milestone.onMilestoneTeam ? 'Remove me from milestone team' : 'Add me to milestone team'}
+                        aria-label={milestone.onMilestoneTeam ? `Remove me from the team for ${milestone.name}` : `Add me to the team for ${milestone.name}`}
+                        aria-pressed={milestone.onMilestoneTeam === true}
+                        onClick={() => void (milestone.onMilestoneTeam ? leaveMilestoneTeam(milestone) : joinMilestoneTeam(milestone))}
+                      />
+                      <strong>{milestone.name}</strong>
+                    </span></td>
                     <td>{milestone.status}</td>
                     <td>{milestone.owner ?? 'Unassigned'}</td>
                     <td>{milestone.commitment ?? 'Uncommitted'}</td>
@@ -1175,6 +1334,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                       <Menu positioning="below-end">
                         <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button milestone-actions" icon={<MoreHorizontal20Regular />} aria-label={`Edit ${milestone.name}`} title="Edit milestone" /></MenuTrigger>
                         <MenuPopover><MenuList>
+                          <MenuItem onClick={() => void openMilestoneActivities(milestone)}>Activities</MenuItem>
                           {(Object.keys(milestoneFieldLabels) as MilestoneField[]).map((field) => <MenuItem key={field} onClick={() => startMilestoneEdit(milestone, field)}>{milestoneFieldLabels[field]}</MenuItem>)}
                         </MenuList></MenuPopover>
                       </Menu>
@@ -1511,7 +1671,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
       {workspaceView === 'discover' && <section className="workflow-launcher discover-launcher" aria-label="Discover opportunities">
         <header className="workflow-launcher-header">
-          <div><p className="eyebrow">DEAL TEAM DISCOVERY</p><h1>Discover opportunities</h1><p>Review all active opportunities for your visible accounts by Solution Engineer domain, then add or remove yourself from each opportunity's Deal Team.</p></div>
+          <div><p className="eyebrow">DEAL TEAM DISCOVERY</p><h1>Discover opportunities</h1><p>Review all active opportunities for your visible accounts by Solution Engineer domain, then add or remove yourself from each opportunity's Deal Team — or expand an opportunity to join a milestone team without joining the Deal Team.</p></div>
         </header>
 
         <div className="workflow-toolbar">
@@ -1530,8 +1690,14 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           {!discoverLoading && visibleDiscoverResults.length > 0 && <table className="record-table discover-table" aria-label="Discovered opportunities">
             <thead><tr><th scope="col">Opportunity</th><DiscoverySortHeader column="account" sort={discoverSort} onSort={(column) => setDiscoverSort((current) => toggleDiscoverySort(current, column))} /><th scope="col">Solution area</th><th scope="col">Technical capability</th><DiscoverySortHeader column="stage" sort={discoverSort} onSort={(column) => setDiscoverSort((current) => toggleDiscoverySort(current, column))} /><th scope="col">Value</th><th scope="col">Closes</th><DiscoverySortHeader column="action" sort={discoverSort} onSort={(column) => setDiscoverSort((current) => toggleDiscoverySort(current, column))} /></tr></thead>
             <tbody>
-              {visibleDiscoverResults.map((item) => <tr key={item.id}>
-                <td><strong>{item.name}</strong></td>
+              {visibleDiscoverResults.map((item) => <Fragment key={item.id}>
+                <tr>
+                <td><span className="discover-name-cell">
+                  <button className="discover-expand" aria-expanded={expandedDiscoverId === item.id} aria-label={`${expandedDiscoverId === item.id ? 'Hide' : 'Show'} milestones for ${item.name}`} title={expandedDiscoverId === item.id ? 'Hide milestones' : 'Show milestones'} onClick={() => void toggleDiscoverExpand(item.id)}>
+                    <ChevronRight20Regular style={expandedDiscoverId === item.id ? { transform: 'rotate(90deg)' } : undefined} />
+                  </button>
+                  <strong>{item.name}</strong>
+                </span></td>
                 <td>{item.accountName ?? '-'}</td>
                 <td>{item.solutionArea ?? '-'}</td>
                 <td>{item.technicalCapability ?? '-'}</td>
@@ -1543,7 +1709,28 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                     ? <div className="deal-team-actions"><span className="deal-team-joined"><CheckmarkCircle20Filled /> On deal team</span><Button size="small" appearance="subtle" className="text-action danger-action" disabled={joiningOpportunityId === item.id} onClick={() => void leaveDealTeam(item.id)}>Remove me</Button></div>
                     : <Button size="small" appearance="primary" disabled={joiningOpportunityId === item.id} icon={joiningOpportunityId === item.id ? <Spinner size="tiny" /> : <Person20Regular />} onClick={() => void joinDealTeam(item.id)}>Add me</Button>}
                 </td>
-              </tr>)}
+                </tr>
+                {expandedDiscoverId === item.id && <tr className="discover-milestones-row" aria-label={`${item.name} milestones`}>
+                  <td colSpan={8}>
+                    {discoverMilestonesLoadingId === item.id && <Spinner size="tiny" label="Loading milestones…" />}
+                    {discoverMilestonesLoadingId !== item.id && (discoverMilestones[item.id]?.length ?? 0) === 0 && <span className="muted">No milestones found for this opportunity.</span>}
+                    {(discoverMilestones[item.id] ?? []).map((milestone) => <div key={milestone.id} className="discover-milestone-item">
+                      <Button
+                        size="small"
+                        appearance={milestone.onMilestoneTeam ? 'subtle' : 'primary'}
+                        className="milestone-team-toggle"
+                        disabled={milestoneTeamBusyId === milestone.id}
+                        icon={milestoneTeamBusyId === milestone.id ? <Spinner size="tiny" /> : milestone.onMilestoneTeam ? <Subtract20Regular /> : <Add20Regular />}
+                        title={milestone.onMilestoneTeam ? 'Remove me from milestone team' : 'Add me to milestone team'}
+                        aria-label={milestone.onMilestoneTeam ? `Remove me from the team for ${milestone.name}` : `Add me to the team for ${milestone.name}`}
+                        aria-pressed={milestone.onMilestoneTeam === true}
+                        onClick={() => void toggleDiscoverMilestone(item.id, milestone)}
+                      />
+                      <span><strong>{milestone.name}</strong> · {milestone.status}{milestone.targetDate ? ` · ${milestone.targetDate}` : ''}</span>
+                    </div>)}
+                  </td>
+                </tr>}
+              </Fragment>)}
             </tbody>
           </table>}
         </div>

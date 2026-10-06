@@ -8,13 +8,13 @@ In live mode, TLC MultiAgent Assist builds your portfolio from your active MSX d
 
 An opportunity appears when all of the following are true:
 
-- Your signed-in MSX user has an active deal-team record linked to the opportunity.
+- Your signed-in MSX user has an active deal-team record linked to the opportunity, **or** you are a member of at least one of the opportunity's milestone teams.
 - The opportunity is active.
 - The opportunity has an active parent customer account that you can access.
 
-The app identifies your MSX user from your authenticated session. It then finds the opportunities linked to your active deal-team records and groups those opportunities by their parent customer account. Selecting an account shows only the eligible opportunities associated with that account.
+The app identifies your MSX user from your authenticated session. It then finds the opportunities linked to your active deal-team records, unions them with the opportunities behind your milestone-team memberships, and groups those opportunities by their parent customer account. Selecting an account shows only the eligible opportunities associated with that account.
 
-Opportunity ownership, account ownership, sales stage, close date, value, and milestone ownership do not determine whether an opportunity appears. Being an account-team member without an active opportunity deal-team record is also not sufficient under the current selection rules.
+Opportunity ownership, account ownership, sales stage, close date, value, and milestone ownership do not determine whether an opportunity appears. Deal Team membership and milestone-team membership are independent: either one is sufficient to bring an opportunity into your Portfolio. Being an account-team member without either an active opportunity deal-team record or a milestone-team membership is not sufficient under the current selection rules.
 
 Accounts and opportunities are displayed alphabetically. The portfolio is cached during the session for performance and is reloaded when you refresh the account context.
 

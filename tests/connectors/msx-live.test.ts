@@ -86,7 +86,8 @@ describe('LiveMsxConnector', () => {
       targetDate: '2026-10-15',
       estimatedMonthlyUsage: 25000,
       owner: 'Taylor Kim',
-      commitment: 'Committed'
+      commitment: 'Committed',
+      onMilestoneTeam: false
     }])
     const firstContext = await connector.getOpportunityContext('opp-2')
     const secondContext = await connector.getOpportunityContext('opp-2')
@@ -234,6 +235,69 @@ describe('LiveMsxConnector', () => {
       },
       stageCodes: { 1: 861980011, 5: 861980015 }
     })
+  })
+
+  it('parses milestone-team and task-category write metadata from the environment', () => {
+    const metadata = msxWriteMetadataFromEnvironment({
+      TLC_MSX_MILESTONE_TEAM_TEMPLATE_NAME: 'Milestone Team',
+      TLC_MSX_TASK_CATEGORY_FIELD: 'msp_tasktype',
+      TLC_MSX_TASK_CATEGORY_CODES: '{"Demo":606820000,"Briefing":606820001}'
+    } as NodeJS.ProcessEnv)
+    expect(metadata.milestoneTeam).toEqual({ templateName: 'Milestone Team' })
+    expect(metadata.taskCategoryField).toBe('msp_tasktype')
+    expect(metadata.taskCategoryCodes).toEqual({ Demo: 606820000, Briefing: 606820001 })
+  })
+
+  it('creates a Task regarding a milestone with the confirmed regardingobjectid binding', async () => {
+    const milestoneGuid = '00000000-0000-4000-8000-000000000a01'
+    const opportunityGuid = '00000000-0000-4000-8000-000000000abc'
+    const posted: Array<Record<string, unknown>> = []
+    const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input))
+      const method = init?.method ?? 'GET'
+      if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+      if (url.pathname.endsWith('/msp_engagementmilestones')) return json({ value: [{ msp_engagementmilestoneid: milestoneGuid, msp_name: 'Pilot' }] })
+      if (url.pathname.endsWith('/tasks') && method === 'POST') {
+        posted.push(JSON.parse(String(init?.body)))
+        return json({ activityid: 'task-1', subject: 'Design session', statecode: 0, prioritycode: 2, scheduledend: '2027-01-15', actualdurationminutes: 30, msp_tasktype: 606820000 })
+      }
+      throw new Error(`Unexpected request: ${url} ${method}`)
+    })
+    const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch, undefined, undefined, {
+      taskCategoryField: 'msp_tasktype',
+      taskCategoryCodes: { Demo: 606820000 }
+    })
+
+    const created = await connector.createMilestoneActivity(opportunityGuid, milestoneGuid, { subject: 'Design session', priority: 'High', taskCategory: 'Demo', due: '2027-01-15', durationMinutes: 30 })
+    expect(created).toMatchObject({ id: 'task-1', milestoneId: milestoneGuid, opportunityId: opportunityGuid, status: 'Open', priority: 'High', activityType: 'task' })
+    expect(posted[0]).toMatchObject({
+      subject: 'Design session',
+      prioritycode: 2,
+      'regardingobjectid_msp_engagementmilestone@odata.bind': `/msp_engagementmilestones(${milestoneGuid})`,
+      'ownerid@odata.bind': '/systemusers(user-id)',
+      scheduledend: '2027-01-15',
+      actualdurationminutes: 30,
+      msp_tasktype: 606820000
+    })
+  })
+
+  it('lists Tasks regarding a milestone filtered by regardingobjectid', async () => {
+    const milestoneGuid = '00000000-0000-4000-8000-000000000a01'
+    let filter = ''
+    const request = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+      if (url.pathname.endsWith('/tasks')) {
+        filter = url.searchParams.get('$filter') ?? ''
+        return json({ value: [{ activityid: 'task-1', subject: 'Design session', statecode: 1, prioritycode: 1 }] })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch)
+
+    const activities = await connector.listMilestoneActivities('00000000-0000-4000-8000-000000000abc', milestoneGuid)
+    expect(filter).toContain(`_regardingobjectid_value eq ${milestoneGuid}`)
+    expect(activities).toEqual([{ id: 'task-1', milestoneId: milestoneGuid, opportunityId: '00000000-0000-4000-8000-000000000abc', subject: 'Design session', activityType: 'task', status: 'Completed', priority: 'Normal' }])
   })
 })
 

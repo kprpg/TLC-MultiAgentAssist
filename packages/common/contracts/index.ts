@@ -61,7 +61,13 @@ export const milestoneSchema = z.object({
   owner: z.string().min(1).optional(),
   commitment: z.string().min(1).optional(),
   riskDetails: z.string().optional(),
-  comments: z.string().optional()
+  comments: z.string().optional(),
+  /**
+   * Whether the signed-in user is on this milestone's team. Independent of
+   * opportunity Deal Team membership and of the milestone owner. Set per-user by
+   * the connector at read time; omitted means membership is unknown/not evaluated.
+   */
+  onMilestoneTeam: z.boolean().optional()
 })
 
 export const milestoneStatusSchema = z.enum([
@@ -87,6 +93,69 @@ export const milestoneUpdateSchema = z.object({
 export const opportunityUpdateSchema = z.object({
   comments: z.string().max(30_000)
 })
+
+/**
+ * Result of adding the signed-in user to a milestone team. Mirrors the
+ * opportunity Deal Team join result but is scoped to a single milestone and is
+ * fully independent of Deal Team membership.
+ */
+export const milestoneTeamJoinResultSchema = z.object({
+  opportunityId: z.string().min(1),
+  milestoneId: z.string().min(1),
+  onMilestoneTeam: z.literal(true),
+  alreadyMember: z.boolean()
+}).strict()
+
+/** Result of removing only the signed-in user from a milestone team. */
+export const milestoneTeamLeaveResultSchema = z.object({
+  opportunityId: z.string().min(1),
+  milestoneId: z.string().min(1),
+  onMilestoneTeam: z.literal(false),
+  alreadyAbsent: z.boolean()
+}).strict()
+
+/** Activity priority, mapped to the Dataverse task `prioritycode` (Low 0 / Normal 1 / High 2). */
+export const milestoneActivityPrioritySchema = z.enum(['Low', 'Normal', 'High'])
+
+/**
+ * Task Category option set shown on the MSX "Quick Create: Task" form. Bundled so sample mode needs
+ * no network; in live mode the field + option codes are environment-configured.
+ */
+export const taskCategorySchema = z.enum([
+  'Architecture Design Session', 'Assessment', 'Blocker Escalation', 'Briefing', 'Call Back Requested',
+  'Consumption Plan', 'Cross Segment', 'Cross Workload', 'Customer Engagement', 'Demo',
+  'External (Co-creation of Value)', 'Internal', 'L300+ Demo', 'Negotiate Pricing', 'New Partner Request',
+  'PoC/Pilot', 'Post Sales', 'Rapid Prototyping', 'RFP/RFI', 'Solution Whiteboarding', 'Tech Support',
+  'Technical Close/Win Plan', 'Technical Workshop', 'Workshop'
+])
+
+/** An Activity (Task) associated with a milestone via the activity's `regardingobjectid`. */
+export const milestoneActivitySchema = z.object({
+  id: z.string().min(1),
+  milestoneId: z.string().min(1),
+  opportunityId: z.string().min(1),
+  subject: z.string().min(1),
+  activityType: z.string().min(1),
+  status: z.string().min(1),
+  priority: milestoneActivityPrioritySchema.optional(),
+  taskCategory: z.string().min(1).optional(),
+  due: z.string().date().optional(),
+  durationMinutes: z.number().int().positive().optional(),
+  description: z.string().optional(),
+  owner: z.string().min(1).optional(),
+  createdBy: z.string().min(1).optional(),
+  createdOn: z.string().datetime().optional()
+})
+
+/** Request to create a Task regarding a milestone (owner defaults to the signed-in user). */
+export const createMilestoneActivityRequestSchema = z.object({
+  subject: z.string().trim().min(1).max(200),
+  taskCategory: taskCategorySchema.optional(),
+  description: z.string().max(30_000).optional(),
+  due: z.string().date().optional(),
+  priority: milestoneActivityPrioritySchema.default('Normal'),
+  durationMinutes: z.number().int().positive().max(100_000).optional()
+}).strict()
 
 /**
  * An opportunity surfaced by SE-domain discovery. It extends the base
@@ -243,6 +312,12 @@ export type Milestone = z.infer<typeof milestoneSchema>
 export type MilestoneStatus = z.infer<typeof milestoneStatusSchema>
 export type CustomerCommitment = z.infer<typeof customerCommitmentSchema>
 export type MilestoneUpdate = z.infer<typeof milestoneUpdateSchema>
+export type MilestoneTeamJoinResult = z.infer<typeof milestoneTeamJoinResultSchema>
+export type MilestoneTeamLeaveResult = z.infer<typeof milestoneTeamLeaveResultSchema>
+export type MilestoneActivity = z.infer<typeof milestoneActivitySchema>
+export type CreateMilestoneActivityRequest = z.infer<typeof createMilestoneActivityRequestSchema>
+export type TaskCategory = z.infer<typeof taskCategorySchema>
+export type MilestoneActivityPriority = z.infer<typeof milestoneActivityPrioritySchema>
 export type OpportunityUpdate = z.infer<typeof opportunityUpdateSchema>
 export type McemStageTransitionRequest = z.infer<typeof mcemStageTransitionRequestSchema>
 export type McemStageTransitionResult = z.infer<typeof mcemStageTransitionResultSchema>

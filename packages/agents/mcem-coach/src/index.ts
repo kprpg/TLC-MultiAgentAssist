@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { contractVersion, mcemResponseSchema, type McemResponse } from '../../../common/index.js'
 import type { OpportunityContext, StageGuidance } from '../../../connectors/common/index.js'
+import { milestoneRecommendations, summarizeMilestones } from './milestone-signals.js'
 
 export const mcemCoachVersion = '0.1.0'
 
@@ -47,7 +48,7 @@ export function evaluateMcemProgress(
   const evidenceBasedStage = gaps.length === 0
     ? Math.min(5, context.opportunity.recordedStage + 1)
     : Math.max(1, context.opportunity.recordedStage - 1)
-  const recommendations = gaps.length === 0
+  const baseRecommendations = gaps.length === 0
     ? [{
         id: 'recommendation-advance-stage',
         action: evidenceBasedStage > context.opportunity.recordedStage
@@ -62,7 +63,17 @@ export function evaluateMcemProgress(
         confidence: 'high' as const
       }]
     : gapRecommendations
+  const milestoneSummary = summarizeMilestones(context.milestones ?? [])
+  const milestoneRecs = milestoneRecommendations(milestoneSummary, [msxEvidenceId, guidanceEvidenceId])
+  const recommendations = [...baseRecommendations, ...milestoneRecs]
   const generatedAt = new Date().toISOString()
+
+  const baseSummary = evidenceBasedStage > context.opportunity.recordedStage
+    ? `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the completed exit criteria support progression to Stage ${evidenceBasedStage}.`
+    : evidenceBasedStage === context.opportunity.recordedStage
+      ? `The available evidence supports recorded Stage ${context.opportunity.recordedStage}.`
+      : `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the available evidence supports Stage ${evidenceBasedStage}.`
+  const summary = milestoneSummary.headline ? `${baseSummary} ${milestoneSummary.headline}` : baseSummary
 
   return mcemResponseSchema.parse({
     contractVersion,
@@ -72,11 +83,7 @@ export function evaluateMcemProgress(
     generatedAt,
     mode: context.sourceHealth.state === 'live' ? 'live' : 'sample',
     state: 'complete',
-    summary: evidenceBasedStage > context.opportunity.recordedStage
-      ? `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the completed exit criteria support progression to Stage ${evidenceBasedStage}.`
-      : evidenceBasedStage === context.opportunity.recordedStage
-        ? `The available evidence supports recorded Stage ${context.opportunity.recordedStage}.`
-        : `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the available evidence supports Stage ${evidenceBasedStage}.`,
+    summary,
     recordedStage: context.opportunity.recordedStage,
     evidenceBasedStage,
     criteria,

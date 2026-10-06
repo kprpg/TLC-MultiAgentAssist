@@ -33,6 +33,8 @@ import type {
     MeetingChangeSetResultView,
     MeetingTranscriptSummaryView,
     MeetingTypeView,
+    MilestoneActivityView,
+    CreateMilestoneActivityInput,
     MilestoneUpdateInput,
     MilestoneView,
     OpportunityView,
@@ -691,14 +693,106 @@ function milestoneFieldValue(milestone: MilestoneView, field: (typeof MILESTONE_
     return milestone.comments ?? ''
 }
 
+const TASK_CATEGORIES = [
+    'Architecture Design Session', 'Assessment', 'Blocker Escalation', 'Briefing', 'Call Back Requested',
+    'Consumption Plan', 'Cross Segment', 'Cross Workload', 'Customer Engagement', 'Demo',
+    'External (Co-creation of Value)', 'Internal', 'L300+ Demo', 'Negotiate Pricing', 'New Partner Request',
+    'PoC/Pilot', 'Post Sales', 'Rapid Prototyping', 'RFP/RFI', 'Solution Whiteboarding', 'Tech Support',
+    'Technical Close/Win Plan', 'Technical Workshop', 'Workshop'
+] as const
+const ACTIVITY_PRIORITIES = ['Low', 'Normal', 'High'] as const
+const emptyActivityForm = { subject: '', taskCategory: '', due: '', priority: 'Normal' as 'Low' | 'Normal' | 'High', durationMinutes: '', description: '' }
+
+/** Inline Activities (Tasks) panel for a milestone: list + a Quick-Create Task form. */
+function MilestoneActivitiesPanel({ opportunityId, milestoneId, onNote }: { opportunityId: string; milestoneId: string; onNote: (message: string) => void }): ReactElement {
+    const [activities, setActivities] = useState<MilestoneActivityView[]>([])
+    const [loading, setLoading] = useState(true)
+    const [form, setForm] = useState({ ...emptyActivityForm })
+    const [saving, setSaving] = useState(false)
+
+    useEffect(() => {
+        let active = true
+        setLoading(true)
+        dataClient.listMilestoneActivities(opportunityId, milestoneId)
+            .then((data) => { if (active) setActivities(data) })
+            .catch((error: unknown) => { if (active) onNote(error instanceof Error ? error.message : 'Could not load activities.') })
+            .finally(() => { if (active) setLoading(false) })
+        return () => { active = false }
+    }, [opportunityId, milestoneId, onNote])
+
+    const create = useCallback(async () => {
+        if (form.subject.trim().length === 0) return
+        setSaving(true)
+        try {
+            const duration = form.durationMinutes.trim().length > 0 ? Number(form.durationMinutes) : undefined
+            const request: CreateMilestoneActivityInput = {
+                subject: form.subject.trim(),
+                priority: form.priority,
+                ...(form.taskCategory ? { taskCategory: form.taskCategory } : {}),
+                ...(form.due ? { due: form.due } : {}),
+                ...(duration !== undefined && Number.isFinite(duration) ? { durationMinutes: duration } : {}),
+                ...(form.description.trim() ? { description: form.description.trim() } : {})
+            }
+            const created = await dataClient.createMilestoneActivity(opportunityId, milestoneId, request)
+            setActivities((current) => [created, ...current])
+            setForm({ ...emptyActivityForm })
+        } catch (error) {
+            onNote(error instanceof Error ? error.message : 'Could not create the task.')
+        } finally {
+            setSaving(false)
+        }
+    }, [form, opportunityId, milestoneId, onNote])
+
+    return (
+        <div className="milestone-activities-panel">
+            <div className="milestone-activities-list" aria-busy={loading}>
+                {loading && <span className="muted">Loading activities…</span>}
+                {!loading && activities.length === 0 && <span className="muted">No activities yet. Create a task below.</span>}
+                {activities.map((activity) => (
+                    <div key={activity.id} className="milestone-activity-item">
+                        <strong>{activity.subject}</strong>
+                        <small>{activity.status}{activity.priority ? ` · ${activity.priority}` : ''}{activity.taskCategory ? ` · ${activity.taskCategory}` : ''}{activity.due ? ` · Due ${activity.due}` : ''}</small>
+                    </div>
+                ))}
+            </div>
+            <div className="milestone-activity-form">
+                <label>Subject<input value={form.subject} onChange={(event) => setForm((current) => ({ ...current, subject: event.target.value }))} /></label>
+                <label>Task Category<select value={form.taskCategory} onChange={(event) => setForm((current) => ({ ...current, taskCategory: event.target.value }))}><option value="">--Select--</option>{TASK_CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
+                <label>Due<input type="date" value={form.due} onChange={(event) => setForm((current) => ({ ...current, due: event.target.value }))} /></label>
+                <label>Priority<select value={form.priority} onChange={(event) => setForm((current) => ({ ...current, priority: event.target.value as 'Low' | 'Normal' | 'High' }))}>{ACTIVITY_PRIORITIES.map((priority) => <option key={priority} value={priority}>{priority}</option>)}</select></label>
+                <label>Duration (minutes)<input type="number" min={1} value={form.durationMinutes} onChange={(event) => setForm((current) => ({ ...current, durationMinutes: event.target.value }))} /></label>
+                <label>Description<textarea rows={2} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></label>
+                <button className="primary" disabled={saving || form.subject.trim().length === 0} onClick={() => void create()}>{saving ? 'Creating…' : 'Create task'}</button>
+            </div>
+        </div>
+    )
+}
+
 /** Milestones sub-list with sort control and five editable fields per milestone. */
 function MilestonesEditor({ opportunityId, currency, milestones, onChanged, onNote }: { opportunityId: string; currency: string; milestones: MilestoneView[]; onChanged: () => void; onNote: (message: string) => void }): ReactElement {
     const [sortBy, setSortBy] = useState<MilestoneSort>('targetDate')
     const [direction, setDirection] = useState<SortDirection>('ascending')
     const [edit, setEdit] = useState<{ milestoneId: string; field: (typeof MILESTONE_FIELDS)[number]['id']; value: string } | undefined>(undefined)
     const [saving, setSaving] = useState(false)
+    const [membershipBusyId, setMembershipBusyId] = useState<string | undefined>(undefined)
+    const [activitiesForId, setActivitiesForId] = useState<string | undefined>(undefined)
 
     const sorted = sortMilestones(milestones, sortBy, direction)
+
+    const toggleMilestoneTeam = useCallback(async (milestone: MilestoneView) => {
+        const joining = milestone.onMilestoneTeam !== true
+        if (!joining && !window.confirm(`Remove yourself from the team for milestone "${milestone.name}"? If this is your only membership on the opportunity, the opportunity will leave your Portfolio.`)) return
+        setMembershipBusyId(milestone.id)
+        try {
+            if (joining) await dataClient.joinMilestoneTeam(opportunityId, milestone.id)
+            else await dataClient.leaveMilestoneTeam(opportunityId, milestone.id)
+            onChanged()
+        } catch (error) {
+            onNote((error as Error).message)
+        } finally {
+            setMembershipBusyId(undefined)
+        }
+    }, [opportunityId, onChanged, onNote])
 
     const save = useCallback(async () => {
         if (!edit) return
@@ -746,23 +840,35 @@ function MilestonesEditor({ opportunityId, currency, milestones, onChanged, onNo
                     <Fragment key={milestone.id}>
                         <tr>
                             <td className="milestone-name-cell">
-                                <RecordTooltip {...milestoneTooltipContent(milestone, currency)}>
-                                    {(tooltipId) => (
-                                        <span className="record-name-trigger" tabIndex={0} aria-describedby={tooltipId}>
-                                            <span className="record-name-line">
-                                                <strong>{milestone.name}</strong>
-                                                <span className="record-value">
-                                                    {milestone.estimatedMonthlyUsage === undefined ? '-' : formatMoney(milestone.estimatedMonthlyUsage, currency)}
+                                <span className="milestone-name-row">
+                                    <button
+                                        type="button"
+                                        className={`milestone-team-toggle ${milestone.onMilestoneTeam ? 'is-member' : ''}`}
+                                        disabled={membershipBusyId === milestone.id}
+                                        aria-pressed={milestone.onMilestoneTeam === true}
+                                        title={milestone.onMilestoneTeam ? 'Remove me from milestone team' : 'Add me to milestone team'}
+                                        aria-label={milestone.onMilestoneTeam ? `Remove me from the team for ${milestone.name}` : `Add me to the team for ${milestone.name}`}
+                                        onClick={() => void toggleMilestoneTeam(milestone)}
+                                    >{membershipBusyId === milestone.id ? '…' : milestone.onMilestoneTeam ? '−' : '+'}</button>
+                                    <RecordTooltip {...milestoneTooltipContent(milestone, currency)}>
+                                        {(tooltipId) => (
+                                            <span className="record-name-trigger" tabIndex={0} aria-describedby={tooltipId}>
+                                                <span className="record-name-line">
+                                                    <strong>{milestone.name}</strong>
+                                                    <span className="record-value">
+                                                        {milestone.estimatedMonthlyUsage === undefined ? '-' : formatMoney(milestone.estimatedMonthlyUsage, currency)}
+                                                    </span>
                                                 </span>
                                             </span>
-                                        </span>
-                                    )}
-                                </RecordTooltip>
+                                        )}
+                                    </RecordTooltip>
+                                </span>
                                 <span className="milestone-meta">{milestone.targetDate ? `Due ${milestone.targetDate}` : 'No target date'} · {milestone.commitment ?? 'Uncommitted'}</span>
                                 <div className="milestone-field-actions">
                                     {MILESTONE_FIELDS.filter((field) => field.id === 'targetDate' || field.id === 'customerCommitment' || field.id === 'riskDetails').map((field) => (
                                         <button key={field.id} className="table-field-button" onClick={() => setEdit({ milestoneId: milestone.id, field: field.id, value: milestoneFieldValue(milestone, field.id) })}>{field.label}</button>
                                     ))}
+                                    <button className="table-field-button" aria-expanded={activitiesForId === milestone.id} onClick={() => setActivitiesForId((current) => current === milestone.id ? undefined : milestone.id)}>Activities</button>
                                 </div>
                             </td>
                             <td><button className="table-field-button" onClick={() => setEdit({ milestoneId: milestone.id, field: 'status', value: milestone.status })}>{milestone.status}</button></td>
@@ -790,6 +896,13 @@ function MilestonesEditor({ opportunityId, currency, milestones, onChanged, onNo
                                             <button className="primary" disabled={saving} onClick={() => void save()}>{saving ? 'Saving...' : 'Save'}</button>
                                         </div>
                                     </div>
+                                </td>
+                            </tr>
+                        )}
+                        {activitiesForId === milestone.id && (
+                            <tr className="milestone-activities-row">
+                                <td colSpan={3}>
+                                    <MilestoneActivitiesPanel opportunityId={opportunityId} milestoneId={milestone.id} onNote={onNote} />
                                 </td>
                             </tr>
                         )}
@@ -1473,6 +1586,10 @@ function DiscoverPanel(): ReactElement {
     const [sort, setSort] = useState<DiscoverySort | null>(null)
     const [joining, setJoining] = useState<string | undefined>(undefined)
     const [note, setNote] = useState<string | undefined>(undefined)
+    const [expandedId, setExpandedId] = useState<string | undefined>(undefined)
+    const [discoverMilestones, setDiscoverMilestones] = useState<Record<string, MilestoneView[]>>({})
+    const [milestonesLoadingId, setMilestonesLoadingId] = useState<string | undefined>(undefined)
+    const [milestoneBusyId, setMilestoneBusyId] = useState<string | undefined>(undefined)
     const opportunities = items.data ?? []
     const visibleOpportunities = sortDiscoveryOpportunities(filterDiscoveryOpportunities(opportunities, filters), sort)
 
@@ -1518,11 +1635,46 @@ function DiscoverPanel(): ReactElement {
         }
     }
 
+    const toggleExpand = async (opportunityId: string): Promise<void> => {
+        if (expandedId === opportunityId) { setExpandedId(undefined); return }
+        setExpandedId(opportunityId)
+        if (discoverMilestones[opportunityId]) return
+        setMilestonesLoadingId(opportunityId)
+        try {
+            const data = await dataClient.listDiscoverableMilestones(opportunityId)
+            setDiscoverMilestones((current) => ({ ...current, [opportunityId]: data }))
+        } catch (error) {
+            setNote(error instanceof Error ? error.message : 'Could not load milestones.')
+        } finally {
+            setMilestonesLoadingId(undefined)
+        }
+    }
+
+    const toggleMilestone = async (opportunityId: string, milestone: MilestoneView): Promise<void> => {
+        const joiningMilestone = milestone.onMilestoneTeam !== true
+        if (!joiningMilestone && !window.confirm(`Remove yourself from the team for milestone "${milestone.name}"? If this is your only membership on the opportunity, the opportunity will leave your Portfolio.`)) return
+        setMilestoneBusyId(milestone.id)
+        setNote(undefined)
+        try {
+            if (joiningMilestone) await dataClient.joinMilestoneTeam(opportunityId, milestone.id)
+            else await dataClient.leaveMilestoneTeam(opportunityId, milestone.id)
+            setDiscoverMilestones((current) => ({
+                ...current,
+                [opportunityId]: (current[opportunityId] ?? []).map((item) => item.id === milestone.id ? { ...item, onMilestoneTeam: joiningMilestone } : item)
+            }))
+            setNote(joiningMilestone ? 'Added you to the milestone team. The opportunity now appears in your portfolio.' : 'Removed you from the milestone team.')
+        } catch (error) {
+            setNote(error instanceof Error ? error.message : 'Could not update the milestone team.')
+        } finally {
+            setMilestoneBusyId(undefined)
+        }
+    }
+
     return (
         <section className="discover-panel" aria-label="Discover opportunities">
             <header className="discover-header">
                 <h2>Discover opportunities</h2>
-                <p>Review all active opportunities for visible accounts and add or remove yourself from the Deal Team. Only Deal Team opportunities enter Portfolio, Plays, and downstream analysis.</p>
+                <p>Review all active opportunities for visible accounts and add or remove yourself from the Deal Team — or expand an opportunity to join a milestone team without joining the Deal Team. Deal Team or milestone-team membership brings an opportunity into Portfolio.</p>
                 <nav className="tabs" role="tablist" aria-label="Solution Engineer domain">
                     {SE_DOMAINS.map((option) => (
                         <button key={option.id} role="tab" aria-selected={domain === option.id} className={domain === option.id ? 'tab active' : 'tab'} onClick={() => setDomain(option.id)}>{option.label}</button>
@@ -1541,8 +1693,12 @@ function DiscoverPanel(): ReactElement {
                         <thead><tr><th scope="col">Opportunity</th><DiscoverySortHeader column="account" sort={sort} onSort={(column) => setSort((current) => toggleDiscoverySort(current, column))} /><th scope="col">Technical capability</th><DiscoverySortHeader column="stage" sort={sort} onSort={(column) => setSort((current) => toggleDiscoverySort(current, column))} /><DiscoverySortHeader column="action" sort={sort} onSort={(column) => setSort((current) => toggleDiscoverySort(current, column))} /></tr></thead>
                         <tbody>
                             {visibleOpportunities.map((item) => (
-                                <tr key={item.id}>
-                                    <td><strong>{item.name}</strong></td>
+                                <Fragment key={item.id}>
+                                <tr>
+                                    <td><span className="discover-name-cell">
+                                        <button className="discover-expand" aria-expanded={expandedId === item.id} aria-label={`${expandedId === item.id ? 'Hide' : 'Show'} milestones for ${item.name}`} title={expandedId === item.id ? 'Hide milestones' : 'Show milestones'} onClick={() => void toggleExpand(item.id)}>{expandedId === item.id ? '▾' : '▸'}</button>
+                                        <strong>{item.name}</strong>
+                                    </span></td>
                                     <td>{item.accountName ?? '-'}</td>
                                     <td>{item.technicalCapability ?? '-'}</td>
                                     <td>{item.recordedStage}</td>
@@ -1552,6 +1708,29 @@ function DiscoverPanel(): ReactElement {
                                             : <button className="tab" disabled={joining === item.id} onClick={() => void join(item.id)}>{joining === item.id ? 'Adding…' : 'Add me'}</button>}
                                     </td>
                                 </tr>
+                                {expandedId === item.id && (
+                                    <tr className="discover-milestones-row" aria-label={`${item.name} milestones`}>
+                                        <td colSpan={5}>
+                                            {milestonesLoadingId === item.id && <span className="muted">Loading milestones…</span>}
+                                            {milestonesLoadingId !== item.id && (discoverMilestones[item.id]?.length ?? 0) === 0 && <span className="muted">No milestones found for this opportunity.</span>}
+                                            {(discoverMilestones[item.id] ?? []).map((milestone) => (
+                                                <div key={milestone.id} className="discover-milestone-item">
+                                                    <button
+                                                        type="button"
+                                                        className={`milestone-team-toggle ${milestone.onMilestoneTeam ? 'is-member' : ''}`}
+                                                        disabled={milestoneBusyId === milestone.id}
+                                                        aria-pressed={milestone.onMilestoneTeam === true}
+                                                        title={milestone.onMilestoneTeam ? 'Remove me from milestone team' : 'Add me to milestone team'}
+                                                        aria-label={milestone.onMilestoneTeam ? `Remove me from the team for ${milestone.name}` : `Add me to the team for ${milestone.name}`}
+                                                        onClick={() => void toggleMilestone(item.id, milestone)}
+                                                    >{milestoneBusyId === milestone.id ? '…' : milestone.onMilestoneTeam ? '−' : '+'}</button>
+                                                    <span><strong>{milestone.name}</strong> · {milestone.status}{milestone.targetDate ? ` · ${milestone.targetDate}` : ''}</span>
+                                                </div>
+                                            ))}
+                                        </td>
+                                    </tr>
+                                )}
+                                </Fragment>
                             ))}
                         </tbody>
                     </table>

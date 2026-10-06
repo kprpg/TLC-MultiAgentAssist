@@ -19,6 +19,10 @@ import {
     type MeetingTranscriptSummary,
     type MeetingType,
     type Milestone,
+    type MilestoneActivity,
+    type CreateMilestoneActivityRequest,
+    type MilestoneTeamJoinResult,
+    type MilestoneTeamLeaveResult,
     type MilestoneUpdate,
     type Opportunity,
     type OpportunityUpdate,
@@ -45,8 +49,13 @@ import {
     discoverSampleOpportunities,
     findSampleOpportunity,
     joinSampleDealTeam,
+    joinSampleMilestoneTeam,
     leaveSampleDealTeam,
+    leaveSampleMilestoneTeam,
     listSampleAccounts,
+    listSampleDiscoverableMilestones,
+    listSampleMilestoneActivities,
+    createSampleMilestoneActivity,
     listSampleMilestones,
     listSampleOpportunities,
     searchSampleAccounts,
@@ -77,7 +86,12 @@ export interface ExtensionDataProvider {
     discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
     joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
     leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult>
+    joinMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamJoinResult>
+    leaveMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamLeaveResult>
     listMilestones(opportunityId: string): Promise<Milestone[]>
+    listDiscoverableMilestones(opportunityId: string): Promise<Milestone[]>
+    listMilestoneActivities(opportunityId: string, milestoneId: string): Promise<MilestoneActivity[]>
+    createMilestoneActivity(opportunityId: string, milestoneId: string, request: CreateMilestoneActivityRequest): Promise<MilestoneActivity>
     updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
     updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
     runMcemCoach(accountId: string, opportunityId: string): Promise<McemResponse>
@@ -148,10 +162,15 @@ export function createSampleDataProvider(): ExtensionDataProvider {
         discoverOpportunities: async (domain) => discoverSampleOpportunities(domain),
         joinDealTeam: async (opportunityId) => joinSampleDealTeam(opportunityId),
         leaveDealTeam: async (opportunityId) => leaveSampleDealTeam(opportunityId),
+        joinMilestoneTeam: async (opportunityId, milestoneId) => joinSampleMilestoneTeam(opportunityId, milestoneId),
+        leaveMilestoneTeam: async (opportunityId, milestoneId) => leaveSampleMilestoneTeam(opportunityId, milestoneId),
         listMilestones: async (opportunityId) => listSampleMilestones(opportunityId),
+        listDiscoverableMilestones: async (opportunityId) => listSampleDiscoverableMilestones(opportunityId),
+        listMilestoneActivities: async (opportunityId, milestoneId) => listSampleMilestoneActivities(opportunityId, milestoneId),
+        createMilestoneActivity: async (opportunityId, milestoneId, request) => createSampleMilestoneActivity(opportunityId, milestoneId, request),
         updateOpportunity: async (opportunityId, update) => updateSampleOpportunity(opportunityId, update),
         updateMilestone: async (opportunityId, milestoneId, update) => updateSampleMilestone(opportunityId, milestoneId, update),
-        runMcemCoach: async (_accountId, opportunityId) => buildSampleEvaluation(opportunityForOrThrow(opportunityId)),
+        runMcemCoach: async (_accountId, opportunityId) => buildSampleEvaluation(opportunityForOrThrow(opportunityId), undefined, listSampleMilestones(opportunityId)),
         transitionOpportunityStage: async (accountId, opportunityId, targetStage, reason) => transitionSampleStage(accountId, opportunityId, targetStage, reason),
         runAgentTask: async (capability, _accountId, opportunityId, prompt) => buildSampleAgentResponse(capability, opportunityForOrThrow(opportunityId), prompt),
         listWorkflowDefinitions: async (scope) => host.listDefinitions({ contractVersion: workflowContractVersion, ...(scope ? { scope } : {}) }),

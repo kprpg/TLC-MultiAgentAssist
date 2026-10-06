@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { z } from 'zod'
-import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, agentTaskRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, mcemRequestSchema, mcemStageTransitionRequestSchema, milestoneUpdateSchema, opportunityUpdateSchema, seDomainSchema, type AuthStatus, type DesktopDataStatus, type McpServer, type PerformanceReporter } from '../../../../packages/common/index.js'
+import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, agentTaskRequestSchema, createMilestoneActivityRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, mcemRequestSchema, mcemStageTransitionRequestSchema, milestoneUpdateSchema, opportunityUpdateSchema, seDomainSchema, type AuthStatus, type DesktopDataStatus, type McpServer, type PerformanceReporter } from '../../../../packages/common/index.js'
 import {
   loadFoundryEnvironment,
   type FoundryEnvironment
@@ -255,9 +255,29 @@ function registerIpc(): void {
     assertTrustedSender(event)
     return orchestrator.leaveDealTeam(z.string().min(1).max(200).parse(opportunityId))
   })
+  ipcMain.handle('tlc:join-milestone-team', (event, opportunityId: unknown, milestoneId: unknown) => {
+    assertTrustedSender(event)
+    return orchestrator.joinMilestoneTeam(z.string().min(1).max(200).parse(opportunityId), z.string().min(1).max(200).parse(milestoneId))
+  })
+  ipcMain.handle('tlc:leave-milestone-team', (event, opportunityId: unknown, milestoneId: unknown) => {
+    assertTrustedSender(event)
+    return orchestrator.leaveMilestoneTeam(z.string().min(1).max(200).parse(opportunityId), z.string().min(1).max(200).parse(milestoneId))
+  })
   ipcMain.handle('tlc:list-milestones', (event, opportunityId: unknown) => {
     assertTrustedSender(event)
     return orchestrator.listMilestones(z.string().min(1).parse(opportunityId))
+  })
+  ipcMain.handle('tlc:list-discoverable-milestones', (event, opportunityId: unknown) => {
+    assertTrustedSender(event)
+    return orchestrator.listDiscoverableMilestones(z.string().min(1).max(200).parse(opportunityId))
+  })
+  ipcMain.handle('tlc:list-milestone-activities', (event, opportunityId: unknown, milestoneId: unknown) => {
+    assertTrustedSender(event)
+    return orchestrator.listMilestoneActivities(z.string().min(1).max(200).parse(opportunityId), z.string().min(1).max(200).parse(milestoneId))
+  })
+  ipcMain.handle('tlc:create-milestone-activity', (event, opportunityId: unknown, milestoneId: unknown, request: unknown) => {
+    assertTrustedSender(event)
+    return orchestrator.createMilestoneActivity(z.string().min(1).max(200).parse(opportunityId), z.string().min(1).max(200).parse(milestoneId), createMilestoneActivityRequestSchema.parse(request))
   })
   ipcMain.handle('tlc:update-milestone', (event, opportunityId: unknown, milestoneId: unknown, update: unknown) => {
     assertTrustedSender(event)

@@ -10,6 +10,10 @@ import {
     mcemResponseSchema,
     mcemStageTransitionResultSchema,
     milestoneSchema,
+    milestoneActivitySchema,
+    createMilestoneActivityRequestSchema,
+    milestoneTeamJoinResultSchema,
+    milestoneTeamLeaveResultSchema,
     opportunitySchema,
     type Account,
     type AccountCandidate,
@@ -18,17 +22,22 @@ import {
     type AccountVisibility,
     type AgentCapability,
     type AgentTaskResponse,
+    type CreateMilestoneActivityRequest,
     type DealTeamJoinResult,
     type DealTeamLeaveResult,
     type DiscoverableOpportunity,
     type McemResponse,
     type McemStageTransitionResult,
     type Milestone,
+    type MilestoneActivity,
+    type MilestoneTeamJoinResult,
+    type MilestoneTeamLeaveResult,
     type MilestoneUpdate,
     type Opportunity,
     type OpportunityUpdate,
     type SeDomainId
 } from '../../../packages/common/index.js'
+import { milestoneRecommendations, summarizeMilestones } from '../../../packages/agents/mcem-coach/src/milestone-signals.js'
 
 /**
  * Sanitized sample dataset for the extension. No network calls are made in sample mode.
@@ -42,7 +51,9 @@ const criteriaLabels = ['Customer outcome', 'Decision team', 'Technical validati
 const sampleAccounts: readonly Account[] = Object.freeze([
     accountSchema.parse({ id: 'account-contoso', name: 'Contoso Energy', segment: 'Strategic', tpid: '1000001' }),
     accountSchema.parse({ id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise', tpid: '1000002' }),
-    accountSchema.parse({ id: 'account-northwind', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003' })
+    accountSchema.parse({ id: 'account-northwind', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003' }),
+    accountSchema.parse({ id: 'account-zava', name: 'Zava Inc.', segment: 'Strategic', tpid: '1000004' }),
+    accountSchema.parse({ id: 'account-adventureworks', name: 'Adventure Works Cycles', segment: 'Enterprise', tpid: '1000005' })
 ])
 
 const sampleOpportunities: readonly Opportunity[] = Object.freeze([
@@ -53,7 +64,10 @@ const sampleOpportunities: readonly Opportunity[] = Object.freeze([
     { id: 'opp-ai-service', accountId: 'account-fabrikam', name: 'AI-assisted customer service', recordedStage: 2, value: 1_750_000, currency: 'USD', closeDate: '2026-12-18' },
     { id: 'opp-store-modernization', accountId: 'account-fabrikam', name: 'Connected store modernization', recordedStage: 1, value: 1_200_000, currency: 'USD', closeDate: '2027-03-19' },
     { id: 'opp-unified-commerce', accountId: 'account-fabrikam', name: 'Unified commerce platform', recordedStage: 3, value: 3_800_000, currency: 'USD', closeDate: '2026-12-11' },
-    { id: 'opp-customer-data-platform', accountId: 'account-fabrikam', name: 'Customer data platform - ready to advance', owner: 'Morgan Lee', recordedStage: 2, value: 3_200_000, currency: 'USD', closeDate: '2027-01-15' }
+    { id: 'opp-customer-data-platform', accountId: 'account-fabrikam', name: 'Customer data platform - ready to advance', owner: 'Morgan Lee', recordedStage: 2, value: 3_200_000, currency: 'USD', closeDate: '2027-01-15' },
+    { id: 'opp-zava-ai-platform', accountId: 'account-zava', name: 'Zava AI platform foundation', owner: 'Avery Johnson', recordedStage: 2, value: 2_900_000, currency: 'USD', closeDate: '2027-04-02' },
+    { id: 'opp-zava-migration', accountId: 'account-zava', name: 'Zava datacenter exit', recordedStage: 1, value: 1_600_000, currency: 'USD', closeDate: '2027-05-28' },
+    { id: 'opp-aw-commerce', accountId: 'account-adventureworks', name: 'Adventure Works commerce replatform', owner: 'Morgan Diaz', recordedStage: 3, value: 3_100_000, currency: 'USD', closeDate: '2027-01-08' }
 ].map((opportunity) => opportunitySchema.parse(opportunity)))
 
 function offsetDate(isoDate: string, days: number): string {
@@ -161,11 +175,78 @@ export function listSampleOpportunities(accountId: string): Opportunity[] {
 }
 
 export function listSampleMilestones(opportunityId: string): Milestone[] {
-    return structuredClone(milestoneStore.filter((milestone) => milestone.opportunityId === opportunityId)) as Milestone[]
+    return milestoneStore
+        .filter((milestone) => milestone.opportunityId === opportunityId)
+        .map((milestone) => milestoneSchema.parse({ ...structuredClone(milestone), onMilestoneTeam: milestoneTeamIds.has(milestone.id) }))
 }
 
 // Mutable milestone store so field edits persist while the workbench is open.
 const milestoneStore: Milestone[] = structuredClone(sampleMilestones) as Milestone[]
+
+// A representative subset of milestones the signed-in sample user is on, so both the "+" (join)
+// and "-" (leave) states are visible. Independent of Deal Team membership.
+const milestoneTeamIds = new Set(
+    sampleOpportunities
+        .filter((_opportunity, index) => index % 2 === 0)
+        .map((opportunity) => milestoneStore.find((milestone) => milestone.opportunityId === opportunity.id)?.id)
+        .filter((milestoneId): milestoneId is string => Boolean(milestoneId))
+)
+
+// Discoverable opportunities each get a milestone so a user can expand them in Discovery and join a
+// milestone team for an opportunity they have never been on the Deal Team for.
+const discoverableMilestoneStore: Milestone[] = []
+function seedDiscoverableMilestone(opportunityId: string, closeDate: string): Milestone {
+    let milestone = discoverableMilestoneStore.find((item) => item.opportunityId === opportunityId)
+    if (!milestone) {
+        milestone = milestoneSchema.parse({
+            id: `${opportunityId}-milestone`,
+            opportunityId,
+            name: 'Customer outcome validation',
+            status: 'On Track',
+            targetDate: closeDate,
+            owner: 'Account team',
+            commitment: 'Best case'
+        })
+        discoverableMilestoneStore.push(milestone)
+    }
+    return milestone
+}
+
+export function listSampleDiscoverableMilestones(opportunityId: string): Milestone[] {
+    const promoted = milestoneStore.filter((milestone) => milestone.opportunityId === opportunityId)
+    const source = promoted.length > 0
+        ? promoted
+        : discoverableMilestoneStore.filter((milestone) => milestone.opportunityId === opportunityId)
+    return source.map((milestone) => milestoneSchema.parse({ ...structuredClone(milestone), onMilestoneTeam: milestoneTeamIds.has(milestone.id) }))
+}
+
+export function joinSampleMilestoneTeam(opportunityId: string, milestoneId: string): MilestoneTeamJoinResult {
+    const existing = milestoneStore.find((item) => item.opportunityId === opportunityId && item.id === milestoneId)
+    if (!existing) {
+        // Joining a milestone for a discovery candidate promotes its opportunity into the portfolio.
+        const discoverable = sampleDiscoverableOpportunities.find((item) => item.id === opportunityId)
+        const seeded = discoverableMilestoneStore.find((item) => item.opportunityId === opportunityId && item.id === milestoneId)
+        if (!discoverable || !seeded) throw new Error('Unknown sample milestone.')
+        if (!opportunityStore.some((item) => item.id === opportunityId)) {
+            const { domain, accountName, solutionArea, technicalCapability, onDealTeam, ...opportunity } = discoverable
+            void domain; void accountName; void solutionArea; void technicalCapability; void onDealTeam
+            opportunityStore.push(opportunitySchema.parse(structuredClone(opportunity)))
+        }
+        if (!milestoneStore.some((item) => item.id === milestoneId)) milestoneStore.push(structuredClone(seeded))
+    }
+    const alreadyMember = milestoneTeamIds.has(milestoneId)
+    milestoneTeamIds.add(milestoneId)
+    return milestoneTeamJoinResultSchema.parse({ opportunityId, milestoneId, onMilestoneTeam: true, alreadyMember })
+}
+
+export function leaveSampleMilestoneTeam(opportunityId: string, milestoneId: string): MilestoneTeamLeaveResult {
+    const milestone = milestoneStore.find((item) => item.opportunityId === opportunityId && item.id === milestoneId)
+        ?? discoverableMilestoneStore.find((item) => item.opportunityId === opportunityId && item.id === milestoneId)
+    if (!milestone) throw new Error('Unknown sample milestone.')
+    const alreadyAbsent = !milestoneTeamIds.has(milestoneId)
+    milestoneTeamIds.delete(milestoneId)
+    return milestoneTeamLeaveResultSchema.parse({ opportunityId, milestoneId, onMilestoneTeam: false, alreadyAbsent })
+}
 
 export function updateSampleMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Milestone {
     const milestone = milestoneStore.find((item) => item.opportunityId === opportunityId && item.id === milestoneId)
@@ -187,6 +268,48 @@ export function findSampleOpportunity(opportunityId: string): Opportunity | unde
     return found ? structuredClone(found) as Opportunity : undefined
 }
 
+// In-memory milestone activities (Tasks) keyed by milestone id, seeded so the list is non-empty.
+const milestoneActivityStore: MilestoneActivity[] = [milestoneActivitySchema.parse({
+    id: 'act-grid-discovery', milestoneId: 'opp-grid-modernization-discovery', opportunityId: 'opp-grid-modernization',
+    subject: 'Architecture design session', activityType: 'task', status: 'Open', priority: 'Normal',
+    taskCategory: 'Architecture Design Session', due: '2026-07-10', owner: 'Girish Pillai', createdBy: 'Girish Pillai'
+})]
+let sampleActivitySequence = 0
+
+function assertSampleMilestoneExists(opportunityId: string, milestoneId: string): void {
+    const exists = milestoneStore.some((milestone) => milestone.opportunityId === opportunityId && milestone.id === milestoneId)
+        || discoverableMilestoneStore.some((milestone) => milestone.opportunityId === opportunityId && milestone.id === milestoneId)
+    if (!exists) throw new Error('Unknown sample milestone.')
+}
+
+export function listSampleMilestoneActivities(opportunityId: string, milestoneId: string): MilestoneActivity[] {
+    assertSampleMilestoneExists(opportunityId, milestoneId)
+    return milestoneActivityStore.filter((activity) => activity.milestoneId === milestoneId).map((activity) => milestoneActivitySchema.parse(structuredClone(activity)))
+}
+
+export function createSampleMilestoneActivity(opportunityId: string, milestoneId: string, input: CreateMilestoneActivityRequest): MilestoneActivity {
+    assertSampleMilestoneExists(opportunityId, milestoneId)
+    const request = createMilestoneActivityRequestSchema.parse(input)
+    const activity = milestoneActivitySchema.parse({
+        id: `act-sample-${++sampleActivitySequence}`,
+        milestoneId,
+        opportunityId,
+        subject: request.subject,
+        activityType: 'task',
+        status: 'Open',
+        priority: request.priority,
+        owner: 'Girish Pillai',
+        createdBy: 'Girish Pillai',
+        createdOn: new Date().toISOString(),
+        ...(request.taskCategory ? { taskCategory: request.taskCategory } : {}),
+        ...(request.due ? { due: request.due } : {}),
+        ...(request.durationMinutes !== undefined ? { durationMinutes: request.durationMinutes } : {}),
+        ...(request.description ? { description: request.description } : {})
+    })
+    milestoneActivityStore.unshift(activity)
+    return milestoneActivitySchema.parse(structuredClone(activity))
+}
+
 const sampleDiscoverableOpportunities: readonly DiscoverableOpportunity[] = Object.freeze([
     { id: 'opp-discover-hybrid-networking', accountId: 'account-contoso', accountName: 'Contoso Energy', name: 'Hybrid networking modernization', recordedStage: 2, value: 1_850_000, currency: 'USD', closeDate: '2027-02-12', domain: 'infra', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'Advanced Networking', onDealTeam: false },
     { id: 'opp-discover-vmware-migration', accountId: 'account-fabrikam', accountName: 'Fabrikam Retail', name: 'Datacenter exit to Azure VMware Solution', recordedStage: 1, value: 2_950_000, currency: 'USD', closeDate: '2027-04-02', domain: 'infra', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'Azure VMware Solutions', onDealTeam: false },
@@ -202,6 +325,9 @@ const sampleDiscoverableOpportunities: readonly DiscoverableOpportunity[] = Obje
     ,
     { id: 'opp-discover-northwind-data', accountId: 'account-northwind', accountName: 'Northwind Health', name: 'Clinical data platform modernization', recordedStage: 1, value: 2_100_000, currency: 'USD', closeDate: '2027-05-20', domain: 'data', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'Analytics', onDealTeam: false }
 ].map((opportunity) => discoverableOpportunitySchema.parse(opportunity)))
+
+// Seed one milestone per discoverable opportunity so Discovery milestone expansion is demoable.
+for (const opportunity of sampleDiscoverableOpportunities) seedDiscoverableMilestone(opportunity.id, opportunity.closeDate)
 
 export function discoverSampleOpportunities(domain: SeDomainId): DiscoverableOpportunity[] {
     const visibleAccountIds = new Set(listSampleAccounts().map((account) => account.id))
@@ -236,7 +362,7 @@ export function transitionSampleStage(accountId: string, opportunityId: string, 
     if (!opportunity) throw new Error('Unknown sample opportunity.')
     if (Math.abs(targetStage - opportunity.recordedStage) !== 1) throw new Error('MCEM stage changes must move to an adjacent stage.')
     const previousStage = opportunity.recordedStage
-    const evaluation = buildSampleEvaluation(opportunity)
+    const evaluation = buildSampleEvaluation(opportunity, undefined, listSampleMilestones(opportunity.id))
     const advancing = targetStage > previousStage
     const hasGaps = evaluation.criteria.some((criterion) => criterion.status !== 'met')
     if ((!advancing || hasGaps) && !reason?.trim()) {
@@ -257,11 +383,28 @@ function accountName(accountId: string): string {
     return sampleAccounts.find((account) => account.id === accountId)?.name ?? accountId
 }
 
-export function buildSampleEvaluation(opportunity: Opportunity, now: () => string = () => new Date().toISOString()): McemResponse {
+export function buildSampleEvaluation(opportunity: Opportunity, now: () => string = () => new Date().toISOString(), milestones: readonly Milestone[] = []): McemResponse {
     const readyToAdvance = opportunity.name.includes('ready to advance')
     const evidenceBasedStage = readyToAdvance ? Math.min(5, opportunity.recordedStage + 1) : Math.max(1, opportunity.recordedStage - 1)
     const generatedAt = now()
     const evidenceIds = [`sample-msx-${opportunity.id}`, `sample-mcem-stage-${opportunity.recordedStage}`]
+    const milestoneSummary = summarizeMilestones(milestones)
+    const milestoneRecs = milestoneRecommendations(milestoneSummary, evidenceIds)
+    const baseSummary = readyToAdvance
+        ? `Completed Stage ${opportunity.recordedStage} exit criteria support progression to Stage ${evidenceBasedStage}.`
+        : `The opportunity is recorded at Stage ${opportunity.recordedStage}; current sample evidence supports Stage ${evidenceBasedStage}.`
+    const baseRecommendations = readyToAdvance ? [{
+        id: 'advance-stage',
+        action: `Confirm progression to Stage ${evidenceBasedStage} with the customer and update MSX.`,
+        ownerRole: sampleStageOwner(opportunity.recordedStage),
+        rationale: 'All current-stage exit criteria are represented in this sanitized sample.',
+        evidenceIds,
+        assumption: false,
+        confidence: 'high'
+    }] : [
+        { id: 'validate-technical', action: 'Schedule a customer validation session for the open technical criterion.', ownerRole: 'Solution Engineer', rationale: 'Technical validation remains partial in sample evidence.', evidenceIds, assumption: false, confidence: 'high' },
+        { id: 'confirm-business-case', action: 'Confirm the quantified business case and economic buyer.', ownerRole: 'Specialist / SSP', rationale: 'The business case is not yet supported in sample evidence.', evidenceIds, assumption: false, confidence: 'medium' }
+    ]
     return mcemResponseSchema.parse({
         contractVersion,
         correlationId: '30000000-0000-4000-8000-000000000001',
@@ -270,9 +413,7 @@ export function buildSampleEvaluation(opportunity: Opportunity, now: () => strin
         generatedAt,
         mode: 'sample',
         state: readyToAdvance ? 'complete' : 'partial',
-        summary: readyToAdvance
-            ? `Completed Stage ${opportunity.recordedStage} exit criteria support progression to Stage ${evidenceBasedStage}.`
-            : `The opportunity is recorded at Stage ${opportunity.recordedStage}; current sample evidence supports Stage ${evidenceBasedStage}.`,
+        summary: milestoneSummary.headline ? `${baseSummary} ${milestoneSummary.headline}` : baseSummary,
         recordedStage: opportunity.recordedStage,
         evidenceBasedStage,
         criteria: criteriaLabels.map((label, index) => ({
@@ -284,18 +425,7 @@ export function buildSampleEvaluation(opportunity: Opportunity, now: () => strin
                 : index < 2 ? `${label} evidence is documented.` : `${label} requires customer confirmation.`,
             evidenceIds
         })),
-        recommendations: readyToAdvance ? [{
-            id: 'advance-stage',
-            action: `Confirm progression to Stage ${evidenceBasedStage} with the customer and update MSX.`,
-            ownerRole: sampleStageOwner(opportunity.recordedStage),
-            rationale: 'All current-stage exit criteria are represented in this sanitized sample.',
-            evidenceIds,
-            assumption: false,
-            confidence: 'high'
-        }] : [
-            { id: 'validate-technical', action: 'Schedule a customer validation session for the open technical criterion.', ownerRole: 'Solution Engineer', rationale: 'Technical validation remains partial in sample evidence.', evidenceIds, assumption: false, confidence: 'high' },
-            { id: 'confirm-business-case', action: 'Confirm the quantified business case and economic buyer.', ownerRole: 'Specialist / SSP', rationale: 'The business case is not yet supported in sample evidence.', evidenceIds, assumption: false, confidence: 'medium' }
-        ],
+        recommendations: [...baseRecommendations, ...milestoneRecs],
         missingData: readyToAdvance ? [] : ['Validated business case', 'Customer-confirmed next step'],
         evidence: [
             { id: evidenceIds[0]!, source: 'msx', recordId: opportunity.id, title: 'Sanitized MSX opportunity snapshot', url: `https://example.com/sample/msx/${opportunity.id}`, retrievedAt: generatedAt, accessContext: 'sample', quality: 'observed', excerpt: 'Static VS Code sample data; no live MSX request was made.' },
@@ -315,7 +445,7 @@ export function buildSampleAgentResponse(
     now: () => string = () => new Date().toISOString()
 ): AgentTaskResponse {
     const generatedAt = now()
-    const evaluation = buildSampleEvaluation(opportunity, now)
+    const evaluation = buildSampleEvaluation(opportunity, now, listSampleMilestones(opportunity.id))
     const summaryByCapability: Record<AgentCapability, string> = {
         'account-pulse': `Focus this week on ${opportunity.name}: close the highest-priority Stage ${evaluation.recordedStage} evidence gaps and confirm the next customer commitment.`,
         'mcem-coach': evaluation.summary,

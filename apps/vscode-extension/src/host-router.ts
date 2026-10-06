@@ -68,9 +68,29 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
                 const params = parseBridgeParams('leaveDealTeam', parsed.data.params)
                 return successResponse(id, await provider.leaveDealTeam(params.opportunityId))
             }
+            case 'joinMilestoneTeam': {
+                const params = parseBridgeParams('joinMilestoneTeam', parsed.data.params)
+                return successResponse(id, await provider.joinMilestoneTeam(params.opportunityId, params.milestoneId))
+            }
+            case 'leaveMilestoneTeam': {
+                const params = parseBridgeParams('leaveMilestoneTeam', parsed.data.params)
+                return successResponse(id, await provider.leaveMilestoneTeam(params.opportunityId, params.milestoneId))
+            }
             case 'listMilestones': {
                 const params = parseBridgeParams('listMilestones', parsed.data.params)
                 return successResponse(id, await provider.listMilestones(params.opportunityId))
+            }
+            case 'listDiscoverableMilestones': {
+                const params = parseBridgeParams('listDiscoverableMilestones', parsed.data.params)
+                return successResponse(id, await provider.listDiscoverableMilestones(params.opportunityId))
+            }
+            case 'listMilestoneActivities': {
+                const params = parseBridgeParams('listMilestoneActivities', parsed.data.params)
+                return successResponse(id, await provider.listMilestoneActivities(params.opportunityId, params.milestoneId))
+            }
+            case 'createMilestoneActivity': {
+                const params = parseBridgeParams('createMilestoneActivity', parsed.data.params)
+                return successResponse(id, await provider.createMilestoneActivity(params.opportunityId, params.milestoneId, params.request))
             }
             case 'updateOpportunity': {
                 const params = parseBridgeParams('updateOpportunity', parsed.data.params)

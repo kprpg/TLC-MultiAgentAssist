@@ -756,7 +756,13 @@ var milestoneSchema = z.object({
 	owner: z.string().min(1).optional(),
 	commitment: z.string().min(1).optional(),
 	riskDetails: z.string().optional(),
-	comments: z.string().optional()
+	comments: z.string().optional(),
+	/**
+	* Whether the signed-in user is on this milestone's team. Independent of
+	* opportunity Deal Team membership and of the milestone owner. Set per-user by
+	* the connector at read time; omitted means membership is unknown/not evaluated.
+	*/
+	onMilestoneTeam: z.boolean().optional()
 });
 var milestoneStatusSchema = z.enum([
 	"On Track",
@@ -776,6 +782,79 @@ var milestoneUpdateSchema = z.object({
 	comments: z.string().max(3e4).optional()
 }).refine((value) => Object.keys(value).length > 0, "At least one milestone field is required.");
 var opportunityUpdateSchema = z.object({ comments: z.string().max(3e4) });
+z.object({
+	opportunityId: z.string().min(1),
+	milestoneId: z.string().min(1),
+	onMilestoneTeam: z.literal(true),
+	alreadyMember: z.boolean()
+}).strict();
+z.object({
+	opportunityId: z.string().min(1),
+	milestoneId: z.string().min(1),
+	onMilestoneTeam: z.literal(false),
+	alreadyAbsent: z.boolean()
+}).strict();
+/** Activity priority, mapped to the Dataverse task `prioritycode` (Low 0 / Normal 1 / High 2). */
+var milestoneActivityPrioritySchema = z.enum([
+	"Low",
+	"Normal",
+	"High"
+]);
+/**
+* Task Category option set shown on the MSX "Quick Create: Task" form. Bundled so sample mode needs
+* no network; in live mode the field + option codes are environment-configured.
+*/
+var taskCategorySchema = z.enum([
+	"Architecture Design Session",
+	"Assessment",
+	"Blocker Escalation",
+	"Briefing",
+	"Call Back Requested",
+	"Consumption Plan",
+	"Cross Segment",
+	"Cross Workload",
+	"Customer Engagement",
+	"Demo",
+	"External (Co-creation of Value)",
+	"Internal",
+	"L300+ Demo",
+	"Negotiate Pricing",
+	"New Partner Request",
+	"PoC/Pilot",
+	"Post Sales",
+	"Rapid Prototyping",
+	"RFP/RFI",
+	"Solution Whiteboarding",
+	"Tech Support",
+	"Technical Close/Win Plan",
+	"Technical Workshop",
+	"Workshop"
+]);
+z.object({
+	id: z.string().min(1),
+	milestoneId: z.string().min(1),
+	opportunityId: z.string().min(1),
+	subject: z.string().min(1),
+	activityType: z.string().min(1),
+	status: z.string().min(1),
+	priority: milestoneActivityPrioritySchema.optional(),
+	taskCategory: z.string().min(1).optional(),
+	due: z.string().date().optional(),
+	durationMinutes: z.number().int().positive().optional(),
+	description: z.string().optional(),
+	owner: z.string().min(1).optional(),
+	createdBy: z.string().min(1).optional(),
+	createdOn: z.string().datetime().optional()
+});
+/** Request to create a Task regarding a milestone (owner defaults to the signed-in user). */
+var createMilestoneActivityRequestSchema = z.object({
+	subject: z.string().trim().min(1).max(200),
+	taskCategory: taskCategorySchema.optional(),
+	description: z.string().max(3e4).optional(),
+	due: z.string().date().optional(),
+	priority: milestoneActivityPrioritySchema.default("Normal"),
+	durationMinutes: z.number().int().positive().max(1e5).optional()
+}).strict();
 /**
 * An opportunity surfaced by SE-domain discovery. It extends the base
 * opportunity with the domain it matched and whether the signed-in user is
@@ -1418,6 +1497,18 @@ var JsonFilePortfolioPreferenceStore = class {
 	}
 };
 //#endregion
+//#region packages/connectors/common/milestone-membership.ts
+/**
+* A single milestone-team membership for a user. The opportunity id is denormalized
+* alongside the milestone id so portfolio assembly can union milestone-team
+* opportunities without an extra per-milestone lookup.
+*/
+var milestoneMembershipSchema = z.object({
+	milestoneId: z.string().min(1),
+	opportunityId: z.string().min(1)
+}).strict();
+z.record(z.string().min(1), z.array(milestoneMembershipSchema));
+//#endregion
 //#region packages/connectors/msx/live.ts
 var defaultBaseUrl = "https://microsoftsales.crm.dynamics.com/api/data/v9.2/";
 var formattedValueSuffix = "@OData.Community.Display.V1.FormattedValue";
@@ -1441,10 +1532,35 @@ var defaultDealTeamWriteMetadata = {
 	userLookupField: "_msp_dealteamuserid_value",
 	opportunityLookupField: "_msp_parentopportunityid_value"
 };
+/** Applies the default template name to a partial milestone-team access-team config. */
+function resolveMilestoneTeamAccessMetadata(partial) {
+	return {
+		templateName: partial?.templateName?.trim() || "Milestone Team",
+		...partial?.templateId ? { templateId: partial.templateId } : {}
+	};
+}
+var MILESTONE_TEAM_NOT_CONFIGURED_MESSAGE = "The Milestone Team is not set up in this MSX environment, so your change was not saved. Ask your administrator to enable the Milestone Team access team on the milestone form.";
 /** Derives a lookup attribute logical name (e.g. `msp_dealteamuserid`) from its `_x_value` field. */
 function lookupAttributeName(valueField) {
 	return valueField.replace(/^_/, "").replace(/_value$/, "");
 }
+/** Dataverse task `prioritycode`: Low 0 / Normal 1 / High 2. */
+var taskPriorityCodes = {
+	Low: 0,
+	Normal: 1,
+	High: 2
+};
+var taskPriorityByCode = {
+	0: "Low",
+	1: "Normal",
+	2: "High"
+};
+/** Dataverse task `statecode`: Open 0 / Completed 1 / Canceled 2. */
+var taskStatusByState = {
+	0: "Open",
+	1: "Completed",
+	2: "Canceled"
+};
 var navigationPropertyPattern = /^[A-Za-z][A-Za-z0-9_]*$/;
 function msxWriteMetadataFromEnvironment(environment) {
 	const riskDetailsField = environment["TLC_MSX_RISK_DETAILS_FIELD"]?.trim();
@@ -1487,12 +1603,42 @@ function msxWriteMetadataFromEnvironment(environment) {
 		if (!navigationPropertyPattern.test(rawValue)) throw new Error(`${variable} must be a valid Dataverse identifier.`);
 		dealTeam[key] = rawValue;
 	}
+	const milestoneTeam = {};
+	const milestoneTeamTemplateName = environment["TLC_MSX_MILESTONE_TEAM_TEMPLATE_NAME"]?.trim();
+	if (milestoneTeamTemplateName) milestoneTeam.templateName = milestoneTeamTemplateName;
+	const milestoneTeamTemplateId = environment["TLC_MSX_MILESTONE_TEAM_TEMPLATE_ID"]?.trim();
+	if (milestoneTeamTemplateId) {
+		if (!guidPattern.test(milestoneTeamTemplateId)) throw new Error("TLC_MSX_MILESTONE_TEAM_TEMPLATE_ID must be a valid GUID.");
+		milestoneTeam.templateId = milestoneTeamTemplateId;
+	}
+	const taskCategoryField = environment["TLC_MSX_TASK_CATEGORY_FIELD"]?.trim();
+	if (taskCategoryField && !navigationPropertyPattern.test(taskCategoryField)) throw new Error("TLC_MSX_TASK_CATEGORY_FIELD must be a valid Dataverse identifier.");
+	let taskCategoryCodes;
+	const rawTaskCategoryCodes = environment["TLC_MSX_TASK_CATEGORY_CODES"]?.trim();
+	if (rawTaskCategoryCodes) {
+		let parsed;
+		try {
+			parsed = JSON.parse(rawTaskCategoryCodes);
+		} catch {
+			throw new Error("TLC_MSX_TASK_CATEGORY_CODES must be a JSON object mapping category labels to integer codes.");
+		}
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("TLC_MSX_TASK_CATEGORY_CODES must be a JSON object mapping category labels to integer codes.");
+		const codes = {};
+		for (const [label, code] of Object.entries(parsed)) {
+			if (!Number.isSafeInteger(code)) throw new Error(`TLC_MSX_TASK_CATEGORY_CODES["${label}"] must be an integer option code.`);
+			codes[label] = code;
+		}
+		taskCategoryCodes = codes;
+	}
 	return {
 		...riskDetailsField ? { riskDetailsField } : {},
 		...accountTpidField ? { accountTpidField } : {},
 		...Object.keys(configuredCodes).length > 0 ? { milestoneStatusCodes: configuredCodes } : {},
 		...Object.keys(stageCodes).length > 0 ? { stageCodes } : {},
-		...Object.keys(dealTeam).length > 0 ? { dealTeam } : {}
+		...Object.keys(dealTeam).length > 0 ? { dealTeam } : {},
+		...Object.keys(milestoneTeam).length > 0 ? { milestoneTeam } : {},
+		...taskCategoryField ? { taskCategoryField } : {},
+		...taskCategoryCodes ? { taskCategoryCodes } : {}
 	};
 }
 var MsxRequestError = class extends Error {
@@ -1515,6 +1661,7 @@ var LiveMsxConnector = class {
 	milestonePromises = /* @__PURE__ */ new Map();
 	currentUserIdPromise;
 	dealTeamBindingsPromise;
+	milestoneTeamTemplateIdPromise;
 	constructor(tokenProvider, fetchImplementation = fetch, baseUrl = defaultBaseUrl, performanceReporter, writeMetadata = {}, preferenceStore = new MemoryPortfolioPreferenceStore()) {
 		this.tokenProvider = tokenProvider;
 		this.fetchImplementation = fetchImplementation;
@@ -1586,6 +1733,13 @@ var LiveMsxConnector = class {
 	}
 	async listMilestones(opportunityId) {
 		if (!(await this.getPortfolio()).opportunities.some((opportunity) => opportunity.id === opportunityId)) throw new Error("The opportunity is not in the signed-in user’s active MSX portfolio.");
+		return this.mapMilestoneRows(opportunityId, await this.milestoneTeamMilestoneIds());
+	}
+	async listDiscoverableMilestones(opportunityId) {
+		if (!guidPattern.test(opportunityId)) throw new Error("The opportunity id must be a valid MSX GUID.");
+		return this.mapMilestoneRows(opportunityId, await this.milestoneTeamMilestoneIds());
+	}
+	async mapMilestoneRows(opportunityId, memberMilestoneIds) {
 		return (await this.getMilestoneRows(opportunityId)).map((row) => ({
 			id: row.msp_engagementmilestoneid,
 			opportunityId,
@@ -1596,8 +1750,36 @@ var LiveMsxConnector = class {
 			...formattedValue(row, "_ownerid_value") ? { owner: formattedValue(row, "_ownerid_value") } : {},
 			...formattedValue(row, "msp_commitmentrecommendation") ? { commitment: formattedValue(row, "msp_commitmentrecommendation") } : {},
 			...this.writeMetadata.riskDetailsField && typeof row[this.writeMetadata.riskDetailsField] === "string" ? { riskDetails: row[this.writeMetadata.riskDetailsField] } : {},
-			...typeof row.msp_forecastcomments === "string" ? { comments: row.msp_forecastcomments } : {}
+			...typeof row.msp_forecastcomments === "string" ? { comments: row.msp_forecastcomments } : {},
+			onMilestoneTeam: memberMilestoneIds.has(row.msp_engagementmilestoneid)
 		}));
+	}
+	/**
+	* Milestone ids whose access team (the "Milestone Team" subgrid) currently includes the signed-in
+	* user, read from the Dataverse `teams`/`teammembership` tables. Empty when the Milestone Team
+	* access-team template is not set up in this environment.
+	*/
+	async milestoneTeamMemberships() {
+		const templateId = await this.resolveMilestoneTeamTemplateId().catch(() => void 0);
+		if (!templateId) return [];
+		const userId = await this.getCurrentUserId();
+		return unique((await this.requestAll("teams", {
+			"$select": "_regardingobjectid_value",
+			"$filter": `teamtype eq 1 and _teamtemplateid_value eq ${templateId} and teammembership_association/any(member:member/systemuserid eq ${userId})`
+		})).map((team) => team._regardingobjectid_value).filter(isPresent)).map((milestoneId) => ({ milestoneId }));
+	}
+	/** The signed-in user's milestone-team milestone ids, read from MSX. */
+	async milestoneTeamMilestoneIds() {
+		return new Set((await this.milestoneTeamMemberships()).map((membership) => membership.milestoneId));
+	}
+	/**
+	* Parent opportunity ids of the signed-in user's milestone-team memberships (for the portfolio
+	* union), resolved from the member milestone rows.
+	*/
+	async milestoneTeamOpportunityIds() {
+		const memberships = await this.milestoneTeamMemberships();
+		if (memberships.length === 0) return [];
+		return unique((await this.requestByIds("msp_engagementmilestones", "msp_engagementmilestoneid", unique(memberships.map((membership) => membership.milestoneId)), "msp_engagementmilestoneid,_msp_opportunityid_value")).map((row) => row._msp_opportunityid_value).filter(isPresent));
 	}
 	async updateMilestone(opportunityId, milestoneId, input) {
 		const update = milestoneUpdateSchema.parse(input);
@@ -1776,11 +1958,163 @@ var LiveMsxConnector = class {
 			alreadyAbsent: false
 		};
 	}
-	/**
-	* Resolves the single-valued navigation property names used to bind a deal-team row to the
-	* systemuser and opportunity. Prefers explicit configuration, then live relationship metadata,
-	* then a conventional fallback derived from the lookup field names. The metadata lookup is cached.
-	*/
+	async joinMilestoneTeam(opportunityId, milestoneId) {
+		if (!guidPattern.test(opportunityId)) throw new Error("The opportunity id must be a valid MSX GUID.");
+		if (!guidPattern.test(milestoneId)) throw new Error("The milestone id must be a valid MSX GUID.");
+		if (!(await this.getMilestoneRows(opportunityId)).some((milestone) => milestone.msp_engagementmilestoneid === milestoneId)) throw new Error("The milestone is not in the selected opportunity.");
+		const userId = await this.getCurrentUserId();
+		const templateId = await this.resolveMilestoneTeamTemplateId();
+		if (await this.isMilestoneTeamMember(milestoneId, userId, templateId)) {
+			this.invalidateMilestoneTeamCaches(opportunityId);
+			return {
+				opportunityId,
+				milestoneId,
+				onMilestoneTeam: true,
+				alreadyMember: true
+			};
+		}
+		await this.post(`systemusers(${userId})/Microsoft.Dynamics.CRM.AddUserToRecordTeam`, this.recordTeamActionBody(milestoneId, templateId));
+		this.invalidateMilestoneTeamCaches(opportunityId);
+		return {
+			opportunityId,
+			milestoneId,
+			onMilestoneTeam: true,
+			alreadyMember: false
+		};
+	}
+	async leaveMilestoneTeam(opportunityId, milestoneId) {
+		if (!guidPattern.test(opportunityId)) throw new Error("The opportunity id must be a valid MSX GUID.");
+		if (!guidPattern.test(milestoneId)) throw new Error("The milestone id must be a valid MSX GUID.");
+		const userId = await this.getCurrentUserId();
+		const templateId = await this.resolveMilestoneTeamTemplateId();
+		if (!await this.isMilestoneTeamMember(milestoneId, userId, templateId)) {
+			this.invalidateMilestoneTeamCaches(opportunityId);
+			return {
+				opportunityId,
+				milestoneId,
+				onMilestoneTeam: false,
+				alreadyAbsent: true
+			};
+		}
+		await this.post(`systemusers(${userId})/Microsoft.Dynamics.CRM.RemoveUserFromRecordTeam`, this.recordTeamActionBody(milestoneId, templateId));
+		this.invalidateMilestoneTeamCaches(opportunityId);
+		return {
+			opportunityId,
+			milestoneId,
+			onMilestoneTeam: false,
+			alreadyAbsent: false
+		};
+	}
+	async listMilestoneActivities(opportunityId, milestoneId) {
+		if (!guidPattern.test(milestoneId)) throw new Error("The milestone id must be a valid MSX GUID.");
+		const categoryField = this.writeMetadata.taskCategoryField;
+		return (await this.requestAll("tasks", {
+			"$select": [
+				"activityid",
+				"subject",
+				"statecode",
+				"prioritycode",
+				"scheduledend",
+				"actualdurationminutes",
+				"description",
+				"_ownerid_value",
+				"createdon",
+				"_createdby_value",
+				categoryField
+			].filter(isPresent).join(","),
+			"$filter": `_regardingobjectid_value eq ${milestoneId}`,
+			"$orderby": "createdon desc"
+		})).map((row) => this.toMilestoneActivity(row, opportunityId, milestoneId));
+	}
+	async createMilestoneActivity(opportunityId, milestoneId, input) {
+		if (!guidPattern.test(opportunityId)) throw new Error("The opportunity id must be a valid MSX GUID.");
+		if (!guidPattern.test(milestoneId)) throw new Error("The milestone id must be a valid MSX GUID.");
+		const request = createMilestoneActivityRequestSchema.parse(input);
+		if (!(await this.getMilestoneRows(opportunityId)).some((milestone) => milestone.msp_engagementmilestoneid === milestoneId)) throw new Error("The milestone is not in the selected opportunity.");
+		const userId = await this.getCurrentUserId();
+		const categoryField = this.writeMetadata.taskCategoryField;
+		const categoryCode = request.taskCategory ? this.writeMetadata.taskCategoryCodes?.[request.taskCategory] : void 0;
+		const body = {
+			subject: request.subject,
+			prioritycode: taskPriorityCodes[request.priority],
+			"regardingobjectid_msp_engagementmilestone@odata.bind": `/msp_engagementmilestones(${milestoneId})`,
+			"ownerid@odata.bind": `/systemusers(${userId})`,
+			...request.description !== void 0 ? { description: request.description } : {},
+			...request.due ? { scheduledend: request.due } : {},
+			...request.durationMinutes !== void 0 ? { actualdurationminutes: request.durationMinutes } : {},
+			...categoryField && categoryCode !== void 0 ? { [categoryField]: categoryCode } : {}
+		};
+		const created = await this.postReturningEntity("tasks", body);
+		return this.toMilestoneActivity(created, opportunityId, milestoneId);
+	}
+	toMilestoneActivity(row, opportunityId, milestoneId) {
+		const categoryField = this.writeMetadata.taskCategoryField;
+		const priority = typeof row.prioritycode === "number" ? taskPriorityByCode[row.prioritycode] : void 0;
+		const category = categoryField ? formattedValue(row, categoryField) : void 0;
+		return {
+			id: row.activityid,
+			milestoneId,
+			opportunityId,
+			subject: row.subject?.trim() || "Untitled task",
+			activityType: "task",
+			status: typeof row.statecode === "number" ? taskStatusByState[row.statecode] ?? "Open" : "Open",
+			...priority ? { priority } : {},
+			...category ? { taskCategory: category } : {},
+			...row.scheduledend ? { due: row.scheduledend.slice(0, 10) } : {},
+			...typeof row.actualdurationminutes === "number" ? { durationMinutes: row.actualdurationminutes } : {},
+			...typeof row.description === "string" && row.description.length > 0 ? { description: row.description } : {},
+			...formattedValue(row, "_ownerid_value") ? { owner: formattedValue(row, "_ownerid_value") } : {},
+			...formattedValue(row, "_createdby_value") ? { createdBy: formattedValue(row, "_createdby_value") } : {},
+			...row.createdon ? { createdOn: row.createdon } : {}
+		};
+	}
+	resolveMilestoneTeamTemplateId() {
+		const configured = resolveMilestoneTeamAccessMetadata(this.writeMetadata.milestoneTeam);
+		if (configured.templateId && guidPattern.test(configured.templateId)) return Promise.resolve(configured.templateId);
+		this.milestoneTeamTemplateIdPromise ??= this.discoverMilestoneTeamTemplateId(configured.templateName).catch((error) => {
+			this.milestoneTeamTemplateIdPromise = void 0;
+			throw error;
+		});
+		return this.milestoneTeamTemplateIdPromise;
+	}
+	/** Finds the "Milestone Team" access-team template id by name (cached for the connector's lifetime). */
+	async discoverMilestoneTeamTemplateId(templateName) {
+		const rows = await this.requestAll("teamtemplates", {
+			"$select": "teamtemplateid,teamtemplatename",
+			"$filter": `teamtemplatename eq '${escapeODataStringLiteral(templateName)}'`,
+			"$top": "2"
+		});
+		if (rows.length > 1) throw new Error(`MSX has multiple access-team templates named "${templateName}". Set TLC_MSX_MILESTONE_TEAM_TEMPLATE_ID to the correct team template id.`);
+		const templateId = rows[0]?.teamtemplateid;
+		if (typeof templateId !== "string" || !guidPattern.test(templateId)) throw new Error(MILESTONE_TEAM_NOT_CONFIGURED_MESSAGE);
+		return templateId;
+	}
+	/** True when the milestone's auto-created access team already includes the given user. */
+	async isMilestoneTeamMember(milestoneId, userId, templateId) {
+		return (await this.requestAll("teams", {
+			"$select": "teamid",
+			"$filter": `teamtype eq 1 and _teamtemplateid_value eq ${templateId} and _regardingobjectid_value eq ${milestoneId} and teammembership_association/any(member:member/systemuserid eq ${userId})`,
+			"$top": "1"
+		})).length > 0;
+	}
+	/** Body for the AddUserToRecordTeam / RemoveUserFromRecordTeam bound actions. */
+	recordTeamActionBody(milestoneId, templateId) {
+		return {
+			Record: {
+				"@odata.type": "Microsoft.Dynamics.CRM.msp_engagementmilestone",
+				msp_engagementmilestoneid: milestoneId
+			},
+			TeamTemplate: {
+				"@odata.type": "Microsoft.Dynamics.CRM.teamtemplate",
+				teamtemplateid: templateId
+			}
+		};
+	}
+	invalidateMilestoneTeamCaches(opportunityId) {
+		this.portfolioPromise = void 0;
+		this.observationPromises.delete(opportunityId);
+		this.milestonePromises.delete(opportunityId);
+	}
 	resolveDealTeamBindings(dealTeam) {
 		if (dealTeam.userNavigationProperty && dealTeam.opportunityNavigationProperty) return Promise.resolve({
 			userNavigationProperty: dealTeam.userNavigationProperty,
@@ -1876,10 +2210,12 @@ var LiveMsxConnector = class {
 	async loadPortfolio() {
 		const userId = await measurePerformance("msx.identity", this.performanceReporter, () => this.getCurrentUserId());
 		const preferences = await this.preferenceStore.read(userId);
-		const opportunityIds = unique((await measurePerformance("msx.deal-team", this.performanceReporter, () => this.requestAll("msp_dealteams", {
+		const dealTeamRows = await measurePerformance("msx.deal-team", this.performanceReporter, () => this.requestAll("msp_dealteams", {
 			"$select": "_msp_parentopportunityid_value",
 			"$filter": `statecode eq 0 and _msp_dealteamuserid_value eq ${userId}`
-		}))).map((row) => row._msp_parentopportunityid_value).filter(isPresent));
+		}));
+		const milestoneOpportunityIds = await this.milestoneTeamOpportunityIds();
+		const opportunityIds = unique([...dealTeamRows.map((row) => row._msp_parentopportunityid_value).filter(isPresent), ...milestoneOpportunityIds]);
 		const activeOpportunities = (await measurePerformance("msx.opportunities", this.performanceReporter, () => this.requestByIds("opportunities", "opportunityid", opportunityIds, "opportunityid,statecode,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description"))).filter((row) => row._parentaccountid_value && (row.statecode === void 0 || row.statecode === 0));
 		const dealTeamAccountIds = unique(activeOpportunities.map((row) => row._parentaccountid_value).filter(isPresent));
 		const accountIds = unique([
@@ -2004,6 +2340,24 @@ var LiveMsxConnector = class {
 		});
 		if (!response.ok) throw new MsxRequestError(`MSX create failed with status ${response.status}.`, response.status);
 	}
+	/** POSTs and returns the created row (via `Prefer: return=representation`). */
+	async postReturningEntity(path, body) {
+		const url = new URL(path, this.baseUrl);
+		this.assertTrustedUrl(url);
+		const accessToken = await this.tokenProvider.getAccessToken();
+		const response = await this.fetchImplementation(url, {
+			method: "POST",
+			headers: {
+				Authorization: ["Bearer", accessToken].join(" "),
+				Accept: "application/json",
+				"Content-Type": "application/json",
+				Prefer: "return=representation"
+			},
+			body: JSON.stringify(body)
+		});
+		if (!response.ok) throw new MsxRequestError(`MSX create failed with status ${response.status}.`, response.status);
+		return await response.json();
+	}
 	async delete(path) {
 		const url = new URL(path, this.baseUrl);
 		this.assertTrustedUrl(url);
@@ -2094,6 +2448,460 @@ function mapOpportunityObservations(opportunity, milestones) {
 	return observations;
 }
 //#endregion
+//#region packages/agents/meeting-signal-extractor/src/index.ts
+/**
+* Meeting Signal Extractor — deterministic sample implementation.
+*
+* In production, a GPT-5 reasoning deployment with Structured Outputs returns a
+* `MeetingChangeSetProposal`. For the offline / SQLite test path this module produces the
+* same contract deterministically with transparent rules, so the extract → review → inject
+* slice can be developed and tested without a model call. Both paths obey the same
+* guardrails: dictionary-only fields, evidence on every slot, no-op drop, customer/internal
+* routing, and conservative confidence.
+*
+* See docs/MeetingCapture.md (Parts B, C, I) and prompts/instructions.md.
+*/
+/** Canonical field dictionary. The extractor may only propose fields listed here. */
+var MEETING_FIELD_DICTIONARY = {
+	budgetAmount: {
+		canonical: "budgetAmount",
+		label: "Budget amount",
+		targetKind: "opportunity",
+		msxField: "budget_amount",
+		valueType: "money",
+		mcemCriterion: "business-case",
+		sensitive: false
+	},
+	budgetStatus: {
+		canonical: "budgetStatus",
+		label: "Budget confirmed",
+		targetKind: "opportunity",
+		msxField: "budget_status",
+		valueType: "optionset",
+		optionLabels: ["Yes", "No"],
+		mcemCriterion: "business-case",
+		sensitive: false
+	},
+	estimatedValue: {
+		canonical: "estimatedValue",
+		label: "Estimated value",
+		targetKind: "opportunity",
+		msxField: "estimated_value",
+		valueType: "money",
+		mcemCriterion: "business-case",
+		sensitive: true
+	},
+	timeline: {
+		canonical: "timeline",
+		label: "Purchase timeline",
+		targetKind: "opportunity",
+		msxField: "timeline",
+		valueType: "optionset",
+		optionLabels: [
+			"Immediate",
+			"This Quarter",
+			"Next Quarter",
+			"This Year",
+			"Not known"
+		],
+		mcemCriterion: "next-step",
+		sensitive: false
+	},
+	purchaseProcess: {
+		canonical: "purchaseProcess",
+		label: "Decision process",
+		targetKind: "opportunity",
+		msxField: "purchase_process",
+		valueType: "optionset",
+		optionLabels: [
+			"Individual",
+			"Committee",
+			"Unknown"
+		],
+		mcemCriterion: "decision-team",
+		sensitive: false
+	},
+	decisionMaker: {
+		canonical: "decisionMaker",
+		label: "Decision maker identified",
+		targetKind: "opportunity",
+		msxField: "decision_maker",
+		valueType: "boolean",
+		mcemCriterion: "decision-team",
+		sensitive: false
+	},
+	need: {
+		canonical: "need",
+		label: "Customer need level",
+		targetKind: "opportunity",
+		msxField: "need",
+		valueType: "optionset",
+		optionLabels: [
+			"Must have",
+			"Should have",
+			"Good to have",
+			"No need"
+		],
+		mcemCriterion: "customer-outcome",
+		sensitive: false
+	},
+	customerNeed: {
+		canonical: "customerNeed",
+		label: "Customer need",
+		targetKind: "opportunity",
+		msxField: "customer_need",
+		valueType: "text",
+		mcemCriterion: "customer-outcome",
+		sensitive: false,
+		fillOnlyWhenEmpty: true
+	},
+	proposedSolution: {
+		canonical: "proposedSolution",
+		label: "Proposed solution",
+		targetKind: "opportunity",
+		msxField: "proposed_solution",
+		valueType: "text",
+		mcemCriterion: "technical-validation",
+		sensitive: false,
+		fillOnlyWhenEmpty: true
+	},
+	finalDecisionDate: {
+		canonical: "finalDecisionDate",
+		label: "Final decision date",
+		targetKind: "opportunity",
+		msxField: "final_decision_date",
+		valueType: "date",
+		mcemCriterion: "next-step",
+		sensitive: false
+	},
+	identifyCompetitors: {
+		canonical: "identifyCompetitors",
+		label: "Competitors identified",
+		targetKind: "opportunity",
+		msxField: "identify_competitors",
+		valueType: "boolean",
+		mcemCriterion: "risk",
+		sensitive: false
+	},
+	opportunityRating: {
+		canonical: "opportunityRating",
+		label: "Opportunity sentiment",
+		targetKind: "opportunity",
+		msxField: "opportunity_rating",
+		valueType: "optionset",
+		optionLabels: [
+			"Hot",
+			"Warm",
+			"Cold"
+		],
+		mcemCriterion: "sentiment",
+		sensitive: false
+	},
+	qualificationComments: {
+		canonical: "qualificationComments",
+		label: "Qualification note",
+		targetKind: "opportunity",
+		msxField: "qualification_comments",
+		valueType: "text",
+		mcemCriterion: "risk",
+		sensitive: false,
+		internalOnly: true,
+		append: true
+	},
+	milestoneCommitment: {
+		canonical: "milestoneCommitment",
+		label: "Milestone commitment",
+		targetKind: "milestone",
+		msxField: "commitment",
+		valueType: "optionset",
+		optionLabels: ["Uncommitted", "Committed"],
+		mcemCriterion: "next-step",
+		sensitive: false
+	},
+	milestoneRisk: {
+		canonical: "milestoneRisk",
+		label: "Milestone risk",
+		targetKind: "milestone",
+		msxField: "risk_details",
+		valueType: "text",
+		mcemCriterion: "risk",
+		sensitive: false,
+		internalOnly: true,
+		append: true
+	}
+};
+var KNOWN_COMPETITORS = [
+	"AWS",
+	"Amazon Web Services",
+	"Google Cloud",
+	"GCP",
+	"Snowflake",
+	"Databricks",
+	"Palo Alto",
+	"Oracle",
+	"IBM",
+	"SAP",
+	"ServiceNow"
+];
+/** Parse "$900,000", "900 thousand", "900k", "4 million", "4m", "2.5 million" to a number. */
+function parseMoney(text) {
+	const match = text.match(/\$?\s*([\d][\d,]*\.?\d*)\s*(million|mil|m|k|thousand)?\b/i);
+	if (!match) return null;
+	const amountRaw = match[1];
+	if (amountRaw === void 0) return null;
+	const base = Number(amountRaw.replace(/,/g, ""));
+	if (!Number.isFinite(base)) return null;
+	const unit = (match[2] ?? "").toLowerCase();
+	if (unit === "million" || unit === "mil" || unit === "m") return Math.round(base * 1e6);
+	if (unit === "thousand" || unit === "k") return Math.round(base * 1e3);
+	return Math.round(base);
+}
+function matchTimeline(text) {
+	if (/\bnext quarter\b/i.test(text)) return "Next Quarter";
+	if (/\bthis quarter\b/i.test(text)) return "This Quarter";
+	if (/\bthis (fiscal )?year\b/i.test(text)) return "This Year";
+	if (/\b(immediately|right away|asap|as soon as possible)\b/i.test(text)) return "Immediate";
+	return null;
+}
+function matchProcess(text) {
+	if (/\b(committee|steering (group|committee)|board approv)/i.test(text)) return "Committee";
+	if (/\b(sole decision|single decision[- ]maker|i will decide|i decide)\b/i.test(text)) return "Individual";
+	return null;
+}
+function matchNeed(text) {
+	if (/\bmust[- ]have\b|\bcritical\b|\bessential\b|\bnon-negotiable\b/i.test(text)) return "Must have";
+	if (/\bshould[- ]have\b/i.test(text)) return "Should have";
+	if (/\b(good to have|nice to have)\b/i.test(text)) return "Good to have";
+	return null;
+}
+function matchSentiment(text) {
+	if (/\b(excited|thrilled|love it|great fit|strong fit|very positive)\b/i.test(text)) return "Hot";
+	if (/\b(concerned|worried|frustrated|hesitant|skeptical|not convinced)\b/i.test(text)) return "Cold";
+	return null;
+}
+function findCompetitor(text) {
+	for (const name of KNOWN_COMPETITORS) if (new RegExp(`\\b${name.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\b`, "i").test(text)) return name;
+	return null;
+}
+var NEW_MILESTONE_PATTERNS = [
+	{
+		re: /\bproof of value\b|\bpov\b/i,
+		name: "Proof of value"
+	},
+	{
+		re: /\bproof of concept\b|\bpoc\b/i,
+		name: "Proof of concept"
+	},
+	{
+		re: /\bpilot\b/i,
+		name: "Pilot"
+	},
+	{
+		re: /\bworkshop\b/i,
+		name: "Workshop"
+	},
+	{
+		re: /\b(architecture|design) review\b/i,
+		name: "Architecture review"
+	}
+];
+function formatMoney(value) {
+	return `$${value.toLocaleString("en-US")}`;
+}
+function displayValue(valueType, value) {
+	if (value === null || value === void 0 || value === "") return "(empty)";
+	if (valueType === "money" && typeof value === "number") return formatMoney(value);
+	if (valueType === "boolean") return value ? "Yes" : "No";
+	return String(value);
+}
+function valuesEqual(valueType, before, after) {
+	if (valueType === "money") return Number(before) === Number(after);
+	if (valueType === "boolean") return Boolean(before) === Boolean(after);
+	return String(before ?? "").trim() === String(after ?? "").trim();
+}
+/** Deterministically extract MCEM signals from a transcript into a change-set proposal. */
+function extractMeetingSignals(ctx, options = {}) {
+	const candidates = [];
+	const competitorNotes = [];
+	const newMilestones = [];
+	const unmappedSignals = [];
+	const seenMilestoneNames = new Set(ctx.milestones.map((m) => m.name.toLowerCase()));
+	for (const seg of ctx.transcript.segments) {
+		const internal = seg.speakerRole === "internal";
+		const text = seg.text;
+		if (/\b(budget|spend|sign[- ]?off|approved to (buy|spend)|commit)\b/i.test(text)) {
+			const amount = parseMoney(text);
+			if (amount !== null) {
+				candidates.push({
+					canonical: "budgetAmount",
+					after: amount,
+					confidence: .82,
+					evidence: [seg.segmentId],
+					rationale: `Customer stated a budget of ${formatMoney(amount)}.`
+				});
+				if (/\b(approved|sign[- ]?off|commit|secured|allocated)\b/i.test(text)) candidates.push({
+					canonical: "budgetStatus",
+					after: "Yes",
+					confidence: .8,
+					evidence: [seg.segmentId],
+					rationale: "Customer confirmed budget is approved."
+				});
+			}
+		}
+		const timeline = matchTimeline(text);
+		if (timeline) candidates.push({
+			canonical: "timeline",
+			after: timeline,
+			confidence: .75,
+			evidence: [seg.segmentId],
+			rationale: `Customer indicated a "${timeline}" buying timeline.`
+		});
+		const process = matchProcess(text);
+		if (process) candidates.push({
+			canonical: "purchaseProcess",
+			after: process,
+			confidence: .76,
+			evidence: [seg.segmentId],
+			rationale: `Decision process described as "${process}".`
+		});
+		const need = matchNeed(text);
+		if (need) candidates.push({
+			canonical: "need",
+			after: need,
+			confidence: .72,
+			evidence: [seg.segmentId],
+			rationale: `Customer framed the need as "${need}".`
+		});
+		const sentiment = matchSentiment(text);
+		if (sentiment) candidates.push({
+			canonical: "opportunityRating",
+			after: sentiment,
+			confidence: .45,
+			evidence: [seg.segmentId],
+			rationale: `Tone suggests a "${sentiment}" sentiment.`
+		});
+		const competitor = findCompetitor(text);
+		if (competitor) {
+			competitorNotes.push({
+				name: competitor,
+				segmentId: seg.segmentId,
+				internal
+			});
+			candidates.push({
+				canonical: "identifyCompetitors",
+				after: true,
+				confidence: .78,
+				evidence: [seg.segmentId],
+				rationale: `Competitor mentioned: ${competitor}.`
+			});
+		}
+		for (const pattern of NEW_MILESTONE_PATTERNS) if (pattern.re.test(text) && !seenMilestoneNames.has(pattern.name.toLowerCase())) {
+			seenMilestoneNames.add(pattern.name.toLowerCase());
+			newMilestones.push({
+				tempId: `new-ms-${newMilestones.length + 1}`,
+				name: pattern.name,
+				confidence: internal ? .68 : .6,
+				checkedByDefault: false,
+				evidence: [seg.segmentId]
+			});
+		}
+	}
+	const internalCompetitors = competitorNotes.filter((c) => c.internal);
+	if (internalCompetitors.length > 0) {
+		const names = [...new Set(internalCompetitors.map((c) => c.name))].join(", ");
+		candidates.push({
+			canonical: "qualificationComments",
+			after: `Competitive: evaluating against ${names}.`,
+			confidence: .7,
+			evidence: internalCompetitors.map((c) => c.segmentId),
+			rationale: `Internal note: competing against ${names}.`
+		});
+		unmappedSignals.push({
+			label: "Competitor mentioned",
+			text: `Evaluating against ${names}.`,
+			mcemCriterion: "risk",
+			evidence: internalCompetitors.map((c) => c.segmentId)
+		});
+	}
+	return assembleProposal(ctx, {
+		candidates,
+		newMilestones,
+		unmappedSignals
+	}, options);
+}
+/**
+* Deterministically turns detected signals into a validated change-set proposal. Shared by the
+* rule-based matcher and the Foundry model path so every guardrail (dictionary-only fields,
+* option-set coercion, no-op drop, before/after from the live snapshot, sensitive gating) is
+* enforced in code regardless of how the signals were detected.
+*/
+function assembleProposal(ctx, signals, options = {}) {
+	const now = options.now ? options.now() : /* @__PURE__ */ new Date();
+	const changeSetId = options.changeSetId ?? `cs-${ctx.transcript.id}`;
+	const bestByKey = /* @__PURE__ */ new Map();
+	for (const candidate of signals.candidates) {
+		const entry = MEETING_FIELD_DICTIONARY[candidate.canonical];
+		if (!entry) continue;
+		const key = `${candidate.canonical}:${entry.targetKind === "milestone" ? candidate.targetRecordId ?? "" : ctx.opportunity.id}`;
+		const existing = bestByKey.get(key);
+		if (!existing || candidate.confidence > existing.confidence) bestByKey.set(key, candidate);
+	}
+	const slots = [];
+	for (const cand of bestByKey.values()) {
+		const entry = MEETING_FIELD_DICTIONARY[cand.canonical];
+		if (!entry) continue;
+		const isMilestone = entry.targetKind === "milestone";
+		const targetRecordId = isMilestone ? cand.targetRecordId : ctx.opportunity.id;
+		if (!targetRecordId) continue;
+		const snapshotFields = isMilestone ? ctx.milestones.find((milestone) => milestone.id === targetRecordId)?.fields : ctx.opportunity.fields;
+		if (!snapshotFields) continue;
+		if (entry.internalOnly && cand.evidence.length === 0) continue;
+		const before = snapshotFields[cand.canonical];
+		if (entry.append) {
+			if (String(before ?? "").toLowerCase().includes(String(cand.after).toLowerCase())) continue;
+		} else if (entry.fillOnlyWhenEmpty) {
+			if (before !== null && before !== void 0 && String(before).trim() !== "") continue;
+		} else if (valuesEqual(entry.valueType, before, cand.after)) continue;
+		if (entry.optionLabels && entry.valueType === "optionset" && !entry.optionLabels.includes(String(cand.after))) continue;
+		const confidence = Math.max(0, Math.min(1, cand.confidence));
+		const blocked = entry.sensitive && confidence < .9;
+		const checkedByDefault = confidence >= .7 && !entry.sensitive && !blocked;
+		slots.push({
+			slotId: `slot-${slots.length + 1}-${entry.canonical}`,
+			label: entry.label,
+			mcemCriterion: entry.mcemCriterion,
+			targetKind: entry.targetKind,
+			targetRecordId,
+			targetField: entry.canonical,
+			valueType: entry.valueType,
+			before: before ?? null,
+			after: cand.after,
+			displayBefore: displayValue(entry.valueType, before),
+			displayAfter: entry.append ? String(cand.after) : displayValue(entry.valueType, cand.after),
+			confidence,
+			checkedByDefault,
+			blocked,
+			...blocked ? { blockedReason: "Sensitive field requires manual confirmation." } : {},
+			sensitive: entry.sensitive,
+			rationale: cand.rationale,
+			evidence: cand.evidence
+		});
+	}
+	const suggestedMilestoneIds = [...new Set(slots.filter((slot) => slot.targetKind === "milestone" && slot.targetRecordId).map((slot) => slot.targetRecordId))];
+	const proposal = {
+		changeSetId,
+		transcriptId: ctx.transcript.id,
+		opportunityId: ctx.opportunity.id,
+		meetingType: ctx.transcript.meetingType,
+		slots,
+		newMilestones: signals.newMilestones,
+		suggestedMilestoneIds,
+		unmappedSignals: signals.unmappedSignals,
+		proposedAt: now.toISOString()
+	};
+	return meetingChangeSetProposalSchema.parse(proposal);
+}
+//#endregion
 //#region packages/connectors/msx/index.ts
 var accounts = [
 	{
@@ -2113,6 +2921,18 @@ var accounts = [
 		name: "Northwind Health",
 		segment: "Enterprise",
 		tpid: "1000003"
+	},
+	{
+		id: "account-zava",
+		name: "Zava Inc.",
+		segment: "Strategic",
+		tpid: "1000004"
+	},
+	{
+		id: "account-adventureworks",
+		name: "Adventure Works Cycles",
+		segment: "Enterprise",
+		tpid: "1000005"
 	}
 ];
 var opportunities = [
@@ -2224,6 +3044,35 @@ var opportunities = [
 		value: 525e4,
 		currency: "USD",
 		closeDate: "2026-11-13"
+	},
+	{
+		id: "opp-zava-ai-platform",
+		accountId: "account-zava",
+		name: "Zava AI platform foundation",
+		owner: "Avery Johnson",
+		recordedStage: 2,
+		value: 29e5,
+		currency: "USD",
+		closeDate: "2027-04-02"
+	},
+	{
+		id: "opp-zava-migration",
+		accountId: "account-zava",
+		name: "Zava datacenter exit",
+		recordedStage: 1,
+		value: 16e5,
+		currency: "USD",
+		closeDate: "2027-05-28"
+	},
+	{
+		id: "opp-aw-commerce",
+		accountId: "account-adventureworks",
+		name: "Adventure Works commerce replatform",
+		owner: "Morgan Diaz",
+		recordedStage: 3,
+		value: 31e5,
+		currency: "USD",
+		closeDate: "2027-01-08"
 	}
 ];
 var milestonesByOpportunity = Object.fromEntries(opportunities.map((opportunity) => [opportunity.id, [{
@@ -2544,6 +3393,87 @@ var observationsByOpportunity = {
 			status: "met",
 			detail: "The first deployment wave has a customer-approved date, scope, and accountable owners."
 		}
+	],
+	"opp-zava-ai-platform": [
+		{
+			criterionId: "customer-outcome",
+			status: "met",
+			detail: "The customer agreed targets for model-deployment velocity and governed AI adoption."
+		},
+		{
+			criterionId: "decision-team",
+			status: "partial",
+			detail: "The platform sponsor is engaged, but procurement and security owners are not yet confirmed."
+		},
+		{
+			criterionId: "technical-validation",
+			status: "partial",
+			detail: "A reference architecture is drafted; a customer validation workshop is not yet booked."
+		},
+		{
+			criterionId: "business-case",
+			status: "partial",
+			detail: "A value hypothesis exists without an approved quantified business case."
+		},
+		{
+			criterionId: "next-step",
+			status: "met",
+			detail: "A foundation design review is scheduled with named owners."
+		}
+	],
+	"opp-zava-migration": [
+		{
+			criterionId: "customer-outcome",
+			status: "partial",
+			detail: "Datacenter exit is the stated goal, but cost and timeline baselines are not recorded."
+		},
+		{
+			criterionId: "decision-team",
+			status: "missing",
+			detail: "The economic buyer and migration owner are not yet identified."
+		},
+		{
+			criterionId: "technical-validation",
+			status: "met",
+			detail: "An initial migration assessment of the on-premises estate is complete."
+		},
+		{
+			criterionId: "business-case",
+			status: "missing",
+			detail: "No quantified migration business case is attached to the opportunity."
+		},
+		{
+			criterionId: "next-step",
+			status: "partial",
+			detail: "A migration planning session is proposed without a confirmed customer date."
+		}
+	],
+	"opp-aw-commerce": [
+		{
+			criterionId: "customer-outcome",
+			status: "met",
+			detail: "The customer targets fewer peak-season outages and faster checkout performance."
+		},
+		{
+			criterionId: "decision-team",
+			status: "met",
+			detail: "The economic buyer, engineering lead, and procurement path are engaged."
+		},
+		{
+			criterionId: "technical-validation",
+			status: "met",
+			detail: "An approved proof of concept validated the AKS microservices approach."
+		},
+		{
+			criterionId: "business-case",
+			status: "partial",
+			detail: "A draft business case exists; final finance approval is pending."
+		},
+		{
+			criterionId: "next-step",
+			status: "met",
+			detail: "A replatform design and delivery plan has a customer-approved date and owners."
+		}
 	]
 };
 var discoverableOpportunities = [
@@ -2715,16 +3645,60 @@ var discoverableOpportunities = [
 		onDealTeam: false
 	}
 ];
+var discoverableMilestonesByOpportunity = Object.fromEntries(discoverableOpportunities.map((opportunity) => [opportunity.id, [{
+	id: `${opportunity.id}-milestone`,
+	opportunityId: opportunity.id,
+	name: "Customer outcome validation",
+	status: "On Track",
+	targetDate: opportunity.closeDate,
+	owner: "Account team",
+	commitment: "Best case"
+}]]));
 var FixtureMsxConnector = class {
 	opportunities = structuredClone(opportunities);
 	milestonesByOpportunity = structuredClone(milestonesByOpportunity);
+	discoverableMilestonesByOpportunity = structuredClone(discoverableMilestonesByOpportunity);
 	discoverable = structuredClone(discoverableOpportunities);
 	dealTeamOpportunityIds = new Set(this.opportunities.map((opportunity) => opportunity.id));
+	milestoneTeamIds = new Set(this.opportunities.filter((_opportunity, index) => index % 2 === 0).flatMap((opportunity) => (this.milestonesByOpportunity[opportunity.id] ?? []).map((milestone) => milestone.id)));
 	manualAccountIds = /* @__PURE__ */ new Set();
 	hiddenAccountIds = /* @__PURE__ */ new Set();
+	activitiesByMilestone = { "opp-grid-modernization-milestone": [{
+		id: "act-grid-ms-1",
+		milestoneId: "opp-grid-modernization-milestone",
+		opportunityId: "opp-grid-modernization",
+		subject: "Architecture design session",
+		activityType: "task",
+		status: "Open",
+		priority: "Normal",
+		taskCategory: "Architecture Design Session",
+		due: "2026-10-20",
+		owner: "Account team",
+		createdBy: "Account team"
+	}] };
+	activitySequence = 0;
+	/** Opportunity ids in the portfolio: Deal Team membership OR milestone-team membership. */
+	portfolioOpportunityIds() {
+		const ids = new Set(this.dealTeamOpportunityIds);
+		for (const [opportunityId, milestones] of Object.entries(this.milestonesByOpportunity)) if (milestones.some((milestone) => this.milestoneTeamIds.has(milestone.id))) ids.add(opportunityId);
+		return ids;
+	}
+	/**
+	* Promotes a discoverable opportunity into the portfolio pool (without Deal Team membership) so
+	* that milestone-team membership can place it in the portfolio union. Idempotent.
+	*/
+	promoteDiscoverableOpportunity(opportunityId) {
+		if (this.opportunities.some((candidate) => candidate.id === opportunityId)) return;
+		const seed = this.discoverable.find((candidate) => candidate.id === opportunityId);
+		if (!seed) return;
+		const { domain, accountName, solutionArea, technicalCapability, onDealTeam, ...opportunity } = seed;
+		this.opportunities.push(structuredClone(opportunity));
+		this.milestonesByOpportunity[opportunityId] = structuredClone(this.discoverableMilestonesByOpportunity[opportunityId] ?? []);
+	}
 	async listAccounts(options = {}) {
-		const dealTeamAccountIds = new Set(this.opportunities.filter((opportunity) => this.dealTeamOpportunityIds.has(opportunity.id)).map((opportunity) => opportunity.accountId));
-		return accounts.filter((account) => dealTeamAccountIds.has(account.id) || this.manualAccountIds.has(account.id) || this.hiddenAccountIds.has(account.id)).map((account) => this.mapAccount(account, dealTeamAccountIds)).filter((account) => options.includeHidden || account.visibility !== "hidden").map((account) => structuredClone(account));
+		const portfolioIds = this.portfolioOpportunityIds();
+		const portfolioAccountIds = new Set(this.opportunities.filter((opportunity) => portfolioIds.has(opportunity.id)).map((opportunity) => opportunity.accountId));
+		return accounts.filter((account) => portfolioAccountIds.has(account.id) || this.manualAccountIds.has(account.id) || this.hiddenAccountIds.has(account.id)).map((account) => this.mapAccount(account, portfolioAccountIds)).filter((account) => options.includeHidden || account.visibility !== "hidden").map((account) => structuredClone(account));
 	}
 	async searchAccounts(input) {
 		const request = accountSearchRequestSchema.parse(input);
@@ -2751,16 +3725,20 @@ var FixtureMsxConnector = class {
 		if (!account) throw new Error(`Unknown sample account: ${accountId}`);
 		if (visibility === "hidden") this.hiddenAccountIds.add(accountId);
 		else this.hiddenAccountIds.delete(accountId);
-		const dealTeamAccountIds = new Set(this.opportunities.filter((opportunity) => this.dealTeamOpportunityIds.has(opportunity.id)).map((opportunity) => opportunity.accountId));
-		return structuredClone(this.mapAccount(account, dealTeamAccountIds));
+		const portfolioAccountIds = new Set(this.opportunities.filter((opportunity) => this.portfolioOpportunityIds().has(opportunity.id)).map((opportunity) => opportunity.accountId));
+		return structuredClone(this.mapAccount(account, portfolioAccountIds));
 	}
 	async listOpportunities(accountId) {
 		if (this.hiddenAccountIds.has(accountId)) return [];
-		return structuredClone(this.opportunities.filter((opportunity) => opportunity.accountId === accountId && this.dealTeamOpportunityIds.has(opportunity.id)));
+		const portfolioIds = this.portfolioOpportunityIds();
+		return structuredClone(this.opportunities.filter((opportunity) => opportunity.accountId === accountId && portfolioIds.has(opportunity.id)));
 	}
 	async listMilestones(opportunityId) {
 		this.assertOpportunityAccess(opportunityId);
-		return structuredClone(this.milestonesByOpportunity[opportunityId] ?? []);
+		return structuredClone(this.milestonesByOpportunity[opportunityId] ?? []).map((milestone) => ({
+			...milestone,
+			onMilestoneTeam: this.milestoneTeamIds.has(milestone.id)
+		}));
 	}
 	async updateMilestone(opportunityId, milestoneId, update) {
 		this.assertOpportunityAccess(opportunityId);
@@ -2839,9 +3817,69 @@ var FixtureMsxConnector = class {
 			alreadyAbsent
 		};
 	}
+	async joinMilestoneTeam(opportunityId, milestoneId) {
+		if (!(this.milestonesByOpportunity[opportunityId] ?? this.discoverableMilestonesByOpportunity[opportunityId])?.find((candidate) => candidate.id === milestoneId)) throw new Error(`Unknown sample milestone: ${milestoneId}`);
+		this.promoteDiscoverableOpportunity(opportunityId);
+		const alreadyMember = this.milestoneTeamIds.has(milestoneId);
+		this.milestoneTeamIds.add(milestoneId);
+		return {
+			opportunityId,
+			milestoneId,
+			onMilestoneTeam: true,
+			alreadyMember
+		};
+	}
+	async leaveMilestoneTeam(opportunityId, milestoneId) {
+		if (!(this.milestonesByOpportunity[opportunityId] ?? this.discoverableMilestonesByOpportunity[opportunityId])?.find((candidate) => candidate.id === milestoneId)) throw new Error(`Unknown sample milestone: ${milestoneId}`);
+		const alreadyAbsent = !this.milestoneTeamIds.has(milestoneId);
+		this.milestoneTeamIds.delete(milestoneId);
+		return {
+			opportunityId,
+			milestoneId,
+			onMilestoneTeam: false,
+			alreadyAbsent
+		};
+	}
+	async listDiscoverableMilestones(opportunityId) {
+		const milestones = this.milestonesByOpportunity[opportunityId] ?? this.discoverableMilestonesByOpportunity[opportunityId];
+		if (!milestones) throw new Error(`Unknown sample opportunity: ${opportunityId}`);
+		return structuredClone(milestones).map((milestone) => ({
+			...milestone,
+			onMilestoneTeam: this.milestoneTeamIds.has(milestone.id)
+		}));
+	}
+	assertSampleMilestone(opportunityId, milestoneId) {
+		if (!(this.milestonesByOpportunity[opportunityId] ?? this.discoverableMilestonesByOpportunity[opportunityId])?.find((candidate) => candidate.id === milestoneId)) throw new Error(`Unknown sample milestone: ${milestoneId}`);
+	}
+	async listMilestoneActivities(opportunityId, milestoneId) {
+		this.assertSampleMilestone(opportunityId, milestoneId);
+		return structuredClone(this.activitiesByMilestone[milestoneId] ?? []);
+	}
+	async createMilestoneActivity(opportunityId, milestoneId, input) {
+		this.assertSampleMilestone(opportunityId, milestoneId);
+		const request = createMilestoneActivityRequestSchema.parse(input);
+		const activity = {
+			id: `act-sample-${++this.activitySequence}`,
+			milestoneId,
+			opportunityId,
+			subject: request.subject,
+			activityType: "task",
+			status: "Open",
+			priority: request.priority,
+			owner: "Account team",
+			createdBy: "Account team",
+			createdOn: (/* @__PURE__ */ new Date()).toISOString(),
+			...request.taskCategory ? { taskCategory: request.taskCategory } : {},
+			...request.due ? { due: request.due } : {},
+			...request.durationMinutes !== void 0 ? { durationMinutes: request.durationMinutes } : {},
+			...request.description ? { description: request.description } : {}
+		};
+		this.activitiesByMilestone[milestoneId] = [activity, ...this.activitiesByMilestone[milestoneId] ?? []];
+		return structuredClone(activity);
+	}
 	assertOpportunityAccess(opportunityId) {
 		const opportunity = this.opportunities.find((candidate) => candidate.id === opportunityId);
-		if (!opportunity || !this.dealTeamOpportunityIds.has(opportunityId) || this.hiddenAccountIds.has(opportunity.accountId)) throw new Error("The opportunity is not in the active sample portfolio.");
+		if (!opportunity || !this.portfolioOpportunityIds().has(opportunityId) || this.hiddenAccountIds.has(opportunity.accountId)) throw new Error("The opportunity is not in the active sample portfolio.");
 	}
 	mapAccount(account, dealTeamAccountIds) {
 		const manual = this.manualAccountIds.has(account.id);
@@ -2853,436 +3891,6 @@ var FixtureMsxConnector = class {
 		};
 	}
 };
-//#endregion
-//#region packages/agents/meeting-signal-extractor/src/index.ts
-/**
-* Meeting Signal Extractor — deterministic sample implementation.
-*
-* In production, a GPT-5 reasoning deployment with Structured Outputs returns a
-* `MeetingChangeSetProposal`. For the offline / SQLite test path this module produces the
-* same contract deterministically with transparent rules, so the extract → review → inject
-* slice can be developed and tested without a model call. Both paths obey the same
-* guardrails: dictionary-only fields, evidence on every slot, no-op drop, customer/internal
-* routing, and conservative confidence.
-*
-* See docs/MeetingCapture.md (Parts B, C, I) and prompts/instructions.md.
-*/
-/** Canonical field dictionary. The extractor may only propose fields listed here. */
-var MEETING_FIELD_DICTIONARY = {
-	budgetAmount: {
-		canonical: "budgetAmount",
-		label: "Budget amount",
-		targetKind: "opportunity",
-		msxField: "budget_amount",
-		valueType: "money",
-		mcemCriterion: "business-case",
-		sensitive: false
-	},
-	budgetStatus: {
-		canonical: "budgetStatus",
-		label: "Budget confirmed",
-		targetKind: "opportunity",
-		msxField: "budget_status",
-		valueType: "optionset",
-		optionLabels: ["Yes", "No"],
-		mcemCriterion: "business-case",
-		sensitive: false
-	},
-	estimatedValue: {
-		canonical: "estimatedValue",
-		label: "Estimated value",
-		targetKind: "opportunity",
-		msxField: "estimated_value",
-		valueType: "money",
-		mcemCriterion: "business-case",
-		sensitive: true
-	},
-	timeline: {
-		canonical: "timeline",
-		label: "Purchase timeline",
-		targetKind: "opportunity",
-		msxField: "timeline",
-		valueType: "optionset",
-		optionLabels: [
-			"Immediate",
-			"This Quarter",
-			"Next Quarter",
-			"This Year",
-			"Not known"
-		],
-		mcemCriterion: "next-step",
-		sensitive: false
-	},
-	purchaseProcess: {
-		canonical: "purchaseProcess",
-		label: "Decision process",
-		targetKind: "opportunity",
-		msxField: "purchase_process",
-		valueType: "optionset",
-		optionLabels: [
-			"Individual",
-			"Committee",
-			"Unknown"
-		],
-		mcemCriterion: "decision-team",
-		sensitive: false
-	},
-	decisionMaker: {
-		canonical: "decisionMaker",
-		label: "Decision maker identified",
-		targetKind: "opportunity",
-		msxField: "decision_maker",
-		valueType: "boolean",
-		mcemCriterion: "decision-team",
-		sensitive: false
-	},
-	need: {
-		canonical: "need",
-		label: "Customer need level",
-		targetKind: "opportunity",
-		msxField: "need",
-		valueType: "optionset",
-		optionLabels: [
-			"Must have",
-			"Should have",
-			"Good to have",
-			"No need"
-		],
-		mcemCriterion: "customer-outcome",
-		sensitive: false
-	},
-	customerNeed: {
-		canonical: "customerNeed",
-		label: "Customer need",
-		targetKind: "opportunity",
-		msxField: "customer_need",
-		valueType: "text",
-		mcemCriterion: "customer-outcome",
-		sensitive: false,
-		fillOnlyWhenEmpty: true
-	},
-	proposedSolution: {
-		canonical: "proposedSolution",
-		label: "Proposed solution",
-		targetKind: "opportunity",
-		msxField: "proposed_solution",
-		valueType: "text",
-		mcemCriterion: "technical-validation",
-		sensitive: false,
-		fillOnlyWhenEmpty: true
-	},
-	finalDecisionDate: {
-		canonical: "finalDecisionDate",
-		label: "Final decision date",
-		targetKind: "opportunity",
-		msxField: "final_decision_date",
-		valueType: "date",
-		mcemCriterion: "next-step",
-		sensitive: false
-	},
-	identifyCompetitors: {
-		canonical: "identifyCompetitors",
-		label: "Competitors identified",
-		targetKind: "opportunity",
-		msxField: "identify_competitors",
-		valueType: "boolean",
-		mcemCriterion: "risk",
-		sensitive: false
-	},
-	opportunityRating: {
-		canonical: "opportunityRating",
-		label: "Opportunity sentiment",
-		targetKind: "opportunity",
-		msxField: "opportunity_rating",
-		valueType: "optionset",
-		optionLabels: [
-			"Hot",
-			"Warm",
-			"Cold"
-		],
-		mcemCriterion: "sentiment",
-		sensitive: false
-	},
-	qualificationComments: {
-		canonical: "qualificationComments",
-		label: "Qualification note",
-		targetKind: "opportunity",
-		msxField: "qualification_comments",
-		valueType: "text",
-		mcemCriterion: "risk",
-		sensitive: false,
-		internalOnly: true,
-		append: true
-	},
-	milestoneCommitment: {
-		canonical: "milestoneCommitment",
-		label: "Milestone commitment",
-		targetKind: "milestone",
-		msxField: "commitment",
-		valueType: "optionset",
-		optionLabels: ["Uncommitted", "Committed"],
-		mcemCriterion: "next-step",
-		sensitive: false
-	},
-	milestoneRisk: {
-		canonical: "milestoneRisk",
-		label: "Milestone risk",
-		targetKind: "milestone",
-		msxField: "risk_details",
-		valueType: "text",
-		mcemCriterion: "risk",
-		sensitive: false,
-		internalOnly: true,
-		append: true
-	}
-};
-var KNOWN_COMPETITORS = [
-	"AWS",
-	"Amazon Web Services",
-	"Google Cloud",
-	"GCP",
-	"Snowflake",
-	"Databricks",
-	"Palo Alto",
-	"Oracle",
-	"IBM",
-	"SAP",
-	"ServiceNow"
-];
-/** Parse "$900,000", "900 thousand", "900k", "4 million", "4m", "2.5 million" to a number. */
-function parseMoney(text) {
-	const match = text.match(/\$?\s*([\d][\d,]*\.?\d*)\s*(million|mil|m|k|thousand)?\b/i);
-	if (!match) return null;
-	const amountRaw = match[1];
-	if (amountRaw === void 0) return null;
-	const base = Number(amountRaw.replace(/,/g, ""));
-	if (!Number.isFinite(base)) return null;
-	const unit = (match[2] ?? "").toLowerCase();
-	if (unit === "million" || unit === "mil" || unit === "m") return Math.round(base * 1e6);
-	if (unit === "thousand" || unit === "k") return Math.round(base * 1e3);
-	return Math.round(base);
-}
-function matchTimeline(text) {
-	if (/\bnext quarter\b/i.test(text)) return "Next Quarter";
-	if (/\bthis quarter\b/i.test(text)) return "This Quarter";
-	if (/\bthis (fiscal )?year\b/i.test(text)) return "This Year";
-	if (/\b(immediately|right away|asap|as soon as possible)\b/i.test(text)) return "Immediate";
-	return null;
-}
-function matchProcess(text) {
-	if (/\b(committee|steering (group|committee)|board approv)/i.test(text)) return "Committee";
-	if (/\b(sole decision|single decision[- ]maker|i will decide|i decide)\b/i.test(text)) return "Individual";
-	return null;
-}
-function matchNeed(text) {
-	if (/\bmust[- ]have\b|\bcritical\b|\bessential\b|\bnon-negotiable\b/i.test(text)) return "Must have";
-	if (/\bshould[- ]have\b/i.test(text)) return "Should have";
-	if (/\b(good to have|nice to have)\b/i.test(text)) return "Good to have";
-	return null;
-}
-function matchSentiment(text) {
-	if (/\b(excited|thrilled|love it|great fit|strong fit|very positive)\b/i.test(text)) return "Hot";
-	if (/\b(concerned|worried|frustrated|hesitant|skeptical|not convinced)\b/i.test(text)) return "Cold";
-	return null;
-}
-function findCompetitor(text) {
-	for (const name of KNOWN_COMPETITORS) if (new RegExp(`\\b${name.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\b`, "i").test(text)) return name;
-	return null;
-}
-var NEW_MILESTONE_PATTERNS = [
-	{
-		re: /\bproof of value\b|\bpov\b/i,
-		name: "Proof of value"
-	},
-	{
-		re: /\bproof of concept\b|\bpoc\b/i,
-		name: "Proof of concept"
-	},
-	{
-		re: /\bpilot\b/i,
-		name: "Pilot"
-	},
-	{
-		re: /\bworkshop\b/i,
-		name: "Workshop"
-	},
-	{
-		re: /\b(architecture|design) review\b/i,
-		name: "Architecture review"
-	}
-];
-function formatMoney(value) {
-	return `$${value.toLocaleString("en-US")}`;
-}
-function displayValue(valueType, value) {
-	if (value === null || value === void 0 || value === "") return "(empty)";
-	if (valueType === "money" && typeof value === "number") return formatMoney(value);
-	if (valueType === "boolean") return value ? "Yes" : "No";
-	return String(value);
-}
-function valuesEqual(valueType, before, after) {
-	if (valueType === "money") return Number(before) === Number(after);
-	if (valueType === "boolean") return Boolean(before) === Boolean(after);
-	return String(before ?? "").trim() === String(after ?? "").trim();
-}
-/** Deterministically extract MCEM signals from a transcript into a change-set proposal. */
-function extractMeetingSignals(ctx, options = {}) {
-	const now = options.now ? options.now() : /* @__PURE__ */ new Date();
-	const changeSetId = options.changeSetId ?? `cs-${ctx.transcript.id}`;
-	const meetingType = ctx.transcript.meetingType;
-	const candidates = [];
-	const competitorNotes = [];
-	const newMilestones = [];
-	const unmappedSignals = [];
-	const seenMilestoneNames = new Set(ctx.milestones.map((m) => m.name.toLowerCase()));
-	for (const seg of ctx.transcript.segments) {
-		const internal = seg.speakerRole === "internal";
-		const text = seg.text;
-		if (/\b(budget|spend|sign[- ]?off|approved to (buy|spend)|commit)\b/i.test(text)) {
-			const amount = parseMoney(text);
-			if (amount !== null) {
-				candidates.push({
-					canonical: "budgetAmount",
-					after: amount,
-					confidence: .82,
-					evidence: [seg.segmentId],
-					rationale: `Customer stated a budget of ${formatMoney(amount)}.`
-				});
-				if (/\b(approved|sign[- ]?off|commit|secured|allocated)\b/i.test(text)) candidates.push({
-					canonical: "budgetStatus",
-					after: "Yes",
-					confidence: .8,
-					evidence: [seg.segmentId],
-					rationale: "Customer confirmed budget is approved."
-				});
-			}
-		}
-		const timeline = matchTimeline(text);
-		if (timeline) candidates.push({
-			canonical: "timeline",
-			after: timeline,
-			confidence: .75,
-			evidence: [seg.segmentId],
-			rationale: `Customer indicated a "${timeline}" buying timeline.`
-		});
-		const process = matchProcess(text);
-		if (process) candidates.push({
-			canonical: "purchaseProcess",
-			after: process,
-			confidence: .76,
-			evidence: [seg.segmentId],
-			rationale: `Decision process described as "${process}".`
-		});
-		const need = matchNeed(text);
-		if (need) candidates.push({
-			canonical: "need",
-			after: need,
-			confidence: .72,
-			evidence: [seg.segmentId],
-			rationale: `Customer framed the need as "${need}".`
-		});
-		const sentiment = matchSentiment(text);
-		if (sentiment) candidates.push({
-			canonical: "opportunityRating",
-			after: sentiment,
-			confidence: .45,
-			evidence: [seg.segmentId],
-			rationale: `Tone suggests a "${sentiment}" sentiment.`
-		});
-		const competitor = findCompetitor(text);
-		if (competitor) {
-			competitorNotes.push({
-				name: competitor,
-				segmentId: seg.segmentId,
-				internal
-			});
-			candidates.push({
-				canonical: "identifyCompetitors",
-				after: true,
-				confidence: .78,
-				evidence: [seg.segmentId],
-				rationale: `Competitor mentioned: ${competitor}.`
-			});
-		}
-		for (const pattern of NEW_MILESTONE_PATTERNS) if (pattern.re.test(text) && !seenMilestoneNames.has(pattern.name.toLowerCase())) {
-			seenMilestoneNames.add(pattern.name.toLowerCase());
-			newMilestones.push({
-				tempId: `new-ms-${newMilestones.length + 1}`,
-				name: pattern.name,
-				confidence: internal ? .68 : .6,
-				checkedByDefault: false,
-				evidence: [seg.segmentId]
-			});
-		}
-	}
-	const internalCompetitors = competitorNotes.filter((c) => c.internal);
-	if (internalCompetitors.length > 0) {
-		const names = [...new Set(internalCompetitors.map((c) => c.name))].join(", ");
-		candidates.push({
-			canonical: "qualificationComments",
-			after: `Competitive: evaluating against ${names}.`,
-			confidence: .7,
-			evidence: internalCompetitors.map((c) => c.segmentId),
-			rationale: `Internal note: competing against ${names}.`
-		});
-		unmappedSignals.push({
-			label: "Competitor mentioned",
-			text: `Evaluating against ${names}.`,
-			mcemCriterion: "risk",
-			evidence: internalCompetitors.map((c) => c.segmentId)
-		});
-	}
-	const slots = [];
-	for (const cand of candidates) {
-		const entry = MEETING_FIELD_DICTIONARY[cand.canonical];
-		if (!entry || entry.targetKind !== "opportunity") continue;
-		if (entry.internalOnly) {
-			if (!(cand.evidence.length > 0)) continue;
-		}
-		const before = ctx.opportunity.fields[cand.canonical];
-		if (entry.append) {
-			if (String(before ?? "").toLowerCase().includes(String(cand.after).toLowerCase())) continue;
-		} else if (entry.fillOnlyWhenEmpty) {
-			if (before !== null && before !== void 0 && String(before).trim() !== "") continue;
-		} else if (valuesEqual(entry.valueType, before, cand.after)) continue;
-		if (entry.optionLabels && entry.valueType === "optionset" && !entry.optionLabels.includes(String(cand.after))) continue;
-		const blocked = entry.sensitive && cand.confidence < .9;
-		const checkedByDefault = cand.confidence >= .7 && !entry.sensitive && !blocked;
-		slots.push({
-			slotId: `slot-${slots.length + 1}-${entry.canonical}`,
-			label: entry.label,
-			mcemCriterion: entry.mcemCriterion,
-			targetKind: "opportunity",
-			targetRecordId: ctx.opportunity.id,
-			targetField: entry.canonical,
-			valueType: entry.valueType,
-			before: before ?? null,
-			after: cand.after,
-			displayBefore: displayValue(entry.valueType, before),
-			displayAfter: entry.append ? String(cand.after) : displayValue(entry.valueType, cand.after),
-			confidence: cand.confidence,
-			checkedByDefault,
-			blocked,
-			...blocked ? { blockedReason: "Sensitive field requires manual confirmation." } : {},
-			sensitive: entry.sensitive,
-			rationale: cand.rationale,
-			evidence: cand.evidence
-		});
-	}
-	const suggestedMilestoneIds = [...new Set(slots.filter((s) => s.targetKind === "milestone" && s.targetRecordId).map((s) => s.targetRecordId))];
-	const proposal = {
-		changeSetId,
-		transcriptId: ctx.transcript.id,
-		opportunityId: ctx.opportunity.id,
-		meetingType,
-		slots,
-		newMilestones,
-		suggestedMilestoneIds,
-		unmappedSignals,
-		proposedAt: now.toISOString()
-	};
-	return meetingChangeSetProposalSchema.parse(proposal);
-}
 //#endregion
 //#region packages/connectors/local-store/schema.ts
 /**
@@ -3396,6 +4004,30 @@ CREATE TABLE opportunity_dealteam (
   PRIMARY KEY (opportunity_id, systemuser_id)
 );
 
+CREATE TABLE milestone_team_member (        -- app-owned milestone-team membership (independent of deal team)
+  milestone_id   TEXT NOT NULL REFERENCES engagement_milestone(id),
+  systemuser_id  TEXT NOT NULL REFERENCES systemuser(id),
+  opportunity_id TEXT NOT NULL REFERENCES opportunity(id),
+  PRIMARY KEY (milestone_id, systemuser_id)
+);
+
+CREATE TABLE milestone_activity (           -- Activity (Task) regarding a milestone (MSX: task.regardingobjectid)
+  id               TEXT PRIMARY KEY,
+  milestone_id     TEXT NOT NULL REFERENCES engagement_milestone(id),
+  opportunity_id   TEXT NOT NULL REFERENCES opportunity(id),
+  subject          TEXT NOT NULL,
+  activity_type    TEXT NOT NULL DEFAULT 'task',
+  status           TEXT NOT NULL DEFAULT 'Open',   -- Open / Completed / Canceled
+  priority         TEXT,                           -- Low / Normal / High
+  task_category    TEXT,
+  due              TEXT,
+  duration_minutes INTEGER,
+  description      TEXT,
+  owner_id         TEXT REFERENCES systemuser(id),
+  created_by       TEXT REFERENCES systemuser(id),
+  created_on       TEXT
+);
+
 CREATE TABLE discoverable_opportunity (     -- SE-domain discovery catalog ("Add me" candidates)
   id                   TEXT PRIMARY KEY,
   account_id           TEXT NOT NULL REFERENCES account(id),
@@ -3467,6 +4099,8 @@ CREATE INDEX idx_opportunity_account ON opportunity(account_id);
 CREATE INDEX idx_milestone_opportunity ON engagement_milestone(opportunity_id);
 CREATE INDEX idx_stakeholder_opportunity ON stakeholder(opportunity_id);
 CREATE INDEX idx_dealteam_user ON opportunity_dealteam(systemuser_id);
+CREATE INDEX idx_milestoneteam_user ON milestone_team_member(systemuser_id);
+CREATE INDEX idx_milestone_activity_milestone ON milestone_activity(milestone_id);
 CREATE INDEX idx_activity_opportunity ON activity(opportunity_id);
 CREATE INDEX idx_transcript_opportunity ON transcript(opportunity_id);
 `;
@@ -3959,9 +4593,79 @@ var seedOpportunities = [
 		primary_competitor_id: "competitor-aws",
 		other_competitor: null,
 		forecast_category: 100000003
+	},
+	{
+		id: "opp-ms-only-showcase",
+		account_id: "account-contoso",
+		name: "Milestone-only workstream (no Deal Team)",
+		owner_id: "user-avery",
+		recorded_stage: 2,
+		estimated_value: 135e4,
+		currency: "USD",
+		estimated_close_date: "2027-03-30",
+		description: null,
+		est_completion_date: null,
+		consumption_recurring: 12e3,
+		solution_area: "Cloud and AI Platforms",
+		technical_capability: "Analytics",
+		budget_amount: null,
+		budget_status: null,
+		purchase_timeframe: null,
+		timeline: null,
+		purchase_process: null,
+		decision_maker: null,
+		need: null,
+		customer_need: null,
+		customer_pain_points: null,
+		current_situation: null,
+		proposed_solution: null,
+		final_decision_date: null,
+		identify_competitors: null,
+		identify_customer_contacts: null,
+		close_probability: 40,
+		opportunity_rating: 2,
+		qualification_comments: null,
+		primary_competitor_id: null,
+		other_competitor: null,
+		forecast_category: 100000002
+	},
+	{
+		id: "disc-contoso-greenfield",
+		account_id: "account-contoso",
+		name: "Greenfield AI expansion (join a milestone in Discovery)",
+		owner_id: null,
+		recorded_stage: 2,
+		estimated_value: 205e4,
+		currency: "USD",
+		estimated_close_date: "2027-04-18",
+		description: null,
+		est_completion_date: null,
+		consumption_recurring: null,
+		solution_area: "Cloud and AI Platforms",
+		technical_capability: "Azure AI and ML",
+		budget_amount: null,
+		budget_status: null,
+		purchase_timeframe: null,
+		timeline: null,
+		purchase_process: null,
+		decision_maker: null,
+		need: null,
+		customer_need: null,
+		customer_pain_points: null,
+		current_situation: null,
+		proposed_solution: null,
+		final_decision_date: null,
+		identify_competitors: null,
+		identify_customer_contacts: null,
+		close_probability: 30,
+		opportunity_rating: 2,
+		qualification_comments: null,
+		primary_competitor_id: null,
+		other_competitor: null,
+		forecast_category: 100000002
 	}
 ];
-var UNCOMMITTED = 86198e4;
+var UNCOMMITTED$1 = 86198e4;
 var COMMITTED = 861980003;
 var seedMilestones = [
 	{
@@ -3999,7 +4703,7 @@ var seedMilestones = [
 		status: 861980001,
 		milestone_date: "2026-10-05",
 		owner_id: null,
-		commitment: UNCOMMITTED,
+		commitment: UNCOMMITTED$1,
 		monthly_use: null,
 		risk_details: "Awaiting customer security team availability.",
 		forecast_comments: null,
@@ -4013,7 +4717,7 @@ var seedMilestones = [
 		status: 86198e4,
 		milestone_date: null,
 		owner_id: null,
-		commitment: UNCOMMITTED,
+		commitment: UNCOMMITTED$1,
 		monthly_use: null,
 		risk_details: null,
 		forecast_comments: null,
@@ -4027,7 +4731,7 @@ var seedMilestones = [
 		status: 861980002,
 		milestone_date: "2026-09-30",
 		owner_id: "user-jordan",
-		commitment: UNCOMMITTED,
+		commitment: UNCOMMITTED$1,
 		monthly_use: null,
 		risk_details: "Blocked on budget approval.",
 		forecast_comments: null,
@@ -4041,7 +4745,7 @@ var seedMilestones = [
 		status: 861980006,
 		milestone_date: "2026-08-01",
 		owner_id: "user-jordan",
-		commitment: UNCOMMITTED,
+		commitment: UNCOMMITTED$1,
 		monthly_use: null,
 		risk_details: null,
 		forecast_comments: null,
@@ -4069,7 +4773,7 @@ var seedMilestones = [
 		status: 861980001,
 		milestone_date: "2026-11-20",
 		owner_id: "user-morgan",
-		commitment: UNCOMMITTED,
+		commitment: UNCOMMITTED$1,
 		monthly_use: 1500,
 		risk_details: "Integration dependencies unconfirmed.",
 		forecast_comments: null,
@@ -4111,7 +4815,7 @@ var seedMilestones = [
 		status: 861980004,
 		milestone_date: "2026-08-05",
 		owner_id: null,
-		commitment: UNCOMMITTED,
+		commitment: UNCOMMITTED$1,
 		monthly_use: null,
 		risk_details: "Customer paused initiative.",
 		forecast_comments: null,
@@ -4139,7 +4843,7 @@ var seedMilestones = [
 		status: 86198e4,
 		milestone_date: "2027-01-15",
 		owner_id: "user-avery",
-		commitment: UNCOMMITTED,
+		commitment: UNCOMMITTED$1,
 		monthly_use: 2200,
 		risk_details: null,
 		forecast_comments: null,
@@ -4153,7 +4857,7 @@ var seedMilestones = [
 		status: 861980005,
 		milestone_date: "2026-11-01",
 		owner_id: "user-avery",
-		commitment: UNCOMMITTED,
+		commitment: UNCOMMITTED$1,
 		monthly_use: null,
 		risk_details: "Lost pilot to competitor; recovering.",
 		forecast_comments: null,
@@ -4167,7 +4871,7 @@ var seedMilestones = [
 		status: 86198e4,
 		milestone_date: null,
 		owner_id: null,
-		commitment: UNCOMMITTED,
+		commitment: UNCOMMITTED$1,
 		monthly_use: null,
 		risk_details: null,
 		forecast_comments: null,
@@ -4201,6 +4905,34 @@ var seedMilestones = [
 		forecast_comments: null,
 		conversation: null,
 		customer_budget_approved: 60682e4
+	},
+	{
+		id: "ms-only-review",
+		opportunity_id: "opp-ms-only-showcase",
+		name: "Executive alignment review",
+		status: 86198e4,
+		milestone_date: "2027-01-20",
+		owner_id: "user-avery",
+		commitment: COMMITTED,
+		monthly_use: 1200,
+		risk_details: null,
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: 60682e4
+	},
+	{
+		id: "ms-greenfield-outcome",
+		opportunity_id: "disc-contoso-greenfield",
+		name: "Customer outcome validation",
+		status: 86198e4,
+		milestone_date: "2027-02-10",
+		owner_id: null,
+		commitment: UNCOMMITTED$1,
+		monthly_use: null,
+		risk_details: null,
+		forecast_comments: null,
+		conversation: null,
+		customer_budget_approved: null
 	}
 ];
 var seedContacts = [
@@ -4293,11 +5025,68 @@ var seedStakeholders = [
 		linkedin_url: null
 	}
 ];
-/** The sample user is on the deal team for every seeded opportunity. */
-var seedDealTeam = seedOpportunities.map((opportunity) => ({
+/**
+* The sample user is on the Deal Team for every seeded opportunity EXCEPT the showcase opportunities:
+* `opp-ms-only-showcase` (milestone-team-only → portfolio union without Deal Team) and
+* `disc-contoso-greenfield` (a Discovery candidate the user joins via a milestone, not the Deal Team).
+*/
+var DEAL_TEAM_EXCLUDED_OPPORTUNITY_IDS = /* @__PURE__ */ new Set(["opp-ms-only-showcase", "disc-contoso-greenfield"]);
+var seedDealTeam = seedOpportunities.filter((opportunity) => !DEAL_TEAM_EXCLUDED_OPPORTUNITY_IDS.has(String(opportunity["id"]))).map((opportunity) => ({
 	opportunity_id: String(opportunity["id"]),
 	systemuser_id: SAMPLE_USER_ID
 }));
+/**
+* The sample user is on the milestone team for a representative subset of milestones, so both
+* the join ("+") and leave ("-") states are visible in the SQLite sample store. Independent of
+* Deal Team membership. `ms-only-review` belongs to an opportunity the user is NOT on the Deal Team
+* for, so that opportunity appears in the Portfolio solely through milestone-team membership.
+*/
+var seedMilestoneTeam = [
+	"ms-grid-outcome",
+	"ms-grid-technical",
+	"ms-ai-poc",
+	"ms-uc-design",
+	"ms-only-review"
+].map((milestoneId) => {
+	const milestone = seedMilestones.find((candidate) => candidate["id"] === milestoneId);
+	return {
+		milestone_id: milestoneId,
+		systemuser_id: SAMPLE_USER_ID,
+		opportunity_id: String(milestone["opportunity_id"])
+	};
+});
+/** A couple of Activities (Tasks) regarding milestones, so the Activities list is non-empty in the SQLite store. */
+var seedMilestoneActivities = [{
+	id: "act-grid-outcome-1",
+	milestone_id: "ms-grid-outcome",
+	opportunity_id: "opp-grid-modernization",
+	subject: "Architecture design session",
+	activity_type: "task",
+	status: "Open",
+	priority: "Normal",
+	task_category: "Architecture Design Session",
+	due: "2026-07-10",
+	duration_minutes: 60,
+	description: "Whiteboard the target data platform.",
+	owner_id: SAMPLE_USER_ID,
+	created_by: SAMPLE_USER_ID,
+	created_on: "2026-06-20T17:00:00.000Z"
+}, {
+	id: "act-grid-technical-1",
+	milestone_id: "ms-grid-technical",
+	opportunity_id: "opp-grid-modernization",
+	subject: "Technical validation workshop prep",
+	activity_type: "task",
+	status: "Completed",
+	priority: "High",
+	task_category: "Technical Workshop",
+	due: "2026-09-15",
+	duration_minutes: 30,
+	description: null,
+	owner_id: SAMPLE_USER_ID,
+	created_by: SAMPLE_USER_ID,
+	created_on: "2026-09-01T17:00:00.000Z"
+}];
 var seedOptionValues = [
 	...Object.entries(MILESTONE_STATUS).map(([code, label]) => ({
 		option_set: "msp_milestonestatus",
@@ -4471,6 +5260,18 @@ var seedDiscoverable = [
 		domain: "infra",
 		solution_area: "Infrastructure",
 		technical_capability: "Migration"
+	},
+	{
+		id: "disc-contoso-greenfield",
+		account_id: "account-contoso",
+		name: "Greenfield AI expansion (join a milestone in Discovery)",
+		recorded_stage: 2,
+		value: 205e4,
+		currency: "USD",
+		close_date: "2027-04-18",
+		domain: "ai-apps",
+		solution_area: "Cloud and AI Platforms",
+		technical_capability: "Azure AI and ML"
 	}
 ];
 /** activitypointer / appointment statecode (verified live). */
@@ -4489,6 +5290,8 @@ var defaultSeed = {
 	competitors: seedCompetitors,
 	stakeholders: seedStakeholders,
 	dealTeam: seedDealTeam,
+	milestoneTeam: seedMilestoneTeam,
+	milestoneActivities: seedMilestoneActivities,
 	optionValues: seedOptionValues,
 	discoverable: seedDiscoverable,
 	activities: [
@@ -4650,6 +5453,8 @@ var LocalStore = class {
 			["contact", seed.contacts],
 			["stakeholder", seed.stakeholders],
 			["opportunity_dealteam", seed.dealTeam],
+			["milestone_team_member", seed.milestoneTeam],
+			["milestone_activity", seed.milestoneActivities],
 			["discoverable_opportunity", seed.discoverable],
 			["activity", seed.activities],
 			["transcript", seed.transcripts],
@@ -4724,9 +5529,13 @@ var LocalStoreMsxConnector = class {
 		return str(this.store.get("SELECT initials FROM systemuser WHERE id = ?", this.currentUserId)?.["initials"]) ?? "??";
 	}
 	dealTeamAccountIds() {
-		const rows = this.store.all(`SELECT DISTINCT o.account_id AS account_id FROM opportunity o
+		const rows = this.store.all(`SELECT o.account_id AS account_id FROM opportunity o
        JOIN opportunity_dealteam dt ON dt.opportunity_id = o.id
-       WHERE dt.systemuser_id = ?`, this.currentUserId);
+       WHERE dt.systemuser_id = ?
+       UNION
+       SELECT o.account_id AS account_id FROM opportunity o
+       JOIN milestone_team_member mt ON mt.opportunity_id = o.id
+       WHERE mt.systemuser_id = ?`, this.currentUserId, this.currentUserId);
 		return new Set(rows.map((row) => String(row["account_id"])));
 	}
 	toAccount(row, dealTeam) {
@@ -4782,7 +5591,9 @@ var LocalStoreMsxConnector = class {
 	assertOpportunityAccess(opportunityId) {
 		const row = this.store.get("SELECT * FROM opportunity WHERE id = ?", opportunityId);
 		if (!row) throw new Error(`Unknown local-store opportunity: ${opportunityId}`);
-		const onTeam = this.store.get("SELECT 1 AS present FROM opportunity_dealteam WHERE opportunity_id = ? AND systemuser_id = ?", opportunityId, this.currentUserId);
+		const onTeam = this.store.get(`SELECT 1 AS present FROM opportunity_dealteam WHERE opportunity_id = ? AND systemuser_id = ?
+       UNION
+       SELECT 1 AS present FROM milestone_team_member WHERE opportunity_id = ? AND systemuser_id = ?`, opportunityId, this.currentUserId, opportunityId, this.currentUserId);
 		const account = this.store.get("SELECT visibility FROM account WHERE id = ?", String(row["account_id"]));
 		if (!onTeam || str(account?.["visibility"]) === "hidden") throw new Error("The opportunity is not in the active local-store portfolio.");
 		return row;
@@ -4819,12 +5630,67 @@ var LocalStoreMsxConnector = class {
 	async listOpportunities(accountId) {
 		if (str(this.store.get("SELECT visibility FROM account WHERE id = ?", accountId)?.["visibility"]) === "hidden") return [];
 		return this.store.all(`SELECT o.* FROM opportunity o
-       JOIN opportunity_dealteam dt ON dt.opportunity_id = o.id
-       WHERE o.account_id = ? AND dt.systemuser_id = ? ORDER BY o.estimated_close_date`, accountId, this.currentUserId).map((row) => this.toOpportunity(row));
+       WHERE o.account_id = ? AND (
+         EXISTS (SELECT 1 FROM opportunity_dealteam dt WHERE dt.opportunity_id = o.id AND dt.systemuser_id = ?)
+         OR EXISTS (SELECT 1 FROM milestone_team_member mt WHERE mt.opportunity_id = o.id AND mt.systemuser_id = ?)
+       )
+       ORDER BY o.estimated_close_date`, accountId, this.currentUserId, this.currentUserId).map((row) => this.toOpportunity(row));
 	}
 	async listMilestones(opportunityId) {
 		this.assertOpportunityAccess(opportunityId);
-		return this.store.all("SELECT * FROM engagement_milestone WHERE opportunity_id = ? ORDER BY milestone_date", opportunityId).map((row) => this.toMilestone(row));
+		const memberMilestoneIds = new Set(this.store.all("SELECT milestone_id FROM milestone_team_member WHERE opportunity_id = ? AND systemuser_id = ?", opportunityId, this.currentUserId).map((row) => String(row["milestone_id"])));
+		return this.store.all("SELECT * FROM engagement_milestone WHERE opportunity_id = ? ORDER BY milestone_date", opportunityId).map((row) => ({
+			...this.toMilestone(row),
+			onMilestoneTeam: memberMilestoneIds.has(String(row["id"]))
+		}));
+	}
+	async listDiscoverableMilestones(opportunityId) {
+		const memberMilestoneIds = new Set(this.store.all("SELECT milestone_id FROM milestone_team_member WHERE opportunity_id = ? AND systemuser_id = ?", opportunityId, this.currentUserId).map((row) => String(row["milestone_id"])));
+		return this.store.all("SELECT * FROM engagement_milestone WHERE opportunity_id = ? ORDER BY milestone_date", opportunityId).map((row) => ({
+			...this.toMilestone(row),
+			onMilestoneTeam: memberMilestoneIds.has(String(row["id"]))
+		}));
+	}
+	toMilestoneActivity(row) {
+		const owner = this.ownerName(row["owner_id"]);
+		const createdBy = this.ownerName(row["created_by"]);
+		const priority = str(row["priority"]);
+		const taskCategory = str(row["task_category"]);
+		const due = str(row["due"]);
+		const duration = num(row["duration_minutes"]);
+		const description = str(row["description"]);
+		const createdOn = str(row["created_on"]);
+		return {
+			id: String(row["id"]),
+			milestoneId: String(row["milestone_id"]),
+			opportunityId: String(row["opportunity_id"]),
+			subject: String(row["subject"]),
+			activityType: str(row["activity_type"]) ?? "task",
+			status: str(row["status"]) ?? "Open",
+			...priority === "Low" || priority === "Normal" || priority === "High" ? { priority } : {},
+			...taskCategory ? { taskCategory } : {},
+			...due ? { due } : {},
+			...duration !== void 0 ? { durationMinutes: duration } : {},
+			...description ? { description } : {},
+			...owner ? { owner } : {},
+			...createdBy ? { createdBy } : {},
+			...createdOn ? { createdOn } : {}
+		};
+	}
+	assertMilestoneInOpportunity(opportunityId, milestoneId) {
+		if (!this.store.get("SELECT 1 AS present FROM engagement_milestone WHERE id = ? AND opportunity_id = ?", milestoneId, opportunityId)) throw new Error(`Unknown local-store milestone: ${milestoneId}`);
+	}
+	async listMilestoneActivities(opportunityId, milestoneId) {
+		this.assertMilestoneInOpportunity(opportunityId, milestoneId);
+		return this.store.all("SELECT * FROM milestone_activity WHERE milestone_id = ? ORDER BY created_on DESC", milestoneId).map((row) => this.toMilestoneActivity(row));
+	}
+	async createMilestoneActivity(opportunityId, milestoneId, input) {
+		this.assertMilestoneInOpportunity(opportunityId, milestoneId);
+		const request = createMilestoneActivityRequestSchema.parse(input);
+		const id = `act-${randomUUID()}`;
+		this.store.run(`INSERT INTO milestone_activity (id, milestone_id, opportunity_id, subject, activity_type, status, priority, task_category, due, duration_minutes, description, owner_id, created_by, created_on)
+       VALUES (?, ?, ?, ?, 'task', 'Open', ?, ?, ?, ?, ?, ?, ?, ?)`, id, milestoneId, opportunityId, request.subject, request.priority, request.taskCategory ?? null, request.due ?? null, request.durationMinutes ?? null, request.description ?? null, this.currentUserId, this.currentUserId, (/* @__PURE__ */ new Date()).toISOString());
+		return this.toMilestoneActivity(this.store.get("SELECT * FROM milestone_activity WHERE id = ?", id));
 	}
 	async updateMilestone(opportunityId, milestoneId, update) {
 		this.assertOpportunityAccess(opportunityId);
@@ -4950,6 +5816,27 @@ var LocalStoreMsxConnector = class {
 		return {
 			opportunityId,
 			onDealTeam: false,
+			alreadyAbsent
+		};
+	}
+	async joinMilestoneTeam(opportunityId, milestoneId) {
+		if (!this.store.get("SELECT 1 AS present FROM engagement_milestone WHERE id = ? AND opportunity_id = ?", milestoneId, opportunityId)) throw new Error(`Unknown local-store milestone: ${milestoneId}`);
+		const alreadyMember = Boolean(this.store.get("SELECT 1 AS present FROM milestone_team_member WHERE milestone_id = ? AND systemuser_id = ?", milestoneId, this.currentUserId));
+		if (!alreadyMember) this.store.run("INSERT INTO milestone_team_member (milestone_id, systemuser_id, opportunity_id) VALUES (?, ?, ?)", milestoneId, this.currentUserId, opportunityId);
+		return {
+			opportunityId,
+			milestoneId,
+			onMilestoneTeam: true,
+			alreadyMember
+		};
+	}
+	async leaveMilestoneTeam(opportunityId, milestoneId) {
+		const alreadyAbsent = !this.store.get("SELECT 1 AS present FROM milestone_team_member WHERE milestone_id = ? AND systemuser_id = ?", milestoneId, this.currentUserId);
+		this.store.run("DELETE FROM milestone_team_member WHERE milestone_id = ? AND systemuser_id = ?", milestoneId, this.currentUserId);
+		return {
+			opportunityId,
+			milestoneId,
+			onMilestoneTeam: false,
 			alreadyAbsent
 		};
 	}
@@ -5109,7 +5996,7 @@ var LocalStoreMsxConnector = class {
 		};
 	}
 	/** Produces a reviewable change-set proposal from a transcript against the live opp snapshot. */
-	async proposeMeetingChangeSet(request) {
+	async proposeMeetingChangeSet(request, extractor) {
 		const oppRow = this.assertOpportunityAccess(request.opportunityId);
 		let transcript;
 		if (request.transcript) transcript = meetingTranscriptSchema.parse(request.transcript);
@@ -5125,7 +6012,7 @@ var LocalStoreMsxConnector = class {
 		const opportunity = this.buildOpportunitySnapshot(oppRow);
 		const milestones = this.store.all("SELECT * FROM engagement_milestone WHERE opportunity_id = ? ORDER BY milestone_date", request.opportunityId).map((milestoneRow) => this.buildMilestoneSnapshot(milestoneRow));
 		const changeSetId = request.changeSetId ?? `cs-${request.opportunityId}-${Date.now().toString(36)}`;
-		return extractMeetingSignals({
+		return (extractor ?? ((ctx, options) => extractMeetingSignals(ctx, options)))({
 			transcript: anchored,
 			opportunity,
 			milestones
@@ -5552,6 +6439,72 @@ var FoundryPromptAgent = class {
 	}
 };
 //#endregion
+//#region packages/agents/mcem-coach/src/milestone-signals.ts
+var RISK_STATUSES = /* @__PURE__ */ new Set(["at risk", "blocked"]);
+var UNCOMMITTED = "uncommitted";
+var MAX_ATTENTION = 3;
+function slug(value) {
+	const cleaned = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+	return cleaned.length > 0 ? cleaned : "item";
+}
+function evaluateMilestone(milestone) {
+	const status = milestone.status?.trim() || "In Progress";
+	const normalizedStatus = status.toLowerCase();
+	const normalizedCommitment = milestone.commitment?.trim().toLowerCase();
+	const reasons = [];
+	let severity = 0;
+	if (normalizedStatus === "blocked") {
+		reasons.push("status is Blocked");
+		severity += 3;
+	} else if (RISK_STATUSES.has(normalizedStatus)) {
+		reasons.push(`status is ${status}`);
+		severity += 2;
+	}
+	if (normalizedCommitment === UNCOMMITTED) {
+		reasons.push("customer commitment is Uncommitted");
+		severity += 2;
+	}
+	if (reasons.length === 0) return void 0;
+	const ownerRole = RISK_STATUSES.has(normalizedStatus) ? "Solution Engineer" : "Account Executive";
+	const confidence = normalizedStatus === "blocked" ? "high" : "medium";
+	return {
+		name: milestone.name,
+		status,
+		commitment: milestone.commitment,
+		targetDate: milestone.targetDate,
+		reasons,
+		ownerRole,
+		confidence,
+		severity
+	};
+}
+/** Derives the milestones that threaten stage progression, ordered by severity. */
+function summarizeMilestones(milestones) {
+	const attention = milestones.map((milestone) => evaluateMilestone(milestone)).filter((item) => item !== void 0).sort((left, right) => right.severity - left.severity).slice(0, MAX_ATTENTION);
+	const headline = attention.length === 0 ? "" : `${attention.length} of ${milestones.length} milestone${milestones.length === 1 ? "" : "s"} need attention: ${attention.map((item) => `${item.name} (${item.reasons.join("; ")})`).join(", ")}.`;
+	return {
+		total: milestones.length,
+		attention,
+		headline
+	};
+}
+/** Builds role-owned, milestone-grounded recommendations from a milestone summary. */
+function milestoneRecommendations(summary, evidenceIds) {
+	return summary.attention.map((item, index) => {
+		const targetClause = item.targetDate ? `, target ${item.targetDate}` : "";
+		const commitmentClause = item.commitment ? `, commitment ${item.commitment}` : "";
+		return {
+			id: `recommendation-milestone-${slug(item.name)}-${index + 1}`,
+			action: `Resolve milestone "${item.name}" (${item.reasons.join("; ")}): confirm the owner, mitigation, and customer commitment, then update MSX.`,
+			ownerRole: item.ownerRole,
+			rationale: `Milestone "${item.name}" is ${item.status}${commitmentClause}${targetClause}, which puts the current MCEM stage at risk until it is resolved.`,
+			evidenceIds: [...evidenceIds],
+			assumption: false,
+			confidence: item.confidence
+		};
+	});
+}
+//#endregion
 //#region packages/agents/mcem-coach/src/index.ts
 var mcemCoachVersion = "0.1.0";
 function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
@@ -5584,7 +6537,7 @@ function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
 		};
 	});
 	const evidenceBasedStage = gaps.length === 0 ? Math.min(5, context.opportunity.recordedStage + 1) : Math.max(1, context.opportunity.recordedStage - 1);
-	const recommendations = gaps.length === 0 ? [{
+	const baseRecommendations = gaps.length === 0 ? [{
 		id: "recommendation-advance-stage",
 		action: evidenceBasedStage > context.opportunity.recordedStage ? `Review the completed exit criteria and advance the opportunity to Stage ${evidenceBasedStage} in MSX after customer confirmation.` : "Continue validating value realization and maintain current evidence in MSX.",
 		ownerRole: "Account Executive",
@@ -5593,7 +6546,12 @@ function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
 		assumption: false,
 		confidence: "high"
 	}] : gapRecommendations;
+	const milestoneSummary = summarizeMilestones(context.milestones ?? []);
+	const milestoneRecs = milestoneRecommendations(milestoneSummary, [msxEvidenceId, guidanceEvidenceId]);
+	const recommendations = [...baseRecommendations, ...milestoneRecs];
 	const generatedAt = (/* @__PURE__ */ new Date()).toISOString();
+	const baseSummary = evidenceBasedStage > context.opportunity.recordedStage ? `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the completed exit criteria support progression to Stage ${evidenceBasedStage}.` : evidenceBasedStage === context.opportunity.recordedStage ? `The available evidence supports recorded Stage ${context.opportunity.recordedStage}.` : `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the available evidence supports Stage ${evidenceBasedStage}.`;
+	const summary = milestoneSummary.headline ? `${baseSummary} ${milestoneSummary.headline}` : baseSummary;
 	return mcemResponseSchema.parse({
 		contractVersion: "1.0",
 		correlationId,
@@ -5602,7 +6560,7 @@ function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
 		generatedAt,
 		mode: context.sourceHealth.state === "live" ? "live" : "sample",
 		state: "complete",
-		summary: evidenceBasedStage > context.opportunity.recordedStage ? `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the completed exit criteria support progression to Stage ${evidenceBasedStage}.` : evidenceBasedStage === context.opportunity.recordedStage ? `The available evidence supports recorded Stage ${context.opportunity.recordedStage}.` : `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the available evidence supports Stage ${evidenceBasedStage}.`,
+		summary,
 		recordedStage: context.opportunity.recordedStage,
 		evidenceBasedStage,
 		criteria,
@@ -8193,8 +9151,32 @@ var ThinSliceOrchestrator = class {
 		if (typeof opportunityId !== "string" || opportunityId.trim().length === 0) throw new Error("An opportunity id is required to leave a deal team.");
 		return this.msx.leaveDealTeam(opportunityId);
 	}
+	async joinMilestoneTeam(opportunityId, milestoneId) {
+		if (typeof opportunityId !== "string" || opportunityId.trim().length === 0) throw new Error("An opportunity id is required to join a milestone team.");
+		if (typeof milestoneId !== "string" || milestoneId.trim().length === 0) throw new Error("A milestone id is required to join a milestone team.");
+		return this.msx.joinMilestoneTeam(opportunityId, milestoneId);
+	}
+	async leaveMilestoneTeam(opportunityId, milestoneId) {
+		if (typeof opportunityId !== "string" || opportunityId.trim().length === 0) throw new Error("An opportunity id is required to leave a milestone team.");
+		if (typeof milestoneId !== "string" || milestoneId.trim().length === 0) throw new Error("A milestone id is required to leave a milestone team.");
+		return this.msx.leaveMilestoneTeam(opportunityId, milestoneId);
+	}
 	listMilestones(opportunityId) {
 		return this.msx.listMilestones(opportunityId);
+	}
+	listDiscoverableMilestones(opportunityId) {
+		if (typeof opportunityId !== "string" || opportunityId.trim().length === 0) throw new Error("An opportunity id is required to list discoverable milestones.");
+		return this.msx.listDiscoverableMilestones(opportunityId);
+	}
+	listMilestoneActivities(opportunityId, milestoneId) {
+		if (typeof opportunityId !== "string" || opportunityId.trim().length === 0) throw new Error("An opportunity id is required to list milestone activities.");
+		if (typeof milestoneId !== "string" || milestoneId.trim().length === 0) throw new Error("A milestone id is required to list milestone activities.");
+		return this.msx.listMilestoneActivities(opportunityId, milestoneId);
+	}
+	createMilestoneActivity(opportunityId, milestoneId, request) {
+		if (typeof opportunityId !== "string" || opportunityId.trim().length === 0) throw new Error("An opportunity id is required to create a milestone activity.");
+		if (typeof milestoneId !== "string" || milestoneId.trim().length === 0) throw new Error("A milestone id is required to create a milestone activity.");
+		return this.msx.createMilestoneActivity(opportunityId, milestoneId, createMilestoneActivityRequestSchema.parse(request));
 	}
 	updateMilestone(opportunityId, milestoneId, update) {
 		return this.msx.updateMilestone(opportunityId, milestoneId, update);
@@ -8228,14 +9210,24 @@ var ThinSliceOrchestrator = class {
 		const request = mcemRequestSchema.parse(input);
 		const context = await this.msx.getOpportunityContext(request.opportunityId);
 		if (context.account.id !== request.accountId) throw new Error("The selected opportunity does not belong to the selected account.");
-		return evaluateMcemProgress(context, await this.mcem.getStageGuidance(context.opportunity.recordedStage));
+		const milestones = await this.msx.listMilestones(request.opportunityId);
+		const guidance = await this.mcem.getStageGuidance(context.opportunity.recordedStage);
+		return evaluateMcemProgress({
+			...context,
+			milestones
+		}, guidance);
 	}
 	async runAgentTask(input) {
 		const request = agentTaskRequestSchema.parse(input);
 		const configuredAgent = this.taskAgents[request.capability];
 		if (!configuredAgent) throw new Error(`The ${request.capability} agent is not configured.`);
-		const opportunityContext = await measurePerformance("agent.context.msx", this.performanceReporter, () => this.msx.getOpportunityContext(request.opportunityId));
-		if (opportunityContext.account.id !== request.accountId) throw new Error("The selected opportunity does not belong to the selected account.");
+		const baseContext = await measurePerformance("agent.context.msx", this.performanceReporter, () => this.msx.getOpportunityContext(request.opportunityId));
+		if (baseContext.account.id !== request.accountId) throw new Error("The selected opportunity does not belong to the selected account.");
+		const milestones = await this.msx.listMilestones(request.opportunityId);
+		const opportunityContext = {
+			...baseContext,
+			milestones
+		};
 		const guidance = await measurePerformance("agent.context.mcem", this.performanceReporter, () => this.mcem.getStageGuidance(opportunityContext.opportunity.recordedStage));
 		const localEvaluation = evaluateMcemProgress(opportunityContext, guidance);
 		const content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke({
@@ -9054,9 +10046,29 @@ function registerIpc() {
 		assertTrustedSender(event);
 		return orchestrator.leaveDealTeam(z.string().min(1).max(200).parse(opportunityId));
 	});
+	ipcMain.handle("tlc:join-milestone-team", (event, opportunityId, milestoneId) => {
+		assertTrustedSender(event);
+		return orchestrator.joinMilestoneTeam(z.string().min(1).max(200).parse(opportunityId), z.string().min(1).max(200).parse(milestoneId));
+	});
+	ipcMain.handle("tlc:leave-milestone-team", (event, opportunityId, milestoneId) => {
+		assertTrustedSender(event);
+		return orchestrator.leaveMilestoneTeam(z.string().min(1).max(200).parse(opportunityId), z.string().min(1).max(200).parse(milestoneId));
+	});
 	ipcMain.handle("tlc:list-milestones", (event, opportunityId) => {
 		assertTrustedSender(event);
 		return orchestrator.listMilestones(z.string().min(1).parse(opportunityId));
+	});
+	ipcMain.handle("tlc:list-discoverable-milestones", (event, opportunityId) => {
+		assertTrustedSender(event);
+		return orchestrator.listDiscoverableMilestones(z.string().min(1).max(200).parse(opportunityId));
+	});
+	ipcMain.handle("tlc:list-milestone-activities", (event, opportunityId, milestoneId) => {
+		assertTrustedSender(event);
+		return orchestrator.listMilestoneActivities(z.string().min(1).max(200).parse(opportunityId), z.string().min(1).max(200).parse(milestoneId));
+	});
+	ipcMain.handle("tlc:create-milestone-activity", (event, opportunityId, milestoneId, request) => {
+		assertTrustedSender(event);
+		return orchestrator.createMilestoneActivity(z.string().min(1).max(200).parse(opportunityId), z.string().min(1).max(200).parse(milestoneId), createMilestoneActivityRequestSchema.parse(request));
 	});
 	ipcMain.handle("tlc:update-milestone", (event, opportunityId, milestoneId, update) => {
 		assertTrustedSender(event);

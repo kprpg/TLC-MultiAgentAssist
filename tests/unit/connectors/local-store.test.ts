@@ -75,10 +75,84 @@ describe('local-store MSX connector', () => {
     expect(prependComment(undefined, entry)).toBe(entry)
   })
 
-  it('blocks access to opportunities the user has left', async () => {
+  it('retains milestone access via milestone-team membership after leaving the deal team', async () => {
     const msx = connector()
     await msx.leaveDealTeam('opp-grid-modernization')
+    // Independent membership: the seed keeps the user on milestone teams for this opportunity,
+    // so the opportunity and its milestones remain reachable even without Deal Team membership.
+    await expect(msx.listMilestones('opp-grid-modernization')).resolves.toEqual(expect.any(Array))
+  })
+
+  it('blocks access once the user has left both the deal team and all milestone teams', async () => {
+    const msx = connector()
+    await msx.leaveDealTeam('opp-grid-modernization')
+    for (const milestone of await msx.listMilestones('opp-grid-modernization')) {
+      await msx.leaveMilestoneTeam('opp-grid-modernization', milestone.id)
+    }
     await expect(msx.listMilestones('opp-grid-modernization')).rejects.toThrow()
+  })
+
+  it('shows mixed milestone-team membership states in the seed', async () => {
+    const milestones = await connector().listMilestones('opp-grid-modernization')
+    // Seeded as a member of some milestones (shows "-") and not others (shows "+").
+    expect(milestones.find((milestone) => milestone.id === 'ms-grid-outcome')?.onMilestoneTeam).toBe(true)
+    expect(milestones.find((milestone) => milestone.id === 'ms-grid-technical')?.onMilestoneTeam).toBe(true)
+    expect(milestones.find((milestone) => milestone.id === 'ms-grid-security')?.onMilestoneTeam).toBe(false)
+  })
+
+  it('keeps a milestone-team-only opportunity in the portfolio without Deal Team membership', async () => {
+    const msx = connector()
+    // opp-ms-only-showcase is excluded from the seed Deal Team but the user is on its milestone team.
+    const opportunities = await msx.listOpportunities('account-contoso')
+    expect(opportunities.some((opportunity) => opportunity.id === 'opp-ms-only-showcase')).toBe(true)
+
+    const milestones = await msx.listMilestones('opp-ms-only-showcase')
+    expect(milestones.find((milestone) => milestone.id === 'ms-only-review')?.onMilestoneTeam).toBe(true)
+
+    // With no Deal Team fallback, leaving the milestone team removes it from the portfolio.
+    await msx.leaveMilestoneTeam('opp-ms-only-showcase', 'ms-only-review')
+    expect((await msx.listOpportunities('account-contoso')).some((opportunity) => opportunity.id === 'opp-ms-only-showcase')).toBe(false)
+  })
+
+  it('expands a greenfield discovery candidate and joins its milestone team without the Deal Team', async () => {
+    const msx = connector()
+    const discovered = (await msx.discoverOpportunities('ai-apps')).find((opportunity) => opportunity.id === 'disc-contoso-greenfield')
+    expect(discovered?.onDealTeam).toBe(false)
+    // Not in the portfolio until a milestone is joined.
+    expect((await msx.listOpportunities('account-contoso')).some((opportunity) => opportunity.id === 'disc-contoso-greenfield')).toBe(false)
+
+    const milestones = await msx.listDiscoverableMilestones('disc-contoso-greenfield')
+    expect(milestones.map((milestone) => milestone.id)).toContain('ms-greenfield-outcome')
+    expect(milestones.find((milestone) => milestone.id === 'ms-greenfield-outcome')?.onMilestoneTeam).toBe(false)
+
+    await msx.joinMilestoneTeam('disc-contoso-greenfield', 'ms-greenfield-outcome')
+    // Now in the portfolio via milestone membership, still NOT on the Deal Team.
+    expect((await msx.listOpportunities('account-contoso')).some((opportunity) => opportunity.id === 'disc-contoso-greenfield')).toBe(true)
+    expect((await msx.discoverOpportunities('ai-apps')).find((opportunity) => opportunity.id === 'disc-contoso-greenfield')?.onDealTeam).toBe(false)
+    expect((await msx.listDiscoverableMilestones('disc-contoso-greenfield')).find((milestone) => milestone.id === 'ms-greenfield-outcome')?.onMilestoneTeam).toBe(true)
+  })
+
+  it('lists and creates milestone activities (Tasks) in the SQLite store', async () => {
+    const msx = connector()
+    // Seeded activities exist for the grid milestones.
+    const seeded = await msx.listMilestoneActivities('opp-grid-modernization', 'ms-grid-outcome')
+    expect(seeded.map((activity) => activity.id)).toContain('act-grid-outcome-1')
+    expect(seeded[0]!.activityType).toBe('task')
+
+    const created = await msx.createMilestoneActivity('opp-grid-modernization', 'ms-grid-outcome', {
+      subject: 'Customer briefing', priority: 'High', taskCategory: 'Briefing', due: '2026-07-01', durationMinutes: 45, description: 'Prep deck.'
+    })
+    expect(created).toMatchObject({ subject: 'Customer briefing', priority: 'High', taskCategory: 'Briefing', due: '2026-07-01', durationMinutes: 45, status: 'Open', activityType: 'task' })
+    expect(created.owner).toBe('Girish Pillai')
+
+    const reread = await msx.listMilestoneActivities('opp-grid-modernization', 'ms-grid-outcome')
+    expect(reread.some((activity) => activity.id === created.id)).toBe(true)
+  })
+
+  it('rejects activities for a milestone not in the opportunity', async () => {
+    const msx = connector()
+    await expect(msx.listMilestoneActivities('opp-grid-modernization', 'nope')).rejects.toThrow()
+    await expect(msx.createMilestoneActivity('opp-grid-modernization', 'nope', { subject: 'x', priority: 'Normal' })).rejects.toThrow()
   })
 
   it('discovers opportunities across every SE domain', async () => {

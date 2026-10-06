@@ -95,7 +95,12 @@ export function buildLiveDataProvider(
         discoverOpportunities: (domain) => orchestrator.discoverOpportunities(domain),
         joinDealTeam: (opportunityId) => orchestrator.joinDealTeam(opportunityId),
         leaveDealTeam: (opportunityId) => orchestrator.leaveDealTeam(opportunityId),
+        joinMilestoneTeam: (opportunityId, milestoneId) => orchestrator.joinMilestoneTeam(opportunityId, milestoneId),
+        leaveMilestoneTeam: (opportunityId, milestoneId) => orchestrator.leaveMilestoneTeam(opportunityId, milestoneId),
         listMilestones: (opportunityId) => orchestrator.listMilestones(opportunityId),
+        listDiscoverableMilestones: (opportunityId) => orchestrator.listDiscoverableMilestones(opportunityId),
+        listMilestoneActivities: (opportunityId, milestoneId) => orchestrator.listMilestoneActivities(opportunityId, milestoneId),
+        createMilestoneActivity: (opportunityId, milestoneId, request) => orchestrator.createMilestoneActivity(opportunityId, milestoneId, request),
         updateOpportunity: (opportunityId, update) => orchestrator.updateOpportunity(opportunityId, update),
         updateMilestone: (opportunityId, milestoneId, update) => orchestrator.updateMilestone(opportunityId, milestoneId, update),
         runMcemCoach: (accountId, opportunityId) => orchestrator.runMcemCoach({

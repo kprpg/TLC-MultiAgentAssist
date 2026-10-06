@@ -26,6 +26,11 @@ import {
   type McemStageTransitionRequest,
   type McemStageTransitionResult,
   type Milestone,
+  type MilestoneActivity,
+  type CreateMilestoneActivityRequest,
+  createMilestoneActivityRequestSchema,
+  type MilestoneTeamJoinResult,
+  type MilestoneTeamLeaveResult,
   type MilestoneUpdate,
   type Opportunity,
   type OpportunityUpdate,
@@ -120,8 +125,55 @@ export class ThinSliceOrchestrator {
     return this.msx.leaveDealTeam(opportunityId)
   }
 
+  async joinMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamJoinResult> {
+    if (typeof opportunityId !== 'string' || opportunityId.trim().length === 0) {
+      throw new Error('An opportunity id is required to join a milestone team.')
+    }
+    if (typeof milestoneId !== 'string' || milestoneId.trim().length === 0) {
+      throw new Error('A milestone id is required to join a milestone team.')
+    }
+    return this.msx.joinMilestoneTeam(opportunityId, milestoneId)
+  }
+
+  async leaveMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamLeaveResult> {
+    if (typeof opportunityId !== 'string' || opportunityId.trim().length === 0) {
+      throw new Error('An opportunity id is required to leave a milestone team.')
+    }
+    if (typeof milestoneId !== 'string' || milestoneId.trim().length === 0) {
+      throw new Error('A milestone id is required to leave a milestone team.')
+    }
+    return this.msx.leaveMilestoneTeam(opportunityId, milestoneId)
+  }
+
   listMilestones(opportunityId: string): Promise<Milestone[]> {
     return this.msx.listMilestones(opportunityId)
+  }
+
+  listDiscoverableMilestones(opportunityId: string): Promise<Milestone[]> {
+    if (typeof opportunityId !== 'string' || opportunityId.trim().length === 0) {
+      throw new Error('An opportunity id is required to list discoverable milestones.')
+    }
+    return this.msx.listDiscoverableMilestones(opportunityId)
+  }
+
+  listMilestoneActivities(opportunityId: string, milestoneId: string): Promise<MilestoneActivity[]> {
+    if (typeof opportunityId !== 'string' || opportunityId.trim().length === 0) {
+      throw new Error('An opportunity id is required to list milestone activities.')
+    }
+    if (typeof milestoneId !== 'string' || milestoneId.trim().length === 0) {
+      throw new Error('A milestone id is required to list milestone activities.')
+    }
+    return this.msx.listMilestoneActivities(opportunityId, milestoneId)
+  }
+
+  createMilestoneActivity(opportunityId: string, milestoneId: string, request: CreateMilestoneActivityRequest): Promise<MilestoneActivity> {
+    if (typeof opportunityId !== 'string' || opportunityId.trim().length === 0) {
+      throw new Error('An opportunity id is required to create a milestone activity.')
+    }
+    if (typeof milestoneId !== 'string' || milestoneId.trim().length === 0) {
+      throw new Error('A milestone id is required to create a milestone activity.')
+    }
+    return this.msx.createMilestoneActivity(opportunityId, milestoneId, createMilestoneActivityRequestSchema.parse(request))
   }
 
   updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone> {
@@ -170,8 +222,9 @@ export class ThinSliceOrchestrator {
     if (context.account.id !== request.accountId) {
       throw new Error('The selected opportunity does not belong to the selected account.')
     }
+    const milestones = await this.msx.listMilestones(request.opportunityId)
     const guidance = await this.mcem.getStageGuidance(context.opportunity.recordedStage)
-    const localEvaluation = evaluateMcemProgress(context, guidance)
+    const localEvaluation = evaluateMcemProgress({ ...context, milestones }, guidance)
     return localEvaluation
   }
 
@@ -182,11 +235,13 @@ export class ThinSliceOrchestrator {
       throw new Error(`The ${request.capability} agent is not configured.`)
     }
 
-    const opportunityContext = await measurePerformance('agent.context.msx', this.performanceReporter, () =>
+    const baseContext = await measurePerformance('agent.context.msx', this.performanceReporter, () =>
       this.msx.getOpportunityContext(request.opportunityId))
-    if (opportunityContext.account.id !== request.accountId) {
+    if (baseContext.account.id !== request.accountId) {
       throw new Error('The selected opportunity does not belong to the selected account.')
     }
+    const milestones = await this.msx.listMilestones(request.opportunityId)
+    const opportunityContext = { ...baseContext, milestones }
     const guidance = await measurePerformance('agent.context.mcem', this.performanceReporter, () =>
       this.mcem.getStageGuidance(opportunityContext.opportunity.recordedStage))
     const localEvaluation = evaluateMcemProgress(opportunityContext, guidance)

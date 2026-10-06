@@ -18,8 +18,8 @@ describe('MCEM Coach thin slice', () => {
     const accounts = await connector.listAccounts()
     const opportunities = (await Promise.all(accounts.map((account) => connector.listOpportunities(account.id)))).flat()
 
-    expect(accounts).toHaveLength(2)
-    expect(opportunities).toHaveLength(12)
+    expect(accounts).toHaveLength(4)
+    expect(opportunities).toHaveLength(15)
     expect(new Set(opportunities.map((opportunity) => opportunity.recordedStage))).toEqual(new Set([1, 2, 3, 4]))
 
     for (const opportunity of opportunities) {
