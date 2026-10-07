@@ -30,7 +30,7 @@ Requires **VS Code or VS Code Insiders 1.90.0 or later**. The extension is self-
 
 ### Install
 
-1. Open the [VS Code extension releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=ext-v) and expand **Assets**. Stable builds and nightly **Pre-release** builds both appear here.
+1. Open the [VS Code extension releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=extension) and expand **Assets**. Stable builds and nightly **Pre-release** builds both appear here.
 2. Download `tlc-assist-vscode-<version>.vsix`. The companion `tlc-assist-vscode-mcp-config-<version>.zip` is optional.
 3. Install it from the Command Palette (`Ctrl+Shift+P`) with **Extensions: Install from VSIX...**, or run `code --install-extension tlc-assist-vscode-<version>.vsix --force`. Confirm the publisher-trust prompt on VS Code 1.97+.
 4. Run **Developer: Reload Window**, then open **TLC Assist** from the Activity Bar (or run **TLC: Open Assist**).
@@ -58,7 +58,7 @@ Switch at runtime from the Command Palette: **TLC: Use Live Data (MSX/Dataverse)
 
 ### Install
 
-1. Open the [latest release](https://github.com/kprpg/TLC-MultiAgentAssist/releases/latest) and expand **Assets**.
+1. Open the [desktop releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=desktop), choose the latest desktop release, and expand **Assets**.
 2. Download a Windows x64 file:
    - `TLC-MultiAgent-Assist-<version>-Windows-x64.exe` — recommended installer with Start menu and desktop shortcuts.
    - `TLC-MultiAgent-Assist-<version>-Windows-x64.zip` — portable build for users without installation access.
