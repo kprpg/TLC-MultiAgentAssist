@@ -2,10 +2,10 @@
   "servers": {
     "typescript-modernization": {
       "type": "stdio",
-      "command": "npx",
+      "command": "node",
       "args": [
-        "--yes",
-        "@microsoft/github-copilot-app-modernization-mcp-server@1.24.0"
+        "${extensionInstallFolder:vscjava.migrate-java-to-azure}/node_modules/@microsoft/jsts-upgrade-assistant/lib/index.js",
+        "--mcp"
       ]
     }
   }
