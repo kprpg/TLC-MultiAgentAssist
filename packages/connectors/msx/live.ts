@@ -41,8 +41,6 @@ import {
 const defaultBaseUrl = 'https://microsoftsales.crm.dynamics.com/api/data/v9.2/'
 const formattedValueSuffix = '@OData.Community.Display.V1.FormattedValue'
 const guidPattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
-/** Upper bound on discovered opportunities returned per domain query. */
-const discoveryRowLimit = 200
 
 export interface MsxAccessTokenProvider {
   getAccessToken(): Promise<string>
@@ -610,8 +608,7 @@ export class LiveMsxConnector implements MsxConnector {
       rows.push(...await this.requestAll<OpportunityRow>('opportunities', {
         '$select': select,
         '$filter': filterClauses.join(' and '),
-        '$orderby': 'name asc',
-        '$top': String(discoveryRowLimit)
+        '$orderby': 'name asc'
       }))
     }
     return rows

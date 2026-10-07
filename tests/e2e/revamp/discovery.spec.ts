@@ -191,10 +191,8 @@ async function verifyDiscoveryControls(page: Page, host: 'desktop' | 'web' | 'vs
   await allCustomers.click()
   await editor.getByRole('checkbox', { name: 'Alpha Corp', exact: true }).check()
   await editor.getByRole('button', { name: 'Apply', exact: true }).click()
-  if (host !== 'vscode') {
-    await panel.getByRole('button', { name: 'Refresh', exact: true }).click()
-    await expect(names).toHaveText(['Alpha analysis', 'Alpha infrastructure'])
-  }
+  await panel.getByRole('button', { name: 'Refresh', exact: true }).click()
+  await expect(names).toHaveText(['Alpha analysis', 'Alpha infrastructure'])
   await panel.getByRole(host === 'vscode' ? 'tab' : 'button', { name: 'Data', exact: true }).click()
   await expect(panel.getByText('Showing 0 of 1 opportunities', { exact: true })).toBeVisible()
   await expect(panel.getByRole('button', { name: 'Customers equals Alpha Corp', exact: true })).toBeVisible()

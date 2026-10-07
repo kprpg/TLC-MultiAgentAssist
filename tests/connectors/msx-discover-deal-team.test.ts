@@ -70,6 +70,37 @@ describe('LiveMsxConnector.discoverOpportunities', () => {
     expect(discoverFilter).toContain('msp_conversation eq 884800003') // Establish a trusted and secure platform for AI
   })
 
+  it('follows Dataverse pagination instead of truncating discovery results', async () => {
+    let firstDiscoverUrl: URL | undefined
+    const request = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input))
+      if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+      if (url.pathname.endsWith('/msp_dealteams')) return json({ value: [{ _msp_parentopportunityid_value: 'opp-existing' }] })
+      if (url.pathname.endsWith('/opportunities')) {
+        if (url.searchParams.has('$skiptoken')) {
+          return json({ value: [{ opportunityid: 'opp-after-first-page', _parentaccountid_value: 'account-a', name: 'TGH WAF' }] })
+        }
+        const filter = url.searchParams.get('$filter') ?? ''
+        if (filter.includes('msp_technicalcapability')) {
+          firstDiscoverUrl = url
+          return json({
+            value: [{ opportunityid: 'opp-first-page', _parentaccountid_value: 'account-a', name: 'First page' }],
+            '@odata.nextLink': `${url.origin}${url.pathname}?$skiptoken=next`
+          })
+        }
+        return json({ value: [{ opportunityid: 'opp-existing', _parentaccountid_value: 'account-a', name: 'Mine' }] })
+      }
+      if (url.pathname.endsWith('/accounts')) return json({ value: [{ accountid: 'account-a', name: 'Alpha' }] })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch)
+
+    const results = await connector.discoverOpportunities('infra')
+
+    expect(firstDiscoverUrl?.searchParams.has('$top')).toBe(false)
+    expect(results.map((item) => item.id)).toEqual(['opp-first-page', 'opp-after-first-page'])
+  })
+
   it('returns no discovery results when the user has no assigned accounts', async () => {
     const request = vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input))
@@ -539,4 +570,3 @@ describe('LiveMsxConnector milestone team membership (Dataverse access team)', (
     expect(request.mock.calls.some(([input]) => String(input).includes('/teamtemplates'))).toBe(false)
   })
 })
-
