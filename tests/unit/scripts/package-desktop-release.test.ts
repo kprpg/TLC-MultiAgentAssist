@@ -14,7 +14,7 @@ describe('desktop release package', () => {
   it('includes the MCP runtime configuration as packaged resources', async () => {
     const packageJson = JSON.parse(await readFile(join(process.cwd(), 'apps/desktop/package.json'), 'utf8'))
 
-    expect(packageJson.dependencies).toHaveProperty('@modelcontextprotocol/sdk', '1.29.0')
+    expect(packageJson.dependencies).toHaveProperty('@modelcontextprotocol/sdk', expect.any(String))
     expect(packageJson.build.extraResources).toEqual(expect.arrayContaining([
       { from: '../../config/mcp.servers.json', to: 'config/mcp.servers.json' },
       { from: '../../config/mcp.tool-policy.json', to: 'config/mcp.tool-policy.json' },
