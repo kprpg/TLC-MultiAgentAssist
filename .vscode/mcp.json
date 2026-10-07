@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "typescript-modernization": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${extensionInstallFolder:vscjava.migrate-java-to-azure}/node_modules/@microsoft/jsts-upgrade-assistant/lib/index.js",
+        "--mcp"
+      ]
+    }
+  }
+}

@@ -1582,6 +1582,7 @@ const SE_DOMAINS: ReadonlyArray<{ id: SeDomainView; label: string }> = [
 /** Discover tab: lists open opportunities for an SE domain with one-click deal-team join. */
 function DiscoverPanel(): ReactElement {
     const [domain, setDomain] = useState<SeDomainView>('infra')
+    const [refreshVersion, setRefreshVersion] = useState(0)
     const [items, setItems] = useState<Loadable<DiscoverableOpportunityView[]>>({ status: 'idle' })
     const [filters, setFilters] = useState<DiscoveryFilters>({ include: [], exclude: [] })
     const [sort, setSort] = useState<DiscoverySort | null>(null)
@@ -1603,7 +1604,7 @@ function DiscoverPanel(): ReactElement {
             .then((data) => { if (active) setItems({ status: 'ready', data }) })
             .catch((error: unknown) => { if (active) setItems({ status: 'error', error: error instanceof Error ? error.message : 'Discovery failed.' }) })
         return () => { active = false }
-    }, [domain])
+    }, [domain, refreshVersion])
 
     const join = async (opportunityId: string): Promise<void> => {
         setJoining(opportunityId)
@@ -1678,11 +1679,14 @@ function DiscoverPanel(): ReactElement {
             <header className="discover-header">
                 <h2>Discover opportunities</h2>
                 <p>Review all active opportunities for visible accounts and add or remove yourself from the Deal Team — or expand an opportunity to join a milestone team without joining the Deal Team. Deal Team or milestone-team membership brings an opportunity into Portfolio.</p>
-                <nav className="tabs" role="tablist" aria-label="Solution Engineer domain">
-                    {SE_DOMAINS.map((option) => (
-                        <button key={option.id} role="tab" aria-selected={domain === option.id} className={domain === option.id ? 'tab active' : 'tab'} onClick={() => setDomain(option.id)}>{option.label}</button>
-                    ))}
-                </nav>
+                <div className="discover-domain-toolbar">
+                    <nav className="tabs" role="tablist" aria-label="Solution Engineer domain">
+                        {SE_DOMAINS.map((option) => (
+                            <button key={option.id} role="tab" aria-selected={domain === option.id} className={domain === option.id ? 'tab active' : 'tab'} onClick={() => setDomain(option.id)}>{option.label}</button>
+                        ))}
+                    </nav>
+                    <button className="secondary" disabled={items.status === 'loading'} onClick={() => setRefreshVersion((version) => version + 1)}>Refresh</button>
+                </div>
             </header>
             <DiscoveryControls customers={discoveryCustomers(opportunities)} filters={filters} onChange={setFilters} visibleCount={visibleOpportunities.length} totalCount={opportunities.length} loading={items.status === 'idle' || items.status === 'loading'} />
             {note && <p className="discover-note" role="status">{note}</p>}
