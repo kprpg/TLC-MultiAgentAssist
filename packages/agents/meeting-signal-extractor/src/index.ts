@@ -123,11 +123,12 @@ function matchTimeline(text: string): string | null {
     if (/\bthis quarter\b/i.test(text)) return 'This Quarter'
     if (/\bthis (fiscal )?year\b/i.test(text)) return 'This Year'
     if (/\b(immediately|right away|asap|as soon as possible)\b/i.test(text)) return 'Immediate'
+    if (/\b(not known|unknown|to be determined|tbd)\b/i.test(text)) return 'Not known'
     return null
 }
 
 function matchProcess(text: string): string | null {
-    if (/\b(committee|steering (group|committee)|board approv)/i.test(text)) return 'Committee'
+    if (/\b(committee|steering (group|committee)|board (approv|decid))/i.test(text)) return 'Committee'
     if (/\b(sole decision|single decision[- ]maker|i will decide|i decide)\b/i.test(text)) return 'Individual'
     return null
 }
@@ -136,13 +137,59 @@ function matchNeed(text: string): string | null {
     if (/\bmust[- ]have\b|\bcritical\b|\bessential\b|\bnon-negotiable\b/i.test(text)) return 'Must have'
     if (/\bshould[- ]have\b/i.test(text)) return 'Should have'
     if (/\b(good to have|nice to have)\b/i.test(text)) return 'Good to have'
+    if (/\b(no need|not needed|not a requirement)\b/i.test(text)) return 'No need'
     return null
 }
 
 function matchSentiment(text: string): string | null {
-    if (/\b(excited|thrilled|love it|great fit|strong fit|very positive)\b/i.test(text)) return 'Hot'
+    if (/\b(excited|thrilled|love it|great fit|strong fit|very positive|enthusiastic|eager to proceed|ready to move forward)\b/i.test(text)) return 'Hot'
+    if (/\b(cautiously optimistic|positive but|interested|promising|leaning positive)\b/i.test(text)) return 'Warm'
     if (/\b(concerned|worried|frustrated|hesitant|skeptical|not convinced)\b/i.test(text)) return 'Cold'
     return null
+}
+
+function matchDecisionMaker(text: string): boolean {
+    return /\b(decision[- ]maker (?:is|identified)|final decision[- ]maker|has final approval|makes? the final (?:call|decision)|owns? the final decision)\b/i.test(text)
+}
+
+function matchCustomerNeed(text: string): string | null {
+    const match = text.match(/\b(?:customer|business) need\s*(?:is|:|-)\s*(.+?)(?:[.!?]|$)/i)
+    return match?.[1]?.trim() || null
+}
+
+function matchProposedSolution(text: string): string | null {
+    const match = text.match(/\b(?:proposed|recommended) solution\s*(?:is|:|-)\s*(.+?)(?:[.!?]|$)/i)
+    return match?.[1]?.trim() || null
+}
+
+function normalizedDate(year: number, month: number, day: number): string | null {
+    const date = new Date(Date.UTC(year, month - 1, day))
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null
+    return date.toISOString().slice(0, 10)
+}
+
+function matchFinalDecisionDate(text: string): string | null {
+    if (!/\b(final decision|decision date|decide by|decision by)\b/i.test(text)) return null
+
+    const iso = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/)
+    if (iso?.[1] && iso[2] && iso[3]) return normalizedDate(Number(iso[1]), Number(iso[2]), Number(iso[3]))
+
+    const numeric = text.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/)
+    if (numeric?.[1] && numeric[2] && numeric[3]) return normalizedDate(Number(numeric[3]), Number(numeric[1]), Number(numeric[2]))
+
+    const monthNames: Readonly<Record<string, number>> = {
+        january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+        july: 7, august: 8, september: 9, october: 10, november: 11, december: 12
+    }
+    const named = text.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})\b/i)
+    if (!named?.[1] || !named[2] || !named[3]) return null
+    const month = monthNames[named[1].toLowerCase()]
+    return month ? normalizedDate(Number(named[3]), month, Number(named[2])) : null
+}
+
+function matchMilestoneRisk(text: string): string | null {
+    const match = text.match(/\brisk\s*(?:is|:|-)\s*(.+?)(?:[.!?]|$)/i)
+    return match?.[1]?.trim() || null
 }
 
 function findCompetitor(text: string): string | null {
@@ -193,9 +240,16 @@ export function extractMeetingSignals(ctx: MeetingExtractionContext, options: Ex
             const amount = parseMoney(text)
             if (amount !== null) {
                 candidates.push({ canonical: 'budgetAmount', after: amount, confidence: 0.82, evidence: [seg.segmentId], rationale: `Customer stated a budget of ${formatMoney(amount)}.` })
-                if (/\b(approved|sign[- ]?off|commit|secured|allocated)\b/i.test(text)) {
+                if (/\b(approved|sign(?:ed)?[- ]?off|commit|secured|allocated)\b/i.test(text)) {
                     candidates.push({ canonical: 'budgetStatus', after: 'Yes', confidence: 0.8, evidence: [seg.segmentId], rationale: 'Customer confirmed budget is approved.' })
                 }
+            }
+        }
+
+        if (/\b(estimated|expected|projected)\s+(deal|opportunity|contract)?\s*value\b|\bdeal value\b/i.test(text)) {
+            const amount = parseMoney(text)
+            if (amount !== null) {
+                candidates.push({ canonical: 'estimatedValue', after: amount, confidence: 0.92, evidence: [seg.segmentId], rationale: `Meeting participants estimated the opportunity value at ${formatMoney(amount)}.` })
             }
         }
 
@@ -205,11 +259,53 @@ export function extractMeetingSignals(ctx: MeetingExtractionContext, options: Ex
         const process = matchProcess(text)
         if (process) candidates.push({ canonical: 'purchaseProcess', after: process, confidence: 0.76, evidence: [seg.segmentId], rationale: `Decision process described as "${process}".` })
 
+        if (matchDecisionMaker(text)) {
+            candidates.push({ canonical: 'decisionMaker', after: true, confidence: 0.8, evidence: [seg.segmentId], rationale: 'The meeting identified who owns the final decision.' })
+        }
+
         const need = matchNeed(text)
         if (need) candidates.push({ canonical: 'need', after: need, confidence: 0.72, evidence: [seg.segmentId], rationale: `Customer framed the need as "${need}".` })
 
+        if (!internal) {
+            const customerNeed = matchCustomerNeed(text)
+            if (customerNeed) candidates.push({ canonical: 'customerNeed', after: customerNeed, confidence: 0.78, evidence: [seg.segmentId], rationale: 'Customer stated the business need in the meeting.' })
+
+            const proposedSolution = matchProposedSolution(text)
+            if (proposedSolution) candidates.push({ canonical: 'proposedSolution', after: proposedSolution, confidence: 0.78, evidence: [seg.segmentId], rationale: 'Meeting participants described the proposed solution.' })
+        }
+
+        const finalDecisionDate = matchFinalDecisionDate(text)
+        if (finalDecisionDate) {
+            candidates.push({ canonical: 'finalDecisionDate', after: finalDecisionDate, confidence: 0.86, evidence: [seg.segmentId], rationale: `Customer stated a final decision date of ${finalDecisionDate}.` })
+        }
+
         const sentiment = matchSentiment(text)
         if (sentiment) candidates.push({ canonical: 'opportunityRating', after: sentiment, confidence: 0.45, evidence: [seg.segmentId], rationale: `Tone suggests a "${sentiment}" sentiment.` })
+
+        const referencedMilestone = ctx.milestones.find((milestone) => text.toLowerCase().includes(milestone.name.toLowerCase()))
+        if (referencedMilestone && /\b(committed|commitment confirmed|confirmed commitment)\b/i.test(text)) {
+            candidates.push({
+                canonical: 'milestoneCommitment',
+                targetRecordId: referencedMilestone.id,
+                after: 'Committed',
+                confidence: 0.83,
+                evidence: [seg.segmentId],
+                rationale: `Commitment was confirmed for milestone "${referencedMilestone.name}".`
+            })
+        }
+        if (internal && referencedMilestone) {
+            const risk = matchMilestoneRisk(text)
+            if (risk) {
+                candidates.push({
+                    canonical: 'milestoneRisk',
+                    targetRecordId: referencedMilestone.id,
+                    after: risk,
+                    confidence: 0.74,
+                    evidence: [seg.segmentId],
+                    rationale: `Internal risk recorded for milestone "${referencedMilestone.name}".`
+                })
+            }
+        }
 
         const competitor = findCompetitor(text)
         if (competitor) {

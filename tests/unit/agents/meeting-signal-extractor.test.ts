@@ -89,6 +89,81 @@ describe('meeting-signal extractor', () => {
     expect(rating?.after).toBe('Cold')
     expect(rating?.checkedByDefault).toBe(false)
   })
+
+  it('extracts the complete narrative, decision, date, value, and milestone field set', () => {
+    const ctx: MeetingExtractionContext = {
+      transcript: transcript([
+        { segmentId: 's1', speakerRole: 'customer', text: 'The projected deal value is $2.75 million.' },
+        { segmentId: 's2', speakerRole: 'customer', text: 'The decision-maker identified is Priya Nair. Customer need: reduce cloud risk.' },
+        { segmentId: 's3', speakerRole: 'customer', text: 'Proposed solution: Microsoft Defender for Cloud. Final decision date: March 5, 2027.' },
+        { segmentId: 's4', speakerRole: 'internal', text: 'Security posture discovery is committed. Risk: procurement review may delay approval.' }
+      ]),
+      opportunity: {
+        id: 'opp-test',
+        name: 'Test',
+        fields: {
+          estimatedValue: 900_000,
+          decisionMaker: false,
+          customerNeed: null,
+          proposedSolution: null,
+          finalDecisionDate: null
+        }
+      },
+      milestones: [{
+        id: 'ms-security',
+        name: 'Security posture discovery',
+        fields: { milestoneCommitment: 'Uncommitted', milestoneRisk: null }
+      }]
+    }
+
+    const proposal = extractMeetingSignals(ctx, { changeSetId: 'cs-complete' })
+    const byField = new Map(proposal.slots.map((slot) => [slot.targetField, slot]))
+
+    expect(byField.get('estimatedValue')?.after).toBe(2_750_000)
+    expect(byField.get('decisionMaker')?.after).toBe(true)
+    expect(byField.get('customerNeed')?.after).toBe('reduce cloud risk')
+    expect(byField.get('proposedSolution')?.after).toBe('Microsoft Defender for Cloud')
+    expect(byField.get('finalDecisionDate')?.after).toBe('2027-03-05')
+    expect(byField.get('milestoneCommitment')?.after).toBe('Committed')
+    expect(byField.get('milestoneCommitment')?.targetRecordId).toBe('ms-security')
+    expect(byField.get('milestoneRisk')?.after).toBe('procurement review may delay approval')
+    expect(byField.get('milestoneRisk')?.targetRecordId).toBe('ms-security')
+    expect(proposal.suggestedMilestoneIds).toEqual(['ms-security'])
+    for (const slot of proposal.slots) expect(slot.evidence.length).toBeGreaterThan(0)
+  })
+
+  it.each([
+    ['The final decision is 2027-04-02.', '2027-04-02'],
+    ['We will make the final decision by 05/14/2027.', '2027-05-14'],
+    ['Final decision date: June 18, 2027.', '2027-06-18']
+  ])('normalizes explicit final-decision date "%s"', (text, expected) => {
+    const ctx: MeetingExtractionContext = {
+      transcript: transcript([{ segmentId: 's1', speakerRole: 'customer', text }]),
+      opportunity: { id: 'opp-test', name: 'Test', fields: { finalDecisionDate: null } },
+      milestones: []
+    }
+
+    const proposal = extractMeetingSignals(ctx, { changeSetId: 'cs-date' })
+    expect(proposal.slots.find((slot) => slot.targetField === 'finalDecisionDate')?.after).toBe(expected)
+  })
+
+  it('does not route customer-spoken milestone risk into the internal risk field', () => {
+    const ctx: MeetingExtractionContext = {
+      transcript: transcript([
+        { segmentId: 's1', speakerRole: 'customer', text: 'Security posture discovery is committed. Risk: procurement may be late.' }
+      ]),
+      opportunity: { id: 'opp-test', name: 'Test', fields: {} },
+      milestones: [{
+        id: 'ms-security',
+        name: 'Security posture discovery',
+        fields: { milestoneCommitment: 'Uncommitted', milestoneRisk: null }
+      }]
+    }
+
+    const proposal = extractMeetingSignals(ctx, { changeSetId: 'cs-customer-risk' })
+    expect(proposal.slots.find((slot) => slot.targetField === 'milestoneCommitment')?.after).toBe('Committed')
+    expect(proposal.slots.find((slot) => slot.targetField === 'milestoneRisk')).toBeUndefined()
+  })
 })
 
 describe('transcript parser', () => {
