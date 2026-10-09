@@ -1776,6 +1776,7 @@ export function App(): ReactElement {
                 onToggleAccounts={() => setAccountsExpanded((current) => !current)}
                 onToggleDetails={() => setDetailsExpanded((current) => !current)}
                 onToggleActions={() => setActionsExpanded((current) => !current)}
+                onOpenIssue={dataClient.openEvidence}
             />
             <main className={`app-body${tab === 'plays' ? ' app-body--plays' : ''}`}>
                 {tab === 'portfolio' ? (

@@ -47,6 +47,7 @@ import { sortMilestones, type MilestoneSort } from './milestone-sort.js'
 import { workflowGuidanceCapability } from './workflow-guidance.js'
 import { DiscoveryControls, DiscoverySortHeader } from '../../../shared/discovery-controls.js'
 import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportunities, toggleDiscoverySort, type DiscoveryFilters, type DiscoverySort } from '../../../shared/discovery.js'
+import { FeedbackButton } from '../../../shared/feedback-button.js'
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 
 type Shell = 'desktop' | 'web'
@@ -1130,6 +1131,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       </form>
       <div className="command-actions">
         <span className="mode-badge">{modeLabel}</span>
+        <FeedbackButton onOpenIssue={client.openEvidence} />
         <button className="profile-button" title="Signed-in user" aria-label="Signed-in user"><Person20Regular /></button>
         <Button appearance="subtle" className="text-action" icon={<Power20Regular />} disabled={exiting} onClick={() => void exitApplication()} aria-label="Exit application" title="Exit application">
           <span className="exit-label">{exiting ? 'Exiting' : 'Exit'}</span>

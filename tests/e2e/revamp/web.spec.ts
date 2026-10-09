@@ -1,6 +1,56 @@
 import { expect, test } from '@playwright/test'
 import { workflowDefinitions, workflowGuidanceDefinition, workflowGuidanceOutput, workflowOutput, workflowRun } from './workflow-fixtures.js'
 
+test('opens structured feedback in the product GitHub repository', async ({ page }) => {
+    await page.addInitScript(() => {
+        const feedbackWindow = window as Window & { copiedFeedbackItems?: number; openedFeedbackUrl?: string }
+        window.open = ((url?: string | URL) => {
+            feedbackWindow.openedFeedbackUrl = String(url)
+            return null
+        }) as typeof window.open
+        Object.defineProperty(navigator, 'clipboard', {
+            configurable: true,
+            value: {
+                write: async (items: ClipboardItems) => {
+                    feedbackWindow.copiedFeedbackItems = items.length
+                }
+            }
+        })
+    })
+    await page.goto('/')
+
+    await page.getByRole('button', { name: 'Send feedback' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Send feedback' })
+    await dialog.getByLabel('Title').fill('Stage board does not refresh')
+    await dialog.getByLabel('Description').fill('The board keeps the old stage.')
+    await dialog.getByLabel('Steps to reproduce').fill('1. Move an opportunity.\n2. Refresh the account.')
+    await dialog.locator('form').evaluate((form) => {
+        const transfer = new DataTransfer()
+        transfer.items.add(new File(
+            [Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='), (character) => character.charCodeAt(0))],
+            'stage-board.png',
+            { type: 'image/png' }
+        ))
+        form.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, clipboardData: transfer }))
+    })
+    await expect(dialog.getByRole('img', { name: 'stage-board.png' })).toBeVisible()
+    await dialog.getByRole('button', { name: 'Continue to GitHub' }).click()
+    await expect(dialog.getByRole('status')).toContainText('Paste once in the Screenshots section')
+
+    const result = await page.evaluate(() => {
+        const feedbackWindow = window as Window & { copiedFeedbackItems?: number; openedFeedbackUrl?: string }
+        return { copiedFeedbackItems: feedbackWindow.copiedFeedbackItems, openedFeedbackUrl: feedbackWindow.openedFeedbackUrl }
+    })
+    expect(result.copiedFeedbackItems).toBe(1)
+    const openedFeedbackUrl = result.openedFeedbackUrl
+    const issueUrl = new URL(openedFeedbackUrl ?? '')
+    expect(issueUrl.origin + issueUrl.pathname).toBe('https://github.com/kprpg/TLC-MultiAgentAssist/issues/new')
+    expect(issueUrl.searchParams.get('title')).toBe('Stage board does not refresh')
+    expect(issueUrl.searchParams.get('body')).toContain('## Description\n\nThe board keeps the old stage.')
+    expect(issueUrl.searchParams.get('body')).toContain('## Steps to reproduce\n\n1. Move an opportunity.\n2. Refresh the account.')
+    expect(issueUrl.searchParams.get('body')).toContain('## Screenshots')
+})
+
 test('curates a customer from account search through Discovery and downstream visibility', async ({ page }) => {
     await page.goto('/')
 
