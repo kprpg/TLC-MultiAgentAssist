@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1040" viewBox="0 0 1400 1040" role="img" aria-labelledby="title desc">
+  <title id="title">Meeting Capture backend flow</title>
+  <desc id="desc">Actual pasted transcript path, deterministic and Foundry extraction branches, review and apply paths, and observed evidence and coverage gaps.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#34495e"/>
+    </marker>
+    <style>
+      .title { font: 700 28px "Segoe UI", Arial, sans-serif; fill: #172b4d; }
+      .subtitle { font: 400 15px "Segoe UI", Arial, sans-serif; fill: #52606d; }
+      .box { fill: #f7f9fc; stroke: #52606d; stroke-width: 2; rx: 12; }
+      .model { fill: #e8f3ff; stroke: #1769aa; stroke-width: 2; rx: 12; }
+      .effect { fill: #e9f7ef; stroke: #237a45; stroke-width: 2; rx: 12; }
+      .gap { fill: #fff4ce; stroke: #8a6116; stroke-width: 2; rx: 12; }
+      .decision { fill: #f4ecff; stroke: #6f42c1; stroke-width: 2; }
+      .label { font: 600 15px "Segoe UI", Arial, sans-serif; fill: #172b4d; text-anchor: middle; }
+      .small { font: 400 13px "Segoe UI", Arial, sans-serif; fill: #334e68; text-anchor: middle; }
+      .gapText { font: 600 14px "Segoe UI", Arial, sans-serif; fill: #5b3b00; text-anchor: middle; }
+      .line { fill: none; stroke: #34495e; stroke-width: 2; marker-end: url(#arrow); }
+      .dash { fill: none; stroke: #8a6116; stroke-width: 2; stroke-dasharray: 7 5; marker-end: url(#arrow); }
+      .edgeLabel { font: 600 12px "Segoe UI", Arial, sans-serif; fill: #52606d; text-anchor: middle; }
+    </style>
+  </defs>
+
+  <text x="700" y="42" class="title" text-anchor="middle">Meeting Capture backend behavior at d541f5b</text>
+  <text x="700" y="68" class="subtitle" text-anchor="middle">Solid arrows are the current executable path; dashed arrows identify observed gaps or coverage boundaries.</text>
+
+  <rect x="40" y="105" width="210" height="90" class="box"/>
+  <text x="145" y="138" class="label">Paste / upload</text>
+  <text x="145" y="162" class="small">MeetingCaptureLauncher</text>
+  <text x="145" y="182" class="small">raw transcript text</text>
+
+  <rect x="300" y="105" width="220" height="90" class="box"/>
+  <text x="410" y="136" class="label">Webview bridge</text>
+  <text x="410" y="160" class="small">proposeMeetingChangeSet</text>
+  <text x="410" y="180" class="small">strict envelope, max 500k chars</text>
+
+  <rect x="570" y="105" width="220" height="90" class="box"/>
+  <text x="680" y="136" class="label">Provider parser</text>
+  <text x="680" y="160" class="small">plain text or WebVTT</text>
+  <text x="680" y="180" class="small">canonical transcript segments</text>
+
+  <rect x="840" y="105" width="220" height="90" class="box"/>
+  <text x="950" y="136" class="label">Connector context</text>
+  <text x="950" y="160" class="small">opportunity snapshot</text>
+  <text x="950" y="180" class="small">milestone snapshots</text>
+
+  <polygon points="1210,100 1340,150 1210,200 1080,150" class="decision"/>
+  <text x="1210" y="144" class="label">Extractor</text>
+  <text x="1210" y="165" class="small">configuration</text>
+
+  <path d="M250 150 L300 150" class="line"/>
+  <path d="M520 150 L570 150" class="line"/>
+  <path d="M790 150 L840 150" class="line"/>
+  <path d="M1060 150 L1080 150" class="line"/>
+
+  <rect x="760" y="280" width="250" height="105" class="box"/>
+  <text x="885" y="313" class="label">Deterministic rules</text>
+  <text x="885" y="337" class="small">default configuration</text>
+  <text x="885" y="359" class="small">detects 8 of 15 dictionary fields</text>
+
+  <rect x="1080" y="280" width="280" height="105" class="model"/>
+  <text x="1220" y="313" class="label">Foundry request</text>
+  <text x="1220" y="337" class="small">system prompt + JSON payload</text>
+  <text x="1220" y="359" class="small">all 15 dictionary fields exposed</text>
+
+  <path d="M1170 190 L900 280" class="line"/>
+  <text x="1000" y="230" class="edgeLabel">default: deterministic</text>
+  <path d="M1250 190 L1220 280" class="line"/>
+  <text x="1300" y="235" class="edgeLabel">foundry flag</text>
+
+  <rect x="910" y="455" width="300" height="100" class="box"/>
+  <text x="1060" y="487" class="label">Shared proposal assembly</text>
+  <text x="1060" y="511" class="small">dictionary, no-op, options, sensitivity</text>
+  <text x="1060" y="533" class="small">strict proposal schema</text>
+
+  <path d="M885 385 L1010 455" class="line"/>
+  <path d="M1220 385 L1110 455" class="line"/>
+
+  <rect x="910" y="625" width="300" height="85" class="box"/>
+  <text x="1060" y="657" class="label">Human review / approval</text>
+  <text x="1060" y="681" class="small">selected slots + reason required</text>
+  <path d="M1060 555 L1060 625" class="line"/>
+
+  <polygon points="1060,775 1190,825 1060,875 930,825" class="decision"/>
+  <text x="1060" y="819" class="label">Apply mode</text>
+  <text x="1060" y="840" class="small">connector</text>
+  <path d="M1060 710 L1060 775" class="line"/>
+
+  <rect x="675" y="925" width="330" height="85" class="effect"/>
+  <text x="840" y="957" class="label">SQLite apply</text>
+  <text x="840" y="981" class="small">discrete fields + transaction + audit note</text>
+
+  <rect x="1060" y="925" width="300" height="85" class="effect"/>
+  <text x="1210" y="957" class="label">Live MSX apply</text>
+  <text x="1210" y="981" class="small">milestone writes; opportunity note</text>
+
+  <path d="M1015 865 L870 925" class="line"/>
+  <path d="M1110 865 L1190 925" class="line"/>
+
+  <rect x="45" y="265" width="560" height="105" class="gap"/>
+  <text x="325" y="298" class="gapText">Observed gap A: speaker routing</text>
+  <text x="325" y="324" class="small">Top-level meetingType is preserved, but pasted segments receive no speakerRole.</text>
+  <text x="325" y="346" class="small">Deterministic internal routing therefore treats those segments as non-internal.</text>
+  <path d="M605 315 L680 195" class="dash"/>
+
+  <rect x="45" y="455" width="650" height="110" class="gap"/>
+  <text x="370" y="488" class="gapText">Observed gap B: evidence enforcement</text>
+  <text x="370" y="514" class="small">Ordinary model slots may retain empty or unknown evidence IDs.</text>
+  <text x="370" y="536" class="small">Evidence IDs and internal-only fields are not cross-validated against transcript roles.</text>
+  <path d="M695 510 L910 505" class="dash"/>
+
+  <rect x="45" y="645" width="650" height="105" class="gap"/>
+  <text x="370" y="678" class="gapText">Coverage boundary</text>
+  <text x="370" y="704" class="small">The model sees the 15-field runtime dictionary; deterministic rules scan only 8.</text>
+  <text x="370" y="726" class="small">The recoverable design lists additional opportunity and milestone signals.</text>
+  <path d="M695 690 L910 530" class="dash"/>
+</svg>
