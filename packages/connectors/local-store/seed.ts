@@ -209,10 +209,262 @@ export const seedActivities: readonly Row[] = [
   { id: 'act-cs-discovery', opportunity_id: 'opp-cloud-security-readiness', subject: 'Cloud security discovery call', owner_id: 'user-girish', activity_type: 'appointment', scheduled_start: '2026-09-15T15:00:00.000Z', scheduled_end: '2026-09-15T15:45:00.000Z', status: 1, is_online_meeting: 1, online_meeting_join_url: 'https://teams.microsoft.com/l/meetup-join/cs-discovery', location: 'Microsoft Teams', description: 'Qualify budget, timeline, and decision process for the security readiness initiative.' }
 ]
 
-/** A seeded meeting transcript linked to a meeting activity, with diarized segments (evidence units). */
+const comprehensiveMeetingVariations = [
+  {
+    id: 'tr-security-complete-01',
+    title: 'Security qualification transcript - executive review',
+    source: 'teams',
+    occurredAt: '2026-09-16T15:00:00.000Z',
+    customerSpeaker: 'Priya Nair',
+    internalSpeaker: 'Girish Pillai',
+    customerSegments: [
+      'The approved budget is $1.1 million for this program.',
+      'The estimated deal value is $2.4 million.',
+      'Our steering committee decides this quarter, and the decision-maker identified is Priya Nair.',
+      'This is a must-have. Customer need: reduce cloud security exposure across regulated workloads.',
+      'Proposed solution: Microsoft Defender for Cloud with Microsoft Sentinel. Final decision date: 2027-01-15.',
+      'We are excited and ready to move forward.'
+    ],
+    internalSegments: [
+      'Internal note: AWS is competing for the security platform scope.',
+      'The Security posture discovery milestone is committed. Risk: customer security architects have limited availability.'
+    ]
+  },
+  {
+    id: 'tr-security-complete-02',
+    title: 'Security discovery meeting notes - committee path',
+    source: 'paste',
+    occurredAt: '2026-09-17T15:00:00.000Z',
+    customerSpeaker: 'Daniel Reyes',
+    internalSpeaker: 'Avery Johnson',
+    customerSegments: [
+      'We secured a budget of 1.25 million dollars.',
+      'The projected opportunity value is 2.6 million.',
+      'The architecture committee makes the final decision next quarter; the final decision-maker is Daniel Reyes.',
+      'The control uplift is critical. Business need: standardize threat detection across all business units.',
+      'Recommended solution: Defender XDR integrated with Sentinel. We will make the final decision by 02/20/2027.',
+      'The leadership team is very positive about the approach.'
+    ],
+    internalSegments: [
+      'Internal note: Palo Alto remains the primary competitor.',
+      'Commitment confirmed for Security posture discovery. Risk is that identity telemetry access may arrive late.'
+    ]
+  },
+  {
+    id: 'tr-security-complete-03',
+    title: 'Cloud protection transcript - board checkpoint',
+    source: 'upload',
+    occurredAt: '2026-09-18T15:00:00.000Z',
+    customerSpeaker: 'Morgan Chen',
+    internalSpeaker: 'Jordan Lee',
+    customerSegments: [
+      'The board approved the budget at $1,300,000.',
+      'Our expected contract value is $2,750,000.',
+      'Board approval is required this fiscal year, and Morgan Chen owns the final decision.',
+      'This program is essential. Customer need: consolidate fragmented cloud security controls.',
+      'Proposed solution is Defender for Cloud plus Sentinel analytics. Final decision date is March 5, 2027.',
+      'The team is thrilled with the consolidated design.'
+    ],
+    internalSegments: [
+      'Internal note: Google Cloud is positioning an alternative security stack.',
+      'Security posture discovery has a confirmed commitment. Risk: procurement review could extend the schedule.'
+    ]
+  },
+  {
+    id: 'tr-security-complete-04',
+    title: 'Threat protection meeting recap - rapid decision',
+    source: 'paste',
+    occurredAt: '2026-09-19T15:00:00.000Z',
+    customerSpeaker: 'Alex Wilber',
+    internalSpeaker: 'Megan Bowen',
+    customerSegments: [
+      'Finance allocated a budget of 1400 thousand.',
+      'The estimated opportunity value is 2.9 million.',
+      'I will decide immediately; the decision-maker identified is Alex Wilber.',
+      'The risk reduction is non-negotiable. Business need: protect privileged access in the cloud.',
+      'Recommended solution is Microsoft Entra ID Protection with Defender XDR. Decision date: 2027-03-12.',
+      'This feels like a strong fit for our security roadmap.'
+    ],
+    internalSegments: [
+      'Internal note: Okta is not in scope, but IBM is competing on identity services.',
+      'The Security posture discovery milestone is committed. Risk: the customer has not assigned a test tenant.'
+    ]
+  },
+  {
+    id: 'tr-security-complete-05',
+    title: 'Security readiness transcript - sponsor alignment',
+    source: 'teams',
+    occurredAt: '2026-09-20T15:00:00.000Z',
+    customerSpeaker: 'Sara Davis',
+    internalSpeaker: 'Avery Johnson',
+    customerSegments: [
+      'We have sign-off on a $1.5m budget.',
+      'The projected deal value is $3.1 million.',
+      'Our security steering group will decide right away, and Sara Davis has final approval.',
+      'This is a should-have for the transformation. Customer need: automate investigation and response.',
+      'Proposed solution: Sentinel automation with Defender XDR. Final decision date: 04/02/2027.',
+      'We are cautiously optimistic and interested in proceeding.'
+    ],
+    internalSegments: [
+      'Internal note: ServiceNow is competing for the workflow portion.',
+      'Confirmed commitment for Security posture discovery. Risk is that the data retention policy is unresolved.'
+    ]
+  },
+  {
+    id: 'tr-security-complete-06',
+    title: 'Cloud defense meeting notes - operating model',
+    source: 'paste',
+    occurredAt: '2026-09-21T15:00:00.000Z',
+    customerSpeaker: 'Lee Gu',
+    internalSpeaker: 'Jordan Lee',
+    customerSegments: [
+      'We can commit a budget of 1.6 million.',
+      'The estimated contract value is 3.25 million.',
+      'A committee will decide this quarter; the final decision-maker is Lee Gu.',
+      'The operating model is a must-have. Business need: give the SOC one cross-cloud incident view.',
+      'Recommended solution: Microsoft Sentinel with Defender for Cloud Apps. The final decision is May 14, 2027.',
+      'The security operations team is enthusiastic about the plan.'
+    ],
+    internalSegments: [
+      'Internal note: Oracle is competing through the incumbent services agreement.',
+      'Security posture discovery is now committed. Risk: the SOC staffing plan is still incomplete.'
+    ]
+  },
+  {
+    id: 'tr-security-complete-07',
+    title: 'Cybersecurity transcript - investment review',
+    source: 'upload',
+    occurredAt: '2026-09-22T15:00:00.000Z',
+    customerSpeaker: 'Nestor Wilke',
+    internalSpeaker: 'Girish Pillai',
+    customerSegments: [
+      'The approved spend is $1,700,000 in this budget.',
+      'The expected deal value is $3.4 million.',
+      'The investment committee decides next quarter, and the decision-maker identified is Nestor Wilke.',
+      'This capability is critical. Customer need: improve ransomware detection and recovery readiness.',
+      'Proposed solution is Microsoft Sentinel and Defender for Endpoint. Final decision date is 2027-06-18.',
+      'Executives love it and are eager to proceed.'
+    ],
+    internalSegments: [
+      'Internal note: AWS is competing with a cloud-native security proposal.',
+      'Commitment confirmed for the Security posture discovery milestone. Risk: legal review of telemetry locations may delay approval.'
+    ]
+  },
+  {
+    id: 'tr-security-complete-08',
+    title: 'Zero trust meeting recap - individual approval',
+    source: 'paste',
+    occurredAt: '2026-09-23T15:00:00.000Z',
+    customerSpeaker: 'Miriam Graham',
+    internalSpeaker: 'Megan Bowen',
+    customerSegments: [
+      'Finance approved a budget of 1.8 million.',
+      'The projected contract value is 3.6 million.',
+      'It is a sole decision this year, and Miriam Graham makes the final call.',
+      'Zero trust is essential. Customer need: enforce consistent conditional access for every workforce identity.',
+      'Recommended solution: Microsoft Entra Suite with Defender XDR. Decision by 07/09/2027.',
+      'The sponsor sees a great fit and is ready to move forward.'
+    ],
+    internalSegments: [
+      'Internal note: Palo Alto is competing on the network security workstream.',
+      'The Security posture discovery milestone is committed. Risk: device inventory quality may slow policy rollout.'
+    ]
+  },
+  {
+    id: 'tr-security-complete-09',
+    title: 'Security platform transcript - urgent response',
+    source: 'teams',
+    occurredAt: '2026-09-24T15:00:00.000Z',
+    customerSpeaker: 'Isaac Levin',
+    internalSpeaker: 'Avery Johnson',
+    customerSegments: [
+      'We have secured the $1.9 million budget.',
+      'The estimated opportunity value is $3.8 million.',
+      'The steering committee must decide ASAP, and Isaac Levin owns the final decision.',
+      'The response capability is non-negotiable. Business need: shorten incident containment from days to hours.',
+      'Proposed solution: Microsoft Sentinel automation and Defender Experts. Final decision date: August 13, 2027.',
+      'The response leaders are excited by the design.'
+    ],
+    internalSegments: [
+      'Internal note: Google Cloud is competing with its security operations tooling.',
+      'Security posture discovery has a confirmed commitment. Risk is that incident data classification is unfinished.'
+    ]
+  },
+  {
+    id: 'tr-security-complete-10',
+    title: 'SOC modernization meeting notes - governance review',
+    source: 'paste',
+    occurredAt: '2026-09-25T15:00:00.000Z',
+    customerSpeaker: 'Emily Braun',
+    internalSpeaker: 'Jordan Lee',
+    customerSegments: [
+      'The committee approved a 2 million budget.',
+      'The expected opportunity value is 4.05 million.',
+      'The governance committee decides this quarter; the decision-maker identified is Emily Braun.',
+      'This is a good to have for the first wave. Customer need: centralize SOC reporting and case management.',
+      'Recommended solution is Microsoft Sentinel with unified security operations. Final decision date is 2027-09-17.',
+      'The team says the proposal is promising and is leaning positive.'
+    ],
+    internalSegments: [
+      'Internal note: ServiceNow is competing for security case management.',
+      'Confirmed commitment for Security posture discovery. Risk: governance ownership remains split across two teams.'
+    ]
+  },
+  {
+    id: 'tr-security-complete-11',
+    title: 'Cloud compliance transcript - funding confirmation',
+    source: 'upload',
+    occurredAt: '2026-09-26T15:00:00.000Z',
+    customerSpeaker: 'Adele Vance',
+    internalSpeaker: 'Girish Pillai',
+    customerSegments: [
+      'Leadership signed off on the $2.1m budget.',
+      'The projected deal value is $4.2 million.',
+      'The compliance board decides next quarter, and Adele Vance has final approval.',
+      'Continuous compliance is a nice to have. Business need: automate evidence collection for cloud audits.',
+      'Proposed solution is Defender for Cloud regulatory compliance. We will decide by 10/08/2027.',
+      'Stakeholders are interested and cautiously optimistic.'
+    ],
+    internalSegments: [
+      'Internal note: IBM is competing through its compliance consulting team.',
+      'The Security posture discovery milestone is now committed. Risk: control mappings need customer validation.'
+    ]
+  },
+  {
+    id: 'tr-security-complete-12',
+    title: 'Identity security meeting recap - final sponsor review',
+    source: 'teams',
+    occurredAt: '2026-09-27T15:00:00.000Z',
+    customerSpeaker: 'Grady Archie',
+    internalSpeaker: 'Megan Bowen',
+    customerSegments: [
+      'Finance allocated a budget of 2200 thousand.',
+      'The estimated contract value is 4.4 million.',
+      'I will decide immediately, and the final decision-maker is Grady Archie.',
+      'There is no need for a separate appliance. Customer need: reduce identity attack paths without new hardware.',
+      'Recommended solution: Microsoft Entra ID Protection and Defender for Identity. Final decision date: November 19, 2027.',
+      'The sponsor is thrilled and eager to proceed.'
+    ],
+    internalSegments: [
+      'Internal note: Oracle is competing through the existing identity platform.',
+      'Commitment confirmed for the Security posture discovery milestone. Risk is that legacy directory cleanup may miss the target date.'
+    ]
+  }
+] as const
+
+/** Seeded meeting transcripts linked to activities, with diarized segments as evidence units. */
 export const seedTranscripts: readonly Row[] = [
   { id: 'tr-grid-customer', opportunity_id: 'opp-grid-modernization', activity_id: 'act-grid-review', meeting_type: 'customer', title: 'Executive architecture review', source: 'teams', occurred_at: '2026-10-12T15:00:00.000Z' },
-  { id: 'tr-cloud-security', opportunity_id: 'opp-cloud-security-readiness', activity_id: 'act-cs-discovery', meeting_type: 'customer', title: 'Cloud security discovery call', source: 'teams', occurred_at: '2026-09-15T15:00:00.000Z' }
+  { id: 'tr-cloud-security', opportunity_id: 'opp-cloud-security-readiness', activity_id: 'act-cs-discovery', meeting_type: 'customer', title: 'Cloud security discovery call', source: 'teams', occurred_at: '2026-09-15T15:00:00.000Z' },
+  ...comprehensiveMeetingVariations.map((variation) => ({
+    id: variation.id,
+    opportunity_id: 'opp-cloud-security-readiness',
+    activity_id: 'act-cs-discovery',
+    meeting_type: 'customer',
+    title: variation.title,
+    source: variation.source,
+    occurred_at: variation.occurredAt
+  }))
 ]
 
 export const seedTranscriptSegments: readonly Row[] = [
@@ -221,7 +473,27 @@ export const seedTranscriptSegments: readonly Row[] = [
   { id: 'seg-grid-3', transcript_id: 'tr-grid-customer', start_ms: 83000, end_ms: 95000, speaker: 'Avery Johnson', speaker_role: 'internal', text: 'We are competing against AWS here, so the proof of value needs to land next week.' },
   { id: 'seg-cs-1', transcript_id: 'tr-cloud-security', start_ms: 15000, end_ms: 30000, speaker: 'Priya Nair', speaker_role: 'customer', text: 'We have sign-off to spend about 900 thousand this quarter to get our cloud security posture right.' },
   { id: 'seg-cs-2', transcript_id: 'tr-cloud-security', start_ms: 54000, end_ms: 70000, speaker: 'Daniel Reyes', speaker_role: 'customer', text: 'Our security steering committee makes the final call, and honestly this is a must-have for us this year.' },
-  { id: 'seg-cs-3', transcript_id: 'tr-cloud-security', start_ms: 95000, end_ms: 112000, speaker: 'Girish Pillai', speaker_role: 'internal', text: 'Let us schedule a threat-protection proof of value; note that Palo Alto is also in the evaluation.' }
+  { id: 'seg-cs-3', transcript_id: 'tr-cloud-security', start_ms: 95000, end_ms: 112000, speaker: 'Girish Pillai', speaker_role: 'internal', text: 'Let us schedule a threat-protection proof of value; note that Palo Alto is also in the evaluation.' },
+  ...comprehensiveMeetingVariations.flatMap((variation) => [
+    ...variation.customerSegments.map((text, index) => ({
+      id: `seg-${variation.id.slice(3)}-customer-${index + 1}`,
+      transcript_id: variation.id,
+      start_ms: index * 30000,
+      end_ms: index * 30000 + 25000,
+      speaker: variation.customerSpeaker,
+      speaker_role: 'customer',
+      text
+    })),
+    ...variation.internalSegments.map((text, index) => ({
+      id: `seg-${variation.id.slice(3)}-internal-${index + 1}`,
+      transcript_id: variation.id,
+      start_ms: (variation.customerSegments.length + index) * 30000,
+      end_ms: (variation.customerSegments.length + index) * 30000 + 25000,
+      speaker: variation.internalSpeaker,
+      speaker_role: 'internal',
+      text
+    }))
+  ])
 ]
 
 export interface LocalStoreSeed {
