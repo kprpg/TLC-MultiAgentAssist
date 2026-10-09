@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createFoundryMeetingExtractor } from '../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
-import type { MeetingExtractionContext } from '../../../packages/agents/meeting-signal-extractor/src/index.js'
+import {
+    MEETING_FIELD_DICTIONARY,
+    type MeetingExtractionContext
+} from '../../../packages/agents/meeting-signal-extractor/src/index.js'
 import type { FoundryOpenAIClient } from '../../../packages/connectors/foundry/index.js'
 
 function ctx(): MeetingExtractionContext {
@@ -24,6 +27,25 @@ function fakeClient(payload: unknown): { client: FoundryOpenAIClient; create: Re
     return { client, create }
 }
 
+interface CapturedFoundryRequest {
+    messages: Array<{ role: string; content: string }>
+    response_format: {
+        json_schema: {
+            schema: {
+                properties: {
+                    signals: {
+                        items: {
+                            properties: {
+                                field: { enum: string[] }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 describe('Foundry meeting extractor', () => {
     it('assembles a validated proposal from model signals with guardrails applied', async () => {
         const { client, create } = fakeClient({
@@ -45,6 +67,55 @@ describe('Foundry meeting extractor', () => {
         expect(byField.get('identifyCompetitors')?.after).toBe(true)
         expect(proposal.newMilestones[0]?.name).toBe('Proof of value')
         for (const slot of proposal.slots) expect(slot.evidence.length).toBeGreaterThan(0)
+    })
+
+    it('sends transcript and record snapshots while exposing every dictionary field to the model', async () => {
+        const { client, create } = fakeClient({
+            signals: [],
+            newMilestones: [],
+            unmappedSignals: []
+        })
+        const context = ctx()
+        context.milestones = [{
+            id: 'ms-1',
+            name: 'Technical validation',
+            fields: { milestoneCommitment: 'Uncommitted', milestoneRisk: null }
+        }]
+        const extractor = createFoundryMeetingExtractor({ openAIClient: client, model: 'gpt-6.1-sol' })
+
+        await extractor(context, { changeSetId: 'cs-model-payload' })
+
+        const call = create.mock.calls[0]
+        if (!call) throw new Error('Expected a Foundry request.')
+        const request = call[0] as CapturedFoundryRequest
+        const systemMessage = request.messages.find((message) => message.role === 'system')
+        const userMessage = request.messages.find((message) => message.role === 'user')
+        if (!systemMessage || !userMessage) throw new Error('Expected system and user messages.')
+
+        const payloadText = userMessage.content.split('\n').slice(1).join('\n')
+        const payload = JSON.parse(payloadText) as {
+            opportunity: { id: string; currentFields: Record<string, unknown> }
+            milestones: Array<{ id: string; currentFields: Record<string, unknown> }>
+            transcript: Array<{ segmentId: string; text: string }>
+        }
+        expect(payload.opportunity).toMatchObject({
+            id: 'opp-1',
+            currentFields: { budgetAmount: null, qualificationComments: null }
+        })
+        expect(payload.milestones).toEqual([{
+            id: 'ms-1',
+            name: 'Technical validation',
+            currentFields: { milestoneCommitment: 'Uncommitted', milestoneRisk: null }
+        }])
+        expect(payload.transcript).toEqual([
+            expect.objectContaining({ segmentId: 's1', text: 'We have sign-off to spend 900 thousand this quarter.' }),
+            expect.objectContaining({ segmentId: 's3', text: 'We are up against AWS.' })
+        ])
+
+        const canonicalFields = Object.keys(MEETING_FIELD_DICTIONARY)
+        for (const field of canonicalFields) expect(systemMessage.content).toContain(field)
+        expect(request.response_format.json_schema.schema.properties.signals.items.properties.field.enum)
+            .toEqual(canonicalFields)
     })
 
     it('drops model signals for fields outside the dictionary and no-ops', async () => {
