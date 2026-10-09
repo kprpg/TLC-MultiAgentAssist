@@ -35,13 +35,82 @@ body {
     border-bottom: 1px solid var(--vscode-panel-border);
     position: sticky;
     top: 0;
+    z-index: 10;
     background: var(--vscode-editor-background);
+    flex-wrap: wrap;
 }
 
 .tabs {
     display: flex;
     gap: 4px;
+}
+
+.portfolio-search {
+    position: relative;
     flex: 1;
+    min-width: 200px;
+}
+
+.portfolio-search input {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+    border-radius: 4px;
+    background: var(--vscode-input-background, var(--vscode-editorWidget-background));
+    color: var(--vscode-input-foreground, var(--vscode-foreground));
+    font: inherit;
+}
+
+.portfolio-search input:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+}
+
+.portfolio-search-results {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    box-shadow: 0 4px 12px var(--vscode-widget-shadow, #00000040);
+}
+
+.portfolio-search-results button {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    padding: 8px;
+    text-align: left;
+    color: var(--vscode-foreground);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+}
+
+.portfolio-search-results button:hover,
+.portfolio-search-results button:focus-visible {
+    background: var(--vscode-list-hoverBackground);
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+}
+
+.portfolio-search-results small,
+.portfolio-search-results p {
+    color: var(--vscode-descriptionForeground);
+}
+
+.portfolio-search-results p {
+    padding: 8px;
+    margin: 0;
+}
+
+.portfolio-search-results [role="alert"] {
+    color: var(--vscode-errorForeground);
 }
 
 .layout-controls {
@@ -1702,6 +1771,19 @@ textarea {
     margin: 8px 0 4px;
 }
 
+.next-best-action p {
+    margin: 4px 0 8px;
+}
+
+.next-best-action-evidence {
+    padding-left: 16px;
+    overflow-wrap: anywhere;
+}
+
+.next-best-action-evidence li {
+    margin-top: 6px;
+}
+
 .next-best-action small,
 .read-only-note {
     color: var(--vscode-descriptionForeground);
@@ -1726,6 +1808,11 @@ textarea {
 @media (max-width: 720px) {
     .app-header {
         gap: 8px;
+    }
+
+    .portfolio-search {
+        order: 1;
+        flex-basis: 100%;
     }
 
     .split {

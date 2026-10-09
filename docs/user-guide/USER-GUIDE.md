@@ -431,14 +431,18 @@ Example seen in the screenshot in [§5](#5-milestones--drilling-down-inside-an-o
 1. **Solution Engineer** — “Schedule a customer validation session for the open technical criterion.” *high confidence · 2 citations*
 2. **Specialist / SSP** — “Confirm the quantified business case and economic buyer.” *medium confidence · 2 citations*
 
+The VS Code **Next Best Actions** panel also shows each action's rationale, confidence, and citation count. Its evidence list resolves only that action's cited IDs to source titles and source labels. Select a linked title to open it through the extension's validated browser-opening path. Evidence without a URL remains visible as text; unresolved IDs are explicitly labeled as unavailable. Actions based on assumptions are marked for confirmation. Run **MCEM Coach** for the selected opportunity to populate the panel.
+
 ---
 
 ## 10. Search
 
 Use the search box in the command bar (top center) to find accounts and opportunities across your entire portfolio, including opportunities outside the account currently open.
 
+In the VS Code extension, the same search is available in the header on **Discover**, **Portfolio**, and **Plays**. Selecting a result switches to Portfolio and reveals the account and opportunity details panels. At narrow widths, search wraps onto its own header row. The extension reloads the visible portfolio when you focus the search box, so newly added or hidden customers and Deal Team changes are reflected on the next search.
+
 - Search matches partial account or opportunity names and is not case-sensitive.
-- Results identify whether each match is an account or opportunity. Opportunity results also show the associated account and current stage.
+- Results identify whether each match is an account or opportunity. Opportunity results also show the associated account.
 - Select a result to open its account. Selecting an opportunity also opens that opportunity’s detail view.
 - Press **Enter** to open the first result without leaving the keyboard.
 

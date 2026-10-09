@@ -5,12 +5,14 @@ export function NextBestActions({
     evaluation,
     loading,
     error,
-    onRun
+    onRun,
+    onOpenEvidence
 }: {
     evaluation?: McemView | undefined
     loading: boolean
     error?: string | undefined
     onRun(): void
+    onOpenEvidence(url: string): void
 }): ReactElement {
     const recommendations = evaluation?.recommendations ?? []
 
@@ -39,7 +41,28 @@ export function NextBestActions({
                                 <strong>{recommendation.ownerRole}</strong>
                             </div>
                             <h4>{recommendation.action}</h4>
-                            <small>{recommendation.confidence} confidence</small>
+                            <p>{recommendation.rationale}</p>
+                            <small>{recommendation.confidence} confidence · {recommendation.evidenceIds.length} {recommendation.evidenceIds.length === 1 ? 'citation' : 'citations'}</small>
+                            {recommendation.assumption && <p className="muted">Assumption - confirm before acting.</p>}
+                            {recommendation.evidenceIds.length > 0 && (
+                                <ul className="next-best-action-evidence" aria-label={`Evidence for ${recommendation.action}`}>
+                                    {recommendation.evidenceIds.map((id) => {
+                                        const evidence = evaluation?.evidence?.find((item) => item.id === id)
+                                        const url = evidence?.url
+                                        return (
+                                            <li key={id}>
+                                                {evidence ? <>
+                                                    {url
+                                                        ? <button className="link" onClick={() => onOpenEvidence(url)}>{evidence.title}</button>
+                                                        : <span>{evidence.title}</span>}
+                                                    {' '}<span className="badge">{evidence.source}</span>
+                                                    {' '}<small>{id}</small>
+                                                </> : <span className="muted">Evidence unavailable: {id}</span>}
+                                            </li>
+                                        )
+                                    })}
+                                </ul>
+                            )}
                         </article>
                     ))}
                 </div>

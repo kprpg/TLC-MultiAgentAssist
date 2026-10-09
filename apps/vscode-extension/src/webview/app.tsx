@@ -1270,6 +1270,8 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
     const [accountQuery, setAccountQuery] = useState('')
     const [accountCandidates, setAccountCandidates] = useState<AccountCandidateView[]>([])
     const [accountBusy, setAccountBusy] = useState(false)
+    const opportunityRequestId = useRef(0)
+    const mcemRequestId = useRef(0)
 
     const loadAccounts = useCallback(async (includeHidden: boolean) => {
         setAccounts({ status: 'loading' })
@@ -1288,40 +1290,56 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
     }, [loadAccounts])
 
     useEffect(() => {
-        if (focus?.accountId) setAccountId(focus.accountId)
-    }, [focus?.accountId])
+        if (focus?.accountId && accounts.status === 'ready') {
+            setAccountId(focus.accountId)
+            setSub('overview')
+        }
+    }, [focus, accounts.status])
 
     const loadOpportunities = useCallback((preferredId?: string) => {
+        const requestId = ++opportunityRequestId.current
         if (!accountId) return
         dataClient.listOpportunities(accountId).then((data) => {
+            if (requestId !== opportunityRequestId.current) return
             setOpportunities(data)
             setOpportunityId((current) => (preferredId && data.some((item) => item.id === preferredId))
                 ? preferredId
                 : (current && data.some((item) => item.id === current)) ? current : data[0]?.id)
-        }).catch(() => setOpportunities([]))
+        }).catch((cause: unknown) => {
+            if (requestId !== opportunityRequestId.current) return
+            setOpportunities([])
+            setNote(cause instanceof Error ? cause.message : 'Could not load opportunities.')
+        })
     }, [accountId])
 
-    useEffect(() => { loadOpportunities(focus?.opportunityId) }, [loadOpportunities, focus?.opportunityId])
+    useEffect(() => {
+        loadOpportunities(focus?.accountId === accountId ? focus?.opportunityId : undefined)
+        return () => { opportunityRequestId.current += 1 }
+    }, [loadOpportunities, focus, accountId])
 
     useEffect(() => {
+        mcemRequestId.current += 1
+        setMcem({ status: 'idle' })
         if (!opportunityId) { setMilestones([]); return }
         dataClient.listMilestones(opportunityId).then(setMilestones).catch(() => setMilestones([]))
-        setMcem({ status: 'idle' })
         setNote(undefined)
-    }, [opportunityId])
+        return () => { mcemRequestId.current += 1 }
+    }, [accountId, opportunityId])
 
     const selectedOpportunity = useMemo(
-        () => opportunities.find((opportunity) => opportunity.id === opportunityId),
-        [opportunities, opportunityId]
+        () => opportunities.find((opportunity) => opportunity.id === opportunityId && opportunity.accountId === accountId),
+        [opportunities, opportunityId, accountId]
     )
 
     const runCoach = useCallback(async () => {
         if (!selectedOpportunity) return
+        const requestId = ++mcemRequestId.current
         setMcem({ status: 'loading' })
         try {
-            setMcem({ status: 'ready', data: await dataClient.runMcemCoach(selectedOpportunity.accountId, selectedOpportunity.id) })
+            const data = await dataClient.runMcemCoach(selectedOpportunity.accountId, selectedOpportunity.id)
+            if (requestId === mcemRequestId.current) setMcem({ status: 'ready', data })
         } catch (error) {
-            setMcem({ status: 'error', error: (error as Error).message })
+            if (requestId === mcemRequestId.current) setMcem({ status: 'error', error: error instanceof Error ? error.message : 'Could not evaluate MCEM stage.' })
         }
     }, [selectedOpportunity])
 
@@ -1561,6 +1579,7 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
                     loading={mcem.status === 'loading'}
                     error={mcem.status === 'error' ? mcem.error : undefined}
                     onRun={() => void runCoach()}
+                    onOpenEvidence={(url) => void openEvidence(url)}
                 />
             )}
             </div>}
@@ -1777,6 +1796,12 @@ export function App(): ReactElement {
                 onToggleDetails={() => setDetailsExpanded((current) => !current)}
                 onToggleActions={() => setActionsExpanded((current) => !current)}
                 onOpenIssue={dataClient.openEvidence}
+                onSearchSelect={(target) => {
+                    setTab('portfolio')
+                    setFocus(target)
+                    setAccountsExpanded(true)
+                    setDetailsExpanded(true)
+                }}
             />
             <main className={`app-body${tab === 'plays' ? ' app-body--plays' : ''}`}>
                 {tab === 'portfolio' ? (

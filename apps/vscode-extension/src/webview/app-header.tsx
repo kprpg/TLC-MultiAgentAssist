@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import { FeedbackButton } from '../../../shared/feedback-button.js'
 import { PortfolioLayoutControls } from './portfolio-layout-controls.js'
+import { PortfolioSearch, type PortfolioSearchTarget } from './portfolio-search.js'
 
 export function AppHeader({
     tab,
@@ -12,7 +13,8 @@ export function AppHeader({
     onToggleAccounts,
     onToggleDetails,
     onToggleActions,
-    onOpenIssue
+    onOpenIssue,
+    onSearchSelect
 }: {
     tab: 'portfolio' | 'plays' | 'discover'
     mode: 'sample' | 'live'
@@ -24,6 +26,7 @@ export function AppHeader({
     onToggleDetails(): void
     onToggleActions(): void
     onOpenIssue(url: string): Promise<void> | void
+    onSearchSelect(target: PortfolioSearchTarget): void
 }): ReactElement {
     return (
         <header className="app-header">
@@ -32,6 +35,7 @@ export function AppHeader({
                 <button className={tab === 'portfolio' ? 'tab active' : 'tab'} onClick={() => onSelectTab('portfolio')}>Portfolio</button>
                 <button className={tab === 'plays' ? 'tab active' : 'tab'} onClick={() => onSelectTab('plays')}>Plays</button>
             </nav>
+            <PortfolioSearch onSelect={onSearchSelect} />
             {tab === 'portfolio' && (
                 <PortfolioLayoutControls
                     accountsExpanded={accountsExpanded}
