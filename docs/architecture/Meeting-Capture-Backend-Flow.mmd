@@ -1,0 +1,31 @@
+flowchart TD
+    A["User pastes or uploads transcript<br/>MeetingCaptureLauncher"] --> B["Webview request<br/>proposeMeetingChangeSet"]
+    B --> C["Strict bridge contract<br/>rawTranscript.content <= 500,000 chars"]
+    C --> D["Extension host router<br/>copies content, format, meetingType"]
+    D --> E["Provider parses text/VTT<br/>parseTranscriptContent"]
+    E --> F["Canonical MeetingTranscript<br/>segments + top-level meetingType"]
+    F --> G["Connector adds opportunity and milestone snapshots"]
+    G --> H{"Configured extractor?"}
+
+    H -->|"default: deterministic"| I["extractMeetingSignals<br/>rule coverage: 8 of 15 dictionary fields"]
+    H -->|"TLC_MEETING_EXTRACTOR=foundry"| J["Foundry request<br/>system prompt + JSON user payload"]
+    J --> K["Configured Foundry model<br/>Structured Outputs"]
+    K --> L["Model signals"]
+    I --> M["assembleProposal"]
+    L --> M
+    M --> N["Dictionary/no-op/option/sensitivity checks<br/>meetingChangeSetProposalSchema"]
+    N --> O["Human review and approval"]
+    O --> P{"Connector mode"}
+    P -->|"SQLite"| Q["Discrete opportunity/milestone writes<br/>transaction + audit note"]
+    P -->|"Live MSX"| R["Milestone commitment/risk writes<br/>opportunity signals appended to comments"]
+
+    F -.-> S["Observed gap: pasted meetingType does not populate<br/>segment.speakerRole; internal routing loses evidence"]
+    M -.-> T["Observed gap: ordinary slots may retain empty or<br/>unknown evidence IDs; speaker role is not cross-validated"]
+    J -.-> U["Coverage boundary: model sees 15 current fields;<br/>historical design contains additional fields/signals"]
+
+    classDef observed fill:#fff4ce,stroke:#8a6116,stroke-width:2px,color:#2b2111;
+    classDef model fill:#e8f3ff,stroke:#1769aa,stroke-width:2px,color:#102a43;
+    classDef effect fill:#e9f7ef,stroke:#237a45,stroke-width:2px,color:#173b26;
+    class S,T,U observed;
+    class J,K,L model;
+    class Q,R effect;

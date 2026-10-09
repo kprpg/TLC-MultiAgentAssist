@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { FixtureMsxConnector } from '../../../packages/connectors/msx/index.js'
+import { LocalStore, LocalStoreMsxConnector, type MeetingExtractorFn } from '../../../packages/connectors/local-store/index.js'
 import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
 import { createSampleWorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import type { AgentCapability } from '../../../packages/common/index.js'
@@ -76,5 +77,54 @@ describe('live data provider (Desktop/Web parity)', () => {
         const provider = makeLiveProvider()
         const definitions = await provider.listWorkflowDefinitions()
         expect(definitions.length).toBeGreaterThan(0)
+    })
+
+    it('forwards pasted meeting text through parsing and the connector to the configured extractor', async () => {
+        const connector = new LocalStoreMsxConnector(new LocalStore())
+        const extractor = vi.fn<MeetingExtractorFn>((context, options) => ({
+            changeSetId: options.changeSetId,
+            transcriptId: context.transcript.id,
+            opportunityId: context.opportunity.id,
+            meetingType: context.transcript.meetingType,
+            slots: [],
+            newMilestones: [],
+            suggestedMilestoneIds: [],
+            unmappedSignals: [],
+            proposedAt: '2026-10-08T00:00:00.000Z'
+        }))
+        const provider = buildLiveDataProvider({
+            orchestrator: new ThinSliceOrchestrator(
+                connector,
+                new ExtensionMcemGuidanceConnector(),
+                buildLiveTaskAgents()
+            ),
+            host: createSampleWorkflowHost(),
+            account: 'seller@contoso.com',
+            meetingConnector: connector,
+            meetingExtractor: extractor,
+            dispose: async () => { /* nothing to dispose in the in-memory store */ }
+        }, 'sample')
+
+        const content = [
+            'Priya Nair: We approved the security budget.',
+            'Daniel Reyes: The steering committee will decide this quarter.'
+        ].join('\n')
+        await provider.proposeMeetingChangeSet({
+            opportunityId: 'opp-cloud-security-readiness',
+            rawTranscript: { content, format: 'text', meetingType: 'internal' }
+        })
+
+        expect(extractor).toHaveBeenCalledTimes(1)
+        const call = extractor.mock.calls[0]
+        if (!call) throw new Error('Expected the meeting extractor to be invoked.')
+        const [context] = call
+        expect(context.transcript.meetingType).toBe('internal')
+        expect(context.transcript.segments.map((segment) => ({
+            speaker: segment.speaker,
+            text: segment.text
+        }))).toEqual([
+            { speaker: 'Priya Nair', text: 'We approved the security budget.' },
+            { speaker: 'Daniel Reyes', text: 'The steering committee will decide this quarter.' }
+        ])
     })
 })

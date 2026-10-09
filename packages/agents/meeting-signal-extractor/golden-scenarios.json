@@ -2,10 +2,50 @@
   "schemaVersion": 1,
   "agent": "meeting-signal-extractor",
   "fixtures": {
-    "transcripts": ["tr-cloud-security", "tr-grid-customer"],
+    "transcripts": [
+      "tr-cloud-security",
+      "tr-grid-customer",
+      "tr-security-complete-01",
+      "tr-security-complete-02",
+      "tr-security-complete-03",
+      "tr-security-complete-04",
+      "tr-security-complete-05",
+      "tr-security-complete-06",
+      "tr-security-complete-07",
+      "tr-security-complete-08",
+      "tr-security-complete-09",
+      "tr-security-complete-10",
+      "tr-security-complete-11",
+      "tr-security-complete-12"
+    ],
     "note": "Transcripts live in the SQLite test store (packages/connectors/local-store/seed.ts)."
   },
   "scenarios": [
+    {
+      "id": "complete-field-review-from-each-sample-variation",
+      "transcriptIds": [
+        "tr-security-complete-01",
+        "tr-security-complete-02",
+        "tr-security-complete-03",
+        "tr-security-complete-04",
+        "tr-security-complete-05",
+        "tr-security-complete-06",
+        "tr-security-complete-07",
+        "tr-security-complete-08",
+        "tr-security-complete-09",
+        "tr-security-complete-10",
+        "tr-security-complete-11",
+        "tr-security-complete-12"
+      ],
+      "opportunityId": "opp-cloud-security-readiness",
+      "prompt": "Extract every supported opportunity and milestone signal from each comprehensive sample transcript.",
+      "expected": [
+        "Every transcript proposes all 13 opportunity fields in MEETING_FIELD_DICTIONARY",
+        "Every transcript proposes milestoneCommitment and milestoneRisk for ms-sec-discovery",
+        "Every emitted slot cites transcript evidence and has a valid target record",
+        "Sensitive estimatedValue is visible for explicit human review"
+      ]
+    },
     {
       "id": "gap-fill-from-discovery-call",
       "transcriptId": "tr-cloud-security",
