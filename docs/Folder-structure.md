@@ -151,6 +151,8 @@ Agents consume connector interfaces or orchestrator-provided evidence. They must
 
 ## Dependency Direction
 
+The current browser-safe shared UI modules in `apps/shared` include `portfolio-search.ts`, which supplies the same matching and result-limit rules to Desktop/Web and the VS Code webview. The extension's focused `portfolio-search.tsx` component owns search loading and interaction; `next-best-actions.tsx` renders MCEM recommendations and their cited evidence without changing the host or orchestrator contracts.
+
 ```text
 Renderer UI
     |

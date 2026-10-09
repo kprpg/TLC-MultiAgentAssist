@@ -1513,8 +1513,6 @@ z.record(z.string().min(1), z.array(milestoneMembershipSchema));
 var defaultBaseUrl = "https://microsoftsales.crm.dynamics.com/api/data/v9.2/";
 var formattedValueSuffix = "@OData.Community.Display.V1.FormattedValue";
 var guidPattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-/** Upper bound on discovered opportunities returned per domain query. */
-var discoveryRowLimit = 200;
 var milestoneStatusCodes = {
 	"On Track": 86198e4,
 	"At Risk": 861980001,
@@ -1888,8 +1886,7 @@ var LiveMsxConnector = class {
 			rows.push(...await this.requestAll("opportunities", {
 				"$select": select,
 				"$filter": filterClauses.join(" and "),
-				"$orderby": "name asc",
-				"$top": String(discoveryRowLimit)
+				"$orderby": "name asc"
 			}));
 		}
 		return rows;
@@ -1964,7 +1961,7 @@ var LiveMsxConnector = class {
 		if (!(await this.getMilestoneRows(opportunityId)).some((milestone) => milestone.msp_engagementmilestoneid === milestoneId)) throw new Error("The milestone is not in the selected opportunity.");
 		const userId = await this.getCurrentUserId();
 		const templateId = await this.resolveMilestoneTeamTemplateId();
-		if (await this.isMilestoneTeamMember(milestoneId, userId, templateId)) {
+		if (await this.isMilestoneTeamMember(milestoneId)) {
 			this.invalidateMilestoneTeamCaches(opportunityId);
 			return {
 				opportunityId,
@@ -1987,7 +1984,7 @@ var LiveMsxConnector = class {
 		if (!guidPattern.test(milestoneId)) throw new Error("The milestone id must be a valid MSX GUID.");
 		const userId = await this.getCurrentUserId();
 		const templateId = await this.resolveMilestoneTeamTemplateId();
-		if (!await this.isMilestoneTeamMember(milestoneId, userId, templateId)) {
+		if (!await this.isMilestoneTeamMember(milestoneId)) {
 			this.invalidateMilestoneTeamCaches(opportunityId);
 			return {
 				opportunityId,
@@ -2089,13 +2086,15 @@ var LiveMsxConnector = class {
 		if (typeof templateId !== "string" || !guidPattern.test(templateId)) throw new Error(MILESTONE_TEAM_NOT_CONFIGURED_MESSAGE);
 		return templateId;
 	}
-	/** True when the milestone's auto-created access team already includes the given user. */
-	async isMilestoneTeamMember(milestoneId, userId, templateId) {
-		return (await this.requestAll("teams", {
-			"$select": "teamid",
-			"$filter": `teamtype eq 1 and _teamtemplateid_value eq ${templateId} and _regardingobjectid_value eq ${milestoneId} and teammembership_association/any(member:member/systemuserid eq ${userId})`,
-			"$top": "1"
-		})).length > 0;
+	/**
+	* True when the milestone's access team currently includes the signed-in user. Uses the same
+	* membership read as `onMilestoneTeam` (the all-teams query that only `$select`s
+	* `_regardingobjectid_value`) rather than a per-record `_regardingobjectid_value` **filter**, which
+	* Dataverse does not reliably support on the polymorphic `team.regardingobjectid` lookup. This also
+	* keeps the join/leave decision consistent with what the UI shows.
+	*/
+	async isMilestoneTeamMember(milestoneId) {
+		return (await this.milestoneTeamMilestoneIds()).has(milestoneId);
 	}
 	/** Body for the AddUserToRecordTeam / RemoveUserFromRecordTeam bound actions. */
 	recordTeamActionBody(milestoneId, templateId) {

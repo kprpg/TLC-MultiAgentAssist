@@ -49,14 +49,13 @@ import { DiscoveryControls, DiscoverySortHeader } from '../../../shared/discover
 import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportunities, toggleDiscoverySort, type DiscoveryFilters, type DiscoverySort } from '../../../shared/discovery.js'
 import { FeedbackButton } from '../../../shared/feedback-button.js'
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
+import { findPortfolioSearchResults, type PortfolioSearchResult } from '../../../shared/portfolio-search.js'
 
 type Shell = 'desktop' | 'web'
 type WorkspaceView = 'accounts' | 'workflows' | 'discover'
 type CenterTab = 'msx' | 'guidance' | 'stages'
 type Blade = 'accounts' | 'opportunities' | 'actions'
-type SearchResult =
-  | { type: 'account'; account: Account }
-  | { type: 'opportunity'; account: Account; opportunity: Opportunity }
+type SearchResult = PortfolioSearchResult<Account, Opportunity>
 
 type BladeWidths = Record<Blade, number>
 type MilestoneField = 'status' | 'riskDetails' | 'targetDate' | 'customerCommitment' | 'comments'
@@ -1054,20 +1053,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   }
 
   const normalizedSearch = searchQuery.trim().toLocaleLowerCase()
-  const searchResults: SearchResult[] = normalizedSearch
-    ? [
-        ...accounts
-          .filter((item) => item.name.toLocaleLowerCase().includes(normalizedSearch))
-          .map((item): SearchResult => ({ type: 'account', account: item })),
-        ...searchOpportunities
-          .filter((item) => item.name.toLocaleLowerCase().includes(normalizedSearch))
-          .map((item): SearchResult | null => {
-            const owningAccount = accounts.find((candidate) => candidate.id === item.accountId)
-            return owningAccount ? { type: 'opportunity', account: owningAccount, opportunity: item } : null
-          })
-          .filter((item): item is SearchResult => item !== null)
-      ].slice(0, 8)
-    : []
+  const searchResults = findPortfolioSearchResults(searchQuery, accounts, searchOpportunities)
 
   function chooseSearchResult(item: SearchResult) {
     setSearchQuery('')

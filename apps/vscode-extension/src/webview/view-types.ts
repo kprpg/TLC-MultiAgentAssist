@@ -114,7 +114,15 @@ export interface MilestoneUpdateInput {
 }
 
 export interface CriterionView { id: string; label: string; status: 'met' | 'partial' | 'missing'; rationale: string }
-export interface RecommendationView { id: string; action: string; ownerRole: string; confidence: string }
+export interface RecommendationView {
+    id: string
+    action: string
+    ownerRole: string
+    rationale: string
+    evidenceIds: string[]
+    assumption: boolean
+    confidence: 'high' | 'medium' | 'low'
+}
 export interface EvidenceView { id: string; title: string; source: string; url?: string }
 
 export interface McemView {

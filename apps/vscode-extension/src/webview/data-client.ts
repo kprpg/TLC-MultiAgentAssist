@@ -59,7 +59,9 @@ export const dataClient = {
         request<AgentTaskView>('runAgentTask', { capability, accountId, opportunityId, prompt }),
     listWorkflowDefinitions: () => request<WorkflowDefinitionView[]>('listWorkflowDefinitions', { scope: 'portfolio' }),
     listWorkflowRuns: (limit = 10) => request<WorkflowRunView[]>('listWorkflowRuns', { limit }),
-    openEvidence: (url: string) => request<null>('openEvidence', { url }),
+    openEvidence: async (url: string): Promise<void> => {
+    await request<null>('openEvidence', { url })
+    },
     exportContent: (title: string, content: string) => request<{ saved: boolean }>('exportContent', { title, content }),
     composeEmail: (subject: string, title: string, body: string) => request<{ drafted: boolean }>('composeEmail', { subject, title, body }),
 
