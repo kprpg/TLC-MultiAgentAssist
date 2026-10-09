@@ -14,7 +14,8 @@ describe('AppHeader', () => {
             onSelectTab: vi.fn(),
             onToggleAccounts: vi.fn(),
             onToggleDetails: vi.fn(),
-            onToggleActions: vi.fn()
+            onToggleActions: vi.fn(),
+            onOpenIssue: vi.fn()
         }))
 
         expect(markup).toContain('Portfolio')
@@ -23,6 +24,7 @@ describe('AppHeader', () => {
         expect(markup.indexOf('Discover')).toBeLessThan(markup.indexOf('Portfolio'))
         expect(markup.indexOf('Portfolio')).toBeLessThan(markup.indexOf('Plays'))
         expect(markup).toContain('Live')
+        expect(markup).toContain('aria-label="Send feedback"')
         expect(markup).not.toContain('TLC Assist')
     })
 })

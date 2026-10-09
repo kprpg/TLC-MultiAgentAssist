@@ -1,0 +1,263 @@
+.feedback-trigger {
+    display: grid;
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    padding: 0;
+    place-items: center;
+    border: 1px solid var(--vscode-panel-border, var(--cp-border, #d1d1d1));
+    border-radius: 50%;
+    background: transparent;
+    color: var(--vscode-textLink-foreground, var(--cp-link, #0f6cbd));
+    cursor: pointer;
+}
+
+.feedback-trigger:hover {
+    background: var(--vscode-toolbar-hoverBackground, var(--cp-accent-soft, #ebf3fc));
+}
+
+.feedback-trigger:focus-visible,
+.feedback-dialog button:focus-visible,
+.feedback-dialog input:focus-visible,
+.feedback-dialog textarea:focus-visible {
+    outline: 2px solid var(--vscode-focusBorder, var(--cp-accent, #0f6cbd));
+    outline-offset: 2px;
+}
+
+.feedback-trigger svg {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.7;
+}
+
+.feedback-trigger .feedback-smile-fill {
+    fill: currentColor;
+    stroke: none;
+}
+
+.feedback-backdrop {
+    position: fixed;
+    z-index: 10000;
+    inset: 0;
+    display: grid;
+    padding: 24px;
+    place-items: center;
+    background: rgb(0 0 0 / 52%);
+}
+
+.feedback-dialog {
+    width: min(620px, 100%);
+    max-height: calc(100vh - 48px);
+    overflow: auto;
+    border: 1px solid var(--vscode-panel-border, var(--cp-border, #d1d1d1));
+    border-radius: 8px;
+    background: var(--vscode-editor-background, var(--cp-surface, #ffffff));
+    color: var(--vscode-foreground, var(--cp-text, #242424));
+    box-shadow: 0 18px 48px rgb(0 0 0 / 28%);
+}
+
+.feedback-dialog form {
+    display: flex;
+    flex-direction: column;
+}
+
+.feedback-dialog-header,
+.feedback-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 20px;
+}
+
+.feedback-dialog-header {
+    align-items: flex-start;
+    border-bottom: 1px solid var(--vscode-panel-border, var(--cp-border, #d1d1d1));
+}
+
+.feedback-dialog-header h2,
+.feedback-dialog-header p,
+.feedback-fields p,
+.feedback-screenshots figure {
+    margin: 0;
+}
+
+.feedback-dialog-header h2 {
+    font-size: 18px;
+}
+
+.feedback-dialog-header p {
+    margin-top: 4px;
+    color: var(--vscode-descriptionForeground, var(--cp-text-muted, #616161));
+    font-size: 12px;
+}
+
+.feedback-close {
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+
+.feedback-close:hover {
+    background: var(--vscode-toolbar-hoverBackground, var(--cp-surface-soft, #f5f5f5));
+}
+
+.feedback-fields {
+    display: grid;
+    gap: 14px;
+    padding: 18px 20px;
+}
+
+.feedback-fields > label {
+    display: grid;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.feedback-fields small {
+    color: var(--vscode-descriptionForeground, var(--cp-text-muted, #616161));
+    font-size: 11px;
+    font-weight: 400;
+}
+
+.feedback-fields input,
+.feedback-fields textarea {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--vscode-input-border, var(--cp-border, #d1d1d1));
+    border-radius: 4px;
+    background: var(--vscode-input-background, var(--cp-surface, #ffffff));
+    color: var(--vscode-input-foreground, var(--cp-text, #242424));
+    font: inherit;
+    font-weight: 400;
+}
+
+.feedback-fields textarea {
+    resize: vertical;
+}
+
+.feedback-dropzone {
+    display: grid;
+    gap: 6px;
+    padding: 14px;
+    border: 1px dashed var(--vscode-panel-border, var(--cp-border, #b3b3b3));
+    border-radius: 6px;
+    background: var(--vscode-sideBar-background, var(--cp-surface-soft, #f5f5f5));
+}
+
+.feedback-dropzone > span,
+.feedback-copy-note,
+.feedback-privacy {
+    color: var(--vscode-descriptionForeground, var(--cp-text-muted, #616161));
+    font-size: 12px;
+}
+
+.feedback-file-button {
+    width: fit-content;
+    padding: 5px 9px;
+    border: 1px solid var(--vscode-button-border, var(--cp-border, #b3b3b3));
+    border-radius: 4px;
+    background: var(--vscode-button-secondaryBackground, var(--cp-surface, #ffffff));
+    cursor: pointer;
+}
+
+.feedback-file-button input {
+    display: none;
+}
+
+.feedback-screenshots {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 10px;
+}
+
+.feedback-screenshots figure {
+    display: grid;
+    min-width: 0;
+    gap: 5px;
+    padding: 8px;
+    border: 1px solid var(--vscode-panel-border, var(--cp-border, #d1d1d1));
+    border-radius: 4px;
+}
+
+.feedback-screenshots img {
+    width: 100%;
+    height: 84px;
+    object-fit: contain;
+    background: #ffffff;
+}
+
+.feedback-screenshots figcaption {
+    overflow: hidden;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.feedback-screenshots button {
+    border: 0;
+    background: transparent;
+    color: var(--vscode-textLink-foreground, var(--cp-link, #0f6cbd));
+    cursor: pointer;
+}
+
+.feedback-message {
+    padding: 9px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.feedback-message.error {
+    background: var(--vscode-inputValidation-errorBackground, #fde7e9);
+    color: var(--vscode-inputValidation-errorForeground, #a4262c);
+}
+
+.feedback-message.success {
+    background: var(--vscode-testing-iconPassed, #dff6dd);
+    color: var(--vscode-editor-background, #107c10);
+}
+
+.feedback-actions {
+    justify-content: flex-end;
+    border-top: 1px solid var(--vscode-panel-border, var(--cp-border, #d1d1d1));
+}
+
+.feedback-actions button {
+    padding: 7px 12px;
+    border: 1px solid var(--vscode-button-border, var(--cp-border, #b3b3b3));
+    border-radius: 4px;
+    background: var(--vscode-button-secondaryBackground, var(--cp-surface, #ffffff));
+    color: inherit;
+    cursor: pointer;
+}
+
+.feedback-actions button:disabled,
+.feedback-close:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
+.feedback-actions .feedback-primary {
+    border-color: var(--vscode-button-background, var(--cp-accent, #0f6cbd));
+    background: var(--vscode-button-background, var(--cp-accent, #0f6cbd));
+    color: var(--vscode-button-foreground, #ffffff);
+}
+
+@media (max-width: 640px) {
+    .feedback-backdrop {
+        padding: 8px;
+    }
+
+    .feedback-dialog {
+        max-height: calc(100vh - 16px);
+    }
+}

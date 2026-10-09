@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react'
+import { FeedbackButton } from '../../../shared/feedback-button.js'
 import { PortfolioLayoutControls } from './portfolio-layout-controls.js'
 
 export function AppHeader({
@@ -10,7 +11,8 @@ export function AppHeader({
     onSelectTab,
     onToggleAccounts,
     onToggleDetails,
-    onToggleActions
+    onToggleActions,
+    onOpenIssue
 }: {
     tab: 'portfolio' | 'plays' | 'discover'
     mode: 'sample' | 'live'
@@ -21,6 +23,7 @@ export function AppHeader({
     onToggleAccounts(): void
     onToggleDetails(): void
     onToggleActions(): void
+    onOpenIssue(url: string): Promise<void> | void
 }): ReactElement {
     return (
         <header className="app-header">
@@ -39,6 +42,7 @@ export function AppHeader({
                     onToggleActions={onToggleActions}
                 />
             )}
+            <FeedbackButton onOpenIssue={onOpenIssue} />
             <span className={`mode-badge mode-${mode}`}>{mode === 'live' ? 'Live' : 'Sample'}</span>
         </header>
     )
