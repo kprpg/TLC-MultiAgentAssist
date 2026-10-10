@@ -24,6 +24,15 @@ Every surface runs in one of two modes:
 
 See [Documentation](#documentation) for the full user guide, FAQ, and runbooks.
 
+## Voice search
+
+The main portfolio search supports a microphone button and **Ctrl+Alt+M** on all
+three current surfaces. Speech is processed offline on the user's device, shown
+as a preview, then inserted for review; Enter/result selection remains explicit.
+Desktop and local Windows VS Code use installed English Windows speech
+recognition; Web uses a bundled offline model. Remote VS Code voice is disabled
+to prevent remote microphone capture. See [voice search setup and privacy](docs/user-guide/VOICE-SEARCH.md).
+
 ## VS Code extension
 
 Requires **VS Code or VS Code Insiders 1.90.0 or later**. The extension is self-contained (no Node.js, npm, or native binaries), embeds its own MCP registry and tool policy, and starts in sample mode.
@@ -144,6 +153,7 @@ The `ext-v*` tag must match the extension `version` in `apps/vscode-extension/pa
 
 - [Technology stack](TechStack.md)
 - [End-user guide](docs/user-guide/USER-GUIDE.md)
+- [Voice search: usage, offline engines, and tests](docs/user-guide/VOICE-SEARCH.md)
 - [Frequently asked questions](docs/FAQ.md)
 - [VS Code extension install (end user)](docs/user-guide/VSCODE-EXTENSION-INSTALL.md)
 - [VS Code extension — command-line build, install, and run](docs/user-guide/VSCODE-EXTENSION-CLI.md)

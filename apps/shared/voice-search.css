@@ -1,0 +1,78 @@
+.voice-search-control {
+    display: inline-flex;
+    flex: 0 0 auto;
+}
+
+.voice-search-button {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 26px;
+    padding: 3px;
+    color: var(--vscode-textLink-foreground, var(--cp-accent, #0f6cbd));
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.voice-search-button[aria-pressed="true"] {
+    background: var(--vscode-toolbar-hoverBackground, var(--cp-accent-soft, #e8f1fa));
+}
+
+.voice-search-button:focus-visible,
+.voice-search-panel button:focus-visible,
+.voice-search-notice button:focus-visible {
+    outline: 2px solid var(--vscode-focusBorder, var(--cp-accent, #0f6cbd));
+    outline-offset: 2px;
+}
+
+.voice-search-panel,
+.voice-search-notice {
+    box-sizing: border-box;
+    padding: 12px;
+    color: var(--vscode-foreground, var(--cp-text, #242424));
+    background: var(--vscode-editorWidget-background, var(--cp-panel-strong, #fff));
+    border: 1px solid var(--vscode-panel-border, var(--cp-border, #d1d1d1));
+    border-radius: 6px;
+    box-shadow: 0 4px 12px #00000030;
+    font: inherit;
+    line-height: 1.5;
+}
+
+.voice-search-panel {
+    position: absolute;
+    z-index: 70;
+    top: calc(100% + 6px);
+    left: 0;
+    width: 100%;
+    min-width: 240px;
+}
+
+.voice-search-panel p { margin: 0 0 10px; }
+.voice-search-panel .voice-search-preview { overflow-wrap: anywhere; max-height: 150px; overflow: auto; }
+
+.voice-search-panel button,
+.voice-search-notice button {
+    margin-right: 8px;
+    padding: 4px 8px;
+    color: inherit;
+    background: transparent;
+    border: 1px solid var(--vscode-panel-border, var(--cp-border, #d1d1d1));
+    border-radius: 4px;
+    font: inherit;
+    cursor: pointer;
+}
+
+.voice-search-notice {
+    position: fixed;
+    z-index: 1000;
+    bottom: 16px;
+    right: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: min(480px, calc(100vw - 32px));
+}
+
+.voice-search-notice[role="alert"] { border-color: var(--vscode-errorForeground, #b10e1e); }

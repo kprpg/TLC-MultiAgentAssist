@@ -34,6 +34,8 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
     const { id, method } = parsed.data
     try {
         switch (method) {
+            case 'voiceInput':
+                return errorResponse(id, 'Voice input must be handled by the local presentation host.', 'host_only')
             case 'getCurrentUserEmail':
                 return successResponse(id, await provider.getCurrentUserEmail() ?? null)
             case 'listAccounts': {

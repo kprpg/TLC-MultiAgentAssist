@@ -54,6 +54,7 @@ import {
 import { createOutlookDraftMessage } from '../../desktop/electron/main/outlook-compose.js'
 import { createResponseDocumentBuffer } from '../../desktop/electron/main/response-document.js'
 import { invokeWorkflowHost, type WorkflowHost, type WorkflowHostOperation } from '../../../packages/orchestrator/workflows/index.js'
+import { createBrowserOnlyVoiceHost, type SharedVoiceInputHost } from '../../../packages/orchestrator/voice-input.js'
 
 const accountIdSchema = z.string().min(1).max(200)
 const maximumBodyBytes = 1_048_576
@@ -87,6 +88,7 @@ export interface AuthenticatedRequest {
 }
 
 export interface WebApiOptions {
+    resolveVoiceHost?(authentication: AuthenticatedRequest): SharedVoiceInputHost
     createRuntime(authentication: AuthenticatedRequest): Promise<WebRuntime> | WebRuntime
     resolveWorkflowHost?(authentication: AuthenticatedRequest): Promise<WorkflowHost> | WorkflowHost
     authenticate?(request: IncomingMessage): Promise<AuthenticatedRequest> | AuthenticatedRequest
@@ -95,6 +97,7 @@ export interface WebApiOptions {
 }
 
 export function buildWebApiHandler(options: WebApiOptions) {
+    const browserOnlyVoice = createBrowserOnlyVoiceHost()
     return async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
         const url = new URL(request.url ?? '/', 'http://localhost')
         if (!url.pathname.startsWith('/api/')) return false
@@ -123,6 +126,11 @@ export function buildWebApiHandler(options: WebApiOptions) {
 
             if (request.method === 'GET' && url.pathname === '/api/me') {
                 sendJson(response, 200, { email: authentication.userEmail })
+                return true
+            }
+            if (request.method === 'POST' && url.pathname === '/api/voice') {
+                const host = options.resolveVoiceHost?.(authentication) ?? browserOnlyVoice
+                sendJson(response, 200, await host.invoke(await readJsonBody(request)))
                 return true
             }
 

@@ -134,6 +134,7 @@ button {
 }
 
 .global-search input {
+    min-width: 0;
     width: 100%;
     border: 0;
     outline: 0;
@@ -144,6 +145,8 @@ button {
 .global-search svg {
     color: var(--cp-text-muted);
 }
+
+.global-search .voice-search-button svg { color: inherit; }
 
 .search-results {
     position: absolute;

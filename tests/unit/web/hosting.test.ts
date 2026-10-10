@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -26,6 +26,10 @@ describe('hosted web static files', () => {
         expect(body).toContain('<meta name="tlc-data-mode" content="live" />')
         expect(response.headers.get('cache-control')).toBe('no-store')
         expect(response.headers.get('content-security-policy')).toContain("frame-ancestors 'none'")
+        expect(response.headers.get('content-security-policy')).toContain("connect-src 'self'")
+        expect(response.headers.get('content-security-policy')).toContain("worker-src 'self'")
+        expect(response.headers.get('content-security-policy')).not.toContain("'unsafe-eval'")
+        expect(response.headers.get('permissions-policy')).toBe('microphone=(self), camera=()')
         expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     })
 
@@ -49,11 +53,23 @@ describe('hosted web static files', () => {
         expect(body).toContain('<meta name="tlc-data-mode" content="sample" />')
     })
 
+    it('isolates required dynamic evaluation to the offline speech worker, never the application page', async () => {
+        const baseUrl = await listen()
+        const response = await fetch(`${baseUrl}/voice/vosk-worker.js`)
+        expect(response.status).toBe(200)
+        expect(response.headers.get('content-security-policy')).toContain("'unsafe-eval'")
+        expect(response.headers.get('content-security-policy')).toContain("connect-src 'self'")
+        expect(response.headers.get('content-security-policy')).toContain("default-src 'none'")
+        expect((await fetch(baseUrl)).headers.get('content-security-policy')).not.toContain("'unsafe-eval'")
+    })
+
     async function listen(dataMode: 'live' | 'sample' = 'live'): Promise<string> {
         staticRoot = await mkdtemp(join(tmpdir(), 'tlc-web-'))
+        await mkdir(join(staticRoot, 'voice'))
         await Promise.all([
             writeFile(join(staticRoot, 'index.html'), '<html><head></head><body>TLC</body></html>'),
-            writeFile(join(staticRoot, 'main.js'), 'console.log("TLC")')
+            writeFile(join(staticRoot, 'main.js'), 'console.log("TLC")'),
+            writeFile(join(staticRoot, 'voice', 'vosk-worker.js'), 'self.postMessage("worker")')
         ])
         const serveStatic = buildStaticHandler(staticRoot, dataMode)
         server = createServer((request, response) => {

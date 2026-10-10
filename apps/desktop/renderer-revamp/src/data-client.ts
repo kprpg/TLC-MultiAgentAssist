@@ -57,8 +57,10 @@ import {
 } from '../../../../packages/orchestrator/workflows/view-contracts.js'
 import type { StartWorkflowHostRequest, WorkflowHostOperation } from '../../../../packages/orchestrator/workflows/host.js'
 import { milestoneRecommendations, summarizeMilestones } from '../../../../packages/agents/mcem-coach/src/milestone-signals.js'
+import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest, type VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 
 export interface RevampDataClient {
+    invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     readonly mode: 'desktop' | 'web-live' | 'web-sample'
     exitApplication(): Promise<void>
     getCurrentUserEmail(): Promise<string | undefined>
@@ -129,6 +131,9 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
     )
     return {
         mode,
+        invokeVoice: async (request) => voiceResponseSchema.parse(await apiRequest(fetcher, '/api/voice', {
+            method: 'POST', body: JSON.stringify(voiceRequestSchema.parse(request))
+        })),
         exitApplication: async () => { await apiRequest(fetcher, '/api/exit', { method: 'POST' }) },
         getCurrentUserEmail: async () => {
             const result = await apiRequest(fetcher, '/api/me') as { email?: unknown }
@@ -210,6 +215,7 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
 }
 
 interface DesktopBridge {
+    invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     exitApplication(): Promise<void>
     getDataStatus(): Promise<DesktopDataStatus>
     listAccounts(options?: AccountListOptions): Promise<Account[]>
@@ -563,13 +569,15 @@ function webClient(): RevampDataClient {
         getWorkflowRun: createWebApiClient().getWorkflowRun,
         cancelWorkflowRun: createWebApiClient().cancelWorkflowRun,
         listWorkflowRuns: createWebApiClient().listWorkflowRuns,
-        prepareWorkflowGuidance: createWebApiClient().prepareWorkflowGuidance
+        prepareWorkflowGuidance: createWebApiClient().prepareWorkflowGuidance,
+        invokeVoice: createWebApiClient().invokeVoice
     }
 }
 
 function desktopClient(bridge: DesktopBridge): RevampDataClient {
     return {
         mode: 'desktop',
+        invokeVoice: async (request) => voiceResponseSchema.parse(await bridge.invokeVoice(voiceRequestSchema.parse(request))),
         exitApplication: () => bridge.exitApplication(),
         getCurrentUserEmail: async () => (await bridge.getDataStatus()).auth.userEmail,
         listAccounts: (options) => bridge.listAccounts(options),

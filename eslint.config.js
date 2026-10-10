@@ -36,7 +36,7 @@ export default defineConfig(
     }
   },
   {
-    files: ['apps/vscode-extension/test/**/*.cjs'],
+    files: ['apps/vscode-extension/test/**/*.cjs', 'tests/electron/vscode-voice-bootstrap.cjs'],
     languageOptions: {
       sourceType: 'commonjs',
       globals: {

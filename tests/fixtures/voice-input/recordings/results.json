@@ -1,0 +1,32 @@
+﻿[
+    {
+        "id":  "grid-operations",
+        "expectedText":  "grid operations modernization",
+        "fileName":  "grid-operations.wav",
+        "sampleRate":  16000,
+        "bitsPerSample":  16,
+        "channels":  1,
+        "bytes":  95406,
+        "sha256":  "2dd708e21145b85d20d123751b4b236e5b4f98b3c9f50c19c007e93dba68633b"
+    },
+    {
+        "id":  "data-platform",
+        "expectedText":  "clinical data platform",
+        "fileName":  "data-platform.wav",
+        "sampleRate":  16000,
+        "bitsPerSample":  16,
+        "channels":  1,
+        "bytes":  82286,
+        "sha256":  "ace9f684c5e7deafb1b1049de571bb525d4f63b0541e032aa84ce1ac566829c0"
+    },
+    {
+        "id":  "renewal-review",
+        "expectedText":  "review the renewal opportunity",
+        "fileName":  "renewal-review.wav",
+        "sampleRate":  16000,
+        "bitsPerSample":  16,
+        "channels":  1,
+        "bytes":  86126,
+        "sha256":  "87b21276a1bab2db69207902b4d8e376308e3d1424d7f6800ce88d1c379857e7"
+    }
+]

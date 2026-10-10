@@ -1,6 +1,7 @@
 import { readFile, stat } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { extname, resolve, sep } from 'node:path'
+import { voiceWorkerCsp, voiceWorkerFile } from '../../../scripts/voice-worker-assets.mjs'
 
 export function buildStaticHandler(staticRoot: string, dataMode: 'live' | 'sample' = 'live') {
     const resolvedRoot = resolve(staticRoot)
@@ -23,6 +24,9 @@ export function buildStaticHandler(staticRoot: string, dataMode: 'live' | 'sampl
 
         if (!(await isFile(filePath))) filePath = resolve(resolvedRoot, 'index.html')
         let content = await readFile(filePath)
+        if (requestedPath === `/${voiceWorkerFile}` && filePath === resolve(resolvedRoot, voiceWorkerFile)) {
+            response.setHeader('content-security-policy', voiceWorkerCsp)
+        }
         if (filePath.endsWith('index.html')) {
             content = Buffer.from(content.toString('utf8').replace(
                 '</head>',
@@ -39,7 +43,8 @@ export function buildStaticHandler(staticRoot: string, dataMode: 'live' | 'sampl
 }
 
 export function setSecurityHeaders(response: ServerResponse): void {
-    response.setHeader('content-security-policy', "default-src 'self'; connect-src 'self'; img-src 'self' data:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+    response.setHeader('content-security-policy', "default-src 'self'; connect-src 'self'; img-src 'self' data:; script-src 'self' 'unsafe-inline'; worker-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+    response.setHeader('permissions-policy', 'microphone=(self), camera=()')
     response.setHeader('referrer-policy', 'no-referrer')
     response.setHeader('x-content-type-options', 'nosniff')
     response.setHeader('x-frame-options', 'DENY')

@@ -439,6 +439,12 @@ The VS Code **Next Best Actions** panel also shows each action's rationale, conf
 
 Use the search box in the command bar (top center) to find accounts and opportunities across your entire portfolio, including opportunities outside the account currently open.
 
+The microphone button or **Ctrl+Alt+M** starts offline voice input on Desktop,
+Web, and local Windows VS Code. Confirm the first-use disclosure, speak, then
+stop and review the inserted text before pressing Enter or selecting a result.
+Escape cancels; typing or leaving the view cancels uninserted speech. See
+[voice search prerequisites, privacy, and troubleshooting](VOICE-SEARCH.md).
+
 In the VS Code extension, the same search is available in the header on **Discover**, **Portfolio**, and **Plays**. Selecting a result switches to Portfolio and reveals the account and opportunity details panels. At narrow widths, search wraps onto its own header row. The extension reloads the visible portfolio when you focus the search box, so newly added or hidden customers and Deal Team changes are reflected on the next search.
 
 - Search matches partial account or opportunity names and is not case-sensitive.
