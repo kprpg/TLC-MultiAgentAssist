@@ -15,6 +15,7 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { AlignmentType, Document, ExternalHyperlink, HeadingLevel, LevelFormat, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
+import { spawn } from "node:child_process";
 var workflowAgentCapabilityValues = [
 	"account-pulse",
 	"mcem-coach",
@@ -695,6 +696,107 @@ var meetingChangeSetResultSchema = z.object({
 	items: z.array(meetingInjectItemResultSchema),
 	auditNote: z.string().min(1)
 }).strict();
+var voiceLimits = {
+	maxAudioMs: 3e4,
+	silenceMs: 1e4,
+	maxTranscriptChars: 2e3,
+	maxSegments: 64,
+	finalizationMs: 1e3
+};
+var voiceAvailabilitySchema = z.discriminatedUnion("available", [z.object({
+	available: z.literal(true),
+	processing: z.literal("on-device"),
+	engine: z.enum(["windows-offline", "browser-offline"])
+}).strict(), z.object({
+	available: z.literal(false),
+	reason: z.enum([
+		"unsupported-platform",
+		"remote-host",
+		"missing-language",
+		"not-configured"
+	]),
+	message: z.string().min(1).max(400)
+}).strict()]);
+var voiceSegmentSchema = z.object({
+	id: z.string().min(1).max(80),
+	sequence: z.number().int().nonnegative(),
+	text: z.string().max(voiceLimits.maxTranscriptChars),
+	isFinal: z.boolean()
+}).strict();
+var voiceErrorCodeSchema = z.enum([
+	"permission-denied",
+	"no-speech",
+	"device-lost",
+	"provider-error",
+	"cancelled"
+]);
+var voiceSourceEventSchema = z.discriminatedUnion("type", [
+	z.object({
+		contractVersion: z.literal("1.0"),
+		type: z.literal("started")
+	}).strict(),
+	z.object({
+		contractVersion: z.literal("1.0"),
+		type: z.literal("segment"),
+		segment: voiceSegmentSchema.extend({ text: z.string().max(16384) }).strict()
+	}).strict(),
+	z.object({
+		contractVersion: z.literal("1.0"),
+		type: z.literal("ended")
+	}).strict(),
+	z.object({
+		contractVersion: z.literal("1.0"),
+		type: z.literal("error"),
+		code: voiceErrorCodeSchema,
+		message: z.string().min(1).max(400)
+	}).strict()
+]);
+var envelope = { contractVersion: z.literal("1.0") };
+var voiceStartRequestSchema = z.object({
+	...envelope,
+	operation: z.literal("start"),
+	sessionId: z.string().uuid(),
+	locale: z.literal("en-US"),
+	consent: z.literal(true),
+	hints: z.array(z.string().trim().min(1).max(200)).max(64).default([])
+}).strict();
+var voiceRequestSchema = z.discriminatedUnion("operation", [
+	z.object({
+		...envelope,
+		operation: z.literal("availability")
+	}).strict(),
+	voiceStartRequestSchema,
+	z.object({
+		...envelope,
+		operation: z.enum([
+			"read",
+			"stop",
+			"cancel"
+		]),
+		sessionId: z.string().uuid()
+	}).strict()
+]);
+var voiceSessionSchema = z.object({
+	...envelope,
+	kind: z.literal("session"),
+	sessionId: z.string().uuid(),
+	status: z.enum([
+		"arming",
+		"listening",
+		"finalizing",
+		"ended",
+		"cancelled",
+		"error"
+	]),
+	segments: z.array(voiceSegmentSchema).max(voiceLimits.maxSegments),
+	message: z.string().max(400),
+	errorCode: voiceErrorCodeSchema.optional()
+}).strict();
+var voiceResponseSchema = z.discriminatedUnion("kind", [z.object({
+	...envelope,
+	kind: z.literal("availability"),
+	availability: voiceAvailabilitySchema
+}).strict(), voiceSessionSchema]);
 var dataModeSchema = z.enum(["sample", "live"]);
 var sourceStateSchema = z.enum([
 	"sample",
@@ -2660,10 +2762,11 @@ function matchTimeline(text) {
 	if (/\bthis quarter\b/i.test(text)) return "This Quarter";
 	if (/\bthis (fiscal )?year\b/i.test(text)) return "This Year";
 	if (/\b(immediately|right away|asap|as soon as possible)\b/i.test(text)) return "Immediate";
+	if (/\b(not known|unknown|to be determined|tbd)\b/i.test(text)) return "Not known";
 	return null;
 }
 function matchProcess(text) {
-	if (/\b(committee|steering (group|committee)|board approv)/i.test(text)) return "Committee";
+	if (/\b(committee|steering (group|committee)|board (approv|decid))/i.test(text)) return "Committee";
 	if (/\b(sole decision|single decision[- ]maker|i will decide|i decide)\b/i.test(text)) return "Individual";
 	return null;
 }
@@ -2671,12 +2774,56 @@ function matchNeed(text) {
 	if (/\bmust[- ]have\b|\bcritical\b|\bessential\b|\bnon-negotiable\b/i.test(text)) return "Must have";
 	if (/\bshould[- ]have\b/i.test(text)) return "Should have";
 	if (/\b(good to have|nice to have)\b/i.test(text)) return "Good to have";
+	if (/\b(no need|not needed|not a requirement)\b/i.test(text)) return "No need";
 	return null;
 }
 function matchSentiment(text) {
-	if (/\b(excited|thrilled|love it|great fit|strong fit|very positive)\b/i.test(text)) return "Hot";
+	if (/\b(excited|thrilled|love it|great fit|strong fit|very positive|enthusiastic|eager to proceed|ready to move forward)\b/i.test(text)) return "Hot";
+	if (/\b(cautiously optimistic|positive but|interested|promising|leaning positive)\b/i.test(text)) return "Warm";
 	if (/\b(concerned|worried|frustrated|hesitant|skeptical|not convinced)\b/i.test(text)) return "Cold";
 	return null;
+}
+function matchDecisionMaker(text) {
+	return /\b(decision[- ]maker (?:is|identified)|final decision[- ]maker|has final approval|makes? the final (?:call|decision)|owns? the final decision)\b/i.test(text);
+}
+function matchCustomerNeed(text) {
+	return text.match(/\b(?:customer|business) need\s*(?:is|:|-)\s*(.+?)(?:[.!?]|$)/i)?.[1]?.trim() || null;
+}
+function matchProposedSolution(text) {
+	return text.match(/\b(?:proposed|recommended) solution\s*(?:is|:|-)\s*(.+?)(?:[.!?]|$)/i)?.[1]?.trim() || null;
+}
+function normalizedDate(year, month, day) {
+	const date = new Date(Date.UTC(year, month - 1, day));
+	if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+	return date.toISOString().slice(0, 10);
+}
+function matchFinalDecisionDate(text) {
+	if (!/\b(final decision|decision date|decide by|decision by)\b/i.test(text)) return null;
+	const iso = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+	if (iso?.[1] && iso[2] && iso[3]) return normalizedDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+	const numeric = text.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
+	if (numeric?.[1] && numeric[2] && numeric[3]) return normalizedDate(Number(numeric[3]), Number(numeric[1]), Number(numeric[2]));
+	const monthNames = {
+		january: 1,
+		february: 2,
+		march: 3,
+		april: 4,
+		may: 5,
+		june: 6,
+		july: 7,
+		august: 8,
+		september: 9,
+		october: 10,
+		november: 11,
+		december: 12
+	};
+	const named = text.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(\d{4})\b/i);
+	if (!named?.[1] || !named[2] || !named[3]) return null;
+	const month = monthNames[named[1].toLowerCase()];
+	return month ? normalizedDate(Number(named[3]), month, Number(named[2])) : null;
+}
+function matchMilestoneRisk(text) {
+	return text.match(/\brisk\s*(?:is|:|-)\s*(.+?)(?:[.!?]|$)/i)?.[1]?.trim() || null;
 }
 function findCompetitor(text) {
 	for (const name of KNOWN_COMPETITORS) if (new RegExp(`\\b${name.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\b`, "i").test(text)) return name;
@@ -2738,7 +2885,7 @@ function extractMeetingSignals(ctx, options = {}) {
 					evidence: [seg.segmentId],
 					rationale: `Customer stated a budget of ${formatMoney(amount)}.`
 				});
-				if (/\b(approved|sign[- ]?off|commit|secured|allocated)\b/i.test(text)) candidates.push({
+				if (/\b(approved|sign(?:ed)?[- ]?off|commit|secured|allocated)\b/i.test(text)) candidates.push({
 					canonical: "budgetStatus",
 					after: "Yes",
 					confidence: .8,
@@ -2746,6 +2893,16 @@ function extractMeetingSignals(ctx, options = {}) {
 					rationale: "Customer confirmed budget is approved."
 				});
 			}
+		}
+		if (/\b(estimated|expected|projected)\s+(deal|opportunity|contract)?\s*value\b|\bdeal value\b/i.test(text)) {
+			const amount = parseMoney(text);
+			if (amount !== null) candidates.push({
+				canonical: "estimatedValue",
+				after: amount,
+				confidence: .92,
+				evidence: [seg.segmentId],
+				rationale: `Meeting participants estimated the opportunity value at ${formatMoney(amount)}.`
+			});
 		}
 		const timeline = matchTimeline(text);
 		if (timeline) candidates.push({
@@ -2763,6 +2920,13 @@ function extractMeetingSignals(ctx, options = {}) {
 			evidence: [seg.segmentId],
 			rationale: `Decision process described as "${process}".`
 		});
+		if (matchDecisionMaker(text)) candidates.push({
+			canonical: "decisionMaker",
+			after: true,
+			confidence: .8,
+			evidence: [seg.segmentId],
+			rationale: "The meeting identified who owns the final decision."
+		});
 		const need = matchNeed(text);
 		if (need) candidates.push({
 			canonical: "need",
@@ -2770,6 +2934,32 @@ function extractMeetingSignals(ctx, options = {}) {
 			confidence: .72,
 			evidence: [seg.segmentId],
 			rationale: `Customer framed the need as "${need}".`
+		});
+		if (!internal) {
+			const customerNeed = matchCustomerNeed(text);
+			if (customerNeed) candidates.push({
+				canonical: "customerNeed",
+				after: customerNeed,
+				confidence: .78,
+				evidence: [seg.segmentId],
+				rationale: "Customer stated the business need in the meeting."
+			});
+			const proposedSolution = matchProposedSolution(text);
+			if (proposedSolution) candidates.push({
+				canonical: "proposedSolution",
+				after: proposedSolution,
+				confidence: .78,
+				evidence: [seg.segmentId],
+				rationale: "Meeting participants described the proposed solution."
+			});
+		}
+		const finalDecisionDate = matchFinalDecisionDate(text);
+		if (finalDecisionDate) candidates.push({
+			canonical: "finalDecisionDate",
+			after: finalDecisionDate,
+			confidence: .86,
+			evidence: [seg.segmentId],
+			rationale: `Customer stated a final decision date of ${finalDecisionDate}.`
 		});
 		const sentiment = matchSentiment(text);
 		if (sentiment) candidates.push({
@@ -2779,6 +2969,26 @@ function extractMeetingSignals(ctx, options = {}) {
 			evidence: [seg.segmentId],
 			rationale: `Tone suggests a "${sentiment}" sentiment.`
 		});
+		const referencedMilestone = ctx.milestones.find((milestone) => text.toLowerCase().includes(milestone.name.toLowerCase()));
+		if (referencedMilestone && /\b(committed|commitment confirmed|confirmed commitment)\b/i.test(text)) candidates.push({
+			canonical: "milestoneCommitment",
+			targetRecordId: referencedMilestone.id,
+			after: "Committed",
+			confidence: .83,
+			evidence: [seg.segmentId],
+			rationale: `Commitment was confirmed for milestone "${referencedMilestone.name}".`
+		});
+		if (internal && referencedMilestone) {
+			const risk = matchMilestoneRisk(text);
+			if (risk) candidates.push({
+				canonical: "milestoneRisk",
+				targetRecordId: referencedMilestone.id,
+				after: risk,
+				confidence: .74,
+				evidence: [seg.segmentId],
+				rationale: `Internal risk recorded for milestone "${referencedMilestone.name}".`
+			});
+		}
 		const competitor = findCompetitor(text);
 		if (competitor) {
 			competitorNotes.push({
@@ -5280,6 +5490,271 @@ var ACTIVITY_STATUS = {
 	2: "Canceled",
 	3: "Scheduled"
 };
+/** Meetings / activities tied to opportunities (the meeting a transcript comes from). */
+var seedActivities = [
+	{
+		id: "act-grid-review",
+		opportunity_id: "opp-grid-modernization",
+		subject: "Executive architecture review",
+		owner_id: "user-avery",
+		activity_type: "appointment",
+		scheduled_start: "2026-10-12T15:00:00.000Z",
+		scheduled_end: "2026-10-12T16:00:00.000Z",
+		status: 3,
+		is_online_meeting: 1,
+		online_meeting_join_url: "https://teams.microsoft.com/l/meetup-join/grid-review",
+		location: "Microsoft Teams",
+		description: "Review solution architecture and decision timeline."
+	},
+	{
+		id: "act-grid-followup",
+		opportunity_id: "opp-grid-modernization",
+		subject: "Customer follow-up on security review",
+		owner_id: "user-avery",
+		activity_type: "phonecall",
+		scheduled_start: "2026-08-01T14:00:00.000Z",
+		scheduled_end: "2026-08-01T14:30:00.000Z",
+		status: 0,
+		is_online_meeting: 0,
+		online_meeting_join_url: null,
+		location: null,
+		description: "Overdue follow-up on the security and compliance review."
+	},
+	{
+		id: "act-ai-kickoff",
+		opportunity_id: "opp-ai-service",
+		subject: "AI service kickoff",
+		owner_id: "user-morgan",
+		activity_type: "appointment",
+		scheduled_start: "2026-08-10T16:00:00.000Z",
+		scheduled_end: "2026-08-10T17:00:00.000Z",
+		status: 1,
+		is_online_meeting: 1,
+		online_meeting_join_url: "https://teams.microsoft.com/l/meetup-join/ai-kickoff",
+		location: "Microsoft Teams",
+		description: "Kickoff and discovery session."
+	},
+	{
+		id: "act-cs-discovery",
+		opportunity_id: "opp-cloud-security-readiness",
+		subject: "Cloud security discovery call",
+		owner_id: "user-girish",
+		activity_type: "appointment",
+		scheduled_start: "2026-09-15T15:00:00.000Z",
+		scheduled_end: "2026-09-15T15:45:00.000Z",
+		status: 1,
+		is_online_meeting: 1,
+		online_meeting_join_url: "https://teams.microsoft.com/l/meetup-join/cs-discovery",
+		location: "Microsoft Teams",
+		description: "Qualify budget, timeline, and decision process for the security readiness initiative."
+	}
+];
+var comprehensiveMeetingVariations = [
+	{
+		id: "tr-security-complete-01",
+		title: "Security qualification transcript - executive review",
+		source: "teams",
+		occurredAt: "2026-09-16T15:00:00.000Z",
+		customerSpeaker: "Priya Nair",
+		internalSpeaker: "Girish Pillai",
+		customerSegments: [
+			"The approved budget is $1.1 million for this program.",
+			"The estimated deal value is $2.4 million.",
+			"Our steering committee decides this quarter, and the decision-maker identified is Priya Nair.",
+			"This is a must-have. Customer need: reduce cloud security exposure across regulated workloads.",
+			"Proposed solution: Microsoft Defender for Cloud with Microsoft Sentinel. Final decision date: 2027-01-15.",
+			"We are excited and ready to move forward."
+		],
+		internalSegments: ["Internal note: AWS is competing for the security platform scope.", "The Security posture discovery milestone is committed. Risk: customer security architects have limited availability."]
+	},
+	{
+		id: "tr-security-complete-02",
+		title: "Security discovery meeting notes - committee path",
+		source: "paste",
+		occurredAt: "2026-09-17T15:00:00.000Z",
+		customerSpeaker: "Daniel Reyes",
+		internalSpeaker: "Avery Johnson",
+		customerSegments: [
+			"We secured a budget of 1.25 million dollars.",
+			"The projected opportunity value is 2.6 million.",
+			"The architecture committee makes the final decision next quarter; the final decision-maker is Daniel Reyes.",
+			"The control uplift is critical. Business need: standardize threat detection across all business units.",
+			"Recommended solution: Defender XDR integrated with Sentinel. We will make the final decision by 02/20/2027.",
+			"The leadership team is very positive about the approach."
+		],
+		internalSegments: ["Internal note: Palo Alto remains the primary competitor.", "Commitment confirmed for Security posture discovery. Risk is that identity telemetry access may arrive late."]
+	},
+	{
+		id: "tr-security-complete-03",
+		title: "Cloud protection transcript - board checkpoint",
+		source: "upload",
+		occurredAt: "2026-09-18T15:00:00.000Z",
+		customerSpeaker: "Morgan Chen",
+		internalSpeaker: "Jordan Lee",
+		customerSegments: [
+			"The board approved the budget at $1,300,000.",
+			"Our expected contract value is $2,750,000.",
+			"Board approval is required this fiscal year, and Morgan Chen owns the final decision.",
+			"This program is essential. Customer need: consolidate fragmented cloud security controls.",
+			"Proposed solution is Defender for Cloud plus Sentinel analytics. Final decision date is March 5, 2027.",
+			"The team is thrilled with the consolidated design."
+		],
+		internalSegments: ["Internal note: Google Cloud is positioning an alternative security stack.", "Security posture discovery has a confirmed commitment. Risk: procurement review could extend the schedule."]
+	},
+	{
+		id: "tr-security-complete-04",
+		title: "Threat protection meeting recap - rapid decision",
+		source: "paste",
+		occurredAt: "2026-09-19T15:00:00.000Z",
+		customerSpeaker: "Alex Wilber",
+		internalSpeaker: "Megan Bowen",
+		customerSegments: [
+			"Finance allocated a budget of 1400 thousand.",
+			"The estimated opportunity value is 2.9 million.",
+			"I will decide immediately; the decision-maker identified is Alex Wilber.",
+			"The risk reduction is non-negotiable. Business need: protect privileged access in the cloud.",
+			"Recommended solution is Microsoft Entra ID Protection with Defender XDR. Decision date: 2027-03-12.",
+			"This feels like a strong fit for our security roadmap."
+		],
+		internalSegments: ["Internal note: Okta is not in scope, but IBM is competing on identity services.", "The Security posture discovery milestone is committed. Risk: the customer has not assigned a test tenant."]
+	},
+	{
+		id: "tr-security-complete-05",
+		title: "Security readiness transcript - sponsor alignment",
+		source: "teams",
+		occurredAt: "2026-09-20T15:00:00.000Z",
+		customerSpeaker: "Sara Davis",
+		internalSpeaker: "Avery Johnson",
+		customerSegments: [
+			"We have sign-off on a $1.5m budget.",
+			"The projected deal value is $3.1 million.",
+			"Our security steering group will decide right away, and Sara Davis has final approval.",
+			"This is a should-have for the transformation. Customer need: automate investigation and response.",
+			"Proposed solution: Sentinel automation with Defender XDR. Final decision date: 04/02/2027.",
+			"We are cautiously optimistic and interested in proceeding."
+		],
+		internalSegments: ["Internal note: ServiceNow is competing for the workflow portion.", "Confirmed commitment for Security posture discovery. Risk is that the data retention policy is unresolved."]
+	},
+	{
+		id: "tr-security-complete-06",
+		title: "Cloud defense meeting notes - operating model",
+		source: "paste",
+		occurredAt: "2026-09-21T15:00:00.000Z",
+		customerSpeaker: "Lee Gu",
+		internalSpeaker: "Jordan Lee",
+		customerSegments: [
+			"We can commit a budget of 1.6 million.",
+			"The estimated contract value is 3.25 million.",
+			"A committee will decide this quarter; the final decision-maker is Lee Gu.",
+			"The operating model is a must-have. Business need: give the SOC one cross-cloud incident view.",
+			"Recommended solution: Microsoft Sentinel with Defender for Cloud Apps. The final decision is May 14, 2027.",
+			"The security operations team is enthusiastic about the plan."
+		],
+		internalSegments: ["Internal note: Oracle is competing through the incumbent services agreement.", "Security posture discovery is now committed. Risk: the SOC staffing plan is still incomplete."]
+	},
+	{
+		id: "tr-security-complete-07",
+		title: "Cybersecurity transcript - investment review",
+		source: "upload",
+		occurredAt: "2026-09-22T15:00:00.000Z",
+		customerSpeaker: "Nestor Wilke",
+		internalSpeaker: "Girish Pillai",
+		customerSegments: [
+			"The approved spend is $1,700,000 in this budget.",
+			"The expected deal value is $3.4 million.",
+			"The investment committee decides next quarter, and the decision-maker identified is Nestor Wilke.",
+			"This capability is critical. Customer need: improve ransomware detection and recovery readiness.",
+			"Proposed solution is Microsoft Sentinel and Defender for Endpoint. Final decision date is 2027-06-18.",
+			"Executives love it and are eager to proceed."
+		],
+		internalSegments: ["Internal note: AWS is competing with a cloud-native security proposal.", "Commitment confirmed for the Security posture discovery milestone. Risk: legal review of telemetry locations may delay approval."]
+	},
+	{
+		id: "tr-security-complete-08",
+		title: "Zero trust meeting recap - individual approval",
+		source: "paste",
+		occurredAt: "2026-09-23T15:00:00.000Z",
+		customerSpeaker: "Miriam Graham",
+		internalSpeaker: "Megan Bowen",
+		customerSegments: [
+			"Finance approved a budget of 1.8 million.",
+			"The projected contract value is 3.6 million.",
+			"It is a sole decision this year, and Miriam Graham makes the final call.",
+			"Zero trust is essential. Customer need: enforce consistent conditional access for every workforce identity.",
+			"Recommended solution: Microsoft Entra Suite with Defender XDR. Decision by 07/09/2027.",
+			"The sponsor sees a great fit and is ready to move forward."
+		],
+		internalSegments: ["Internal note: Palo Alto is competing on the network security workstream.", "The Security posture discovery milestone is committed. Risk: device inventory quality may slow policy rollout."]
+	},
+	{
+		id: "tr-security-complete-09",
+		title: "Security platform transcript - urgent response",
+		source: "teams",
+		occurredAt: "2026-09-24T15:00:00.000Z",
+		customerSpeaker: "Isaac Levin",
+		internalSpeaker: "Avery Johnson",
+		customerSegments: [
+			"We have secured the $1.9 million budget.",
+			"The estimated opportunity value is $3.8 million.",
+			"The steering committee must decide ASAP, and Isaac Levin owns the final decision.",
+			"The response capability is non-negotiable. Business need: shorten incident containment from days to hours.",
+			"Proposed solution: Microsoft Sentinel automation and Defender Experts. Final decision date: August 13, 2027.",
+			"The response leaders are excited by the design."
+		],
+		internalSegments: ["Internal note: Google Cloud is competing with its security operations tooling.", "Security posture discovery has a confirmed commitment. Risk is that incident data classification is unfinished."]
+	},
+	{
+		id: "tr-security-complete-10",
+		title: "SOC modernization meeting notes - governance review",
+		source: "paste",
+		occurredAt: "2026-09-25T15:00:00.000Z",
+		customerSpeaker: "Emily Braun",
+		internalSpeaker: "Jordan Lee",
+		customerSegments: [
+			"The committee approved a 2 million budget.",
+			"The expected opportunity value is 4.05 million.",
+			"The governance committee decides this quarter; the decision-maker identified is Emily Braun.",
+			"This is a good to have for the first wave. Customer need: centralize SOC reporting and case management.",
+			"Recommended solution is Microsoft Sentinel with unified security operations. Final decision date is 2027-09-17.",
+			"The team says the proposal is promising and is leaning positive."
+		],
+		internalSegments: ["Internal note: ServiceNow is competing for security case management.", "Confirmed commitment for Security posture discovery. Risk: governance ownership remains split across two teams."]
+	},
+	{
+		id: "tr-security-complete-11",
+		title: "Cloud compliance transcript - funding confirmation",
+		source: "upload",
+		occurredAt: "2026-09-26T15:00:00.000Z",
+		customerSpeaker: "Adele Vance",
+		internalSpeaker: "Girish Pillai",
+		customerSegments: [
+			"Leadership signed off on the $2.1m budget.",
+			"The projected deal value is $4.2 million.",
+			"The compliance board decides next quarter, and Adele Vance has final approval.",
+			"Continuous compliance is a nice to have. Business need: automate evidence collection for cloud audits.",
+			"Proposed solution is Defender for Cloud regulatory compliance. We will decide by 10/08/2027.",
+			"Stakeholders are interested and cautiously optimistic."
+		],
+		internalSegments: ["Internal note: IBM is competing through its compliance consulting team.", "The Security posture discovery milestone is now committed. Risk: control mappings need customer validation."]
+	},
+	{
+		id: "tr-security-complete-12",
+		title: "Identity security meeting recap - final sponsor review",
+		source: "teams",
+		occurredAt: "2026-09-27T15:00:00.000Z",
+		customerSpeaker: "Grady Archie",
+		internalSpeaker: "Megan Bowen",
+		customerSegments: [
+			"Finance allocated a budget of 2200 thousand.",
+			"The estimated contract value is 4.4 million.",
+			"I will decide immediately, and the final decision-maker is Grady Archie.",
+			"There is no need for a separate appliance. Customer need: reduce identity attack paths without new hardware.",
+			"Recommended solution: Microsoft Entra ID Protection and Defender for Identity. Final decision date: November 19, 2027.",
+			"The sponsor is thrilled and eager to proceed."
+		],
+		internalSegments: ["Internal note: Oracle is competing through the existing identity platform.", "Commitment confirmed for the Security posture discovery milestone. Risk is that legacy directory cleanup may miss the target date."]
+	}
+];
 var defaultSeed = {
 	accounts: seedAccounts,
 	systemUsers: seedSystemUsers,
@@ -5293,81 +5768,36 @@ var defaultSeed = {
 	milestoneActivities: seedMilestoneActivities,
 	optionValues: seedOptionValues,
 	discoverable: seedDiscoverable,
-	activities: [
+	activities: seedActivities,
+	transcripts: [
 		{
-			id: "act-grid-review",
+			id: "tr-grid-customer",
 			opportunity_id: "opp-grid-modernization",
-			subject: "Executive architecture review",
-			owner_id: "user-avery",
-			activity_type: "appointment",
-			scheduled_start: "2026-10-12T15:00:00.000Z",
-			scheduled_end: "2026-10-12T16:00:00.000Z",
-			status: 3,
-			is_online_meeting: 1,
-			online_meeting_join_url: "https://teams.microsoft.com/l/meetup-join/grid-review",
-			location: "Microsoft Teams",
-			description: "Review solution architecture and decision timeline."
+			activity_id: "act-grid-review",
+			meeting_type: "customer",
+			title: "Executive architecture review",
+			source: "teams",
+			occurred_at: "2026-10-12T15:00:00.000Z"
 		},
 		{
-			id: "act-grid-followup",
-			opportunity_id: "opp-grid-modernization",
-			subject: "Customer follow-up on security review",
-			owner_id: "user-avery",
-			activity_type: "phonecall",
-			scheduled_start: "2026-08-01T14:00:00.000Z",
-			scheduled_end: "2026-08-01T14:30:00.000Z",
-			status: 0,
-			is_online_meeting: 0,
-			online_meeting_join_url: null,
-			location: null,
-			description: "Overdue follow-up on the security and compliance review."
-		},
-		{
-			id: "act-ai-kickoff",
-			opportunity_id: "opp-ai-service",
-			subject: "AI service kickoff",
-			owner_id: "user-morgan",
-			activity_type: "appointment",
-			scheduled_start: "2026-08-10T16:00:00.000Z",
-			scheduled_end: "2026-08-10T17:00:00.000Z",
-			status: 1,
-			is_online_meeting: 1,
-			online_meeting_join_url: "https://teams.microsoft.com/l/meetup-join/ai-kickoff",
-			location: "Microsoft Teams",
-			description: "Kickoff and discovery session."
-		},
-		{
-			id: "act-cs-discovery",
+			id: "tr-cloud-security",
 			opportunity_id: "opp-cloud-security-readiness",
-			subject: "Cloud security discovery call",
-			owner_id: "user-girish",
-			activity_type: "appointment",
-			scheduled_start: "2026-09-15T15:00:00.000Z",
-			scheduled_end: "2026-09-15T15:45:00.000Z",
-			status: 1,
-			is_online_meeting: 1,
-			online_meeting_join_url: "https://teams.microsoft.com/l/meetup-join/cs-discovery",
-			location: "Microsoft Teams",
-			description: "Qualify budget, timeline, and decision process for the security readiness initiative."
-		}
+			activity_id: "act-cs-discovery",
+			meeting_type: "customer",
+			title: "Cloud security discovery call",
+			source: "teams",
+			occurred_at: "2026-09-15T15:00:00.000Z"
+		},
+		...comprehensiveMeetingVariations.map((variation) => ({
+			id: variation.id,
+			opportunity_id: "opp-cloud-security-readiness",
+			activity_id: "act-cs-discovery",
+			meeting_type: "customer",
+			title: variation.title,
+			source: variation.source,
+			occurred_at: variation.occurredAt
+		}))
 	],
-	transcripts: [{
-		id: "tr-grid-customer",
-		opportunity_id: "opp-grid-modernization",
-		activity_id: "act-grid-review",
-		meeting_type: "customer",
-		title: "Executive architecture review",
-		source: "teams",
-		occurred_at: "2026-10-12T15:00:00.000Z"
-	}, {
-		id: "tr-cloud-security",
-		opportunity_id: "opp-cloud-security-readiness",
-		activity_id: "act-cs-discovery",
-		meeting_type: "customer",
-		title: "Cloud security discovery call",
-		source: "teams",
-		occurred_at: "2026-09-15T15:00:00.000Z"
-	}],
 	transcriptSegments: [
 		{
 			id: "seg-grid-1",
@@ -5422,7 +5852,24 @@ var defaultSeed = {
 			speaker: "Girish Pillai",
 			speaker_role: "internal",
 			text: "Let us schedule a threat-protection proof of value; note that Palo Alto is also in the evaluation."
-		}
+		},
+		...comprehensiveMeetingVariations.flatMap((variation) => [...variation.customerSegments.map((text, index) => ({
+			id: `seg-${variation.id.slice(3)}-customer-${index + 1}`,
+			transcript_id: variation.id,
+			start_ms: index * 3e4,
+			end_ms: index * 3e4 + 25e3,
+			speaker: variation.customerSpeaker,
+			speaker_role: "customer",
+			text
+		})), ...variation.internalSegments.map((text, index) => ({
+			id: `seg-${variation.id.slice(3)}-internal-${index + 1}`,
+			transcript_id: variation.id,
+			start_ms: (variation.customerSegments.length + index) * 3e4,
+			end_ms: (variation.customerSegments.length + index) * 3e4 + 25e3,
+			speaker: variation.internalSpeaker,
+			speaker_role: "internal",
+			text
+		}))])
 	]
 };
 //#endregion
@@ -9862,6 +10309,380 @@ function createWorkflowIpcHandlers(host) {
 	return Object.fromEntries(Object.entries(workflowIpcChannels).map(([operation, channel]) => [channel, (request) => invokeWorkflowHost(host, operation, request)]));
 }
 //#endregion
+//#region packages/orchestrator/voice-input.ts
+var SharedVoiceInputHost = class {
+	driver;
+	canStart;
+	session;
+	capture;
+	watchdog;
+	finalization;
+	generation = 0;
+	lastSequence = -1;
+	constructor(driver, canStart = () => true) {
+		this.driver = driver;
+		this.canStart = canStart;
+	}
+	async invoke(rawRequest) {
+		const request = voiceRequestSchema.parse(rawRequest);
+		if (request.operation === "availability") return voiceResponseSchema.parse({
+			contractVersion: "1.0",
+			kind: "availability",
+			availability: await this.driver.getAvailability()
+		});
+		if (request.operation === "start") {
+			if (this.session && [
+				"arming",
+				"listening",
+				"finalizing"
+			].includes(this.session.status)) throw new Error("A voice session is already active.");
+			const generation = ++this.generation;
+			this.lastSequence = -1;
+			this.session = {
+				contractVersion: "1.0",
+				kind: "session",
+				sessionId: request.sessionId,
+				status: "arming",
+				segments: [],
+				message: ""
+			};
+			const availability = await this.driver.getAvailability();
+			if (generation !== this.generation) throw new Error("Voice activation was cancelled.");
+			if (this.session.status !== "arming") return voiceResponseSchema.parse(this.session);
+			if (!availability.available) {
+				this.fail("provider-error", availability.message);
+				return voiceResponseSchema.parse(this.session);
+			}
+			if (!this.canStart()) {
+				this.fail("cancelled", "Voice capture requires the active visible TLC window.");
+				return voiceResponseSchema.parse(this.session);
+			}
+			this.watchdog = setTimeout(() => this.cancel(), voiceLimits.maxAudioMs + 3e4);
+			try {
+				const capture = this.driver.start(request, (event) => {
+					if (generation === this.generation) this.receive(event);
+				});
+				if (generation === this.generation && [
+					"arming",
+					"listening",
+					"finalizing"
+				].includes(this.session.status)) this.capture = capture;
+				else capture.dispose();
+			} catch {
+				this.receive({
+					contractVersion: "1.0",
+					type: "error",
+					code: "provider-error",
+					message: "The offline speech engine could not start."
+				});
+			}
+		} else {
+			if (!this.session || this.session.sessionId !== request.sessionId) throw new Error("The voice session is not available.");
+			if (request.operation === "stop") this.stop();
+			if (request.operation === "cancel") this.cancel();
+		}
+		return voiceResponseSchema.parse(this.session);
+	}
+	receive(rawEvent) {
+		const session = this.session;
+		if (!session || ![
+			"arming",
+			"listening",
+			"finalizing"
+		].includes(session.status)) return;
+		const parsed = voiceSourceEventSchema.safeParse(rawEvent);
+		if (!parsed.success) {
+			this.fail("provider-error", "The speech engine returned an invalid event.");
+			return;
+		}
+		const event = parsed.data;
+		if (event.type === "started" && session.status === "arming") session.status = "listening";
+		if (event.type === "segment") {
+			const segment = event.segment;
+			if (segment.sequence <= this.lastSequence) return;
+			this.lastSequence = segment.sequence;
+			const previous = session.segments.find((item) => item.id === segment.id);
+			if (previous?.isFinal) return;
+			const segments = previous ? session.segments.map((item) => item.id === segment.id ? segment : item) : [...session.segments, segment];
+			if (segments.length > voiceLimits.maxSegments || segments.map((item) => item.text).join(" ").length > voiceLimits.maxTranscriptChars) {
+				session.message = "Voice input limit reached. The latest speech was not accepted.";
+				this.stop();
+			} else session.segments = segments;
+		}
+		if (event.type === "ended") {
+			session.status = "ended";
+			this.release();
+		}
+		if (event.type === "error") this.fail(event.code, event.message);
+	}
+	fail(code, message) {
+		if (this.session) {
+			this.session.status = "error";
+			this.session.errorCode = code;
+			this.session.message = message;
+			this.session.segments = [];
+		}
+		this.release();
+	}
+	stop() {
+		if (!this.session || !["arming", "listening"].includes(this.session.status)) return;
+		this.session.status = "finalizing";
+		this.finalization = setTimeout(() => {
+			if (this.session?.status === "finalizing") {
+				this.session.status = "ended";
+				this.session.message ||= "Unconfirmed trailing speech was not inserted.";
+				this.release();
+			}
+		}, voiceLimits.finalizationMs);
+		this.capture?.stop();
+	}
+	cancel() {
+		++this.generation;
+		if (this.session && [
+			"arming",
+			"listening",
+			"finalizing"
+		].includes(this.session.status)) {
+			this.session.status = "cancelled";
+			this.session.message = "Voice input was cancelled.";
+		}
+		if (this.session) this.session.segments = [];
+		this.release();
+	}
+	dispose() {
+		this.cancel();
+		this.session = void 0;
+	}
+	release() {
+		clearTimeout(this.watchdog);
+		clearTimeout(this.finalization);
+		this.watchdog = void 0;
+		this.finalization = void 0;
+		const capture = this.capture;
+		this.capture = void 0;
+		capture?.dispose();
+	}
+};
+//#endregion
+//#region packages/connectors/common/windows-voice.ts
+var speechProgram = String.raw`
+Add-Type -AssemblyName System.Speech,System.Web.Extensions
+Add-Type -ReferencedAssemblies System.Speech,System.Web.Extensions -TypeDefinition @'
+using System;
+using System.Globalization;
+using System.Speech.Recognition;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Web.Script.Serialization;
+public class TlcVoiceConfiguration { public string[] hints; public string waveFile; }
+public static class TlcOfflineVoice {
+    static readonly object gate = new object();
+    static readonly JavaScriptSerializer json = new JavaScriptSerializer();
+    static int sequence = 0, segment = 0;
+    static void Send(object message) { lock (gate) { Console.WriteLine(json.Serialize(message)); Console.Out.Flush(); } }
+    static void Text(string text, bool final) {
+        lock (gate) {
+            Send(new { contractVersion = "1.0", type = "segment",
+                segment = new { id = segment.ToString(), sequence = ++sequence, text = text, isFinal = final } });
+            if (final) segment++;
+        }
+    }
+    public static void Run() {
+        try {
+            var configuration = json.Deserialize<TlcVoiceConfiguration>(Console.ReadLine());
+            using (var recognizer = new SpeechRecognitionEngine(new CultureInfo("en-US")))
+            using (var done = new ManualResetEvent(false)) {
+                recognizer.LoadGrammar(new DictationGrammar());
+                if (configuration.hints != null && configuration.hints.Length > 0) {
+                    var choices = new Choices(configuration.hints);
+                    var builder = new GrammarBuilder(choices) { Culture = new CultureInfo("en-US") };
+                    recognizer.LoadGrammar(new Grammar(builder) { Weight = 1.0f, Priority = 1 });
+                }
+                recognizer.InitialSilenceTimeout = TimeSpan.FromSeconds(10);
+                recognizer.BabbleTimeout = TimeSpan.FromSeconds(10);
+                recognizer.SpeechHypothesized += (s, e) => Text(e.Result.Text, false);
+                recognizer.SpeechRecognized += (s, e) => Text(e.Result.Text, true);
+                recognizer.RecognizeCompleted += (s, e) => {
+                    if (e.Error != null) Send(new { contractVersion = "1.0", type = "error", code = "device-lost",
+                        message = "The microphone or offline speech engine became unavailable." });
+                    else Send(new { contractVersion = "1.0", type = "ended" });
+                    done.Set();
+                };
+                if (String.IsNullOrEmpty(configuration.waveFile)) recognizer.SetInputToDefaultAudioDevice();
+                else recognizer.SetInputToWaveFile(configuration.waveFile);
+                recognizer.RecognizeAsync(RecognizeMode.Multiple);
+                Send(new { contractVersion = "1.0", type = "started" });
+                Task.Run(() => {
+                    string command;
+                    while (!done.WaitOne(0) && (command = Console.ReadLine()) != null) {
+                        try {
+                            if (command == "stop") { recognizer.RecognizeAsyncStop(); return; }
+                        } catch (InvalidOperationException) { return; }
+                    }
+                });
+                if (!done.WaitOne(TimeSpan.FromSeconds(30))) {
+                    recognizer.RecognizeAsyncStop();
+                    if (!done.WaitOne(TimeSpan.FromSeconds(1))) recognizer.RecognizeAsyncCancel();
+                }
+            }
+        } catch (UnauthorizedAccessException) {
+            Send(new { contractVersion = "1.0", type = "error", code = "permission-denied",
+                message = "Microphone access was denied. Check Windows microphone privacy settings." });
+        } catch (Exception) {
+            Send(new { contractVersion = "1.0", type = "error", code = "provider-error",
+                message = "Offline speech could not start. Check the microphone and installed English speech language." });
+        }
+    }
+}
+'@
+[TlcOfflineVoice]::Run()
+`;
+var WindowsVoiceCaptureDriver = class {
+	options;
+	availability;
+	constructor(options = {}) {
+		this.options = options;
+	}
+	getAvailability() {
+		if (this.options.remote) return {
+			available: false,
+			reason: "remote-host",
+			message: "Voice capture is disabled in remote VS Code windows to protect the local microphone boundary."
+		};
+		if (process.platform !== "win32" || !process.env["SystemRoot"]) return {
+			available: false,
+			reason: "unsupported-platform",
+			message: "Desktop and VS Code voice require local Windows and an installed English (United States) speech language."
+		};
+		this.availability ??= this.probe();
+		return this.availability;
+	}
+	launch(program) {
+		const systemRoot = process.env["SystemRoot"];
+		if (!systemRoot) throw new Error("The Windows system directory is unavailable.");
+		return spawn(join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), [
+			"-NoProfile",
+			"-NonInteractive",
+			"-EncodedCommand",
+			Buffer.from(program, "utf16le").toString("base64")
+		], {
+			windowsHide: true,
+			shell: false,
+			env: {
+				...process.env,
+				PSModulePath: join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "Modules")
+			}
+		});
+	}
+	probe() {
+		return new Promise((resolve) => {
+			const child = this.launch(String.raw`
+try {
+    Add-Type -AssemblyName System.Speech
+    $installed = @([System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers() | Where-Object { $_.Culture.Name -eq 'en-US' })
+    if ($installed.Count -gt 0) { Write-Output '{"available":true,"processing":"on-device","engine":"windows-offline"}' }
+    else { Write-Output '{"available":false,"reason":"missing-language","message":"Install English (United States) speech recognition in Windows language settings."}' }
+} catch { Write-Output '{"available":false,"reason":"not-configured","message":"The Windows offline speech engine is unavailable."}' }
+`);
+			let output = "";
+			let settled = false;
+			const finish = (availability) => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timeout);
+				child.kill();
+				resolve(availability);
+			};
+			const unavailable = {
+				available: false,
+				reason: "not-configured",
+				message: "The Windows offline speech engine could not be checked."
+			};
+			const timeout = setTimeout(() => finish(unavailable), 1e4);
+			child.stdout.on("data", (chunk) => {
+				output += chunk.toString("utf8");
+				if (output.length > 4096) finish(unavailable);
+			});
+			child.once("error", () => finish(unavailable));
+			child.once("close", () => {
+				try {
+					finish(voiceAvailabilitySchema.parse(JSON.parse(output.trim())));
+				} catch {
+					finish(unavailable);
+				}
+			});
+		});
+	}
+	start(request, onEvent) {
+		if (this.options.remote || process.platform !== "win32") throw new Error("Offline native voice capture requires a local Windows host.");
+		const child = this.launch(speechProgram);
+		child.stderr.resume();
+		let disposed = false;
+		let ended = false;
+		let pending = "";
+		const dispose = () => {
+			if (disposed) return;
+			disposed = true;
+			child.kill();
+		};
+		const fail = () => {
+			if (disposed || ended) return;
+			ended = true;
+			onEvent({
+				contractVersion: "1.0",
+				type: "error",
+				code: "provider-error",
+				message: "The Windows offline speech process failed."
+			});
+			dispose();
+		};
+		child.stdout.on("data", (chunk) => {
+			if (disposed) return;
+			pending += chunk.toString("utf8");
+			if (pending.length > 65536) {
+				fail();
+				return;
+			}
+			let newline;
+			while ((newline = pending.indexOf("\n")) >= 0) {
+				const line = pending.slice(0, newline).trim();
+				pending = pending.slice(newline + 1);
+				if (!line) continue;
+				let event;
+				try {
+					event = voiceSourceEventSchema.parse(JSON.parse(line));
+				} catch {
+					fail();
+					return;
+				}
+				if (event.type === "ended" || event.type === "error") ended = true;
+				onEvent(event);
+			}
+		});
+		child.once("error", fail);
+		child.stdin.on("error", fail);
+		child.once("close", () => {
+			if (!disposed && !ended) fail();
+		});
+		child.stdin.write(`${JSON.stringify({
+			hints: request.hints,
+			...this.options.inputFile ? { waveFile: this.options.inputFile } : {}
+		})}\n`);
+		return {
+			stop: () => {
+				if (!disposed && !ended) child.stdin.write("stop\n");
+			},
+			dispose
+		};
+	}
+};
+//#endregion
+//#region apps/desktop/electron/main/voice-ipc.ts
+var voiceIpcChannel = "tlc:voice-input";
+function createVoiceIpcHandler(host) {
+	return (request) => host.invoke(request);
+}
+//#endregion
 //#region apps/desktop/electron/main/index.ts
 var currentDirectory = dirname(fileURLToPath(import.meta.url));
 var desktopRoot = resolve(currentDirectory, "../..");
@@ -9871,6 +10692,7 @@ var appIcon = resolve(desktopRoot, "build/icon.png");
 var developmentUrl = process.env["VITE_DEV_SERVER_URL"];
 var allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString();
 var dataMode = process.env["TLC_DATA_MODE"] === "sample" ? "sample" : "live";
+var voiceHost = new SharedVoiceInputHost(new WindowsVoiceCaptureDriver(), () => BrowserWindow.getAllWindows().some((window) => window.isVisible() && window.isFocused()));
 var preparedEnvironment = app.isPackaged || dataMode === "live" ? await prepareFoundryEnvironmentFile({
 	isPackaged: app.isPackaged,
 	userDataPath: app.getPath("userData"),
@@ -9997,6 +10819,12 @@ function assertTrustedSender(event) {
 	if (!senderUrl || !senderUrl.startsWith(allowedRendererUrl)) throw new Error("Rejected IPC request from an untrusted renderer.");
 }
 function registerIpc() {
+	const invokeVoice = createVoiceIpcHandler(voiceHost);
+	ipcMain.handle(voiceIpcChannel, (event, request) => {
+		assertTrustedSender(event);
+		if (event.senderFrame !== event.sender.mainFrame) throw new Error("Voice capture requires the main renderer frame.");
+		return invokeVoice(request);
+	});
 	for (const [channel, handler] of Object.entries(createWorkflowIpcHandlers(workflowHost))) ipcMain.handle(channel, (event, request) => {
 		assertTrustedSender(event);
 		return handler(request);
@@ -10150,6 +10978,8 @@ async function createWindow() {
 	window.webContents.on("will-navigate", (event, url) => {
 		if (!url.startsWith(allowedRendererUrl)) event.preventDefault();
 	});
+	window.on("blur", () => voiceHost.cancel());
+	window.webContents.on("destroyed", () => voiceHost.dispose());
 	if (developmentUrl) await window.loadURL(developmentUrl);
 	else await window.loadFile(rendererFile);
 }
@@ -10164,6 +10994,7 @@ app.on("activate", () => {
 	if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 app.on("before-quit", () => {
+	voiceHost.dispose();
 	configuredWorkflowHost?.dispose();
 });
 //#endregion
