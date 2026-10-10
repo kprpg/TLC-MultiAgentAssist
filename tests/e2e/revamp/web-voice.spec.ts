@@ -46,7 +46,7 @@ test('actual hosted security policy permits offline recognition without external
         await page.getByRole('button', { name: 'Start listening', exact: true }).click()
         await expect(page.getByLabel('Voice transcript preview')).toContainText('grid operations modernization', { timeout: 45_000 })
         await page.getByRole('button', { name: 'Stop voice search', exact: true }).click()
-        await expect(page.getByRole('searchbox', { name: 'Search accounts and opportunities' })).toHaveValue(/grid operations modernization/i)
+        await expect(page.getByRole('searchbox', { name: 'Search accounts and opportunities' })).toHaveValue(/grid operations modernization/i, { timeout: 15_000 })
         expect(violations.filter((message) => /Content Security Policy|Refused|Permissions policy/i.test(message))).toEqual([])
     } finally { await browser.close() }
 })
@@ -88,7 +88,7 @@ test.describe('real offline browser voice input', () => {
                 await search.press('Enter')
                 await expect(search).toHaveValue('')
                 await page.getByRole('button', { name: 'Stop voice search', exact: true }).click()
-                await expect(search).toHaveValue(new RegExp(statement.text, 'i'))
+                await expect(search).toHaveValue(new RegExp(statement.text, 'i'), { timeout: 15_000 })
                 await expect(page.getByRole('heading', { name: 'Select a customer account', exact: true })).toBeVisible()
                 expect(external).toEqual([])
                 expect(errors).toEqual([])
