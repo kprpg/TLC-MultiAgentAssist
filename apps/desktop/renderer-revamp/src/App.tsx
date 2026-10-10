@@ -49,7 +49,8 @@ import { DiscoveryControls, DiscoverySortHeader } from '../../../shared/discover
 import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportunities, toggleDiscoverySort, type DiscoveryFilters, type DiscoverySort } from '../../../shared/discovery.js'
 import { FeedbackButton } from '../../../shared/feedback-button.js'
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
-import { findPortfolioSearchResults, type PortfolioSearchResult } from '../../../shared/portfolio-search.js'
+import type { PortfolioSearchResult } from '../../../shared/portfolio-search.js'
+import { PortfolioSearch } from './portfolio-search.js'
 
 type Shell = 'desktop' | 'web'
 type WorkspaceView = 'accounts' | 'workflows' | 'discover'
@@ -218,7 +219,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [mobileBlade, setMobileBlade] = useState<Blade | 'center'>('accounts')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [searchQuery, setSearchQuery] = useState('')
   const [searchOpportunities, setSearchOpportunities] = useState<Opportunity[]>([])
   const [searchLoading, setSearchLoading] = useState(true)
   const [discoverDomain, setDiscoverDomain] = useState<SeDomainId>('infra')
@@ -1052,18 +1052,9 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setMobileBlade('accounts')
   }
 
-  const normalizedSearch = searchQuery.trim().toLocaleLowerCase()
-  const searchResults = findPortfolioSearchResults(searchQuery, accounts, searchOpportunities)
-
   function chooseSearchResult(item: SearchResult) {
-    setSearchQuery('')
     if (item.type === 'account') void selectAccount(item.account)
     else void selectOpportunity(item.opportunity, item.account)
-  }
-
-  function submitSearch(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (searchResults[0]) chooseSearchResult(searchResults[0])
   }
 
   async function exitApplication() {
@@ -1086,35 +1077,9 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     <header className="command-bar">
       <div className="brand-mark" aria-hidden="true">T</div>
       <div className="brand"><strong>TLC</strong><span>Account Team Intelligence</span></div>
-      <form className="global-search" role="search" onSubmit={submitSearch}>
-        <Search20Regular />
-        <input
-          type="search"
-          aria-label="Search accounts and opportunities"
-          aria-controls="global-search-results"
-          aria-expanded={normalizedSearch.length > 0}
-          autoComplete="off"
-          placeholder="Search accounts and opportunities"
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-        />
-        {normalizedSearch && <div className="search-results" id="global-search-results" role="listbox" aria-label="Search results">
-          {searchResults.map((item) => <button
-            key={item.type === 'account' ? `account-${item.account.id}` : `opportunity-${item.opportunity.id}`}
-            type="button"
-            role="option"
-            onClick={() => chooseSearchResult(item)}
-          >
-            {item.type === 'account' ? <Building20Regular /> : <List20Regular />}
-            <span>
-              <strong>{item.type === 'account' ? item.account.name : item.opportunity.name}</strong>
-              <small>{item.type === 'account' ? `Account · ${item.account.segment}` : `Opportunity · ${item.account.name}`}</small>
-            </span>
-          </button>)}
-          {!searchLoading && searchResults.length === 0 && <p role="status">No accounts or opportunities found.</p>}
-          {searchLoading && <p role="status">Searching portfolio…</p>}
-        </div>}
-      </form>
+      <PortfolioSearch accounts={accounts} opportunities={searchOpportunities} loading={searchLoading}
+        shell={shell} client={client} contextKey={`${workspaceView}:${centerTab}:${account?.id ?? ''}:${opportunity?.id ?? ''}`}
+        onSelect={chooseSearchResult} />
       <div className="command-actions">
         <span className="mode-badge">{modeLabel}</span>
         <FeedbackButton onOpenIssue={client.openEvidence} />

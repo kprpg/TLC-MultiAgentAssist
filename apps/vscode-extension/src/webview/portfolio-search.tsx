@@ -1,15 +1,19 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { findPortfolioSearchResults, type PortfolioSearchResult } from '../../../shared/portfolio-search.js'
 import { dataClient } from './data-client.js'
 import type { AccountView, OpportunityView } from './view-types.js'
+import { createHostVoiceProvider } from '../../../shared/host-voice-provider.js'
+import { useVoiceDictation } from '../../../shared/use-voice-dictation.js'
+import { VoiceSearchControl } from '../../../shared/voice-search-control.js'
 
 export interface PortfolioSearchTarget {
     accountId: string
     opportunityId?: string
 }
 
-export function PortfolioSearch({ onSelect }: {
+export function PortfolioSearch({ onSelect, contextKey = '' }: {
     onSelect(target: PortfolioSearchTarget): void
+    contextKey?: string
 }): ReactElement {
     const [query, setQuery] = useState('')
     const [accounts, setAccounts] = useState<AccountView[]>([])
@@ -17,6 +21,12 @@ export function PortfolioSearch({ onSelect }: {
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState('')
     const requestId = useRef(0)
+    const input = useRef<HTMLInputElement>(null)
+    const form = useRef<HTMLFormElement>(null)
+    const provider = useMemo(() => createHostVoiceProvider((request) => dataClient.invokeVoice(request)), [])
+    const hints = [...new Set([...accounts.map((account) => account.name), ...opportunities.map((opportunity) => opportunity.name)])]
+        .filter((name) => name.trim().length > 0 && name.length <= 200).slice(0, 64)
+    const voice = useVoiceDictation({ input, form, value: query, onChange: setQuery, provider, hints, contextKey })
 
     useEffect(() => () => { requestId.current += 1 }, [])
 
@@ -43,6 +53,7 @@ export function PortfolioSearch({ onSelect }: {
     const expanded = query.trim().length > 0
 
     function choose(result: PortfolioSearchResult<AccountView, OpportunityView>) {
+        voice.cancel()
         setQuery('')
         onSelect({
             accountId: result.account.id,
@@ -51,13 +62,15 @@ export function PortfolioSearch({ onSelect }: {
     }
 
     return (
-        <form className="portfolio-search" role="search" onSubmit={(event) => {
+        <form ref={form} className="portfolio-search" role="search" onSubmit={(event) => {
             event.preventDefault()
-            if (results[0]) choose(results[0])
+            if (!voice.active && results[0]) choose(results[0])
         }} onBlur={(event) => {
+            voice.blurred(event.relatedTarget)
             if (!event.currentTarget.contains(event.relatedTarget)) setQuery('')
         }}>
             <input
+                ref={input}
                 type="search"
                 aria-label="Search accounts and opportunities"
                 aria-controls="portfolio-search-results"
@@ -66,11 +79,14 @@ export function PortfolioSearch({ onSelect }: {
                 placeholder="Search accounts and opportunities"
                 value={query}
                 onFocus={() => void refreshPortfolio()}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => voice.change(event.target.value)}
+                onSelect={voice.selected}
                 onKeyDown={(event) => {
+                    if (event.key === 'Enter' && voice.active) event.preventDefault()
                     if (event.key === 'Escape') setQuery('')
                 }}
             />
+            <VoiceSearchControl voice={voice} />
             {expanded && <div className="portfolio-search-results" id="portfolio-search-results" role="listbox" aria-label="Search results">
                 {results.map((result) => <button
                     key={result.type === 'account' ? `account-${result.account.id}` : `opportunity-${result.opportunity.id}`}

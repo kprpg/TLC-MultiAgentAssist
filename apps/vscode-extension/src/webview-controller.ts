@@ -8,6 +8,9 @@ import { contractVersion } from '../../../packages/common/index.js'
 import { createResponseDocumentBuffer } from '../../desktop/electron/main/response-document.js'
 import { createOutlookDraftMessage } from '../../desktop/electron/main/outlook-compose.js'
 import type { ExtensionDataProvider } from './data-provider.js'
+import { SharedVoiceInputHost } from '../../../packages/orchestrator/voice-input.js'
+import { WindowsVoiceCaptureDriver } from '../../../packages/connectors/common/windows-voice.js'
+import { routeVoiceBridgeMessage } from './voice-bridge.js'
 
 function nonce(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
@@ -21,6 +24,7 @@ export class WorkbenchPanel {
     private static current: WorkbenchPanel | undefined
     private readonly disposables: vscode.Disposable[] = []
     private ready = false
+    private readonly voiceHost: SharedVoiceInputHost
     private pending: { kind: 'focus'; accountId?: string; opportunityId?: string } | { kind: 'runPlay'; workflowId: string; token: number } | undefined
 
     private constructor(
@@ -28,8 +32,18 @@ export class WorkbenchPanel {
         private readonly extensionUri: vscode.Uri,
         private readonly getProvider: () => ExtensionDataProvider
     ) {
+        this.voiceHost = new SharedVoiceInputHost(
+            new WindowsVoiceCaptureDriver({ remote: vscode.env.remoteName !== undefined }),
+            () => this.panel.visible && this.panel.active && vscode.window.state.focused
+        )
         this.panel.webview.onDidReceiveMessage((message) => void this.onMessage(message), undefined, this.disposables)
         this.panel.onDidDispose(() => this.dispose(), undefined, this.disposables)
+        this.panel.onDidChangeViewState(() => {
+            if (!this.panel.visible || !this.panel.active) this.voiceHost.cancel()
+        }, undefined, this.disposables)
+        vscode.window.onDidChangeWindowState((state) => {
+            if (!state.focused) this.voiceHost.cancel()
+        }, undefined, this.disposables)
         this.render()
     }
 
@@ -90,6 +104,10 @@ export class WorkbenchPanel {
         if (kind === 'ready') {
             this.ready = true
             this.flushPending()
+            return
+        }
+        if (message && typeof message === 'object' && (message as { method?: unknown }).method === 'voiceInput') {
+            void this.panel.webview.postMessage(await routeVoiceBridgeMessage(this.voiceHost, message))
             return
         }
         if (message && typeof message === 'object' && (message as { method?: unknown }).method === 'openEvidence') {
@@ -228,6 +246,7 @@ export class WorkbenchPanel {
     }
 
     dispose(): void {
+        this.voiceHost.dispose()
         WorkbenchPanel.current = undefined
         while (this.disposables.length) this.disposables.pop()?.dispose()
         this.panel.dispose()

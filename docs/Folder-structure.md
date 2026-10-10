@@ -109,6 +109,7 @@ TLC-MultiAgentAssist/
 |   |-- PRD.md
 |   |-- architecture/
 |   |-- decisions/
+|   |-- research/
 |   `-- runbooks/
 |-- scripts/
 `-- package.json
@@ -152,6 +153,16 @@ Agents consume connector interfaces or orchestrator-provided evidence. They must
 ## Dependency Direction
 
 The current browser-safe shared UI modules in `apps/shared` include `portfolio-search.ts`, which supplies the same matching and result-limit rules to Desktop/Web and the VS Code webview. The extension's focused `portfolio-search.tsx` component owns search loading and interaction; `next-best-actions.tsx` renders MCEM recommendations and their cited evidence without changing the host or orchestrator contracts.
+
+Voice search uses shared `voice-input.ts`, `use-voice-dictation.ts`,
+`voice-search-control.tsx`, and provider adapters in `apps/shared`. Its strict
+contracts live in `packages/common/contracts/voice.ts`; the shared native-session
+host is `packages/orchestrator/voice-input.ts`, with local Windows capture in
+`packages/connectors/common/windows-voice.ts`. The two focused portfolio-search
+components remain thin UI integrations. `scripts/prepare-voice-model.mjs` and
+`scripts/voice-worker-assets.mjs` build the offline browser model/isolated worker;
+sanitized audio fixtures live in `tests/fixtures/voice-input`. Research and the
+implemented design are documented under `docs/research`.
 
 ```text
 Renderer UI
