@@ -1786,6 +1786,7 @@ export function App(): ReactElement {
     return (
         <div className="app">
             <AppHeader
+                contextKey={`${tab}:${mode}:${focus?.accountId ?? ''}:${focus?.opportunityId ?? ''}:${runRequest?.token ?? ''}`}
                 tab={tab}
                 mode={mode}
                 accountsExpanded={accountsExpanded}

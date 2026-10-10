@@ -6,6 +6,7 @@ export * from './mcp.js'
 export * from './portfolio.js'
 export * from './workflows.js'
 export * from './meeting.js'
+export * from './voice.js'
 
 export const contractVersion = '1.0' as const
 

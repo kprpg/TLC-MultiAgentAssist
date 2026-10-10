@@ -14,7 +14,8 @@ export function AppHeader({
     onToggleDetails,
     onToggleActions,
     onOpenIssue,
-    onSearchSelect
+    onSearchSelect,
+    contextKey
 }: {
     tab: 'portfolio' | 'plays' | 'discover'
     mode: 'sample' | 'live'
@@ -27,6 +28,7 @@ export function AppHeader({
     onToggleActions(): void
     onOpenIssue(url: string): Promise<void> | void
     onSearchSelect(target: PortfolioSearchTarget): void
+    contextKey?: string
 }): ReactElement {
     return (
         <header className="app-header">
@@ -35,7 +37,7 @@ export function AppHeader({
                 <button className={tab === 'portfolio' ? 'tab active' : 'tab'} onClick={() => onSelectTab('portfolio')}>Portfolio</button>
                 <button className={tab === 'plays' ? 'tab active' : 'tab'} onClick={() => onSelectTab('plays')}>Plays</button>
             </nav>
-            <PortfolioSearch onSelect={onSearchSelect} />
+            <PortfolioSearch onSelect={onSearchSelect} contextKey={contextKey ?? `${tab}:${mode}`} />
             {tab === 'portfolio' && (
                 <PortfolioLayoutControls
                     accountsExpanded={accountsExpanded}

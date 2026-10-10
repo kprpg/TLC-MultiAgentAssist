@@ -47,11 +47,15 @@ body {
 
 .portfolio-search {
     position: relative;
+    display: flex;
+    align-items: center;
+    gap: 4px;
     flex: 1;
     min-width: 200px;
 }
 
 .portfolio-search input {
+    min-width: 0;
     box-sizing: border-box;
     width: 100%;
     padding: 6px 8px;

@@ -26,6 +26,9 @@ import { showResponseSaveDialog } from './response-save-dialog.js'
 import { buildSampleAgentResponse } from './sample-agent-response.js'
 import { openConfigurationAndExit } from './startup-dialog.js'
 import { createWorkflowIpcHandlers } from './workflow-ipc.js'
+import { SharedVoiceInputHost } from '../../../../packages/orchestrator/voice-input.js'
+import { WindowsVoiceCaptureDriver } from '../../../../packages/connectors/common/windows-voice.js'
+import { createVoiceIpcHandler, voiceIpcChannel } from './voice-ipc.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -37,6 +40,9 @@ const appIcon = resolve(desktopRoot, 'build/icon.png')
 const developmentUrl = process.env['VITE_DEV_SERVER_URL']
 const allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString()
 const dataMode = process.env['TLC_DATA_MODE'] === 'sample' ? 'sample' : 'live'
+const voiceHost = new SharedVoiceInputHost(new WindowsVoiceCaptureDriver(), () =>
+  BrowserWindow.getAllWindows().some((window) => window.isVisible() && window.isFocused())
+)
 
 const preparedEnvironment = app.isPackaged || dataMode === 'live'
   ? await prepareFoundryEnvironmentFile({
@@ -202,6 +208,12 @@ function assertTrustedSender(event: IpcMainInvokeEvent): void {
 }
 
 function registerIpc(): void {
+  const invokeVoice = createVoiceIpcHandler(voiceHost)
+  ipcMain.handle(voiceIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    if (event.senderFrame !== event.sender.mainFrame) throw new Error('Voice capture requires the main renderer frame.')
+    return invokeVoice(request)
+  })
   for (const [channel, handler] of Object.entries(createWorkflowIpcHandlers(workflowHost))) {
     ipcMain.handle(channel, (event, request: unknown) => {
       assertTrustedSender(event)
@@ -364,6 +376,8 @@ async function createWindow(): Promise<void> {
   window.webContents.on('will-navigate', (event, url) => {
     if (!url.startsWith(allowedRendererUrl)) event.preventDefault()
   })
+  window.on('blur', () => voiceHost.cancel())
+  window.webContents.on('destroyed', () => voiceHost.dispose())
 
   if (developmentUrl) {
     await window.loadURL(developmentUrl)
@@ -386,5 +400,6 @@ app.on('activate', () => {
 })
 
 app.on('before-quit', () => {
+  voiceHost.dispose()
   void configuredWorkflowHost?.dispose()
 })
