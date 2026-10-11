@@ -113,7 +113,10 @@ function PipelineSection({ snapshot, view }: { snapshot: SellerDashboardSnapshot
         const uncommitted = sellerCommitment(row.commitment) === 'uncommitted'
         if (queue === 'qualified') return active && uncommitted && stage !== null && stage >= 2
         if (queue === 'overdue') return active && uncommitted && row.date !== null && row.date < report.period.today
-        if (queue === 'stale') return active && uncommitted && (sellerDaysSince(parent?.modifiedAt, report.period.today) ?? -1) >= 45
+        if (queue === 'stale') {
+            const days = sellerDaysSince(row.modifiedAt, report.period.today)
+            return active && uncommitted && days !== null && days >= 45
+        }
         if (queue === 'early') return active && stage === 1
         if (queue === 'committed') return active && sellerCommitment(row.commitment) === 'committed'
         if (queue === 'recent') {
@@ -158,7 +161,10 @@ function PipelineSection({ snapshot, view }: { snapshot: SellerDashboardSnapshot
         report.sources.pipeline.status !== 'unavailable' &&
         !report.opportunities.some((opportunity) => opportunity.tpid === row.tpid) &&
         !report.milestones.some((milestone) => milestone.tpid === row.tpid))
-    const unknownUpdates = view.opportunities.filter((row) => !row.modifiedAt).length
+    const unknownMilestoneHistory = view.milestones.filter((row) => sellerIsActive(row) &&
+        (queue === 'stale'
+            ? sellerCommitment(row.commitment) === 'uncommitted' && !row.modifiedAt
+            : sellerCommitment(row.commitment) === 'committed' && !row.commitmentChangedAt)).length
     return <>
         <div className="sd-section-heading"><div><p className="sd-eyebrow">WORKING VIEW · ACCESSIBLE INVENTORY</p><h2>Pipeline coverage snapshot</h2></div>
             <span className="sd-chip">{view.accounts.length} accounts · {view.opportunities.length} opportunities</span></div>
@@ -193,7 +199,9 @@ function PipelineSection({ snapshot, view }: { snapshot: SellerDashboardSnapshot
                     {pipelineQueues.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
                 </select></label></div>
             {(queue === 'stale' || queue === 'recent') && <SellerDashboardNotice>
-                These queues require source update/commitment-change timestamps. {unknownUpdates} returned opportunities have no update timestamp; missing history is not zero days or proof of recent activity.
+                {queue === 'stale'
+                    ? <>Staleness uses each milestone’s own update timestamp. Missing milestone update timestamps: {unknownMilestoneHistory}. Only active uncommitted milestones with known history are classified; missing history is not zero days.</>
+                    : <>Recent commitment uses each milestone’s commitment-change timestamp. Missing milestone commitment-change timestamps: {unknownMilestoneHistory}. Only active committed milestones with known history are classified; missing history is not proof of recent commitment.</>}
             </SellerDashboardNotice>}
             {queue === 'sql' || queue === 'macc'
                 ? <SellerDashboardTable caption={queue === 'sql' ? 'SQL billed opportunities' : 'MACC opportunities'} rows={opportunityRows} columns={opportunityColumns} rowKey={(row) => row.id} />

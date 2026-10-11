@@ -10,7 +10,16 @@ import { createFoundryMeetingExtractor } from '../../../packages/agents/meeting-
 import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
 import { createLivePlayWorkflowHost, type WorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
+import { createSellerDashboardHost, type SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 import type { AuthenticatedRequest, WebRuntime } from './app.js'
+
+export function createWebSellerDashboardHost(mode: 'sample' | 'live'): SellerDashboardHost {
+    return createSellerDashboardHost({
+        mode,
+        allowLocalProfile: false,
+        resolveUserEmail: async () => undefined
+    })
+}
 
 export interface HostedRuntimeOptions {
     environment?: NodeJS.ProcessEnv

@@ -4,7 +4,7 @@ import { buildWebApiHandler, type WebRuntime } from './app.js'
 import { assertLoopbackHost, createAzureCliAuthentication, createSampleAuthentication } from './authentication.js'
 import { buildStaticHandler, setSecurityHeaders } from './hosting.js'
 import { listenWebServer } from './listener.js'
-import { createHostedRuntimeFactory, createHostedWorkflowHostResolver } from './runtime.js'
+import { createHostedRuntimeFactory, createHostedWorkflowHostResolver, createWebSellerDashboardHost } from './runtime.js'
 import { createSampleWorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import { FixtureMsxConnector } from '../../../packages/connectors/msx/index.js'
 import { createLocalStoreMsxConnector } from '../../../packages/connectors/local-store/index.js'
@@ -13,7 +13,6 @@ import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/shar
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
 import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import type { AgentCapability } from '../../../packages/common/index.js'
-import { createSellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 
 const port = parsePort(process.env['PORT'])
 const mode = resolveWebHostMode(process.env)
@@ -80,11 +79,7 @@ const serveStatic = buildStaticHandler(staticRoot, mode === 'sample' ? 'sample' 
 const handleApi = buildWebApiHandler({
     createRuntime,
     resolveWorkflowHost,
-    resolveSellerDashboardHost: (authentication) => createSellerDashboardHost({
-        mode: mode === 'sample' ? 'sample' : 'live',
-        allowLocalProfile: mode === 'azure-cli',
-        resolveUserEmail: async () => authentication.userEmail
-    }),
+    resolveSellerDashboardHost: () => createWebSellerDashboardHost(mode === 'sample' ? 'sample' : 'live'),
     ...(authenticate ? { authenticate } : {}),
     ...(mode !== 'easy-auth' ? { shutdown: closeLocalServer } : {}),
     onError: (error, correlationId) => {

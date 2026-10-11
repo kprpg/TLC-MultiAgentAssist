@@ -4,6 +4,10 @@ import {
 } from '../../packages/common/contracts/seller-dashboard.js'
 import { createSampleSellerDashboard } from '../../packages/common/fixtures/seller-dashboard.js'
 
+const omittedMetricCases = createSampleSellerDashboard().report.accounts.flatMap((account) =>
+    account.metrics.map((metric) => ({ account: account.name, tpid: account.tpid, metric: metric.metric }))
+)
+
 describe('Seller Dashboard contract v1', () => {
     it('accepts a strict, fully synthetic source-reported snapshot with signed and unknown actuals', () => {
         const snapshot = createSampleSellerDashboard()
@@ -12,6 +16,38 @@ describe('Seller Dashboard contract v1', () => {
         expect(snapshot.report.accounts.at(-1)?.metrics[0]?.actual).toBe(-30_000)
         expect(snapshot.report.accounts.at(-1)?.metrics[1]?.gap).toBeNull()
         expect(sellerDashboardSnapshotSchema.parse({ ...snapshot, supplement: null }).supplement).toBeNull()
+    })
+
+    it.each(omittedMetricCases)('rejects omission of $metric from $account', ({ tpid, metric }) => {
+        const snapshot = createSampleSellerDashboard()
+        const account = snapshot.report.accounts.find((row) => row.tpid === tpid)
+        if (!account) throw new Error('Missing synthetic quota account.')
+        account.metrics = account.metrics.filter((row) => row.metric !== metric)
+
+        const result = sellerDashboardSnapshotSchema.safeParse(snapshot)
+
+        expect(result.success).toBe(false)
+        if (!result.success) {
+            expect(result.error.issues).toContainEqual(expect.objectContaining({
+                message: 'Account metrics must include the complete official metric set.'
+            }))
+        }
+    })
+
+    it('rejects an account with no metric rows instead of treating it as zero financial activity', () => {
+        const snapshot = createSampleSellerDashboard()
+        snapshot.report.accounts.at(-1)!.metrics = []
+        expect(sellerDashboardSnapshotSchema.safeParse(snapshot).success).toBe(false)
+    })
+
+    it('accepts complete metric sets in any order and preserves unknown actuals', () => {
+        const snapshot = createSampleSellerDashboard()
+        for (const account of snapshot.report.accounts) account.metrics.reverse()
+        const result = sellerDashboardSnapshotSchema.parse(snapshot)
+        expect(result.report.official.weightedAttainment).toBe(78)
+        expect(result.report.accounts.at(-1)?.metrics.find((row) => row.metric === 'Databases')).toMatchObject({
+            actual: null, variance: null, gap: null
+        })
     })
 
     it('version-checks every operation and requires explicit refresh confirmation', () => {

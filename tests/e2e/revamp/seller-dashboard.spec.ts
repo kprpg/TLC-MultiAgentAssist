@@ -51,6 +51,20 @@ test('Seller Dashboard Web keeps panes isolated and supports report filters, que
     await page.getByRole('checkbox', { name: 'Enable illustrative scenario' }).check()
     await expect(page.getByRole('table', { name: 'Illustrative scenario — not a forecast', exact: true })).toContainText('Assumed committed credit')
     await expect(page.getByTestId('seller-official-attainment')).toHaveText('78%')
+    const coreScenario = page.getByRole('table', { name: 'Illustrative scenario — not a forecast', exact: true })
+        .getByRole('row').filter({ has: page.getByRole('cell', { name: 'ACR - Core', exact: true }) })
+    await page.getByLabel('Seller pipeline state').selectOption('committed')
+    await expect(coreScenario.getByRole('cell').nth(2)).toHaveText('$92,774.19')
+    await expect(coreScenario.getByRole('cell').nth(3)).toHaveText('$0')
+    await page.getByLabel('Seller pipeline state').selectOption('uncommitted')
+    await expect(coreScenario.getByRole('cell').nth(2)).toHaveText('$0')
+    await expect(coreScenario.getByRole('cell').nth(3)).toHaveText('$51,096.77')
+    await page.getByLabel('Seller pipeline state').selectOption('')
+    await page.getByRole('searchbox', { name: 'Search Seller Dashboard' }).fill('Azure production rollout')
+    await expect(coreScenario.getByRole('cell').nth(2)).toHaveText('$84,000')
+    await expect(coreScenario.getByRole('cell').nth(3)).toHaveText('$0')
+    await expect(page.getByTestId('seller-official-attainment')).toHaveText('78%')
+    await page.getByRole('button', { name: 'Reset filters', exact: true }).click()
     await page.getByLabel('Seller bucket').selectOption('Organic consumption')
     await expect(page.getByLabel('Seller metric').locator('option')).toHaveCount(2)
     await page.getByRole('button', { name: 'Reset filters', exact: true }).click()
@@ -152,6 +166,72 @@ async function mountSellerWebview(page: Page): Promise<void> {
     await page.addStyleTag({ path: resolve('apps', 'vscode-extension', 'dist', 'webview', 'webview.css') })
     await page.addScriptTag({ path: resolve('apps', 'vscode-extension', 'dist', 'webview', 'webview.js') })
 }
+
+test('Seller Dashboard Web profile denial clears prior data and explains supported hosts', async ({ page }) => {
+    await mountSellerWebview(page)
+    const snapshot = createSampleSellerDashboard()
+    snapshot.mode = 'live'
+    await page.evaluate((response) => { window.sellerDashboardTest.response = response }, snapshot)
+    await page.getByRole('button', { name: 'Seller Dashboard', exact: true }).click()
+    await expectDashboard(page)
+    await expect(page.getByRole('button', { name: 'Refresh live sources', exact: true })).toBeVisible()
+
+    await page.evaluate(() => {
+        window.sellerDashboardTest.response = {
+            contractVersion: '1.0', kind: 'unavailable', mode: 'live', code: 'hosted-profile-denied',
+            message: 'Web private-profile access requires HTTP caller authentication bound to the seller identity.'
+        }
+    })
+    await page.getByRole('button', { name: 'Reload dashboard', exact: true }).click()
+    await expect(page.getByRole('alert')).toContainText('HTTP caller authentication')
+    await expect(page.getByRole('heading', { name: 'Private seller profiles are disabled on Web', exact: true })).toBeVisible()
+    await expect(page.getByTestId('seller-official-attainment')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Refresh live sources', exact: true })).toHaveCount(0)
+    await expect(page.locator('.sd-source-missing')).toContainText('Desktop or local Windows VS Code')
+    await expect(page.locator('.sd-source-missing')).not.toContainText('TLC_SELLER_DASHBOARD_SKILL_ROOT')
+})
+
+test('Seller Dashboard stale queues use milestone history, not parent opportunity updates', async ({ page }) => {
+    const snapshot = createSampleSellerDashboard()
+    for (const [name, modifiedAt] of [
+        ['Grid telemetry expansion', '2026-10-10T09:00:00.000Z'],
+        ['Store analytics expansion', '2026-08-26T09:00:00.000Z'],
+        ['Regional capacity approval', null],
+        ['SQL production cutover', '2026-08-27T09:00:00.000Z']
+    ] as const) {
+        const milestone = snapshot.report.milestones.find((row) => row.name === name)
+        if (!milestone) throw new Error(`Missing synthetic milestone: ${name}`)
+        if (modifiedAt === null) delete milestone.modifiedAt
+        else milestone.modifiedAt = modifiedAt
+    }
+    const committed = snapshot.report.milestones.find((row) => row.name === 'Azure production rollout')
+    if (!committed) throw new Error('Missing synthetic committed milestone.')
+    delete committed.commitmentChangedAt
+
+    await mountSellerWebview(page)
+    await page.evaluate((response) => { window.sellerDashboardTest.response = response }, snapshot)
+    await page.getByRole('button', { name: 'Seller Dashboard', exact: true }).click()
+    await expectDashboard(page)
+    await page.getByLabel('Pipeline inventory view').selectOption('stale')
+    const stale = page.getByRole('table', { name: 'Stale 45+ days', exact: true })
+    await expect(stale).toContainText('Store analytics expansion')
+    await expect(stale).toContainText('Database capacity growth')
+    await expect(stale).not.toContainText('Grid telemetry expansion')
+    await expect(stale).not.toContainText('Regional capacity approval')
+    await expect(stale).not.toContainText('SQL production cutover')
+    await expect(stale.locator('tbody tr')).toHaveCount(2)
+    await expect(stale.locator('tbody tr').filter({ hasText: 'Store analytics expansion' }).getByRole('cell').last()).toHaveText('45')
+    const queuePanel = page.locator('.sd-panel').filter({ has: page.getByLabel('Pipeline inventory view') })
+    await expect(queuePanel.locator('.sd-notice')).toContainText('Missing milestone update timestamps: 1')
+
+    await page.getByLabel('Pipeline inventory view').selectOption('recent')
+    const recent = page.getByRole('table', { name: 'Recently committed', exact: true })
+    await expect(recent).not.toContainText('Azure production rollout')
+    await expect(recent).toContainText('Commitment onboarding')
+    await expect(recent.locator('tbody tr')).toHaveCount(3)
+    await expect(queuePanel.locator('.sd-notice')).toContainText('Missing milestone commitment-change timestamps: 1')
+    await expect(page.getByTestId('seller-official-attainment')).toHaveText('78%')
+})
 
 test('Seller Dashboard VS Code webview shares the report and keeps failed reloads stale with explicit refresh approval', async ({ page }) => {
     const errors: Error[] = []

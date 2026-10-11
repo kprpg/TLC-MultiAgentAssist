@@ -82,6 +82,27 @@ describe('Seller Dashboard analysis and rendering', () => {
         expect(sellerIllustrativeCredit(Infinity, '2026-10-01', '2026-10-31')).toBeNull()
     })
 
+    it.each([
+        { label: 'committed milestones', state: 'committed', search: '', committed: 92_774.1935483871, uncommitted: 0 },
+        { label: 'uncommitted milestones', state: 'uncommitted', search: '', committed: 0, uncommitted: 51_096.7741935484 },
+        { label: 'record-level search', state: '', search: 'Azure production rollout', committed: 84_000, uncommitted: 0 },
+        { label: 'overdue milestones', state: 'overdue', search: '', committed: 0, uncommitted: 0 },
+        { label: 'unmatched search', state: '', search: 'No matching synthetic milestone', committed: 0, uncommitted: 0 }
+    ])('limits scenario credit to the working view for $label', ({ state, search, committed, uncommitted }) => {
+        const { report } = createSampleSellerDashboard()
+        const official = structuredClone(report.official)
+        const view = filterSellerDashboard(report, { ...defaultSellerDashboardFilters(report), state, search })
+        const metric = report.official.metrics.find((row) => row.name === 'ACR - Core')
+        if (!metric) throw new Error('Missing synthetic core metric.')
+
+        const result = sellerMetricScenario(report, view, metric)
+
+        expect(result.committed).toBeCloseTo(committed, 5)
+        expect(result.uncommitted).toBeCloseTo(uncommitted, 5)
+        expect(result.remaining).toBeCloseTo(Math.max(metric.gap - committed - uncommitted, 0), 5)
+        expect(report.official).toEqual(official)
+    })
+
     it('keeps scenario unsupported when commitment, mapping or retrieval is uncertain', () => {
         const snapshot = createSampleSellerDashboard()
         const view = filterSellerDashboard(snapshot.report, defaultSellerDashboardFilters(snapshot.report))

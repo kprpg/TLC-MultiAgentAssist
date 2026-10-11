@@ -8,7 +8,7 @@ import {
     sellerDate, sellerFiscalQuarters, type SellerDashboardFilters
 } from './seller-dashboard-analysis.js'
 import {
-    SellerDashboardNotice, SellerDashboardOverview, SellerDashboardSectionContent,
+    SellerDashboardNotice, SellerDashboardOverview, SellerDashboardSectionContent, SellerDashboardSourceMissing,
     sellerDashboardSections, type SellerDashboardSection
 } from './seller-dashboard-sections.js'
 
@@ -143,7 +143,12 @@ export function SellerDashboardPane({ invoke }: { invoke: InvokeSellerDashboard 
             {busy && <p className="sd-loading" role="status">{snapshot ? 'Updating the view; the previous snapshot remains visible.' : 'Loading the validated seller dashboard…'}</p>}
             {error && <div className="sd-error" role="alert">{error}</div>}
             {snapshot?.state === 'stale' && <div className="sd-stale" role="status"><strong>Stale / retained snapshot.</strong> {snapshot.message}</div>}
-            {!snapshot && !busy && <section className="sd-source-missing">
+            {!snapshot && !busy && (unavailable?.code === 'hosted-profile-denied'
+                ? <SellerDashboardSourceMissing title="Private seller profiles are disabled on Web">
+                    Web requires HTTP caller authentication bound to the seller identity before it can read a host user’s encrypted financial profile.
+                    Use a configured Desktop or local Windows VS Code host for your private earnings, or sample mode for an offline walkthrough.
+                </SellerDashboardSourceMissing>
+                : <section className="sd-source-missing">
                 <span className="sd-chip sd-chip--warning">{unavailable?.code ?? 'Load failed'}</span>
                 <h2>Connect your own seller-performance sources</h2>
                 <p>The live dashboard never borrows another seller’s export or substitutes opportunity values for official earnings.</p>
@@ -151,8 +156,8 @@ export function SellerDashboardPane({ invoke }: { invoke: InvokeSellerDashboard 
                     <li>Use the trusted Python collector to validate and set up your own Windows-user-encrypted profile, tenant, MSX organization and installed MCP runtime.</li>
                     <li>Complete one explicit successful source refresh.</li>
                     <li>Configure <code>TLC_SELLER_DASHBOARD_SKILL_ROOT</code>, <code>TLC_SELLER_DASHBOARD_PROFILE</code> and <code>TLC_SELLER_DASHBOARD_OWNER_EMAIL</code> in the local host’s environment, then reload.</li></ol>
-                <p>Hosted multi-user Web never reads a server user’s private profile. Consumption and U2C require their own validated source evidence. Sample mode remains available for an offline feature walkthrough.</p>
-            </section>}
+                <p>Web private-profile access is disabled until HTTP callers are authenticated to the seller identity. Consumption and U2C require their own validated source evidence. Sample mode remains available for an offline feature walkthrough.</p>
+            </section>)}
             {snapshot && view && <>
                 {snapshot.mode === 'sample' && <SellerDashboardNotice>{snapshot.message}</SellerDashboardNotice>}
                 <SellerDashboardOverview snapshot={snapshot} />

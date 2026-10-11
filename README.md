@@ -30,10 +30,11 @@ The separate **Seller Dashboard** pane is available on Desktop, Web, and the
 VS Code webview. Its four sections cover Pipeline & Hygiene, ACR & Insights,
 Consumption & Growth, and U2C Progress without changing existing panes.
 Sample mode uses one fictitious offline snapshot; official attainment stays fixed
-under working-view filters. Local live mode can read the seller's own validated,
+under working-view filters. Desktop and local Windows VS Code can read the seller's own validated,
 Windows-user-encrypted MCAPS collector profile, with explicit refresh approval.
 Missing consumption/history sources remain unavailable, never synthetic live data.
-Hosted multi-user Web does not read a server user's private financial profile.
+All Web modes, including local Azure CLI Web, deny host-user private profiles until
+HTTP caller authentication is bound to the seller identity; Web sample mode remains available.
 See [setup and methodology](docs/user-guide/SELLER-DASHBOARD.md) and the
 [source analysis/implementation plan](docs/Seller-Dashboard-Implementation.md).
 
