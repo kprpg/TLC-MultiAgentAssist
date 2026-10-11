@@ -216,6 +216,12 @@ button.secondary:focus-visible,
     padding: 0;
 }
 
+.app-body--seller-dashboard {
+    display: flex;
+    overflow: hidden;
+    padding: 0;
+}
+
 .discover-panel .discover-header {
     margin-bottom: 12px;
 }

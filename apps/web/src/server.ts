@@ -13,6 +13,7 @@ import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/shar
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
 import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import type { AgentCapability } from '../../../packages/common/index.js'
+import { createSellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 
 const port = parsePort(process.env['PORT'])
 const mode = resolveWebHostMode(process.env)
@@ -79,6 +80,11 @@ const serveStatic = buildStaticHandler(staticRoot, mode === 'sample' ? 'sample' 
 const handleApi = buildWebApiHandler({
     createRuntime,
     resolveWorkflowHost,
+    resolveSellerDashboardHost: (authentication) => createSellerDashboardHost({
+        mode: mode === 'sample' ? 'sample' : 'live',
+        allowLocalProfile: mode === 'azure-cli',
+        resolveUserEmail: async () => authentication.userEmail
+    }),
     ...(authenticate ? { authenticate } : {}),
     ...(mode !== 'easy-auth' ? { shutdown: closeLocalServer } : {}),
     onError: (error, correlationId) => {

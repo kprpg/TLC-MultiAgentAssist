@@ -31,6 +31,8 @@ import { createWorkflowIpcHandlers } from './workflow-ipc.js'
 import { SharedVoiceInputHost } from '../../../../packages/orchestrator/voice-input.js'
 import { WindowsVoiceCaptureDriver } from '../../../../packages/connectors/common/windows-voice.js'
 import { createVoiceIpcHandler, voiceIpcChannel } from './voice-ipc.js'
+import { createSellerDashboardHost } from '../../../../packages/orchestrator/seller-dashboard.js'
+import { createSellerDashboardIpcHandler, sellerDashboardIpcChannel } from './seller-dashboard-ipc.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -95,6 +97,10 @@ const tokenProvider = new AzureCliMsxTokenProvider({
       authenticationLabel: authentication.mode === 'interactive-browser' ? 'Interactive sign-in' : 'Azure CLI'
     }
     : {})
+})
+const sellerDashboardHost = createSellerDashboardHost({
+  mode: dataMode,
+  resolveUserEmail: async () => (await tokenProvider.getAuthStatus()).userEmail
 })
 const reportPerformance: PerformanceReporter = (event) => {
   console.info(`[performance] ${JSON.stringify(event)}`)
@@ -222,6 +228,11 @@ function assertTrustedSender(event: IpcMainInvokeEvent): void {
 }
 
 function registerIpc(): void {
+  const invokeSellerDashboard = createSellerDashboardIpcHandler(sellerDashboardHost)
+  ipcMain.handle(sellerDashboardIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return invokeSellerDashboard(request)
+  })
   const invokeVoice = createVoiceIpcHandler(voiceHost)
   ipcMain.handle(voiceIpcChannel, (event, request: unknown) => {
     assertTrustedSender(event)

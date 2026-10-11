@@ -154,6 +154,16 @@ Agents consume connector interfaces or orchestrator-provided evidence. They must
 
 The current browser-safe shared UI modules in `apps/shared` include `portfolio-search.ts`, which supplies the same matching and result-limit rules to Desktop/Web and the VS Code webview. The extension's focused `portfolio-search.tsx` component owns search loading and interaction; `next-best-actions.tsx` renders MCEM recommendations and their cited evidence without changing the host or orchestrator contracts.
 
+Seller Dashboard uses shared `seller-dashboard.tsx`, `seller-dashboard-sections.tsx`,
+`seller-dashboard-table.tsx`, `seller-dashboard-analysis.ts`, and feature-scoped
+`seller-dashboard.css` in `apps/shared`. Its browser-safe, independently versioned
+schemas live in `packages/common/contracts/seller-dashboard.ts`, with one fictitious
+snapshot in `packages/common/fixtures/seller-dashboard.ts`. The shared read-only
+host in `packages/orchestrator/seller-dashboard.ts` fronts the optional
+Windows-encrypted profile adapter in `packages/connectors/common/seller-dashboard.ts`.
+Electron IPC, authenticated/no-store HTTP, and the strict webview bridge invoke
+the same operations. Multi-user Easy Auth never reads a server user's private profile.
+
 Voice search uses shared `voice-input.ts`, `use-voice-dictation.ts`,
 `voice-search-control.tsx`, and provider adapters in `apps/shared`. Its strict
 contracts live in `packages/common/contracts/voice.ts`; the shared native-session

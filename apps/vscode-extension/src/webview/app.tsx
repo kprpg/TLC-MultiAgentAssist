@@ -23,6 +23,7 @@ import { sortMilestones, sortOpportunities, type MilestoneSort, type Opportunity
 import { DiscoveryControls, DiscoverySortHeader } from '../../../shared/discovery-controls.js'
 import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportunities, toggleDiscoverySort, type DiscoveryFilters, type DiscoverySort } from '../../../shared/discovery.js'
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
+import { SellerDashboardPane } from '../../../shared/seller-dashboard.js'
 import type {
     AccountCandidateView,
     AccountView,
@@ -45,7 +46,7 @@ import type {
     WorkflowResultCardView
 } from './view-types.js'
 
-type Tab = 'portfolio' | 'plays' | 'discover'
+type Tab = 'portfolio' | 'plays' | 'discover' | 'seller-dashboard'
 type Loadable<T> = { status: 'idle' | 'loading' | 'error' | 'ready'; data?: T; error?: string }
 
 // Routes each Play's queue-item guidance handoff to the most relevant agent.
@@ -1804,10 +1805,11 @@ export function App(): ReactElement {
                     setDetailsExpanded(true)
                 }}
             />
-            <main className={`app-body${tab === 'plays' ? ' app-body--plays' : ''}`}>
+            <main className={`app-body${tab === 'plays' ? ' app-body--plays' : tab === 'seller-dashboard' ? ' app-body--seller-dashboard' : ''}`}>
                 {tab === 'portfolio' ? (
                     <PortfolioPanel focus={focus} accountsExpanded={accountsExpanded} detailsExpanded={detailsExpanded} actionsExpanded={actionsExpanded} />
-                ) : tab === 'discover' ? <DiscoverPanel /> : <PlaysPanel runRequest={runRequest} />}
+                ) : tab === 'discover' ? <DiscoverPanel /> : tab === 'seller-dashboard'
+                    ? <SellerDashboardPane invoke={dataClient.invokeSellerDashboard} /> : <PlaysPanel runRequest={runRequest} />}
             </main>
         </div>
     )

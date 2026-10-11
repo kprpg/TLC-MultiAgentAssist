@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, createMilestoneActivityRequestSchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, meetingTypeSchema, milestoneUpdateSchema, opportunityUpdateSchema, scopeRefSchema, seDomainSchema } from '../../../packages/common/index.js'
 import { voiceRequestSchema } from '../../../packages/common/contracts/voice.js'
+import { sellerDashboardRequestSchema } from '../../../packages/common/contracts/seller-dashboard.js'
 
 /**
  * Strict, discriminated message envelopes for the webview <-> extension-host bridge.
@@ -16,6 +17,7 @@ export const agentCapabilitySchema = z.enum([
 ])
 
 export const bridgeMethodSchema = z.enum([
+    'sellerDashboard',
     'voiceInput',
     'getCurrentUserEmail',
     'listAccounts',
@@ -57,6 +59,7 @@ export type BridgeMethod = z.infer<typeof bridgeMethodSchema>
 const scopeKindSchema = z.enum(['portfolio', 'account', 'opportunity'])
 
 export const bridgeParamSchemas = {
+    sellerDashboard: sellerDashboardRequestSchema,
     voiceInput: voiceRequestSchema,
     getCurrentUserEmail: z.void().optional(),
     listAccounts: accountListOptionsSchema.optional(),

@@ -1,5 +1,6 @@
 import { request } from './bridge.js'
 import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest } from '../../../../packages/common/contracts/voice.js'
+import { sellerDashboardRequestSchema, sellerDashboardResponseSchema, type SellerDashboardRequest } from '../../../../packages/common/contracts/seller-dashboard.js'
 import type {
     AccountView,
     AccountCandidateView,
@@ -36,6 +37,9 @@ const POLL_TIMEOUT_MS = 15_000
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 export const dataClient = {
+    invokeSellerDashboard: async (input: SellerDashboardRequest) => sellerDashboardResponseSchema.parse(
+        await request('sellerDashboard', sellerDashboardRequestSchema.parse(input))
+    ),
     invokeVoice: async (input: VoiceRequest) => voiceResponseSchema.parse(await request('voiceInput', voiceRequestSchema.parse(input))),
     getCurrentUserEmail: () => request<string | null>('getCurrentUserEmail'),
     listAccounts: (includeHidden = false) => request<AccountView[]>('listAccounts', { includeHidden }),

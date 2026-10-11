@@ -246,6 +246,15 @@ button {
     overflow-y: hidden;
 }
 
+.seller-dashboard-mobile-entry {
+    display: none;
+    border: 0;
+    color: var(--cp-accent);
+    background: transparent;
+    padding: 4px;
+    cursor: pointer;
+}
+
 .icon-rail {
     z-index: 3;
     display: flex;
@@ -2178,6 +2187,10 @@ body.resizing-blade .blade {
 }
 
 @media (max-width: 900px) {
+    .seller-dashboard-mobile-entry {
+        display: grid;
+        place-items: center;
+    }
     .app-shell {
         grid-template-rows: 48px minmax(0, 1fr) 58px;
     }

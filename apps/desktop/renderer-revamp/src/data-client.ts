@@ -68,8 +68,11 @@ import {
 import type { StartWorkflowHostRequest, WorkflowHostOperation } from '../../../../packages/orchestrator/workflows/host.js'
 import { milestoneRecommendations, summarizeMilestones } from '../../../../packages/agents/mcem-coach/src/milestone-signals.js'
 import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest, type VoiceResponse } from '../../../../packages/common/contracts/voice.js'
+import { sellerDashboardRequestSchema, sellerDashboardResponseSchema, type SellerDashboardRequest, type SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
+import { createSampleSellerDashboard } from '../../../../packages/common/fixtures/seller-dashboard.js'
 
 export interface RevampDataClient {
+    invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     readonly mode: 'desktop' | 'web-live' | 'web-sample'
     exitApplication(): Promise<void>
@@ -111,6 +114,12 @@ export interface RevampDataClient {
 
 type Fetcher = typeof fetch
 
+class WebApiRequestError extends Error {
+    constructor(readonly status: number, message: string) {
+        super(message)
+    }
+}
+
 function downloadBlob(blob: Blob, fileName: string): void {
     const downloadUrl = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -134,7 +143,7 @@ async function apiRequest(fetcher: Fetcher, path: string, init?: RequestInit): P
         }
     })
     const payload = await response.json().catch(() => null) as { error?: string } | null
-    if (!response.ok) throw new Error(payload?.error ?? `The server request failed (${response.status}).`)
+    if (!response.ok) throw new WebApiRequestError(response.status, payload?.error ?? `The server request failed (${response.status}).`)
     return payload
 }
 
@@ -146,6 +155,9 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
     )
     return {
         mode,
+        invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(await apiRequest(fetcher, '/api/seller-dashboard', {
+            method: 'POST', body: JSON.stringify(sellerDashboardRequestSchema.parse(request))
+        })),
         invokeVoice: async (request) => voiceResponseSchema.parse(await apiRequest(fetcher, '/api/voice', {
             method: 'POST', body: JSON.stringify(voiceRequestSchema.parse(request))
         })),
@@ -235,6 +247,7 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
 }
 
 interface DesktopBridge {
+    invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     exitApplication(): Promise<void>
     getDataStatus(): Promise<DesktopDataStatus>
@@ -422,6 +435,10 @@ function buildWebEvaluation(opportunity: Opportunity, opportunityMilestones: rea
 function webClient(): RevampDataClient {
     return {
         mode: 'web-sample',
+        invokeSellerDashboard: async (request) => {
+            sellerDashboardRequestSchema.parse(request)
+            return createSampleSellerDashboard()
+        },
         exitApplication: async () => { await apiRequest(fetch, '/api/exit', { method: 'POST' }) },
         getCurrentUserEmail: async () => undefined,
         listAccounts: async (options) => structuredClone(sampleAccountRows(options?.includeHidden)),
@@ -606,6 +623,9 @@ function webClient(): RevampDataClient {
 function desktopClient(bridge: DesktopBridge): RevampDataClient {
     return {
         mode: 'desktop',
+        invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(
+            await bridge.invokeSellerDashboard(sellerDashboardRequestSchema.parse(request))
+        ),
         invokeVoice: async (request) => voiceResponseSchema.parse(await bridge.invokeVoice(voiceRequestSchema.parse(request))),
         exitApplication: () => bridge.exitApplication(),
         getCurrentUserEmail: async () => (await bridge.getDataStatus()).auth.userEmail,

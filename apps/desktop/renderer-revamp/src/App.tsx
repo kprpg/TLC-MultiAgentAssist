@@ -15,6 +15,7 @@ import {
   ChevronRight20Regular,
   ClipboardTaskListLtr20Regular,
   Dismiss20Regular,
+  DataBarVertical20Regular,
   Home20Regular,
   Eye20Regular,
   EyeOff20Regular,
@@ -52,9 +53,10 @@ import { FeedbackButton } from '../../../shared/feedback-button.js'
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 import type { PortfolioSearchResult } from '../../../shared/portfolio-search.js'
 import { PortfolioSearch } from './portfolio-search.js'
+import { SellerDashboardPane } from '../../../shared/seller-dashboard.js'
 
 type Shell = 'desktop' | 'web'
-type WorkspaceView = 'accounts' | 'workflows' | 'discover'
+type WorkspaceView = 'accounts' | 'workflows' | 'discover' | 'seller-dashboard'
 type CenterTab = 'msx' | 'guidance' | 'stages'
 type Blade = 'accounts' | 'opportunities' | 'actions'
 type SearchResult = PortfolioSearchResult<Account, Opportunity>
@@ -1082,6 +1084,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         shell={shell} client={client} contextKey={`${workspaceView}:${centerTab}:${account?.id ?? ''}:${opportunity?.id ?? ''}`}
         onSelect={chooseSearchResult} />
       <div className="command-actions">
+        <button className="seller-dashboard-mobile-entry" aria-label="Open Seller Dashboard" title="Seller Dashboard" onClick={() => setWorkspaceView('seller-dashboard')}><DataBarVertical20Regular /></button>
         <span className="mode-badge">{modeLabel}</span>
         <FeedbackButton onOpenIssue={client.openEvidence} />
         <button className="profile-button" title="Signed-in user" aria-label="Signed-in user"><Person20Regular /></button>
@@ -1099,7 +1102,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         <button className="rail-button" title="Guidance" aria-label="Guidance"><Sparkle20Regular /></button>
         <button className={`rail-button ${workspaceView === 'workflows' ? 'active' : ''}`} title="Workflows" aria-label="Workflows" onClick={() => setWorkspaceView('workflows')}><ClipboardTaskListLtr20Regular /></button>
         <button className={`rail-button ${workspaceView === 'discover' ? 'active' : ''}`} title="Discover opportunities" aria-label="Discover opportunities" onClick={() => setWorkspaceView('discover')}><Person20Regular /></button>
+        <button className={`rail-button ${workspaceView === 'seller-dashboard' ? 'active' : ''}`} title="Seller Dashboard" aria-label="Seller Dashboard" onClick={() => setWorkspaceView('seller-dashboard')}><DataBarVertical20Regular /></button>
       </nav>
+
+      {workspaceView === 'seller-dashboard' && <SellerDashboardPane invoke={client.invokeSellerDashboard} />}
 
       {workspaceView === 'accounts' && <>
       <section className={`blade account-blade ${collapsed.has('accounts') ? 'collapsed' : ''} ${mobileBlade === 'accounts' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('accounts') ? undefined : bladeWidths.accounts }} aria-label="Accounts blade">
@@ -1708,6 +1714,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     {workspaceView === 'discover' && <nav className="mobile-nav workflow-mobile-nav" aria-label="Mobile workspace navigation">
       <button onClick={() => setWorkspaceView('accounts')}><Building20Regular /><span>Accounts</span></button>
       <button className="active"><Person20Regular /><span>Discover</span></button>
+    </nav>}
+    {workspaceView === 'seller-dashboard' && <nav className="mobile-nav workflow-mobile-nav" aria-label="Mobile workspace navigation">
+      <button onClick={() => setWorkspaceView('accounts')}><Building20Regular /><span>Accounts</span></button>
+      <button className="active"><DataBarVertical20Regular /><span>Seller Dashboard</span></button>
     </nav>}
   </div>
 }

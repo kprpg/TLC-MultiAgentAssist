@@ -38,6 +38,7 @@ import {
     type WorkflowRunView
 } from '../../../packages/orchestrator/workflows/index.js'
 import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
+import { createSellerDashboardHost, type SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 import { LocalStore, LocalStoreMsxConnector } from '../../../packages/connectors/local-store/index.js'
 import { ExtensionMcemGuidanceConnector } from './mcem-guidance.js'
 import { buildLiveDataProvider, buildLiveTaskAgents } from './live-provider-core.js'
@@ -76,6 +77,7 @@ export interface MeetingTranscriptSource {
  * decision of sample vs live; the router never learns which mode is active.
  */
 export interface ExtensionDataProvider {
+    readonly sellerDashboard?: SellerDashboardHost
     readonly mode: 'sample' | 'live'
     getCurrentUserEmail(): Promise<string | undefined>
     listAccounts(options?: AccountListOptions): Promise<Account[]>
@@ -153,6 +155,7 @@ export function createSampleDataProvider(): ExtensionDataProvider {
     })
     return {
         mode: 'sample',
+        sellerDashboard: createSellerDashboardHost({ mode: 'sample', resolveUserEmail: async () => undefined }),
         getCurrentUserEmail: async () => undefined,
         listAccounts: async (options) => listSampleAccounts(options),
         searchAccounts: async (request) => searchSampleAccounts(request),
