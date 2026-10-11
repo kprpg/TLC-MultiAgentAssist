@@ -2,8 +2,10 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { Account, AccountCandidate, AccountListOptions, AccountSearchRequest, AccountVisibility, AgentTaskRequest, AgentTaskResponse, AuthStatus, CreateMilestoneActivityRequest, DealTeamJoinResult, DealTeamLeaveResult, DesktopDataStatus, DiscoverableOpportunity, EmailComposeRequest, EmailComposeResult, ExportResponseRequest, ExportResponseResult, McemRequest, McemResponse, McemStageTransitionRequest, McemStageTransitionResult, Milestone, MilestoneActivity, MilestoneTeamJoinResult, MilestoneTeamLeaveResult, MilestoneUpdate, Opportunity, OpportunityUpdate, SeDomainId } from '../../../../packages/common/index.js'
 import type { WorkflowHostOperation } from '../../../../packages/orchestrator/workflows/index.js'
 import type { VoiceRequest, VoiceResponse } from '../../../../packages/common/contracts/voice.js'
+import type { SellerDashboardRequest, SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
 
 export interface TlcDesktopApi {
+  invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
   invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
   exitApplication(): Promise<void>
   getDataStatus(): Promise<DesktopDataStatus>
@@ -34,6 +36,7 @@ export interface TlcDesktopApi {
 }
 
 const api: TlcDesktopApi = {
+  invokeSellerDashboard: (request) => ipcRenderer.invoke('tlc:seller-dashboard', request),
   invokeVoice: (request) => ipcRenderer.invoke('tlc:voice-input', request),
   exitApplication: () => ipcRenderer.invoke('tlc:exit-application'),
   getDataStatus: () => ipcRenderer.invoke('tlc:get-data-status'),

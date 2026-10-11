@@ -26,6 +26,7 @@ describe('AppHeader', () => {
         expect(markup).toContain('Portfolio')
         expect(markup).toContain('Plays')
         expect(markup).toContain('Discover')
+        expect(markup).toContain('Seller Dashboard')
         expect(markup.indexOf('Discover')).toBeLessThan(markup.indexOf('Portfolio'))
         expect(markup.indexOf('Portfolio')).toBeLessThan(markup.indexOf('Plays'))
         expect(markup).toContain('Live')
