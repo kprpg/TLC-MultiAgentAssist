@@ -44,7 +44,7 @@ export function createSellerDashboardHost(
     if (options.allowLocalProfile === false) {
         const denied = async (): Promise<never> => {
             throw new SellerDashboardSourceError('hosted-profile-denied',
-                'Hosted multi-user Web cannot read a server user’s private earnings profile. Use a configured local Windows host or an identity-scoped earnings provider.')
+                'Web cannot read a host user’s private earnings profile without HTTP caller authentication bound to the seller identity. Use a configured Desktop or local VS Code host.')
         }
         return new SharedSellerDashboardHost({ read: denied, refresh: denied })
     }

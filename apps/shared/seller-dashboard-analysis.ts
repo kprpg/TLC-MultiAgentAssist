@@ -172,8 +172,7 @@ export function sellerIllustrativeCredit(monthly: number, start: string, end: st
 const scenarioMetrics = new Set(['ACR - Core', 'Databases', 'Fabric + XCR - Power BI Consumed Revenue'])
 
 export function sellerMetricScenario(report: SellerDashboardReport, view: SellerDashboardView, metric: SellerDashboardView['metrics'][number]) {
-    const accountIds = new Set(view.accounts.map((row) => row.tpid))
-    const candidates = report.milestones.filter((row) => accountIds.has(row.tpid) && sellerIsProduction(row) &&
+    const candidates = view.milestones.filter((row) => sellerIsProduction(row) &&
         row.date !== null && row.date >= report.period.today && row.date <= report.period.end &&
         row.date >= view.range.start && row.date <= view.range.end)
     const mapped = candidates.filter((row) => row.metricCandidates.includes(metric.name))

@@ -28,10 +28,24 @@ period or prorate supplied quota/actuals. Tables sort from their column headers
 and paginate without dropping records from totals. Arrow keys/Home/End navigate
 the report-section tabs.
 
+**Stale 45+ days** uses each active uncommitted milestone's own update timestamp,
+the same evidence shown in **Days since update**, not its parent opportunity's age.
+**Recently committed** uses the milestone's commitment-change timestamp. Missing
+timestamps are reported for the relevant milestones and do not establish staleness
+or recent commitment.
+
 “Unknown,” “partial,” and “unavailable” are not zero. Source warnings and
 **Sources, freshness & methodology** explain scope, timestamps and accounting.
+Every quota account must include the complete official metric set with source-supplied
+quota rows. Missing actuals remain `null`/unknown; genuine zeros must be explicit.
+An omitted metric or empty account-metric list rejects the snapshot rather than
+silently dropping amounts from account gaps or supplying invented zeros.
+
 Monthly usage and nominal opportunity values are never treated as verified
 reporting-period credit. The scenario starts off and is explicitly hypothetical.
+Its candidate credit uses only milestones in the filtered working view, including
+record-level search and pipeline-state filters. Selecting committed milestones
+excludes uncommitted scenario credit; official attainment and posted gaps remain fixed.
 
 ## Local live prerequisites
 
@@ -68,11 +82,16 @@ The UI cannot choose an arbitrary profile, executable, tenant or path.
   labels it stale. A reload/validation failure does not make retained data fresh.
 - An identity/access denial clears the private displayed snapshot.
 
-The Windows profile adapter is supported on Desktop, local Windows VS Code,
-and **loopback-only** Web in `TLC_WEB_MODE=azure-cli`. It is deliberately disabled
-on hosted multi-user Easy Auth: a server user’s encrypted financial profile must
-never be shared among browser principals. Other identity-scoped providers can
-implement the same versioned dashboard host contract.
+The Windows profile adapter is supported only on **Desktop and local Windows
+VS Code**. It is disabled on **all Web modes**, including `TLC_WEB_MODE=azure-cli`
+and hosted Easy Auth. Loopback and the server's Azure CLI identity do not
+authenticate an HTTP caller, so another local process/user must never receive
+the host user's decrypted financial snapshot. Setting profile environment
+variables does not enable this Web path.
+
+Web private earnings require a future per-session capability or caller-authenticated
+provider bound to the seller identity. Web sample mode remains available and
+never reads an encrypted profile.
 
 ## Supplemental data and privacy
 

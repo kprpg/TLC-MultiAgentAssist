@@ -157,6 +157,10 @@ export const sellerDashboardReportSchema = z.object({
     if (report.sources.quota.accounts !== report.accounts.length) reject('Quota account count does not reconcile.')
     for (const account of report.accounts) {
         unique(account.metrics.map((row) => row.metric), 'account metric')
+        const accountMetricNames = new Set(account.metrics.map((row) => row.metric))
+        if (metrics.some((metric) => !accountMetricNames.has(metric.name))) {
+            reject('Account metrics must include the complete official metric set.')
+        }
         for (const row of account.metrics) {
             if (metricMap.get(row.metric)?.bucket !== row.bucket) reject('Unknown account metric mapping.')
             if (row.actual === null) {

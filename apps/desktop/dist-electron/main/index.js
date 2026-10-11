@@ -1040,6 +1040,8 @@ var sellerDashboardReportSchema = z.object({
 	if (report.sources.quota.accounts !== report.accounts.length) reject("Quota account count does not reconcile.");
 	for (const account of report.accounts) {
 		unique(account.metrics.map((row) => row.metric), "account metric");
+		const accountMetricNames = new Set(account.metrics.map((row) => row.metric));
+		if (metrics.some((metric) => !accountMetricNames.has(metric.name))) reject("Account metrics must include the complete official metric set.");
 		for (const row of account.metrics) {
 			if (metricMap.get(row.metric)?.bucket !== row.bucket) reject("Unknown account metric mapping.");
 			if (row.actual === null) {
@@ -12053,7 +12055,7 @@ function createSellerDashboardHost(options) {
 	});
 	if (options.allowLocalProfile === false) {
 		const denied = async () => {
-			throw new SellerDashboardSourceError("hosted-profile-denied", "Hosted multi-user Web cannot read a server user’s private earnings profile. Use a configured local Windows host or an identity-scoped earnings provider.");
+			throw new SellerDashboardSourceError("hosted-profile-denied", "Web cannot read a host user’s private earnings profile without HTTP caller authentication bound to the seller identity. Use a configured Desktop or local VS Code host.");
 		};
 		return new SharedSellerDashboardHost({
 			read: denied,

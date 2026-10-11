@@ -162,7 +162,10 @@ snapshot in `packages/common/fixtures/seller-dashboard.ts`. The shared read-only
 host in `packages/orchestrator/seller-dashboard.ts` fronts the optional
 Windows-encrypted profile adapter in `packages/connectors/common/seller-dashboard.ts`.
 Electron IPC, authenticated/no-store HTTP, and the strict webview bridge invoke
-the same operations. Multi-user Easy Auth never reads a server user's private profile.
+the same operations. `createWebSellerDashboardHost` in `apps/web/src/runtime.ts`
+denies host-user private profiles in all Web live modes, including local Azure CLI,
+until HTTP caller authentication is identity-bound. Desktop/local Windows VS Code
+retain the protected-profile adapter; Web sample mode remains synthetic.
 
 Voice search uses shared `voice-input.ts`, `use-voice-dictation.ts`,
 `voice-search-control.tsx`, and provider adapters in `apps/shared`. Its strict

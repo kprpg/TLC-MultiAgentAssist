@@ -93,10 +93,11 @@ nominal opportunity dollars, and monthly run-rate must not masquerade as earning
   explains possible corporate sign-in; the collector performs the transaction.
 - A failed refresh returns the previous report as visibly stale, not current.
   Read/validation failures produce explicit errors; the UI labels retained data stale.
-- Multi-user Easy Auth must never read a server user's DPAPI earnings profile.
-  The local adapter is deliberately unavailable there. Local loopback Web,
-  Desktop, and local VS Code can use the Windows adapter. Other live providers
-  may implement the same contract without changing the UI.
+- All Web live modes must deny a host user's DPAPI earnings profile, including
+  local Azure CLI and hosted Easy Auth. Loopback and the server's identity do not
+  authenticate the HTTP caller. Desktop and local Windows VS Code can use the
+  Windows adapter; Web private data requires a future identity-bound caller
+  capability/provider. Web sample mode remains synthetic.
 - No automation, sharing/export, new CRM write, or account-scope expansion is added.
 
 ### UI boundaries and presentation
@@ -145,8 +146,10 @@ nominal opportunity dollars, and monthly run-rate must not masquerade as earning
 - Seller Dashboard is independent and reachable on all three surfaces; navigation
   back to existing panes still works.
 - Offline/sample mode renders four populated report sections with clearly synthetic data.
-- Configured local live mode reads the actual protected collector output and uses the
+- Configured Desktop/local Windows VS Code live mode reads the protected collector output and uses the
   same validated UI, with no sample substitution.
+- Web live reads/refreshes never invoke the Windows profile connector until HTTP
+  callers are securely bound to the seller identity.
 - Unsupported/unconfigured/identity-mismatched sources fail explicitly before private reads.
 - Official source-reported attainment, negative actuals, zero targets, unknowns,
   net-clamped account gaps, and period boundaries are preserved.
@@ -172,7 +175,7 @@ nominal opportunity dollars, and monthly run-rate must not masquerade as earning
 | Shared presentation | [pane](../apps/shared/seller-dashboard.tsx), [sections](../apps/shared/seller-dashboard-sections.tsx), [analysis](../apps/shared/seller-dashboard-analysis.ts), [table](../apps/shared/seller-dashboard-table.tsx), [styles](../apps/shared/seller-dashboard.css). |
 | Desktop/Web navigation | Focused mounting in the shared renderer, chart navigation entry, mobile command entry and return navigation; existing pane state is not repurposed. |
 | Desktop transport | [IPC adapter](../apps/desktop/electron/main/seller-dashboard-ipc.ts), main composition and trusted-sender registration, preload/client method. |
-| Web transport | Authenticated same-origin/no-store API and local/sample composition; Easy Auth explicitly denies a server-user financial profile. |
+| Web transport | Same-origin/no-store API and sample composition; the Web-specific host factory explicitly denies host-user profiles in all live modes, including local Azure CLI. |
 | VS Code transport/UI | Provider composition, strict message/host routing, schema-validated browser client, fourth header tab, and shared pane mounting. |
 | Documentation | This source analysis/plan, [user setup guide](user-guide/SELLER-DASHBOARD.md), README, user-guide navigation and folder-structure updates. |
 | Tests | [contract](../tests/contract/seller-dashboard.test.ts), [analysis/static render](../tests/unit/shared/seller-dashboard.test.ts), [connector/lifecycle](../tests/unit/connectors/seller-dashboard.test.ts), [harness](../tests/unit/orchestrator/seller-dashboard.test.ts), [transport parity](../tests/unit/hosts/seller-dashboard-transport-parity.test.ts), [three-surface interaction/proof](../tests/e2e/revamp/seller-dashboard.spec.ts), and existing header test. |
@@ -258,7 +261,8 @@ real-HTTP capture was taken only after verifying the actual sample API response.
 - Fabric consumption, U2C history, update/commitment timestamps and certified
   credit rules are not created by the supplied collector. Live fields remain
   explicitly unavailable until an approved source supplies validated evidence.
-- Hosted multi-user financial-data integration requires an identity-scoped
-  provider; the Windows server-user profile path intentionally remains denied.
+- All Web private financial-data integration requires identity-bound HTTP caller
+  authentication; the Windows host-user profile path intentionally remains denied
+  in both local Azure CLI and hosted Easy Auth modes.
 - Synthetic validation and screenshots do not certify compensation accuracy for
   an unsupported plan or grant access to a real seller's environment.

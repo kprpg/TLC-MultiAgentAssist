@@ -109,6 +109,14 @@ describe('Windows protected seller-profile connector', () => {
         }
     })
 
+    it.each(['read', 'refresh'] as const)('rejects incomplete account metrics during protected-source %s', async (operation) => {
+        const { report } = createSampleSellerDashboard()
+        report.accounts[0]!.metrics.pop()
+        const { instance } = await connector({ payload: { report, supplement: null, stale: false } })
+        const result = operation === 'read' ? instance.read() : instance.refresh('2026-10-10')
+        await expect(result).rejects.toMatchObject({ code: 'invalid-snapshot' })
+    })
+
     it('does not accept a success-shaped refresh for a different confirmed reporting date', async () => {
         const { instance } = await connector()
         await expect(instance.refresh('2026-10-11')).rejects.toMatchObject({ code: 'invalid-snapshot' })
