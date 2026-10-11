@@ -1,6 +1,7 @@
 let electron = require("electron");
 //#region apps/desktop/electron/preload/index.ts
 electron.contextBridge.exposeInMainWorld("tlc", {
+	invokeSellerDashboard: (request) => electron.ipcRenderer.invoke("tlc:seller-dashboard", request),
 	invokeVoice: (request) => electron.ipcRenderer.invoke("tlc:voice-input", request),
 	exitApplication: () => electron.ipcRenderer.invoke("tlc:exit-application"),
 	getDataStatus: () => electron.ipcRenderer.invoke("tlc:get-data-status"),

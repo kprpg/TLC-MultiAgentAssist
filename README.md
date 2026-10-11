@@ -24,6 +24,19 @@ Every surface runs in one of two modes:
 
 See [Documentation](#documentation) for the full user guide, FAQ, and runbooks.
 
+## Seller Dashboard
+
+The separate **Seller Dashboard** pane is available on Desktop, Web, and the
+VS Code webview. Its four sections cover Pipeline & Hygiene, ACR & Insights,
+Consumption & Growth, and U2C Progress without changing existing panes.
+Sample mode uses one fictitious offline snapshot; official attainment stays fixed
+under working-view filters. Local live mode can read the seller's own validated,
+Windows-user-encrypted MCAPS collector profile, with explicit refresh approval.
+Missing consumption/history sources remain unavailable, never synthetic live data.
+Hosted multi-user Web does not read a server user's private financial profile.
+See [setup and methodology](docs/user-guide/SELLER-DASHBOARD.md) and the
+[source analysis/implementation plan](docs/Seller-Dashboard-Implementation.md).
+
 ## Voice search
 
 The main portfolio search supports a microphone button and **Ctrl+Alt+M** on all

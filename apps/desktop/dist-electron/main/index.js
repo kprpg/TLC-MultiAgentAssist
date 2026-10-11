@@ -1,9 +1,9 @@
 import { createRequire } from "node:module";
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
-import { copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { dirname, join, posix, resolve, win32 } from "node:path";
+import { dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
 import { PDFParse } from "pdf-parse";
@@ -15,7 +15,7 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { AlignmentType, Document, ExternalHyperlink, HeadingLevel, LevelFormat, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 var workflowAgentCapabilityValues = [
 	"account-pulse",
 	"mcem-coach",
@@ -523,7 +523,7 @@ var accountProvenanceSchema = z.enum([
 	"both"
 ]);
 var accountVisibilitySchema = z.enum(["visible", "hidden"]);
-var accountSchema = z.object({
+var accountSchema$1 = z.object({
 	id: z.string().min(1),
 	name: z.string().min(1),
 	segment: z.string().min(1),
@@ -541,7 +541,7 @@ var accountSearchRequestSchema = z.object({
 		message: "Account name searches require at least two characters."
 	});
 });
-accountSchema.extend({ state: z.enum([
+accountSchema$1.extend({ state: z.enum([
 	"not-added",
 	"visible",
 	"hidden"
@@ -797,6 +797,407 @@ var voiceResponseSchema = z.discriminatedUnion("kind", [z.object({
 	kind: z.literal("availability"),
 	availability: voiceAvailabilitySchema
 }).strict(), voiceSessionSchema]);
+var text$1 = z.string().max(3e4);
+var name = z.string().min(1).max(500);
+var identifier = z.string().min(1).max(200);
+var tpid = z.string().regex(/^[1-9][0-9]{0,19}$/);
+var amount = z.number().finite();
+var nonnegative = amount.nonnegative();
+var count = z.number().int().nonnegative();
+var date$1 = z.iso.date();
+var timestamp = z.iso.datetime({ offset: true });
+var quality = z.enum([
+	"complete",
+	"partial",
+	"unavailable"
+]);
+var timing = z.enum([
+	"overdue",
+	"in-quarter",
+	"future",
+	"undated"
+]);
+var bucketSchema = z.object({
+	name,
+	weight: amount.min(0).max(1),
+	unit: z.literal("USD"),
+	attainment: amount,
+	actual: amount,
+	quota: amount,
+	recurring: amount,
+	calcActual: amount,
+	calcQuota: nonnegative,
+	gap: nonnegative
+}).strict();
+var metricSchema = z.object({
+	name,
+	bucket: name,
+	unit: z.literal("USD"),
+	mappingSupported: z.boolean(),
+	scenarioAllowed: z.boolean(),
+	attainment: amount,
+	actual: amount,
+	quota: amount,
+	recurring: amount,
+	calcActual: amount,
+	calcQuota: amount,
+	gap: nonnegative,
+	closedGap: nonnegative,
+	closedAttainment: amount.nullable(),
+	accountActualDifference: amount,
+	accountQuotaDifference: amount
+}).strict();
+var accountMetricSchema = z.object({
+	metric: name,
+	bucket: name,
+	quota: nonnegative,
+	actual: amount.nullable(),
+	variance: amount.nullable(),
+	gap: nonnegative.nullable()
+}).strict();
+var accountSchema = z.object({
+	tpid,
+	name,
+	metrics: z.array(accountMetricSchema).max(100),
+	pipeline: z.object({
+		status: quality,
+		openCount: count,
+		inQuarterCount: count,
+		inQuarterValue: amount,
+		productionCount: count,
+		inQuarterProductionCount: count,
+		committedMonthly: amount,
+		uncommittedMonthly: amount,
+		noPipeline: z.boolean(),
+		noInQuarterPipeline: z.boolean()
+	}).strict(),
+	nextAction: text$1
+}).strict();
+var opportunitySchema$1 = z.object({
+	id: identifier,
+	number: text$1,
+	tpid,
+	account: name,
+	name,
+	owner: text$1,
+	stage: text$1,
+	solutionArea: text$1,
+	salesPlay: text$1,
+	intent: text$1,
+	estimatedValue: amount.nullable(),
+	currency: text$1,
+	monthlyRunRate: amount.nullable(),
+	closeDate: date$1.nullable(),
+	state: text$1,
+	forecastComments: text$1,
+	timing,
+	relevance: text$1,
+	modifiedAt: timestamp.optional(),
+	estimatedBilledRevenue: amount.nullable().optional(),
+	estimatedSqlRevenue: amount.nullable().optional()
+}).strict();
+var milestoneSchema$1 = z.object({
+	id: identifier,
+	number: text$1,
+	opportunityId: identifier,
+	opportunityName: name,
+	tpid,
+	account: name,
+	name,
+	owner: text$1,
+	category: text$1,
+	status: text$1,
+	commitment: text$1,
+	monthly: amount.nullable(),
+	date: date$1.nullable(),
+	workload: text$1,
+	forecastComments: text$1,
+	currency: text$1,
+	active: z.boolean().nullable(),
+	timing,
+	metricCandidates: z.array(name).max(100),
+	mappingBasis: text$1,
+	classification: text$1,
+	scenarioCredit: amount.nullable(),
+	modifiedAt: timestamp.optional(),
+	commitmentChangedAt: timestamp.optional(),
+	region: text$1.optional(),
+	riskDetails: text$1.optional()
+}).strict();
+var coverageSchema = z.object({
+	metric: name,
+	bucket: name,
+	gap: nonnegative,
+	candidateCount: count,
+	committedMonthly: amount,
+	uncommittedMonthly: amount,
+	verifiedPeriodCredit: z.null(),
+	state: text$1,
+	mappingSupported: z.boolean(),
+	mappingReviewRequired: z.boolean(),
+	scenarioAllowed: z.boolean(),
+	scenarioCommittedCredit: amount.nullable(),
+	scenarioUncommittedCredit: amount.nullable(),
+	scenarioRemainingGap: amount.nullable(),
+	nextAction: text$1
+}).strict();
+var sellerDashboardReportSchema = z.object({
+	schemaVersion: z.literal(1),
+	generatedAt: timestamp,
+	plan: z.object({
+		currency: z.literal("USD"),
+		unit: z.literal("USD"),
+		fiscalYear: z.number().int().min(2e3).max(2200),
+		sourceUnitsVerified: z.boolean(),
+		metricMapping: z.array(z.object({
+			metric: name,
+			bucket: name,
+			hintSupported: z.boolean(),
+			state: text$1,
+			scenarioAllowed: z.boolean()
+		}).strict()).max(100),
+		unmappedProductionCandidates: count
+	}).strict(),
+	period: z.object({
+		label: name,
+		start: date$1,
+		end: date$1,
+		today: date$1
+	}).strict(),
+	sources: z.object({
+		earnings: z.object({
+			status: z.enum(["live", "stale"]),
+			generatedAt: timestamp,
+			refreshedAt: timestamp.nullable(),
+			months: z.array(name).max(12),
+			ageDays: z.number().int().nullable()
+		}).strict(),
+		pipeline: z.object({
+			status: quality,
+			asOf: timestamp.nullable(),
+			errors: z.array(text$1).max(1e3)
+		}).strict(),
+		quota: z.object({
+			name,
+			rows: count,
+			accounts: count.max(200)
+		}).strict()
+	}).strict(),
+	warnings: z.array(text$1).max(1e3),
+	official: z.object({
+		weightedAttainment: amount,
+		closedMonthAttainment: amount.nullable(),
+		closedThrough: name.nullable(),
+		buckets: z.array(bucketSchema).min(1).max(100),
+		metrics: z.array(metricSchema).min(1).max(100)
+	}).strict(),
+	accounts: z.array(accountSchema).min(1).max(200),
+	opportunities: z.array(opportunitySchema$1).max(5e4),
+	milestones: z.array(milestoneSchema$1).max(5e4),
+	coverage: z.array(coverageSchema).max(100),
+	actions: z.array(z.object({
+		account: name,
+		tpid,
+		metric: name,
+		priority: z.enum([
+			"High",
+			"Medium",
+			"Low"
+		]),
+		issue: text$1,
+		action: text$1,
+		owner: text$1
+	}).strict()).max(2e4),
+	methodology: z.array(text$1).max(100)
+}).strict().superRefine((report, context) => {
+	const reject = (message) => context.addIssue({
+		code: "custom",
+		message
+	});
+	const unique = (values, label) => {
+		if (new Set(values).size !== values.length) reject(`Duplicate ${label}.`);
+	};
+	const close = (left, right) => Math.abs(left - right) <= .01;
+	const { buckets, metrics } = report.official;
+	unique(buckets.map((row) => row.name), "bucket");
+	unique(metrics.map((row) => row.name), "metric");
+	unique(report.accounts.map((row) => row.tpid), "account");
+	unique(report.opportunities.map((row) => row.id), "opportunity");
+	unique(report.milestones.map((row) => row.id), "milestone");
+	unique(report.coverage.map((row) => row.metric), "coverage metric");
+	if (Math.abs(buckets.reduce((sum, row) => sum + row.weight, 0) - 1) > 1e-6) reject("Official bucket weights must sum to one.");
+	if (report.period.start > report.period.end) reject("Invalid official reporting interval.");
+	if (report.period.today < report.period.start || Date.parse(report.period.today) > Date.parse(report.period.end) + 26784e5) reject("As-of date is outside the supported official reporting interval.");
+	if (report.period.start < `${report.plan.fiscalYear - 1}-07-01` || report.period.end > `${report.plan.fiscalYear}-06-30`) reject("Reporting interval is outside the fiscal year.");
+	for (const row of [...buckets, ...metrics]) if (!close(row.gap, Math.max(row.calcQuota - row.calcActual, 0))) reject("Posted gap does not reconcile to signed calculated amounts.");
+	const metricMap = new Map(metrics.map((row) => [row.name, row]));
+	const bucketNames = new Set(buckets.map((row) => row.name));
+	if (metrics.some((row) => !bucketNames.has(row.bucket))) reject("Unknown metric bucket.");
+	if (report.plan.metricMapping.length !== metrics.length || report.plan.metricMapping.some((row) => metricMap.get(row.metric)?.bucket !== row.bucket)) reject("Plan metric mapping does not reconcile.");
+	unique(report.plan.metricMapping.map((row) => row.metric), "plan mapping");
+	const accountMap = new Map(report.accounts.map((row) => [row.tpid, row]));
+	const opportunityMap = new Map(report.opportunities.map((row) => [row.id, row]));
+	if (report.sources.quota.accounts !== report.accounts.length) reject("Quota account count does not reconcile.");
+	for (const account of report.accounts) {
+		unique(account.metrics.map((row) => row.metric), "account metric");
+		for (const row of account.metrics) {
+			if (metricMap.get(row.metric)?.bucket !== row.bucket) reject("Unknown account metric mapping.");
+			if (row.actual === null) {
+				if (row.gap !== null || row.variance !== null) reject("Missing actuals cannot establish an account gap.");
+			} else if (row.gap === null || row.variance === null || !close(row.gap, Math.max(row.quota - row.actual, 0)) || !close(row.variance, row.actual - row.quota)) reject("Account amounts do not reconcile.");
+		}
+		if (account.pipeline.status !== "complete" && (account.pipeline.noPipeline || account.pipeline.noInQuarterPipeline)) reject("Incomplete retrieval cannot establish absent pipeline.");
+		if (report.sources.pipeline.status === "unavailable" && account.pipeline.status !== "unavailable") reject("Unavailable global retrieval cannot establish complete account data.");
+	}
+	for (const row of [...report.opportunities, ...report.milestones]) {
+		if (accountMap.get(row.tpid)?.name !== row.account) reject("Pipeline is outside the quota roster.");
+		const value = "date" in row ? row.date : row.closeDate;
+		const expectedTiming = value === null ? "undated" : value < report.period.today ? "overdue" : value > report.period.end ? "future" : "in-quarter";
+		if (row.timing !== expectedTiming) reject("Pipeline timing does not match source dates.");
+	}
+	for (const row of report.milestones) {
+		const parent = opportunityMap.get(row.opportunityId);
+		if (!parent || parent.tpid !== row.tpid) reject("Milestone parent attribution is invalid.");
+		if (row.metricCandidates.some((metric) => !metricMap.has(metric))) reject("Unknown candidate metric.");
+		if (parent?.state === "Lost" && row.active === true) reject("A lost parent cannot supply active consumption.");
+		if (row.active === null && accountMap.get(row.tpid)?.pipeline.status === "complete") reject("Unknown milestone activity requires incomplete source quality.");
+	}
+	for (const row of report.coverage) {
+		const metric = metricMap.get(row.metric);
+		if (!metric || metric.bucket !== row.bucket || !close(row.gap, metric.gap)) reject("Coverage does not reconcile to the official metric.");
+	}
+	for (const row of report.actions) if (!accountMap.has(row.tpid) || !metricMap.has(row.metric)) reject("Action is outside the reporting scope.");
+});
+var supplementSourceSchema = z.object({
+	name,
+	status: quality,
+	asOf: timestamp,
+	start: date$1,
+	end: date$1,
+	detail: text$1
+}).strict().refine((source) => source.start <= source.end, "Invalid supplemental source interval.");
+var sellerDashboardSupplementSchema = z.object({
+	schemaVersion: z.literal(1),
+	consumption: z.object({
+		source: supplementSourceSchema,
+		accounts: z.array(z.object({
+			tpid,
+			actual: nonnegative,
+			previousActual: nonnegative.nullable(),
+			averageDaily: nonnegative,
+			projected: nonnegative.nullable(),
+			daysPosted: count,
+			pillars: z.array(z.object({
+				name,
+				actual: nonnegative
+			}).strict()).max(100)
+		}).strict()).max(200),
+		services: z.array(z.object({
+			id: identifier,
+			tpid,
+			name,
+			pillar: name,
+			previousDaily: nonnegative,
+			currentDaily: nonnegative,
+			isNew: z.boolean()
+		}).strict()).max(5e4),
+		subscriptions: z.array(z.object({
+			id: identifier,
+			tpid,
+			name,
+			created: date$1,
+			averageDaily: nonnegative
+		}).strict()).max(5e4),
+		sqlReclassification: z.array(z.object({
+			id: identifier,
+			tpid,
+			workload: name,
+			monthlyOpportunity: nonnegative,
+			evidence: text$1
+		}).strict()).max(5e4)
+	}).strict().nullable(),
+	conversion: z.object({
+		source: supplementSourceSchema,
+		accounts: z.array(z.object({
+			tpid,
+			territory: text$1,
+			startingMonthly: nonnegative,
+			convertedMonthly: nonnegative,
+			inQuarterMonthly: nonnegative,
+			shiftedOutMonthly: nonnegative,
+			startingCount: count,
+			convertedCount: count
+		}).strict()).max(200)
+	}).strict().nullable()
+}).strict().superRefine((supplement, context) => {
+	const reject = (message) => context.addIssue({
+		code: "custom",
+		message
+	});
+	const consumption = supplement.consumption;
+	if (consumption) {
+		if (new Set(consumption.accounts.map((row) => row.tpid)).size !== consumption.accounts.length) reject("Duplicate consumption account.");
+		for (const row of consumption.accounts) {
+			if (row.daysPosted > 31 || row.daysPosted === 0 && row.actual !== 0) reject("Invalid posted consumption days.");
+			if (Math.abs(row.pillars.reduce((sum, pillar) => sum + pillar.actual, 0) - row.actual) > .01) reject("Pillar consumption does not reconcile to the account.");
+		}
+	}
+	const conversion = supplement.conversion;
+	if (conversion) {
+		if (new Set(conversion.accounts.map((row) => row.tpid)).size !== conversion.accounts.length) reject("Duplicate conversion account.");
+		for (const row of conversion.accounts) if (row.convertedCount > row.startingCount || row.convertedMonthly > row.startingMonthly || Math.abs(row.inQuarterMonthly + row.shiftedOutMonthly - row.convertedMonthly) > .01) reject("Conversion does not reconcile to the historical baseline.");
+	}
+});
+var sellerDashboardSnapshotSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	kind: z.literal("snapshot"),
+	mode: z.enum(["sample", "live"]),
+	state: z.enum(["ready", "stale"]),
+	message: text$1,
+	report: sellerDashboardReportSchema,
+	supplement: sellerDashboardSupplementSchema.nullable()
+}).strict().superRefine((snapshot, context) => {
+	const tpids = new Set(snapshot.report.accounts.map((row) => row.tpid));
+	const consumption = snapshot.supplement?.consumption;
+	if ([
+		...consumption?.accounts ?? [],
+		...consumption?.services ?? [],
+		...consumption?.subscriptions ?? [],
+		...consumption?.sqlReclassification ?? [],
+		...snapshot.supplement?.conversion?.accounts ?? []
+	].some((row) => !tpids.has(row.tpid))) context.addIssue({
+		code: "custom",
+		message: "Supplemental data is outside the quota roster."
+	});
+	for (const source of [consumption, snapshot.supplement?.conversion]) if (source?.source.status === "complete" && source.accounts.length !== tpids.size) context.addIssue({
+		code: "custom",
+		message: "A complete supplemental source must cover the quota account roster."
+	});
+});
+var sellerDashboardUnavailableSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	kind: z.literal("unavailable"),
+	mode: z.literal("live"),
+	code: z.enum([
+		"not-configured",
+		"unsupported-platform",
+		"identity-mismatch",
+		"invalid-snapshot",
+		"runtime-failed",
+		"hosted-profile-denied"
+	]),
+	message: name
+}).strict();
+var sellerDashboardResponseSchema = z.discriminatedUnion("kind", [sellerDashboardSnapshotSchema, sellerDashboardUnavailableSchema]);
+var sellerDashboardRequestSchema = z.discriminatedUnion("operation", [z.object({
+	contractVersion: z.literal("1.0"),
+	operation: z.literal("get")
+}).strict(), z.object({
+	contractVersion: z.literal("1.0"),
+	operation: z.literal("refresh"),
+	confirmed: z.literal(true),
+	asOf: date$1.optional()
+}).strict()]);
 var dataModeSchema = z.enum(["sample", "live"]);
 var sourceStateSchema = z.enum([
 	"sample",
@@ -5988,7 +6389,7 @@ var LocalStoreMsxConnector = class {
 		const id = String(row["id"]);
 		const manual = this.manualAccountIds.has(id);
 		const onDealTeam = dealTeam.has(id);
-		return accountSchema.parse({
+		return accountSchema$1.parse({
 			id,
 			name: String(row["name"]),
 			...str(row["segment"]) ? { segment: str(row["segment"]) } : {},
@@ -8665,7 +9066,7 @@ var opportunity360Schema = z.object({
 	products: z.array(z.string().min(1))
 }).strict();
 var account360Schema = z.object({
-	account: accountSchema,
+	account: accountSchema$1,
 	opportunities: z.array(opportunitySchema),
 	team: z.array(z.string().min(1)),
 	consumption: z.number().nonnegative().optional(),
@@ -10683,6 +11084,991 @@ function createVoiceIpcHandler(host) {
 	return (request) => host.invoke(request);
 }
 //#endregion
+//#region packages/common/fixtures/seller-dashboard.ts
+var asOf = "2026-10-10";
+var generatedAt = "2026-10-10T09:00:00.000Z";
+var end = "2026-12-31";
+var accountInputs = [
+	{
+		tpid: "1000001",
+		name: "Contoso Energy",
+		quotas: [
+			9e5,
+			42e4,
+			24e4
+		],
+		actuals: [
+			72e4,
+			27e4,
+			28e4
+		]
+	},
+	{
+		tpid: "1000002",
+		name: "Fabrikam Retail",
+		quotas: [
+			6e5,
+			3e5,
+			15e4
+		],
+		actuals: [
+			45e4,
+			18e4,
+			16e4
+		]
+	},
+	{
+		tpid: "1000003",
+		name: "Northwind Health",
+		quotas: [
+			42e4,
+			24e4,
+			12e4
+		],
+		actuals: [
+			462e3,
+			13e4,
+			125e3
+		]
+	},
+	{
+		tpid: "1000004",
+		name: "Zava Inc.",
+		quotas: [
+			3e5,
+			18e4,
+			6e4
+		],
+		actuals: [
+			18e4,
+			9e4,
+			65e3
+		]
+	},
+	{
+		tpid: "1000005",
+		name: "Adventure Works Cycles",
+		quotas: [
+			18e4,
+			6e4,
+			3e4
+		],
+		actuals: [
+			-3e4,
+			null,
+			2e4
+		]
+	}
+];
+var metricInputs = [
+	{
+		name: "ACR - Core",
+		bucket: "Organic consumption",
+		weight: .6,
+		attainment: 80,
+		recurring: 6e5
+	},
+	{
+		name: "Databases",
+		bucket: "Strategic workloads",
+		weight: .25,
+		attainment: 60,
+		recurring: 2e5
+	},
+	{
+		name: "Fabric + XCR - Power BI Consumed Revenue",
+		bucket: "Analytics growth",
+		weight: .15,
+		attainment: 100,
+		recurring: 1e5
+	}
+];
+function recordTiming(value) {
+	return value === null ? "undated" : value < asOf ? "overdue" : value > end ? "future" : "in-quarter";
+}
+function createSampleSellerDashboard() {
+	const metrics = metricInputs.map((metric, index) => {
+		const quota = accountInputs.reduce((sum, row) => sum + (row.quotas[index] ?? 0), 0);
+		const actual = accountInputs.reduce((sum, row) => sum + (row.actuals[index] ?? 0), 0);
+		return {
+			name: metric.name,
+			bucket: metric.bucket,
+			unit: "USD",
+			mappingSupported: true,
+			scenarioAllowed: true,
+			attainment: metric.attainment,
+			actual,
+			quota,
+			recurring: metric.recurring,
+			calcActual: actual - metric.recurring,
+			calcQuota: quota - metric.recurring,
+			gap: Math.max(quota - actual, 0),
+			closedGap: Math.max(quota / 2 - actual / 2, 0),
+			closedAttainment: 85.2,
+			accountActualDifference: 0,
+			accountQuotaDifference: 0
+		};
+	});
+	const opportunities = [
+		{
+			account: 0,
+			name: "Grid operations modernization",
+			owner: "Avery Johnson",
+			stage: "3 - Empower & Achieve",
+			value: 42e5,
+			date: "2026-11-15",
+			state: "Open",
+			intent: "Azure consumption",
+			play: "Cloud migration",
+			modified: "2026-08-20T09:00:00.000Z"
+		},
+		{
+			account: 0,
+			name: "Azure commitment renewal",
+			owner: "Jordan Lee",
+			stage: "2 - Inspire & Design",
+			value: 26e5,
+			date: "2026-12-10",
+			state: "Open",
+			intent: "MACC",
+			play: "Azure commitment",
+			modified: generatedAt
+		},
+		{
+			account: 1,
+			name: "Retail analytics expansion",
+			owner: "Taylor Morgan",
+			stage: "3 - Empower & Achieve",
+			value: 18e5,
+			date: "2026-10-25",
+			state: "Open",
+			intent: "Azure consumption",
+			play: "Fabric analytics",
+			modified: generatedAt
+		},
+		{
+			account: 1,
+			name: "SQL platform modernization",
+			owner: "Casey Park",
+			stage: "2 - Inspire & Design",
+			value: 11e5,
+			date: "2026-12-01",
+			state: "Open",
+			intent: "SQL billed",
+			play: "SQL modernization",
+			modified: "2026-08-18T09:00:00.000Z"
+		},
+		{
+			account: 2,
+			name: "Clinical data estate",
+			owner: "Morgan Chen",
+			stage: "4 - Realize Value",
+			value: 32e5,
+			date: "2026-08-30",
+			state: "Won",
+			intent: "Azure consumption",
+			play: "Database modernization",
+			modified: generatedAt
+		},
+		{
+			account: 2,
+			name: "AI-assisted care planning",
+			owner: "Morgan Chen",
+			stage: "1 - Listen & Consult",
+			value: 85e4,
+			date: "2027-02-20",
+			state: "Open",
+			intent: "Azure consumption",
+			play: "AI innovation",
+			modified: generatedAt
+		},
+		{
+			account: 3,
+			name: "Secure cloud landing zone",
+			owner: "Drew Wilson",
+			stage: "1 - Listen & Consult",
+			value: 65e4,
+			date: "2026-12-20",
+			state: "Open",
+			intent: "Azure consumption",
+			play: "Security foundations",
+			modified: generatedAt
+		},
+		{
+			account: 3,
+			name: "Database growth program",
+			owner: "Sam Rivera",
+			stage: "2 - Inspire & Design",
+			value: 72e4,
+			date: "2026-11-28",
+			state: "Open",
+			intent: "Azure consumption",
+			play: "Database modernization",
+			modified: generatedAt
+		}
+	].map((input, index) => {
+		const account = accountInputs[input.account];
+		if (!account) throw new Error("Invalid synthetic opportunity account.");
+		return {
+			id: `sample-opportunity-${index + 1}`,
+			number: `SAMPLE-OP-${index + 1}`,
+			tpid: account.tpid,
+			account: account.name,
+			name: input.name,
+			owner: input.owner,
+			stage: input.stage,
+			solutionArea: "Cloud and AI Platforms",
+			salesPlay: input.play,
+			intent: input.intent,
+			estimatedValue: input.value,
+			currency: "USD",
+			monthlyRunRate: null,
+			closeDate: input.date,
+			state: input.state,
+			forecastComments: "Synthetic review evidence: confirm customer decision, workload credit and the next accountable owner.",
+			timing: recordTiming(input.date),
+			relevance: "Review metric mapping",
+			modifiedAt: input.modified,
+			...input.intent === "SQL billed" ? {
+				estimatedBilledRevenue: 24e4,
+				estimatedSqlRevenue: 18e4
+			} : {}
+		};
+	});
+	const milestones = [
+		{
+			parent: 0,
+			name: "Azure production rollout",
+			monthly: 42e3,
+			date: "2026-11-01",
+			status: "On Track",
+			commitment: "Committed",
+			metric: 0,
+			workload: "Azure Kubernetes Service",
+			category: "Production"
+		},
+		{
+			parent: 0,
+			name: "Grid telemetry expansion",
+			monthly: 18e3,
+			date: "2026-10-03",
+			status: "At Risk",
+			commitment: "Uncommitted",
+			metric: 0,
+			workload: "Azure infrastructure",
+			category: "Production"
+		},
+		{
+			parent: 0,
+			name: "Regional capacity approval",
+			monthly: 24e3,
+			date: "2026-10-28",
+			status: "Blocked",
+			commitment: "Uncommitted",
+			metric: 0,
+			workload: "Azure virtual machines",
+			category: "Production"
+		},
+		{
+			parent: 1,
+			name: "Commitment onboarding",
+			monthly: 16e3,
+			date: "2026-12-15",
+			status: "On Track",
+			commitment: "Committed",
+			metric: 0,
+			workload: "Azure infrastructure",
+			category: "Production"
+		},
+		{
+			parent: 2,
+			name: "Fabric analytics launch",
+			monthly: 22e3,
+			date: "2026-10-21",
+			status: "On Track",
+			commitment: "Committed",
+			metric: 2,
+			workload: "Microsoft Fabric",
+			category: "Production"
+		},
+		{
+			parent: 2,
+			name: "Store analytics expansion",
+			monthly: 12e3,
+			date: "2026-11-20",
+			status: "At Risk",
+			commitment: "Uncommitted",
+			metric: 2,
+			workload: "Power BI",
+			category: "Production"
+		},
+		{
+			parent: 3,
+			name: "SQL production cutover",
+			monthly: 28e3,
+			date: "2026-10-05",
+			status: "Blocked",
+			commitment: "Uncommitted",
+			metric: 1,
+			workload: "Azure SQL Database",
+			category: "Production"
+		},
+		{
+			parent: 3,
+			name: "Database capacity growth",
+			monthly: 19e3,
+			date: "2026-12-01",
+			status: "On Track",
+			commitment: "Uncommitted",
+			metric: 1,
+			workload: "Azure SQL Database",
+			category: "Production"
+		},
+		{
+			parent: 4,
+			name: "Clinical database scale-out",
+			monthly: 31e3,
+			date: "2026-11-08",
+			status: "On Track",
+			commitment: "Committed",
+			metric: 1,
+			workload: "Azure Cosmos DB",
+			category: "Production"
+		},
+		{
+			parent: 4,
+			name: "Completed clinical pilot",
+			monthly: 8e3,
+			date: "2026-08-30",
+			status: "Completed",
+			commitment: "Committed",
+			metric: 1,
+			workload: "Azure SQL Database",
+			category: "Pilot"
+		},
+		{
+			parent: 5,
+			name: "AI proof of value",
+			monthly: 9e3,
+			date: "2027-01-12",
+			status: "On Track",
+			commitment: "Uncommitted",
+			metric: 0,
+			workload: "Azure AI",
+			category: "Pilot"
+		},
+		{
+			parent: 6,
+			name: "Landing-zone assessment",
+			monthly: 7e3,
+			date: "2026-11-12",
+			status: "On Track",
+			commitment: "Uncommitted",
+			metric: 0,
+			workload: "Azure infrastructure",
+			category: "Assessment"
+		},
+		{
+			parent: 7,
+			name: "PostgreSQL production ramp",
+			monthly: 14e3,
+			date: "2026-11-18",
+			status: "At Risk",
+			commitment: "Uncommitted",
+			metric: 1,
+			workload: "Azure Database for PostgreSQL",
+			category: "Production"
+		},
+		{
+			parent: 7,
+			name: "Workload credit review",
+			monthly: 11e3,
+			date: null,
+			status: "On Track",
+			commitment: "Best case",
+			metric: null,
+			workload: "Unmapped workload",
+			category: "Production"
+		}
+	].map((input, index) => {
+		const parent = opportunities[input.parent];
+		const metric = input.metric === null ? void 0 : metricInputs[input.metric];
+		if (!parent) throw new Error("Invalid synthetic milestone parent.");
+		const active = input.status !== "Completed";
+		const eligible = active && input.category === "Production";
+		return {
+			id: `sample-milestone-${index + 1}`,
+			number: `SAMPLE-MS-${index + 1}`,
+			opportunityId: parent.id,
+			opportunityName: parent.name,
+			tpid: parent.tpid,
+			account: parent.account,
+			name: input.name,
+			owner: parent.owner,
+			category: input.category,
+			status: input.status,
+			commitment: input.commitment,
+			monthly: input.monthly,
+			date: input.date,
+			workload: input.workload,
+			forecastComments: "Synthetic customer-review note; incremental credit and production date require owner confirmation.",
+			currency: "USD",
+			active,
+			timing: recordTiming(input.date),
+			metricCandidates: metric ? [metric.name] : [],
+			mappingBasis: "Tentative workload hint; not a verified earnings-credit rule.",
+			classification: eligible ? "Production candidate - credit unverified" : "Not an eligible production candidate",
+			scenarioCredit: null,
+			modifiedAt: parent.modifiedAt ?? generatedAt,
+			...input.commitment === "Committed" ? { commitmentChangedAt: "2026-10-05T09:00:00.000Z" } : {},
+			region: "East US",
+			riskDetails: input.status === "Blocked" ? "Synthetic capacity dependency: owner approval required." : ""
+		};
+	});
+	const accounts = accountInputs.map((input) => {
+		const accountOpportunities = opportunities.filter((row) => row.tpid === input.tpid);
+		const open = accountOpportunities.filter((row) => row.state === "Open");
+		const accountMilestones = milestones.filter((row) => row.tpid === input.tpid);
+		const candidates = accountMilestones.filter((row) => row.active && row.category === "Production" && row.timing === "in-quarter");
+		return {
+			tpid: input.tpid,
+			name: input.name,
+			metrics: metricInputs.map((metric, index) => {
+				const quota = input.quotas[index];
+				const actual = input.actuals[index];
+				if (quota === void 0 || actual === void 0) throw new Error("Incomplete synthetic quota row.");
+				return {
+					metric: metric.name,
+					bucket: metric.bucket,
+					quota,
+					actual,
+					variance: actual === null ? null : actual - quota,
+					gap: actual === null ? null : Math.max(quota - actual, 0)
+				};
+			}),
+			pipeline: {
+				status: "complete",
+				openCount: open.length,
+				inQuarterCount: open.filter((row) => row.timing === "in-quarter").length,
+				inQuarterValue: open.filter((row) => row.timing === "in-quarter").reduce((sum, row) => sum + (row.estimatedValue ?? 0), 0),
+				productionCount: accountMilestones.filter((row) => row.active && row.category === "Production").length,
+				inQuarterProductionCount: candidates.length,
+				committedMonthly: candidates.filter((row) => row.commitment === "Committed").reduce((sum, row) => sum + (row.monthly ?? 0), 0),
+				uncommittedMonthly: candidates.filter((row) => row.commitment === "Uncommitted").reduce((sum, row) => sum + (row.monthly ?? 0), 0),
+				noPipeline: accountOpportunities.length + accountMilestones.length === 0,
+				noInQuarterPipeline: !open.some((row) => row.timing === "in-quarter") && candidates.length === 0
+			},
+			nextAction: input.tpid === "1000005" ? "No recorded pipeline in the complete accessible sample scope. Resolve missing database actuals and qualify a new customer play." : "Validate incremental credit, production timing and dependencies with the milestone owner."
+		};
+	});
+	return sellerDashboardSnapshotSchema.parse({
+		contractVersion: "1.0",
+		kind: "snapshot",
+		mode: "sample",
+		state: "ready",
+		message: "Synthetic sample only. No seller, customer, earnings or pipeline data was copied from the reference report.",
+		report: {
+			schemaVersion: 1,
+			generatedAt,
+			plan: {
+				currency: "USD",
+				unit: "USD",
+				fiscalYear: 2027,
+				sourceUnitsVerified: true,
+				metricMapping: metricInputs.map((row) => ({
+					metric: row.name,
+					bucket: row.bucket,
+					hintSupported: true,
+					state: "Optional tentative hints only",
+					scenarioAllowed: true
+				})),
+				unmappedProductionCandidates: 0
+			},
+			period: {
+				label: "FY27 Q2 official YTD period",
+				start: "2026-07-01",
+				end,
+				today: asOf
+			},
+			sources: {
+				earnings: {
+					status: "live",
+					generatedAt,
+					refreshedAt: "2026-10-09T09:00:00.000Z",
+					months: [
+						"July, 2026",
+						"August, 2026",
+						"September, 2026",
+						"October, 2026",
+						"November, 2026",
+						"December, 2026"
+					],
+					ageDays: 1
+				},
+				pipeline: {
+					status: "complete",
+					asOf: generatedAt,
+					errors: []
+				},
+				quota: {
+					name: "Synthetic Quota by Accounts fixture",
+					rows: 90,
+					accounts: accounts.length
+				}
+			},
+			warnings: [
+				"Adventure Works Cycles has missing database actuals; unknown is not zero.",
+				"Opportunity nominal value, monthly consumption and period earnings credit have different units.",
+				"Workload mappings are tentative. No pipeline amount is certified as incremental earnings credit."
+			],
+			official: {
+				weightedAttainment: 78,
+				closedMonthAttainment: 85.2,
+				closedThrough: "September, 2026",
+				buckets: metrics.map((row, index) => ({
+					name: row.bucket,
+					weight: metricInputs[index]?.weight,
+					unit: "USD",
+					attainment: row.attainment,
+					actual: row.actual,
+					quota: row.quota,
+					recurring: row.recurring,
+					calcActual: row.calcActual,
+					calcQuota: row.calcQuota,
+					gap: row.gap
+				})),
+				metrics
+			},
+			accounts,
+			opportunities,
+			milestones,
+			coverage: metrics.map((metric) => {
+				const candidates = milestones.filter((row) => row.active && row.category === "Production" && row.timing === "in-quarter" && row.metricCandidates.includes(metric.name));
+				return {
+					metric: metric.name,
+					bucket: metric.bucket,
+					gap: metric.gap,
+					candidateCount: candidates.length,
+					committedMonthly: candidates.filter((row) => row.commitment === "Committed").reduce((sum, row) => sum + (row.monthly ?? 0), 0),
+					uncommittedMonthly: candidates.filter((row) => row.commitment === "Uncommitted").reduce((sum, row) => sum + (row.monthly ?? 0), 0),
+					verifiedPeriodCredit: null,
+					state: "Needs credit validation",
+					mappingSupported: true,
+					mappingReviewRequired: false,
+					scenarioAllowed: true,
+					scenarioCommittedCredit: null,
+					scenarioUncommittedCredit: null,
+					scenarioRemainingGap: null,
+					nextAction: "Confirm metric mapping, incremental production credit and the remaining-period ramp."
+				};
+			}),
+			actions: accounts.map((account) => ({
+				account: account.name,
+				tpid: account.tpid,
+				metric: "ACR - Core",
+				priority: account.pipeline.noPipeline ? "High" : "Medium",
+				issue: account.pipeline.noPipeline ? "No recorded pipeline" : "Credit and timing need validation",
+				action: account.nextAction,
+				owner: "Account team"
+			})),
+			methodology: [
+				"Official weighted attainment and bucket scores are source-reported, never reconstructed from gross consumption.",
+				"Posted gap is max(calculated quota minus signed calculated actual, zero). Ordinary earnings still to post are included.",
+				"Account gaps net selected quota and actuals before clamping; overlapping buckets remain separate.",
+				"Remaining-period candidates are active positive USD production milestones from the as-of date through period end, inclusive.",
+				"Monthly run-rate and nominal opportunity value are not verified period earnings credit.",
+				"All data in this sample is fictitious. Live mode requires the current seller’s own validated quota export and authorized sources."
+			]
+		},
+		supplement: {
+			schemaVersion: 1,
+			consumption: {
+				source: {
+					name: "Synthetic Fabric consumption",
+					status: "complete",
+					asOf: generatedAt,
+					start: "2026-10-01",
+					end: "2026-10-31",
+					detail: "Posted monthly consumption and illustrative calendar-day landing are separate from compensation attainment."
+				},
+				accounts: accountInputs.map((account, index) => {
+					const actual = [
+						216e3,
+						153e3,
+						189e3,
+						81e3,
+						36e3
+					][index];
+					if (actual === void 0) throw new Error("Incomplete synthetic consumption.");
+					return {
+						tpid: account.tpid,
+						actual,
+						previousActual: actual * [
+							.9,
+							1.12,
+							.85,
+							1.2,
+							1.4
+						][index],
+						averageDaily: actual / 9,
+						projected: actual / 9 * 31,
+						daysPosted: 9,
+						pillars: [
+							{
+								name: "Infrastructure",
+								actual: actual * .4
+							},
+							{
+								name: "Databases",
+								actual: actual * .3
+							},
+							{
+								name: "Analytics",
+								actual: actual * .2
+							},
+							{
+								name: "AI",
+								actual: actual * .1
+							}
+						]
+					};
+				}),
+				services: accountInputs.flatMap((account, index) => [{
+					id: `sample-service-${index}-1`,
+					tpid: account.tpid,
+					name: "Azure SQL Database",
+					pillar: "Databases",
+					previousDaily: 5200 + index * 100,
+					currentDaily: 6400 - index * 700,
+					isNew: false
+				}, {
+					id: `sample-service-${index}-2`,
+					tpid: account.tpid,
+					name: "Microsoft Fabric",
+					pillar: "Analytics",
+					previousDaily: 0,
+					currentDaily: 1800 + index * 100,
+					isNew: true
+				}]),
+				subscriptions: [{
+					id: "sample-subscription-1",
+					tpid: "1000001",
+					name: "Grid production analytics",
+					created: "2026-10-03",
+					averageDaily: 1200
+				}, {
+					id: "sample-subscription-2",
+					tpid: "1000002",
+					name: "Retail data innovation",
+					created: "2026-10-07",
+					averageDaily: 850
+				}],
+				sqlReclassification: [{
+					id: "sample-sql-1",
+					tpid: "1000002",
+					workload: "Arc-enabled SQL inventory",
+					monthlyOpportunity: 4200,
+					evidence: "Synthetic validated inventory; licensing and credit eligibility require review."
+				}]
+			},
+			conversion: {
+				source: {
+					name: "Synthetic U2C history",
+					status: "complete",
+					asOf: generatedAt,
+					start: "2026-10-01",
+					end,
+					detail: "Historical starting cohort, conversion events and shifted-out dates; not inferred from today’s commitment state."
+				},
+				accounts: accountInputs.map((account, index) => ({
+					tpid: account.tpid,
+					territory: "Sample territory",
+					startingMonthly: 1e5 - index * 1e4,
+					convertedMonthly: 42e3 - index * 6e3,
+					inQuarterMonthly: 35e3 - index * 5e3,
+					shiftedOutMonthly: 7e3 - index * 1e3,
+					startingCount: 10 - index,
+					convertedCount: 5 - index
+				}))
+			}
+		}
+	});
+}
+//#endregion
+//#region packages/connectors/common/seller-dashboard.ts
+var SellerDashboardSourceError = class extends Error {
+	code;
+	constructor(code, message) {
+		super(message);
+		this.code = code;
+		this.name = "SellerDashboardSourceError";
+	}
+};
+var collectorBridge = `
+import contextlib, io, json, pathlib, sys
+root, profile, action, as_of = sys.argv[1:5]
+sys.path.insert(0, str(pathlib.Path(root) / "scripts"))
+try:
+    from dashboard_config import load_state
+    result = 0
+    if action == "refresh":
+        from manager_runner import main
+        arguments = ["--refresh", "--profile", profile]
+        if as_of:
+            arguments.extend(["--as-of", as_of])
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            result = main(arguments)
+    state = load_state(profile)
+    if not state.get("dashboard"):
+        raise ValueError("No successful dashboard")
+    status = state.get("lastRun", {}).get("status")
+    print(json.dumps({
+        "report": state["dashboard"],
+        "supplement": state.get("sellerDashboardSupplement"),
+        "stale": result != 0 or status in ("failed", "setup-pending-refresh")
+    }, ensure_ascii=True, allow_nan=False))
+except (OSError, ValueError, KeyError, TypeError, ImportError):
+    print("The protected seller profile could not be loaded. Complete setup and a successful manual refresh.", file=sys.stderr)
+    sys.exit(2)
+`.trim();
+var isolatedCollectorBridge = `
+import ctypes, subprocess, sys, threading
+from ctypes import wintypes
+
+class BasicLimits(ctypes.Structure):
+    _fields_ = [
+        ("process_time", ctypes.c_longlong), ("job_time", ctypes.c_longlong),
+        ("flags", wintypes.DWORD), ("min_working_set", ctypes.c_size_t),
+        ("max_working_set", ctypes.c_size_t), ("active_processes", wintypes.DWORD),
+        ("affinity", ctypes.c_size_t), ("priority", wintypes.DWORD),
+        ("scheduling", wintypes.DWORD)
+    ]
+
+class IoCounters(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_ulonglong) for name in (
+        "read_operations", "write_operations", "other_operations",
+        "read_bytes", "write_bytes", "other_bytes"
+    )]
+
+class ExtendedLimits(ctypes.Structure):
+    _fields_ = [
+        ("basic", BasicLimits), ("io", IoCounters),
+        ("process_memory", ctypes.c_size_t), ("job_memory", ctypes.c_size_t),
+        ("peak_process_memory", ctypes.c_size_t), ("peak_job_memory", ctypes.c_size_t)
+    ]
+
+kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+kernel.CreateJobObjectW.restype = wintypes.HANDLE
+kernel.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+kernel.SetInformationJobObject.restype = wintypes.BOOL
+kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+kernel.OpenProcess.restype = wintypes.HANDLE
+kernel.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+kernel.AssignProcessToJobObject.restype = wintypes.BOOL
+kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+kernel.CloseHandle.restype = wintypes.BOOL
+job = kernel.CreateJobObjectW(None, None)
+worker = None
+try:
+    if not job:
+        raise ctypes.WinError(ctypes.get_last_error())
+    limits = ExtendedLimits()
+    limits.basic.flags = 0x00002000
+    if not kernel.SetInformationJobObject(job, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    code = ${JSON.stringify("import sys\nif sys.stdin.buffer.read(1) != b\"1\":\n    sys.exit(3)\n" + collectorBridge)}
+    worker = subprocess.Popen(
+        [sys.executable, "-B", "-c", code, *sys.argv[1:]],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        creationflags=subprocess.CREATE_NO_WINDOW
+    )
+    process = kernel.OpenProcess(0x0101, False, worker.pid)
+    try:
+        if not process or not kernel.AssignProcessToJobObject(job, process):
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        if process:
+            kernel.CloseHandle(process)
+    failures = []
+    def pump(source, target):
+        try:
+            for chunk in iter(lambda: source.read(65536), b""):
+                target.write(chunk)
+                target.flush()
+        except (OSError, ValueError) as error:
+            failures.append(error)
+            if worker.poll() is None:
+                worker.terminate()
+    threads = [
+        threading.Thread(target=pump, args=(worker.stdout, sys.stdout.buffer), daemon=True),
+        threading.Thread(target=pump, args=(worker.stderr, sys.stderr.buffer), daemon=True)
+    ]
+    for thread in threads:
+        thread.start()
+    # Collection starts only after job assignment; exit closes inherited child pipes.
+    worker.stdin.write(b"1")
+    worker.stdin.close()
+    result = worker.wait()
+    if not kernel.CloseHandle(job):
+        raise ctypes.WinError(ctypes.get_last_error())
+    job = None
+    for thread in threads:
+        thread.join()
+    worker.stdout.close()
+    worker.stderr.close()
+    if failures:
+        raise OSError("Collector output channel failed")
+    sys.exit(result)
+except OSError:
+    if worker is not None and worker.poll() is None:
+        worker.terminate()
+        worker.communicate()
+    print("Windows could not isolate the protected seller collector.", file=sys.stderr)
+    sys.exit(2)
+finally:
+    if job:
+        kernel.CloseHandle(job)
+`.trim();
+var runCollector = (command) => new Promise((resolve, reject) => {
+	execFile(command.executable, command.args, {
+		windowsHide: true,
+		timeout: command.timeout,
+		maxBuffer: 67108864,
+		env: {
+			...process.env,
+			PYTHONDONTWRITEBYTECODE: "1"
+		}
+	}, (error, stdout) => {
+		if (error) reject(new SellerDashboardSourceError("runtime-failed", "The protected seller collector failed or timed out. Verify Python, the trusted runtime, profile setup and authorized access."));
+		else resolve(stdout);
+	});
+});
+var WindowsSellerDashboardConnector = class {
+	options;
+	constructor(options) {
+		this.options = options;
+	}
+	read() {
+		return this.collect("get");
+	}
+	refresh(asOf) {
+		return this.collect("refresh", asOf);
+	}
+	async collect(operation, asOf) {
+		if ((this.options.platform ?? process.platform) !== "win32") throw new SellerDashboardSourceError("unsupported-platform", "The supplied collector requires Windows user encryption. Use a configured local Windows host; no live sample fallback is permitted.");
+		const environment = this.options.environment ?? process.env;
+		const root = environment["TLC_SELLER_DASHBOARD_SKILL_ROOT"]?.trim();
+		const profile = environment["TLC_SELLER_DASHBOARD_PROFILE"]?.trim();
+		const owner = environment["TLC_SELLER_DASHBOARD_OWNER_EMAIL"]?.trim().toLowerCase();
+		if (!root || !isAbsolute(root) || root.split(/[\\/]/).includes("..") || !profile || !/^[a-z0-9][a-z0-9_-]{0,47}$/.test(profile) || /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/.test(profile) || !owner || owner.length > 320 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(owner)) throw new SellerDashboardSourceError("not-configured", "Configure a trusted skill root, an explicit profile and its owner email after onboarding with your own MSX Earnings Quota by Accounts CSV.");
+		const user = (await this.options.resolveUserEmail())?.trim().toLowerCase();
+		if (!user || user !== owner) throw new SellerDashboardSourceError("identity-mismatch", "The current authenticated seller does not match the configured earnings-profile owner. No private data was read.");
+		try {
+			await Promise.all([
+				"dashboard_config.py",
+				"manager_runner.py",
+				"secure_dashboard.py"
+			].map((file) => access(join(root, "scripts", file))));
+		} catch (error) {
+			if (error instanceof Error && "code" in error && [
+				"ENOENT",
+				"EACCES",
+				"EPERM"
+			].includes(String(error.code))) throw new SellerDashboardSourceError("not-configured", "The explicitly configured trusted dashboard runtime is unavailable.");
+			throw error;
+		}
+		const output = await (this.options.run ?? runCollector)({
+			executable: environment["TLC_SELLER_DASHBOARD_PYTHON"]?.trim() || "python",
+			args: [
+				"-B",
+				"-c",
+				isolatedCollectorBridge,
+				root,
+				profile,
+				operation,
+				asOf ?? ""
+			],
+			timeout: operation === "get" ? 3e4 : 48e4
+		});
+		let payload;
+		try {
+			payload = JSON.parse(output);
+		} catch (error) {
+			if (error instanceof SyntaxError) throw new SellerDashboardSourceError("invalid-snapshot", "The protected collector returned an invalid dashboard envelope.");
+			throw error;
+		}
+		if (!payload || typeof payload !== "object" || !("report" in payload) || !("supplement" in payload) || !("stale" in payload) || typeof payload.stale !== "boolean") throw new SellerDashboardSourceError("invalid-snapshot", "The protected collector returned an unsupported dashboard envelope.");
+		const parsed = sellerDashboardSnapshotSchema.safeParse({
+			contractVersion: "1.0",
+			kind: "snapshot",
+			mode: "live",
+			state: payload.stale ? "stale" : "ready",
+			message: payload.stale ? "The last successful protected snapshot is retained. The latest refresh/setup did not establish current reconciled data." : "Read from this seller’s Windows-user-encrypted snapshot. Reloading this view performs no live source calls.",
+			report: payload.report,
+			supplement: payload.supplement
+		});
+		if (!parsed.success) throw new SellerDashboardSourceError("invalid-snapshot", "The protected dashboard failed schema or monetary reconciliation checks. Verify the supported USD plan and complete source data.");
+		const snapshot = parsed.data;
+		if (operation === "refresh" && !payload.stale && asOf && snapshot.report.period.today !== asOf) throw new SellerDashboardSourceError("invalid-snapshot", "The refreshed dashboard does not match the confirmed reporting date. No replacement data was accepted.");
+		const refreshedAt = snapshot.report.sources.earnings.refreshedAt;
+		const now = (this.options.now ?? (() => /* @__PURE__ */ new Date()))();
+		const ageMs = refreshedAt ? now.getTime() - Date.parse(refreshedAt) : Infinity;
+		const asOfAgeMs = Date.parse(now.toISOString().slice(0, 10)) - Date.parse(snapshot.report.period.today);
+		if (snapshot.report.sources.earnings.status === "stale" || ageMs > 1728e5 || asOfAgeMs > 1728e5) {
+			snapshot.state = "stale";
+			snapshot.message = "Official earnings are stale or undated. The displayed source timestamps are unchanged; reload does not refresh source data.";
+		}
+		return snapshot;
+	}
+};
+//#endregion
+//#region packages/orchestrator/seller-dashboard.ts
+var SharedSellerDashboardHost = class {
+	connector;
+	constructor(connector) {
+		this.connector = connector;
+	}
+	async invoke(rawRequest) {
+		const request = sellerDashboardRequestSchema.parse(rawRequest);
+		try {
+			const result = request.operation === "get" ? await this.connector.read() : await this.connector.refresh(request.asOf);
+			return sellerDashboardResponseSchema.parse(result);
+		} catch (error) {
+			if (!(error instanceof SellerDashboardSourceError)) throw error;
+			return sellerDashboardResponseSchema.parse({
+				contractVersion: "1.0",
+				kind: "unavailable",
+				mode: "live",
+				code: error.code,
+				message: error.message
+			});
+		}
+	}
+};
+function createSellerDashboardHost(options) {
+	if (options.mode === "sample") return new SharedSellerDashboardHost({
+		read: async () => createSampleSellerDashboard(),
+		refresh: async () => createSampleSellerDashboard()
+	});
+	if (options.allowLocalProfile === false) {
+		const denied = async () => {
+			throw new SellerDashboardSourceError("hosted-profile-denied", "Hosted multi-user Web cannot read a server user’s private earnings profile. Use a configured local Windows host or an identity-scoped earnings provider.");
+		};
+		return new SharedSellerDashboardHost({
+			read: denied,
+			refresh: denied
+		});
+	}
+	return new SharedSellerDashboardHost(new WindowsSellerDashboardConnector(options));
+}
+//#endregion
+//#region apps/desktop/electron/main/seller-dashboard-ipc.ts
+var sellerDashboardIpcChannel = "tlc:seller-dashboard";
+function createSellerDashboardIpcHandler(host) {
+	return (request) => host.invoke(request);
+}
+//#endregion
 //#region apps/desktop/electron/main/index.ts
 var currentDirectory = dirname(fileURLToPath(import.meta.url));
 var desktopRoot = resolve(currentDirectory, "../..");
@@ -10723,6 +12109,10 @@ var tokenProvider = new AzureCliMsxTokenProvider({
 		expectedUserDomain: authentication.expectedUserDomain,
 		authenticationLabel: authentication.mode === "interactive-browser" ? "Interactive sign-in" : "Azure CLI"
 	} : {}
+});
+var sellerDashboardHost = createSellerDashboardHost({
+	mode: dataMode,
+	resolveUserEmail: async () => (await tokenProvider.getAuthStatus()).userEmail
 });
 var reportPerformance = (event) => {
 	console.info(`[performance] ${JSON.stringify(event)}`);
@@ -10819,6 +12209,11 @@ function assertTrustedSender(event) {
 	if (!senderUrl || !senderUrl.startsWith(allowedRendererUrl)) throw new Error("Rejected IPC request from an untrusted renderer.");
 }
 function registerIpc() {
+	const invokeSellerDashboard = createSellerDashboardIpcHandler(sellerDashboardHost);
+	ipcMain.handle(sellerDashboardIpcChannel, (event, request) => {
+		assertTrustedSender(event);
+		return invokeSellerDashboard(request);
+	});
 	const invokeVoice = createVoiceIpcHandler(voiceHost);
 	ipcMain.handle(voiceIpcChannel, (event, request) => {
 		assertTrustedSender(event);

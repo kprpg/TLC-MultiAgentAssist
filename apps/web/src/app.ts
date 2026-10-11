@@ -55,6 +55,7 @@ import { createOutlookDraftMessage } from '../../desktop/electron/main/outlook-c
 import { createResponseDocumentBuffer } from '../../desktop/electron/main/response-document.js'
 import { invokeWorkflowHost, type WorkflowHost, type WorkflowHostOperation } from '../../../packages/orchestrator/workflows/index.js'
 import { createBrowserOnlyVoiceHost, type SharedVoiceInputHost } from '../../../packages/orchestrator/voice-input.js'
+import type { SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 
 const accountIdSchema = z.string().min(1).max(200)
 const maximumBodyBytes = 1_048_576
@@ -88,6 +89,7 @@ export interface AuthenticatedRequest {
 }
 
 export interface WebApiOptions {
+    resolveSellerDashboardHost?(authentication: AuthenticatedRequest): Promise<SellerDashboardHost> | SellerDashboardHost
     resolveVoiceHost?(authentication: AuthenticatedRequest): SharedVoiceInputHost
     createRuntime(authentication: AuthenticatedRequest): Promise<WebRuntime> | WebRuntime
     resolveWorkflowHost?(authentication: AuthenticatedRequest): Promise<WorkflowHost> | WorkflowHost
@@ -126,6 +128,11 @@ export function buildWebApiHandler(options: WebApiOptions) {
 
             if (request.method === 'GET' && url.pathname === '/api/me') {
                 sendJson(response, 200, { email: authentication.userEmail })
+                return true
+            }
+            if (request.method === 'POST' && url.pathname === '/api/seller-dashboard' && options.resolveSellerDashboardHost) {
+                const host = await options.resolveSellerDashboardHost(authentication)
+                sendJson(response, 200, await host.invoke(await readJsonBody(request)))
                 return true
             }
             if (request.method === 'POST' && url.pathname === '/api/voice') {

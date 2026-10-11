@@ -7,7 +7,7 @@ It ships as two end-user surfaces that share the same feature set — a **VS Cod
 - **[VS Code Shell Extension](#vs-code-shell-extension)** — install, open, and use TLC Assist inside VS Code, with VS Code-specific screenshots.
 - **[Desktop Version](#desktop-version)** — install, launch, and run the Windows desktop app, with the full illustrated feature walkthrough.
 
-All screenshots come from the sanitized sample dataset shipped with the product; the live experience is identical except that data is pulled from MSX for opportunities on which you are on the deal team.
+All screenshots come from the sanitized sample dataset shipped with the product. Portfolio live data is pulled from MSX for opportunities on which you are on the deal team. The separate Seller Dashboard uses the seller's own official quota-account scope and requires its own authorized source setup.
 
 ---
 
@@ -76,11 +76,12 @@ Two independent toggles control where data comes from:
 
 ### The Discover, Portfolio, and Plays tabs
 
-The TLC Assist view is organized into three tabs:
+The TLC Assist view is organized into four tabs:
 
 - **Discover** — browse Solution Engineer domains and join or leave opportunity Deal Teams.
 - **Portfolio** — your accounts, opportunities, milestones, MSX evidence, and the four guidance agents, with **Email** and **Word** export on every agent response.
 - **Plays** — the operational Plays catalog in the left rail (ordered by workflow number) and the Operational Queue of results. Each queue item can be dispatched to an agent — for example **Send to Pursuit** or **Send to Risk & Play** — and the returned response can be exported with **Email** or **Word**, just like Portfolio guidance.
+- **Seller Dashboard** — a separate, read-only four-section performance report with fixed official attainment, account gaps, pipeline hygiene, consumption and U2C evidence. It adds no financial export/sharing controls; unavailable live sources remain unknown. See the [Seller Dashboard guide](SELLER-DASHBOARD.md) for filters, methodology and protected local-live setup.
 
 VS Code also contributes a native **TLC Assist** tree and toolbar commands (**TLC: Refresh Data**, **TLC: Add Customer Account**, **TLC: Toggle Hidden Customers**).
 

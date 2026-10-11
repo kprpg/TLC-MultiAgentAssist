@@ -14,6 +14,7 @@ import type { WorkflowHost } from '../../../packages/orchestrator/workflows/inde
 import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import type { MeetingExtractorFn } from '../../../packages/connectors/local-store/index.js'
 import type { ExtensionDataProvider, MeetingTranscriptSource } from './data-provider.js'
+import { createSellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 
 export const AGENT_CAPABILITIES: readonly AgentCapability[] = ['account-pulse', 'mcem-coach', 'pursuit-executive', 'risk-solution-play']
 const LIVE_AGENT_VERSION = 'guidance-live-v1'
@@ -86,6 +87,7 @@ export function buildLiveDataProvider(
     }
     return {
         mode,
+        sellerDashboard: createSellerDashboardHost({ mode, resolveUserEmail: async () => account }),
         getCurrentUserEmail: async () => account,
         listAccounts: (options) => orchestrator.listAccounts(options),
         searchAccounts: (request) => orchestrator.searchAccounts(request),
