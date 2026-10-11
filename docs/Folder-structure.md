@@ -164,6 +164,17 @@ components remain thin UI integrations. `scripts/prepare-voice-model.mjs` and
 sanitized audio fixtures live in `tests/fixtures/voice-input`. Research and the
 implemented design are documented under `docs/research`.
 
+Meeting capture's Desktop/Web launcher and review modal live in the focused
+`apps/desktop/renderer-revamp/src/meeting-capture.tsx` (shared by Desktop and Web,
+not `apps/shared`, since it depends on the renderer-revamp `RevampDataClient` and
+Fluent UI already used throughout `App.tsx`). The VS Code webview keeps its own
+equivalent component. Both call the same shared connectors/extractor
+(`packages/connectors/msx/live-meeting.ts`, `packages/connectors/local-store`,
+`packages/agents/meeting-signal-extractor`) through host-specific transports:
+Electron IPC (`apps/desktop/electron/main/index.ts`), the webview bridge
+(`apps/vscode-extension/src/host-router.ts`), and Web HTTP routes
+(`apps/web/src/app.ts`/`runtime.ts`/`server.ts`).
+
 ```text
 Renderer UI
     |

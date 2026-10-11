@@ -2,10 +2,12 @@ import { AzureCliCredential, ManagedIdentityCredential } from '@azure/identity'
 import { resolve } from 'node:path'
 import { loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, type AgentCapability } from '../../../packages/common/index.js'
 import { loadFoundryEnvironmentFromEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
-import { LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
+import { LiveMeetingCaptureConnector, LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../packages/connectors/foundry/index.js'
+import { createFoundryMeetingExtractor } from '../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
+import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
 import { createLivePlayWorkflowHost, type WorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import type { AuthenticatedRequest, WebRuntime } from './app.js'
@@ -52,10 +54,37 @@ export async function createHostedRuntimeFactory(options: HostedRuntimeOptions =
     const portfolioPreferenceStore = new JsonFilePortfolioPreferenceStore(
         resolve(workingDirectory, environment['TLC_PORTFOLIO_PREFERENCES_PATH']?.trim() || '.tlc/portfolio-preferences.json')
     )
+    /** Foundry model-backed meeting-signal extractor when TLC_MEETING_EXTRACTOR=foundry; else the deterministic offline extractor. */
+    const meetingExtractor = (environment['TLC_MEETING_EXTRACTOR'] ?? '').toLowerCase() === 'foundry'
+        ? createFoundryMeetingExtractor({
+            openAIClient: foundryClient,
+            model: environment['TLC_MEETING_MODEL']?.trim() || 'gpt-6.1-sol',
+            requestTimeoutMs: foundryEnvironment.foundry.requestTimeoutMs
+        })
+        : undefined
 
     return ({ accessToken }: AuthenticatedRequest): WebRuntime => {
         const msx = new LiveMsxConnector({ getAccessToken: async () => accessToken }, fetch, undefined, undefined, msxWriteMetadataFromEnvironment(environment), portfolioPreferenceStore)
-        return new ThinSliceOrchestrator(msx, guidance, taskAgents)
+        const meetingConnector = new LiveMeetingCaptureConnector(msx)
+        return Object.assign(new ThinSliceOrchestrator(msx, guidance, taskAgents), {
+            listMeetingTranscripts: () => meetingConnector.listMeetingTranscripts(),
+            getMeetingTranscript: async () => (await meetingConnector.getMeetingTranscript()) ?? null,
+            proposeMeetingChangeSet: (request: { opportunityId: string; transcriptId?: string; rawTranscript?: { content: string; format?: 'vtt' | 'text'; meetingType?: 'customer' | 'internal' } }) => {
+                const transcript = request.rawTranscript
+                    ? parseTranscriptContent(request.rawTranscript.content, {
+                        opportunityId: request.opportunityId,
+                        ...(request.rawTranscript.format ? { format: request.rawTranscript.format } : {}),
+                        ...(request.rawTranscript.meetingType ? { meetingType: request.rawTranscript.meetingType } : {})
+                    })
+                    : undefined
+                return meetingConnector.proposeMeetingChangeSet({
+                    opportunityId: request.opportunityId,
+                    ...(request.transcriptId ? { transcriptId: request.transcriptId } : {}),
+                    ...(transcript ? { transcript } : {})
+                }, meetingExtractor)
+            },
+            applyMeetingChangeSet: (input: Parameters<LiveMeetingCaptureConnector['applyMeetingChangeSet']>[0]) => meetingConnector.applyMeetingChangeSet(input)
+        }) as WebRuntime
     }
 }
 

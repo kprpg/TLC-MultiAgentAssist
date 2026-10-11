@@ -40,6 +40,7 @@ import { agentCapabilities } from '../../../../packages/common/types/agent-capab
 import type { InitialWorkflowOutput } from '../../../../packages/orchestrator/workflows/index.js'
 import workflowDescriptions from '../../../../config/workflow-descriptions.json'
 import { createDataClient, stageOwner, type RevampDataClient } from './data-client.js'
+import { MeetingCaptureLauncher } from './meeting-capture.js'
 import { suggestedPrompts } from './prompt-catalog.js'
 import { formatResponseMarkdown } from './response-markdown.js'
 import { sortOpportunities, type OpportunitySort, type SortDirection } from './opportunity-sort.js'
@@ -1240,6 +1241,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
             <div className="milestone-tree-header">
               <span>Milestones</span>
               <div className="milestone-tree-actions">
+                <MeetingCaptureLauncher client={client} opportunityId={opportunity.id} opportunityName={opportunity.name} milestones={milestones} onApplied={() => void refreshOpportunityContext()} onNote={setError} />
                 <Menu checkedValues={{ milestoneSort: [milestoneSort] }} positioning="below-end">
                   <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="tree-refresh-button" icon={<ArrowSort20Regular />} aria-label="Sort milestones" title={`Sort milestones by ${milestoneSort === 'targetDate' ? 'Milestone Est. Date' : milestoneSort === 'estimatedMonthlyUsage' ? 'Est. Change in Monthly Usage' : milestoneSort === 'commitment' ? 'Customer Commitment' : 'Milestone Status'} (${milestoneSortDirection})`} /></MenuTrigger>
                   <MenuPopover><MenuList aria-label="Sort milestones by">

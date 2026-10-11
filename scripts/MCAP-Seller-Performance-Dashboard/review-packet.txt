@@ -1,0 +1,101 @@
+DISPLAY TITLE
+MCAPS Seller Performance Dashboard
+
+SUGGESTED SLUG
+mcaps-seller-performance-dashboard
+
+SUBMISSION TYPE
+Runnable skill package
+
+ATTRIBUTION
+The submitter supplies their own name/email in the Skill Shack submission form.
+Personal attribution is intentionally not embedded in this reusable package.
+
+CATEGORY SUGGESTION
+MSX Earnings (msx-earnings). Related audiences: forecasting and manager tools.
+
+ONE-SENTENCE SUMMARY
+Build a private manager-ready view of official MSX Earnings attainment, quota gaps,
+and account-scoped pipeline, with explicit no-pipeline and unverified-coverage
+callouts.
+
+REQUIRED USER INPUT
+The user's OWN Quota by Accounts CSV downloaded from MSX Earnings for the selected
+fiscal year. No quota, account roster, earnings or pipeline dataset is bundled.
+
+FIRST-RUN ONBOARDING
+Present in SKILL.md and executable helpers. Validates the local export, approved
+corporate tenant/organization, trusted MSX MCP bundle, reporting timezone and
+isolated profile. No personal dataset fallback or author-specific schedule.
+
+SUPPORTED SCOPE
+Version 1: Windows; Python 3.11+; USD monetary plans with EndCustomerTopParentName account quota
+and compatible MINT performance/summary/PCG fields; up to 200 quota TPIDs.
+Different currencies, seats, percentage units and unsupported schemas fail clearly.
+Metric/workload mappings are tentative; unknown mappings are not zero pipeline.
+Zero calculated targets and partial-month official periods are supported.
+Negative calculated bucket targets and truncated source summaries are rejected.
+
+EXPECTED OUTPUT
+A loopback-only manager dashboard rendered in memory from Windows-user-encrypted
+snapshots. Official attainment, baselines, metric/account gaps, pipeline inventory,
+no-pipeline flags, source-quality warnings and optional illustrative ramp scenarios.
+The output is NOT a portable HTML attachment or manager-sharing URL.
+
+DATA AND TOOLS
+- Local user-supplied quota CSV.
+- Authorized MINT earnings through the installed MSX MCP runtime.
+- Read-only, bounded and paginated Dataverse account/opportunity/milestone queries.
+- Python standard library, Node.js, Azure CLI, Edge, Windows DPAPI.
+- Optional host automation tools after explicit setup approval.
+
+DEPENDENCY ROUTING
+Byte-identical generic helpers, renderer and tests: included in this package.
+MSX MCP runtime / Python / Node / Azure CLI / Edge: separately installed trusted
+dependencies; not redistributed or silently downloaded by the package.
+Quota, tenant/organization, bundle path, timezone, profile and auth: per-user
+onboarding; stored locally, outside the package.
+Generated earnings/pipeline/snapshots: user/machine-encrypted runtime only.
+
+ACTIONS AND RISK
+Suggested review risk: High, because financial data, local code execution,
+authenticated internal data access and a local viewer are involved.
+No CRM writes, automatic messages, uploads, external telemetry, scheduled tasks
+or automation changes are performed by the bundled Python helpers.
+The installed MSX runtime may open Edge for initial authorized authentication.
+Optional automation configuration requires preview and explicit approval.
+
+PRIVACY / SCRUB EXPECTATIONS
+Only an explicit source/template/test/document allowlist is packaged.
+Excluded: actual quota exports, normalized quota data, earnings/pipeline responses,
+private dashboards, screenshots, auth tokens, browser profiles, caches, logs,
+encrypted runtime snapshots, local shortcuts, legacy proxy code and bytecode.
+No submitter-specific customer names, TPIDs, opportunity IDs, tenant IDs, local
+absolute paths, compensation figures or automation identifiers should be present.
+Synthetic tests use clearly fictitious fixtures only.
+The generated manifest records the final included files and hashes.
+
+LOCAL VALIDATION
+86 synthetic tests passed on Windows with Python 3.12 and installed Node.js.
+Coverage includes multiple plan shapes and fiscal years, own-export validation,
+nullable payout units, zero targets, partial reporting months, model/UI agreement,
+unknown source data, optional scenarios, Windows-user encryption, first-run
+isolation, last-good snapshot preservation and cross-process profile locking.
+No live customer, quota, earnings or pipeline payload was used as a test fixture.
+The published source adapter still requires each user's own authorized environment
+and live source reconciliation; synthetic tests do not grant or prove user access.
+
+REVIEWER INSPECTION POINTS
+- Mandatory own-export onboarding and strict units/schema validation.
+- Dynamic official weights/metrics/partitions; no gross-consumption proxy.
+- Closed-month comparison and optional scenario clearly non-official.
+- No direct subtraction of TCV or monthly run-rate from quarterly gaps.
+- Unknown statuses, unknown mappings and missing access preserved honestly.
+- Bounded source queries, pagination and global record attribution/deduplication.
+- Isolated encrypted state; last-good snapshot preservation; no unprotected export.
+- Trust boundary for user-selected installed MCP executable and corporate URL.
+- No author-specific account data or credentials in code, tests or archive.
+
+SUBMISSION STATUS
+Prepared locally for human review. Not submitted, published, approved or announced.
+Read SKILL.md for the complete prompt body and implementation instructions.

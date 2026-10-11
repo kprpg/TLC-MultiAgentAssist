@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Account, AccountCandidate, AccountListOptions, AccountSearchRequest, AccountVisibility, AgentTaskRequest, AgentTaskResponse, AuthStatus, CreateMilestoneActivityRequest, DealTeamJoinResult, DealTeamLeaveResult, DesktopDataStatus, DiscoverableOpportunity, EmailComposeRequest, EmailComposeResult, ExportResponseRequest, ExportResponseResult, McemRequest, McemResponse, McemStageTransitionRequest, McemStageTransitionResult, Milestone, MilestoneActivity, MilestoneTeamJoinResult, MilestoneTeamLeaveResult, MilestoneUpdate, Opportunity, OpportunityUpdate, SeDomainId } from '../../../../packages/common/index.js'
+import type { Account, AccountCandidate, AccountListOptions, AccountSearchRequest, AccountVisibility, AgentTaskRequest, AgentTaskResponse, AuthStatus, CreateMilestoneActivityRequest, DealTeamJoinResult, DealTeamLeaveResult, DesktopDataStatus, DiscoverableOpportunity, EmailComposeRequest, EmailComposeResult, ExportResponseRequest, ExportResponseResult, McemRequest, McemResponse, McemStageTransitionRequest, McemStageTransitionResult, MeetingChangeSetApproval, MeetingChangeSetProposal, MeetingChangeSetResult, MeetingTranscript, MeetingTranscriptSummary, MeetingType, Milestone, MilestoneActivity, MilestoneTeamJoinResult, MilestoneTeamLeaveResult, MilestoneUpdate, Opportunity, OpportunityUpdate, SeDomainId } from '../../../../packages/common/index.js'
 import type { WorkflowHostOperation } from '../../../../packages/orchestrator/workflows/index.js'
 import type { VoiceRequest, VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 
@@ -22,6 +22,10 @@ export interface TlcDesktopApi {
   listDiscoverableMilestones(opportunityId: string): Promise<Milestone[]>
   listMilestoneActivities(opportunityId: string, milestoneId: string): Promise<MilestoneActivity[]>
   createMilestoneActivity(opportunityId: string, milestoneId: string, request: CreateMilestoneActivityRequest): Promise<MilestoneActivity>
+  listMeetingTranscripts(opportunityId?: string): Promise<MeetingTranscriptSummary[]>
+  getMeetingTranscript(transcriptId: string): Promise<MeetingTranscript | null>
+  proposeMeetingChangeSet(request: { opportunityId: string; transcriptId?: string; rawTranscript?: { content: string; format?: 'vtt' | 'text'; meetingType?: MeetingType } }): Promise<MeetingChangeSetProposal>
+  applyMeetingChangeSet(proposal: MeetingChangeSetProposal, approval: MeetingChangeSetApproval): Promise<MeetingChangeSetResult>
   updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
   updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
   runMcemCoach(request: McemRequest): Promise<McemResponse>
@@ -52,6 +56,10 @@ const api: TlcDesktopApi = {
   listDiscoverableMilestones: (opportunityId) => ipcRenderer.invoke('tlc:list-discoverable-milestones', opportunityId),
   listMilestoneActivities: (opportunityId, milestoneId) => ipcRenderer.invoke('tlc:list-milestone-activities', opportunityId, milestoneId),
   createMilestoneActivity: (opportunityId, milestoneId, request) => ipcRenderer.invoke('tlc:create-milestone-activity', opportunityId, milestoneId, request),
+  listMeetingTranscripts: (opportunityId) => ipcRenderer.invoke('tlc:list-meeting-transcripts', opportunityId),
+  getMeetingTranscript: (transcriptId) => ipcRenderer.invoke('tlc:get-meeting-transcript', transcriptId),
+  proposeMeetingChangeSet: (request) => ipcRenderer.invoke('tlc:propose-meeting-change-set', request),
+  applyMeetingChangeSet: (proposal, approval) => ipcRenderer.invoke('tlc:apply-meeting-change-set', proposal, approval),
   updateMilestone: (opportunityId, milestoneId, update) => ipcRenderer.invoke('tlc:update-milestone', opportunityId, milestoneId, update),
   updateOpportunity: (opportunityId, update) => ipcRenderer.invoke('tlc:update-opportunity', opportunityId, update),
   runMcemCoach: (request) => ipcRenderer.invoke('tlc:run-mcem-coach', request),
