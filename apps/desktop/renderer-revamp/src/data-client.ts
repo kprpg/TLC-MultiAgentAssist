@@ -9,6 +9,10 @@ import {
     mcemStageTransitionRequestSchema,
     mcemStageTransitionResultSchema,
     mcemResponseSchema,
+    meetingChangeSetProposalSchema,
+    meetingChangeSetResultSchema,
+    meetingTranscriptSchema,
+    meetingTranscriptSummarySchema,
     milestoneSchema,
     milestoneActivitySchema,
     createMilestoneActivityRequestSchema,
@@ -41,6 +45,12 @@ import {
     type ExportResponseResult,
     type McemResponse,
     type McemStageTransitionResult,
+    type MeetingChangeSetApproval,
+    type MeetingChangeSetProposal,
+    type MeetingChangeSetResult,
+    type MeetingTranscript,
+    type MeetingTranscriptSummary,
+    type MeetingType,
     type Milestone,
     type MilestoneActivity,
     type CreateMilestoneActivityRequest,
@@ -58,8 +68,11 @@ import {
 import type { StartWorkflowHostRequest, WorkflowHostOperation } from '../../../../packages/orchestrator/workflows/host.js'
 import { milestoneRecommendations, summarizeMilestones } from '../../../../packages/agents/mcem-coach/src/milestone-signals.js'
 import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest, type VoiceResponse } from '../../../../packages/common/contracts/voice.js'
+import { sellerDashboardRequestSchema, sellerDashboardResponseSchema, type SellerDashboardRequest, type SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
+import { createSampleSellerDashboard } from '../../../../packages/common/fixtures/seller-dashboard.js'
 
 export interface RevampDataClient {
+    invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     readonly mode: 'desktop' | 'web-live' | 'web-sample'
     exitApplication(): Promise<void>
@@ -78,6 +91,11 @@ export interface RevampDataClient {
     listDiscoverableMilestones(opportunityId: string): Promise<Milestone[]>
     listMilestoneActivities(opportunityId: string, milestoneId: string): Promise<MilestoneActivity[]>
     createMilestoneActivity(opportunityId: string, milestoneId: string, request: CreateMilestoneActivityRequest): Promise<MilestoneActivity>
+    listMeetingTranscripts(opportunityId?: string): Promise<MeetingTranscriptSummary[]>
+    getMeetingTranscript(transcriptId: string): Promise<MeetingTranscript | null>
+    proposeMeetingFromTranscript(opportunityId: string, transcriptId: string): Promise<MeetingChangeSetProposal>
+    proposeMeetingFromRaw(opportunityId: string, content: string, meetingType: MeetingType, format?: 'vtt' | 'text'): Promise<MeetingChangeSetProposal>
+    applyMeetingChangeSet(proposal: MeetingChangeSetProposal, approval: MeetingChangeSetApproval): Promise<MeetingChangeSetResult>
     updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
     updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
     transitionOpportunityStage(accountId: string, opportunityId: string, targetStage: number, reason?: string): Promise<McemStageTransitionResult>
@@ -95,6 +113,12 @@ export interface RevampDataClient {
 }
 
 type Fetcher = typeof fetch
+
+class WebApiRequestError extends Error {
+    constructor(readonly status: number, message: string) {
+        super(message)
+    }
+}
 
 function downloadBlob(blob: Blob, fileName: string): void {
     const downloadUrl = URL.createObjectURL(blob)
@@ -119,7 +143,7 @@ async function apiRequest(fetcher: Fetcher, path: string, init?: RequestInit): P
         }
     })
     const payload = await response.json().catch(() => null) as { error?: string } | null
-    if (!response.ok) throw new Error(payload?.error ?? `The server request failed (${response.status}).`)
+    if (!response.ok) throw new WebApiRequestError(response.status, payload?.error ?? `The server request failed (${response.status}).`)
     return payload
 }
 
@@ -131,6 +155,9 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
     )
     return {
         mode,
+        invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(await apiRequest(fetcher, '/api/seller-dashboard', {
+            method: 'POST', body: JSON.stringify(sellerDashboardRequestSchema.parse(request))
+        })),
         invokeVoice: async (request) => voiceResponseSchema.parse(await apiRequest(fetcher, '/api/voice', {
             method: 'POST', body: JSON.stringify(voiceRequestSchema.parse(request))
         })),
@@ -153,6 +180,11 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
         listDiscoverableMilestones: async (opportunityId) => milestoneSchema.array().parse(await apiRequest(fetcher, `/api/discover/opportunities/${encodeURIComponent(opportunityId)}/milestones`)),
         listMilestoneActivities: async (opportunityId, milestoneId) => milestoneActivitySchema.array().parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/milestones/${encodeURIComponent(milestoneId)}/activities`)),
         createMilestoneActivity: async (opportunityId, milestoneId, request) => milestoneActivitySchema.parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/milestones/${encodeURIComponent(milestoneId)}/activities`, { method: 'POST', body: JSON.stringify(createMilestoneActivityRequestSchema.parse(request)) })),
+        listMeetingTranscripts: async (opportunityId) => meetingTranscriptSummarySchema.array().parse(await apiRequest(fetcher, `/api/meeting-transcripts${opportunityId ? `?opportunityId=${encodeURIComponent(opportunityId)}` : ''}`)),
+        getMeetingTranscript: async (transcriptId) => meetingTranscriptSchema.nullable().parse(await apiRequest(fetcher, `/api/meeting-transcripts/${encodeURIComponent(transcriptId)}`)),
+        proposeMeetingFromTranscript: async (opportunityId, transcriptId) => meetingChangeSetProposalSchema.parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/meeting-change-set`, { method: 'POST', body: JSON.stringify({ transcriptId }) })),
+        proposeMeetingFromRaw: async (opportunityId, content, meetingType, format) => meetingChangeSetProposalSchema.parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/meeting-change-set`, { method: 'POST', body: JSON.stringify({ rawTranscript: { content, meetingType, ...(format ? { format } : {}) } }) })),
+        applyMeetingChangeSet: async (proposal, approval) => meetingChangeSetResultSchema.parse(await apiRequest(fetcher, '/api/meeting-change-set/apply', { method: 'POST', body: JSON.stringify({ proposal, approval }) })),
         updateMilestone: async (opportunityId, milestoneId, update) => milestoneSchema.parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/milestones/${encodeURIComponent(milestoneId)}`, { method: 'PATCH', body: JSON.stringify(milestoneUpdateSchema.parse(update)) })),
         updateOpportunity: async (opportunityId, update) => opportunitySchema.parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}`, { method: 'PATCH', body: JSON.stringify(opportunityUpdateSchema.parse(update)) })),
         transitionOpportunityStage: async (accountId, opportunityId, targetStage, reason) => mcemStageTransitionResultSchema.parse(await apiRequest(fetcher, '/api/mcem-stage-transition', {
@@ -215,6 +247,7 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
 }
 
 interface DesktopBridge {
+    invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     exitApplication(): Promise<void>
     getDataStatus(): Promise<DesktopDataStatus>
@@ -232,6 +265,10 @@ interface DesktopBridge {
     listDiscoverableMilestones(opportunityId: string): Promise<Milestone[]>
     listMilestoneActivities(opportunityId: string, milestoneId: string): Promise<MilestoneActivity[]>
     createMilestoneActivity(opportunityId: string, milestoneId: string, request: CreateMilestoneActivityRequest): Promise<MilestoneActivity>
+    listMeetingTranscripts(opportunityId?: string): Promise<MeetingTranscriptSummary[]>
+    getMeetingTranscript(transcriptId: string): Promise<MeetingTranscript | null>
+    proposeMeetingChangeSet(request: { opportunityId: string; transcriptId?: string; rawTranscript?: { content: string; format?: 'vtt' | 'text'; meetingType?: MeetingType } }): Promise<MeetingChangeSetProposal>
+    applyMeetingChangeSet(proposal: MeetingChangeSetProposal, approval: MeetingChangeSetApproval): Promise<MeetingChangeSetResult>
     updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
     updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
     transitionOpportunityStage(request: { contractVersion: typeof contractVersion; accountId: string; opportunityId: string; targetStage: number; reason?: string }): Promise<McemStageTransitionResult>
@@ -398,6 +435,10 @@ function buildWebEvaluation(opportunity: Opportunity, opportunityMilestones: rea
 function webClient(): RevampDataClient {
     return {
         mode: 'web-sample',
+        invokeSellerDashboard: async (request) => {
+            sellerDashboardRequestSchema.parse(request)
+            return createSampleSellerDashboard()
+        },
         exitApplication: async () => { await apiRequest(fetch, '/api/exit', { method: 'POST' }) },
         getCurrentUserEmail: async () => undefined,
         listAccounts: async (options) => structuredClone(sampleAccountRows(options?.includeHidden)),
@@ -512,6 +553,11 @@ function webClient(): RevampDataClient {
             milestoneActivities.unshift(activity)
             return structuredClone(activity)
         },
+        listMeetingTranscripts: async () => { throw new Error('Meeting capture requires the SQLite test store (sample data) or a live Graph connection.') },
+        getMeetingTranscript: async () => { throw new Error('Meeting capture requires the SQLite test store (sample data) or a live Graph connection.') },
+        proposeMeetingFromTranscript: async () => { throw new Error('Meeting capture requires the SQLite test store (sample data) or a live Graph connection.') },
+        proposeMeetingFromRaw: async () => { throw new Error('Meeting capture requires the SQLite test store (sample data) or a live Graph connection.') },
+        applyMeetingChangeSet: async () => { throw new Error('Meeting capture requires the SQLite test store (sample data) or a live Graph connection.') },
         updateMilestone: async (opportunityId, milestoneId, update) => {
             const milestone = milestones.find((item) => item.opportunityId === opportunityId && item.id === milestoneId)
             if (!milestone) throw new Error('Unknown sample milestone.')
@@ -577,6 +623,9 @@ function webClient(): RevampDataClient {
 function desktopClient(bridge: DesktopBridge): RevampDataClient {
     return {
         mode: 'desktop',
+        invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(
+            await bridge.invokeSellerDashboard(sellerDashboardRequestSchema.parse(request))
+        ),
         invokeVoice: async (request) => voiceResponseSchema.parse(await bridge.invokeVoice(voiceRequestSchema.parse(request))),
         exitApplication: () => bridge.exitApplication(),
         getCurrentUserEmail: async () => (await bridge.getDataStatus()).auth.userEmail,
@@ -594,6 +643,11 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         listDiscoverableMilestones: (opportunityId) => bridge.listDiscoverableMilestones(opportunityId),
         listMilestoneActivities: (opportunityId, milestoneId) => bridge.listMilestoneActivities(opportunityId, milestoneId),
         createMilestoneActivity: (opportunityId, milestoneId, request) => bridge.createMilestoneActivity(opportunityId, milestoneId, request),
+        listMeetingTranscripts: (opportunityId) => bridge.listMeetingTranscripts(opportunityId),
+        getMeetingTranscript: (transcriptId) => bridge.getMeetingTranscript(transcriptId),
+        proposeMeetingFromTranscript: (opportunityId, transcriptId) => bridge.proposeMeetingChangeSet({ opportunityId, transcriptId }),
+        proposeMeetingFromRaw: (opportunityId, content, meetingType, format) => bridge.proposeMeetingChangeSet({ opportunityId, rawTranscript: { content, meetingType, ...(format ? { format } : {}) } }),
+        applyMeetingChangeSet: (proposal, approval) => bridge.applyMeetingChangeSet(proposal, approval),
         updateMilestone: (opportunityId, milestoneId, update) => bridge.updateMilestone(opportunityId, milestoneId, update),
         updateOpportunity: (opportunityId, update) => bridge.updateOpportunity(opportunityId, update),
         transitionOpportunityStage: (accountId, opportunityId, targetStage, reason) => bridge.transitionOpportunityStage({ contractVersion, accountId, opportunityId, targetStage, ...(reason === undefined ? {} : { reason }) }),

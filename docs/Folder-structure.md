@@ -154,6 +154,19 @@ Agents consume connector interfaces or orchestrator-provided evidence. They must
 
 The current browser-safe shared UI modules in `apps/shared` include `portfolio-search.ts`, which supplies the same matching and result-limit rules to Desktop/Web and the VS Code webview. The extension's focused `portfolio-search.tsx` component owns search loading and interaction; `next-best-actions.tsx` renders MCEM recommendations and their cited evidence without changing the host or orchestrator contracts.
 
+Seller Dashboard uses shared `seller-dashboard.tsx`, `seller-dashboard-sections.tsx`,
+`seller-dashboard-table.tsx`, `seller-dashboard-analysis.ts`, and feature-scoped
+`seller-dashboard.css` in `apps/shared`. Its browser-safe, independently versioned
+schemas live in `packages/common/contracts/seller-dashboard.ts`, with one fictitious
+snapshot in `packages/common/fixtures/seller-dashboard.ts`. The shared read-only
+host in `packages/orchestrator/seller-dashboard.ts` fronts the optional
+Windows-encrypted profile adapter in `packages/connectors/common/seller-dashboard.ts`.
+Electron IPC, authenticated/no-store HTTP, and the strict webview bridge invoke
+the same operations. `createWebSellerDashboardHost` in `apps/web/src/runtime.ts`
+denies host-user private profiles in all Web live modes, including local Azure CLI,
+until HTTP caller authentication is identity-bound. Desktop/local Windows VS Code
+retain the protected-profile adapter; Web sample mode remains synthetic.
+
 Voice search uses shared `voice-input.ts`, `use-voice-dictation.ts`,
 `voice-search-control.tsx`, and provider adapters in `apps/shared`. Its strict
 contracts live in `packages/common/contracts/voice.ts`; the shared native-session
@@ -163,6 +176,17 @@ components remain thin UI integrations. `scripts/prepare-voice-model.mjs` and
 `scripts/voice-worker-assets.mjs` build the offline browser model/isolated worker;
 sanitized audio fixtures live in `tests/fixtures/voice-input`. Research and the
 implemented design are documented under `docs/research`.
+
+Meeting capture's Desktop/Web launcher and review modal live in the focused
+`apps/desktop/renderer-revamp/src/meeting-capture.tsx` (shared by Desktop and Web,
+not `apps/shared`, since it depends on the renderer-revamp `RevampDataClient` and
+Fluent UI already used throughout `App.tsx`). The VS Code webview keeps its own
+equivalent component. Both call the same shared connectors/extractor
+(`packages/connectors/msx/live-meeting.ts`, `packages/connectors/local-store`,
+`packages/agents/meeting-signal-extractor`) through host-specific transports:
+Electron IPC (`apps/desktop/electron/main/index.ts`), the webview bridge
+(`apps/vscode-extension/src/host-router.ts`), and Web HTTP routes
+(`apps/web/src/app.ts`/`runtime.ts`/`server.ts`).
 
 ```text
 Renderer UI

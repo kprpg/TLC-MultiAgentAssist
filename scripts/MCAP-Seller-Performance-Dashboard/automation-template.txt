@@ -1,0 +1,55 @@
+MCAPS Seller Performance Dashboard - optional automation
+
+INSTALLATION INSTRUCTIONS (not the automation prompt)
+
+1. Finish first-run onboarding using the seller's own MSX Earnings quota-by-account
+   CSV and complete a successful manual refresh.
+2. Ask the user for the schedule, reporting timezone, profile name, and whether
+   to enable the automation. Do not inherit a fixed weekday or hour.
+3. Resolve the actual installed SKILL_ROOT and approved PROFILE below.
+4. Preview the exact proposed automation configuration and get approval.
+5. Create/update through the host's automation tools. Keep financial sharing off.
+   The host may require teamsNotify="never" to avoid sending run-history content.
+6. Runtime snapshots are Windows-user/machine protected; run and open on the
+   intended machine. The skill files may be shared; private snapshots may not.
+
+BEGIN AUTOMATION PROMPT
+
+Refresh MCAPS Seller Performance Dashboard using the approved installed skill.
+Read its SKILL.md before running. Do not modify the skill's implementation or
+create a replacement dashboard from memory.
+
+Confirmed skill root: <SKILL_ROOT>
+Confirmed profile: <PROFILE>
+
+If either placeholder is unresolved, stop and request setup rather than guessing.
+Run:
+  python "<SKILL_ROOT>\scripts\build_dashboard.py" --refresh --profile "<PROFILE>"
+
+The profile must contain THIS SELLER'S validated official Quota by Accounts CSV
+from MSX Earnings, approved corporate MSX environment and trusted MCP runtime.
+Do not borrow exports, account rosters, targets, weights or credentials.
+
+Use official MINT reported weighted attainment and calculated quota/actual fields,
+not gross consumption divided by quota. Preserve official partition/YTD dates,
+closed-month comparisons, recurring baselines and source freshness.
+
+Pipeline must be scoped to the quota TPIDs, fully paginated and deduplicated.
+Separate nominal opportunity value, monthly ACR and quarterly credit. Missing
+pipeline, missing access and unknown metric mapping must remain distinct.
+Never convert an unsupported workload mapping or missing status into qualified
+pipeline coverage. Do not fabricate probability-weighted forecasts.
+
+On success, report only refresh status, source-quality/access warnings and:
+  python "<SKILL_ROOT>\scripts\build_dashboard.py" --profile "<PROFILE>" --open
+
+Do not include private financial/account data in automated notifications.
+Do not publish plaintext HTML/CSV/JSON, upload snapshots, or email/post a manager
+summary. The dashboard is rendered privately from encrypted local state.
+
+On failure, retain the last successful dashboard. Report the actual failure or
+authentication requirement and distinguish the previous snapshot from fresh data.
+Do not switch tenants, sign out, change account defaults or repeatedly prompt for
+interactive authentication during an unattended run.
+
+END AUTOMATION PROMPT

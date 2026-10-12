@@ -284,4 +284,60 @@ describe('revamp live web data client', () => {
             body: JSON.stringify({ contractVersion, capability: 'account-pulse', accountId: 'account-1', opportunityId: 'opportunity-1', prompt: 'Show milestone drift.' })
         }))
     })
+
+    it('uses the meeting-capture routes over the web HTTP transport', async () => {
+        const transcripts = [{ id: 'transcript-1', subject: 'Executive review', occurredAt: '2026-04-01T10:00:00.000Z', meetingType: 'customer', source: 'teams', segmentCount: 3 }]
+        const proposal = { changeSetId: 'cs-1', transcriptId: 'transcript-1', opportunityId: 'opportunity-1', meetingType: 'customer', slots: [], newMilestones: [], unmappedSignals: [], suggestedMilestoneIds: [], proposedAt: '2026-04-01T10:05:00.000Z' }
+        const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+            const path = String(input)
+            const payload = path.includes('/meeting-transcripts/transcript-1') ? null
+                : path.includes('/meeting-transcripts') ? transcripts
+                    : path.includes('/meeting-change-set/apply') ? { changeSetId: 'cs-1', state: 'applied', auditNote: 'ok', items: [] }
+                        : proposal
+            return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
+        })
+        const client = createWebApiClient(fetcher)
+
+        await client.listMeetingTranscripts('opportunity-1')
+        await client.getMeetingTranscript('transcript-1')
+        await client.proposeMeetingFromTranscript('opportunity-1', 'transcript-1')
+        await client.proposeMeetingFromRaw('opportunity-1', 'Avery: thanks.', 'customer')
+        await client.applyMeetingChangeSet(proposal as never, { changeSetId: 'cs-1', opportunityId: 'opportunity-1', approvedSlotIds: [], approvedNewMilestoneTempIds: [], selectedMilestoneIds: [], reason: 'test' })
+
+        expect(fetcher.mock.calls.map(([path, init]) => [path, init?.method, init?.body])).toEqual([
+            ['/api/meeting-transcripts?opportunityId=opportunity-1', undefined, undefined],
+            ['/api/meeting-transcripts/transcript-1', undefined, undefined],
+            ['/api/opportunities/opportunity-1/meeting-change-set', 'POST', JSON.stringify({ transcriptId: 'transcript-1' })],
+            ['/api/opportunities/opportunity-1/meeting-change-set', 'POST', JSON.stringify({ rawTranscript: { content: 'Avery: thanks.', meetingType: 'customer' } })],
+            ['/api/meeting-change-set/apply', 'POST', JSON.stringify({
+                proposal,
+                approval: { changeSetId: 'cs-1', opportunityId: 'opportunity-1', approvedSlotIds: [], approvedNewMilestoneTempIds: [], selectedMilestoneIds: [], reason: 'test' }
+            })]
+        ])
+    })
+
+    it('uses the meeting-capture routes over the desktop IPC bridge', async () => {
+        const invoke = vi.fn()
+        invoke.mockResolvedValueOnce([{ id: 'transcript-1' }])
+        invoke.mockResolvedValueOnce(null)
+        const bridge = {
+            listMeetingTranscripts: (opportunityId?: string) => invoke('listMeetingTranscripts', opportunityId),
+            getMeetingTranscript: (transcriptId: string) => invoke('getMeetingTranscript', transcriptId),
+            proposeMeetingChangeSet: (request: unknown) => invoke('proposeMeetingChangeSet', request),
+            applyMeetingChangeSet: (proposal: unknown, approval: unknown) => invoke('applyMeetingChangeSet', proposal, approval)
+        }
+        vi.stubGlobal('window', { tlc: bridge })
+        const client = createDataClient('desktop')
+
+        await expect(client.listMeetingTranscripts('opportunity-1')).resolves.toEqual([{ id: 'transcript-1' }])
+        await expect(client.getMeetingTranscript('transcript-1')).resolves.toBeNull()
+        await client.proposeMeetingFromTranscript('opportunity-1', 'transcript-1')
+        await client.proposeMeetingFromRaw('opportunity-1', 'Avery: thanks.', 'customer', 'text')
+
+        expect(invoke).toHaveBeenNthCalledWith(1, 'listMeetingTranscripts', 'opportunity-1')
+        expect(invoke).toHaveBeenNthCalledWith(2, 'getMeetingTranscript', 'transcript-1')
+        expect(invoke).toHaveBeenNthCalledWith(3, 'proposeMeetingChangeSet', { opportunityId: 'opportunity-1', transcriptId: 'transcript-1' })
+        expect(invoke).toHaveBeenNthCalledWith(4, 'proposeMeetingChangeSet', { opportunityId: 'opportunity-1', rawTranscript: { content: 'Avery: thanks.', meetingType: 'customer', format: 'text' } })
+        vi.unstubAllGlobals()
+    })
 })

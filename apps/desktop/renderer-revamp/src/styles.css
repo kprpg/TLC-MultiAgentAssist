@@ -246,6 +246,15 @@ button {
     overflow-y: hidden;
 }
 
+.dashboard-mobile-entry {
+    display: none;
+    border: 0;
+    color: var(--cp-accent);
+    background: transparent;
+    padding: 4px;
+    cursor: pointer;
+}
+
 .icon-rail {
     z-index: 3;
     display: flex;
@@ -2178,6 +2187,10 @@ body.resizing-blade .blade {
 }
 
 @media (max-width: 900px) {
+    .dashboard-mobile-entry {
+        display: grid;
+        place-items: center;
+    }
     .app-shell {
         grid-template-rows: 48px minmax(0, 1fr) 58px;
     }
@@ -2362,3 +2375,133 @@ body.resizing-blade .blade {
     }
 
 }
+
+        /* Meeting capture: launcher (Milestones header) and review modal (Fluent Dialog). */
+        .meeting-launcher {
+            position: relative;
+        }
+
+        .meeting-launcher-panel {
+            position: absolute;
+            right: 0;
+            z-index: 20;
+            margin-top: 6px;
+            width: 340px;
+            max-width: 80vw;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            background: var(--cp-surface);
+            border: 1px solid var(--cp-border-strong);
+            border-radius: 6px;
+            box-shadow: var(--cp-shadow);
+        }
+
+        .meeting-launcher-tabs {
+            display: flex;
+            gap: 4px;
+        }
+
+        .meeting-launcher-tabs .tab {
+            border: 1px solid var(--cp-border);
+            background: var(--cp-surface-soft);
+            border-radius: 4px;
+            padding: 4px 10px;
+            cursor: pointer;
+        }
+
+        .meeting-launcher-tabs .tab.active {
+            background: var(--cp-accent-soft);
+            border-color: var(--cp-accent);
+            color: var(--cp-accent);
+        }
+
+        .meeting-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 0.85em;
+        }
+
+        .meeting-paste {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .meeting-paste textarea {
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .meeting-modal-surface {
+            width: 760px;
+            max-width: 96vw;
+        }
+
+        .meeting-modal-subhead {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .meeting-review-table th,
+        .meeting-review-table td {
+            vertical-align: top;
+        }
+
+        .meeting-review-table .blocked-row {
+            opacity: 0.65;
+        }
+
+        .meeting-rationale {
+            display: block;
+            font-size: 0.8em;
+        }
+
+        .meeting-before {
+            text-decoration: line-through;
+            opacity: 0.7;
+        }
+
+        .meeting-after {
+            font-weight: 700;
+        }
+
+        .badge.sensitive {
+            background: var(--cp-warning);
+            color: var(--cp-accent-fg);
+        }
+
+        .meeting-section {
+            margin-top: 12px;
+        }
+
+        .meeting-section h4 {
+            margin: 0 0 6px;
+        }
+
+        .meeting-check-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 3px 0;
+        }
+
+        .meeting-reason {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-top: 12px;
+        }
+
+        .meeting-result-list li {
+            padding: 2px 0;
+        }
+
+        .meeting-selected-count {
+            margin-right: auto;
+        }

@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "title": "MCAPS Seller Performance Dashboard",
+  "slug": "mcaps-seller-performance-dashboard",
+  "version": "1.0.0",
+  "category": "msx-earnings",
+  "submissionType": "package",
+  "risk": "High",
+  "status": "local-review-package-not-submitted",
+  "entryPoint": "SKILL.md",
+  "runtimeEntryPoint": "scripts/build_dashboard.py",
+  "requiredInput": "Each user's own official Quota by Accounts CSV downloaded from MSX Earnings.",
+  "supportedScope": "Windows; compatible USD monetary account-quota MINT plans; up to 200 TPIDs.",
+  "dependenciesNotBundled": [
+    "Python 3.11+",
+    "Node.js",
+    "Azure CLI",
+    "Microsoft Edge",
+    "Trusted installed MSX MCP runtime"
+  ],
+  "outboundActions": "No messages, uploads, or CRM writes; authenticated read-only source calls and local viewer.",
+  "privateState": "Windows-user-encrypted, outside the package, isolated by profile.",
+  "excludedCategories": [
+    "Quota/account/earnings/pipeline exports and responses",
+    "Credentials, tokens, auth caches and browser profiles",
+    "Private dashboards, screenshots, logs and shortcuts",
+    "Encrypted runtime snapshots and profile configuration",
+    "Legacy consumption proxy and Python bytecode"
+  ],
+  "scrub": {
+    "allowlistOnly": true,
+    "privateSourceIdentifierScan": "passed",
+    "literalCredentialAndPersonalPathScan": "passed",
+    "fixtures": "synthetic-only",
+    "approval": "Human Skill Shack review still required; no publication performed."
+  },
+  "hashNote": "File hashes cover all package members except this generated manifest.",
+  "files": [
+    {
+      "path": "SKILL.md",
+      "bytes": 13202,
+      "sha256": "9f91f6527135382adfead33db5848793cd53c0a3f6cfbded7e2f27c107c35ad0"
+    },
+    {
+      "path": "automation-template.txt",
+      "bytes": 2871,
+      "sha256": "1e3f90b5b35978207ea4cdd63fcc53c9107a71c191ea2c65acba74d13d2c133f"
+    },
+    {
+      "path": "review-packet.txt",
+      "bytes": 5309,
+      "sha256": "bb2f4abf136cc5e08b5b3d6081ecd4390e2877364e702a072f98cd834808f265"
+    },
+    {
+      "path": "scripts/build_dashboard.py",
+      "bytes": 187,
+      "sha256": "d9f7182e15f8f76cb98c89bc94523c100d356f74495f051e3b3de8bea3ea0499"
+    },
+    {
+      "path": "scripts/dashboard_config.py",
+      "bytes": 13561,
+      "sha256": "086484c276846ba5684f04afaf66248b5eee41a6c3a424779ceafa6f4b6cd164"
+    },
+    {
+      "path": "scripts/manager_dashboard.html",
+      "bytes": 86662,
+      "sha256": "794bb6009a9ef0350da46ea6816c4c6bf4b446e6f47aa6867150666d093c6016"
+    },
+    {
+      "path": "scripts/manager_model.py",
+      "bytes": 36116,
+      "sha256": "5e5c4f299cb65cc429234aec78daa51ccf2795811f2161ffc40bafe24266afb1"
+    },
+    {
+      "path": "scripts/manager_runner.py",
+      "bytes": 10148,
+      "sha256": "8bd90f1ecdf5cea00e3b14e70ce9416b1ac48415ebbdb629818ac695bf85b463"
+    },
+    {
+      "path": "scripts/manager_sources.py",
+      "bytes": 38814,
+      "sha256": "bc160726396ae300c3973154877c11da9c057c4179d5ae6409b8d056ff25a136"
+    },
+    {
+      "path": "scripts/secure_dashboard.py",
+      "bytes": 10202,
+      "sha256": "6ad67614221e4951eedeef43055583775f340a7df2e12431eb92bbbd1efa6d66"
+    },
+    {
+      "path": "scripts/test_manager_model.py",
+      "bytes": 41196,
+      "sha256": "f446ba83a03b11a2a3343c8bcde0e69ef6ae7b78cb4158c28615d168df170335"
+    },
+    {
+      "path": "scripts/test_onboarding.py",
+      "bytes": 31724,
+      "sha256": "459a75c43c9a7491e79deb71c9ecc0423b492ba99bcffa5c98734384fc6ab0e1"
+    }
+  ]
+}

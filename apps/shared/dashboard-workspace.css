@@ -1,0 +1,48 @@
+.dashboard-workspace {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    flex-direction: column;
+    background: var(--colorNeutralBackground1, var(--cp-surface, var(--vscode-editor-background, #ffffff)));
+}
+
+.dashboard-tabs {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 4px;
+    padding: 8px 12px 0;
+    border-bottom: 1px solid var(--colorNeutralStroke2, var(--cp-border, var(--vscode-panel-border, #d1d1d1)));
+    overflow-x: auto;
+}
+
+.dashboard-tabs button {
+    padding: 8px 12px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--colorNeutralForeground2, var(--cp-text-muted, var(--vscode-descriptionForeground, #424242)));
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.dashboard-tabs button:hover,
+.dashboard-tabs button[aria-selected="true"] {
+    border-bottom-color: var(--colorBrandForeground1, var(--cp-accent, var(--vscode-focusBorder, #0f6cbd)));
+    color: var(--colorBrandForeground1, var(--cp-accent, var(--vscode-foreground, #0f6cbd)));
+}
+
+.dashboard-tabs button:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder, var(--cp-accent, #0f6cbd));
+    outline-offset: -2px;
+}
+
+.dashboard-content {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}

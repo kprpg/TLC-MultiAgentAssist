@@ -15,6 +15,7 @@ import {
   ChevronRight20Regular,
   ClipboardTaskListLtr20Regular,
   Dismiss20Regular,
+  DataBarVertical20Regular,
   Home20Regular,
   Eye20Regular,
   EyeOff20Regular,
@@ -40,6 +41,7 @@ import { agentCapabilities } from '../../../../packages/common/types/agent-capab
 import type { InitialWorkflowOutput } from '../../../../packages/orchestrator/workflows/index.js'
 import workflowDescriptions from '../../../../config/workflow-descriptions.json'
 import { createDataClient, stageOwner, type RevampDataClient } from './data-client.js'
+import { MeetingCaptureLauncher } from './meeting-capture.js'
 import { suggestedPrompts } from './prompt-catalog.js'
 import { formatResponseMarkdown } from './response-markdown.js'
 import { sortOpportunities, type OpportunitySort, type SortDirection } from './opportunity-sort.js'
@@ -51,9 +53,10 @@ import { FeedbackButton } from '../../../shared/feedback-button.js'
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 import type { PortfolioSearchResult } from '../../../shared/portfolio-search.js'
 import { PortfolioSearch } from './portfolio-search.js'
+import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
 
 type Shell = 'desktop' | 'web'
-type WorkspaceView = 'accounts' | 'workflows' | 'discover'
+type WorkspaceView = 'accounts' | 'workflows' | 'discover' | 'dashboard'
 type CenterTab = 'msx' | 'guidance' | 'stages'
 type Blade = 'accounts' | 'opportunities' | 'actions'
 type SearchResult = PortfolioSearchResult<Account, Opportunity>
@@ -283,6 +286,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const sortedOpportunities = sortOpportunities(opportunities, opportunitySort, opportunitySortDirection)
   const sortedMilestones = sortMilestones(filterVisibleMilestones(milestones), milestoneSort, milestoneSortDirection)
   const visibleDiscoverResults = sortDiscoveryOpportunities(filterDiscoveryOpportunities(discoverResults, discoverFilters), discoverSort)
+  const discoverCustomers = discoveryCustomers([
+    ...discoverResults,
+    ...accounts
+      .filter((item) => item.visibility !== 'hidden')
+      .map((item) => ({ accountId: item.id, accountName: item.name }))
+  ])
   const displayedDiscoverMilestones = (opportunityId: string): Milestone[] =>
     filterVisibleMilestones(discoverMilestones[opportunityId] ?? [])
 
@@ -1081,6 +1090,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         shell={shell} client={client} contextKey={`${workspaceView}:${centerTab}:${account?.id ?? ''}:${opportunity?.id ?? ''}`}
         onSelect={chooseSearchResult} />
       <div className="command-actions">
+        <button className="dashboard-mobile-entry" aria-label="Open Dashboard" title="Dashboard" onClick={() => setWorkspaceView('dashboard')}><DataBarVertical20Regular /></button>
         <span className="mode-badge">{modeLabel}</span>
         <FeedbackButton onOpenIssue={client.openEvidence} />
         <button className="profile-button" title="Signed-in user" aria-label="Signed-in user"><Person20Regular /></button>
@@ -1098,7 +1108,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         <button className="rail-button" title="Guidance" aria-label="Guidance"><Sparkle20Regular /></button>
         <button className={`rail-button ${workspaceView === 'workflows' ? 'active' : ''}`} title="Workflows" aria-label="Workflows" onClick={() => setWorkspaceView('workflows')}><ClipboardTaskListLtr20Regular /></button>
         <button className={`rail-button ${workspaceView === 'discover' ? 'active' : ''}`} title="Discover opportunities" aria-label="Discover opportunities" onClick={() => setWorkspaceView('discover')}><Person20Regular /></button>
+        <button className={`rail-button ${workspaceView === 'dashboard' ? 'active' : ''}`} title="Dashboard" aria-label="Dashboard" onClick={() => setWorkspaceView('dashboard')}><DataBarVertical20Regular /></button>
       </nav>
+
+      {workspaceView === 'dashboard' && <DashboardWorkspace invokeSellerDashboard={client.invokeSellerDashboard} />}
 
       {workspaceView === 'accounts' && <>
       <section className={`blade account-blade ${collapsed.has('accounts') ? 'collapsed' : ''} ${mobileBlade === 'accounts' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('accounts') ? undefined : bladeWidths.accounts }} aria-label="Accounts blade">
@@ -1240,6 +1253,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
             <div className="milestone-tree-header">
               <span>Milestones</span>
               <div className="milestone-tree-actions">
+                <MeetingCaptureLauncher client={client} opportunityId={opportunity.id} opportunityName={opportunity.name} milestones={milestones} onApplied={() => void refreshOpportunityContext()} onNote={setError} />
                 <Menu checkedValues={{ milestoneSort: [milestoneSort] }} positioning="below-end">
                   <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="tree-refresh-button" icon={<ArrowSort20Regular />} aria-label="Sort milestones" title={`Sort milestones by ${milestoneSort === 'targetDate' ? 'Milestone Est. Date' : milestoneSort === 'estimatedMonthlyUsage' ? 'Est. Change in Monthly Usage' : milestoneSort === 'commitment' ? 'Customer Commitment' : 'Milestone Status'} (${milestoneSortDirection})`} /></MenuTrigger>
                   <MenuPopover><MenuList aria-label="Sort milestones by">
@@ -1637,7 +1651,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           <Button appearance="subtle" className="text-action" icon={<ArrowClockwise20Regular />} disabled={discoverLoading} onClick={() => void loadDiscover(discoverDomain)}>Refresh</Button>
         </div>
 
-        <DiscoveryControls customers={discoveryCustomers(discoverResults)} filters={discoverFilters} onChange={setDiscoverFilters} visibleCount={visibleDiscoverResults.length} totalCount={discoverResults.length} loading={discoverLoading} />
+        <DiscoveryControls customers={discoverCustomers} filters={discoverFilters} onChange={setDiscoverFilters} visibleCount={visibleDiscoverResults.length} totalCount={discoverResults.length} loading={discoverLoading} />
 
         <div className="discover-body">
           {discoverLoading && <div className="discover-loading"><Spinner size="small" label="Loading opportunities…" /></div>}
@@ -1706,6 +1720,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     {workspaceView === 'discover' && <nav className="mobile-nav workflow-mobile-nav" aria-label="Mobile workspace navigation">
       <button onClick={() => setWorkspaceView('accounts')}><Building20Regular /><span>Accounts</span></button>
       <button className="active"><Person20Regular /><span>Discover</span></button>
+    </nav>}
+    {workspaceView === 'dashboard' && <nav className="mobile-nav workflow-mobile-nav" aria-label="Mobile workspace navigation">
+      <button onClick={() => setWorkspaceView('accounts')}><Building20Regular /><span>Accounts</span></button>
+      <button className="active"><DataBarVertical20Regular /><span>Dashboard</span></button>
     </nav>}
   </div>
 }

@@ -1,6 +1,7 @@
 let electron = require("electron");
 //#region apps/desktop/electron/preload/index.ts
 electron.contextBridge.exposeInMainWorld("tlc", {
+	invokeSellerDashboard: (request) => electron.ipcRenderer.invoke("tlc:seller-dashboard", request),
 	invokeVoice: (request) => electron.ipcRenderer.invoke("tlc:voice-input", request),
 	exitApplication: () => electron.ipcRenderer.invoke("tlc:exit-application"),
 	getDataStatus: () => electron.ipcRenderer.invoke("tlc:get-data-status"),
@@ -19,6 +20,10 @@ electron.contextBridge.exposeInMainWorld("tlc", {
 	listDiscoverableMilestones: (opportunityId) => electron.ipcRenderer.invoke("tlc:list-discoverable-milestones", opportunityId),
 	listMilestoneActivities: (opportunityId, milestoneId) => electron.ipcRenderer.invoke("tlc:list-milestone-activities", opportunityId, milestoneId),
 	createMilestoneActivity: (opportunityId, milestoneId, request) => electron.ipcRenderer.invoke("tlc:create-milestone-activity", opportunityId, milestoneId, request),
+	listMeetingTranscripts: (opportunityId) => electron.ipcRenderer.invoke("tlc:list-meeting-transcripts", opportunityId),
+	getMeetingTranscript: (transcriptId) => electron.ipcRenderer.invoke("tlc:get-meeting-transcript", transcriptId),
+	proposeMeetingChangeSet: (request) => electron.ipcRenderer.invoke("tlc:propose-meeting-change-set", request),
+	applyMeetingChangeSet: (proposal, approval) => electron.ipcRenderer.invoke("tlc:apply-meeting-change-set", proposal, approval),
 	updateMilestone: (opportunityId, milestoneId, update) => electron.ipcRenderer.invoke("tlc:update-milestone", opportunityId, milestoneId, update),
 	updateOpportunity: (opportunityId, update) => electron.ipcRenderer.invoke("tlc:update-opportunity", opportunityId, update),
 	runMcemCoach: (request) => electron.ipcRenderer.invoke("tlc:run-mcem-coach", request),

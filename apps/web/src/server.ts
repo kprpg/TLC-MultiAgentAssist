@@ -1,16 +1,17 @@
 import { createServer } from 'node:http'
 import { resolve } from 'node:path'
-import { buildWebApiHandler } from './app.js'
+import { buildWebApiHandler, type WebRuntime } from './app.js'
 import { assertLoopbackHost, createAzureCliAuthentication, createSampleAuthentication } from './authentication.js'
 import { buildStaticHandler, setSecurityHeaders } from './hosting.js'
 import { listenWebServer } from './listener.js'
-import { createHostedRuntimeFactory, createHostedWorkflowHostResolver } from './runtime.js'
+import { createHostedRuntimeFactory, createHostedWorkflowHostResolver, createWebSellerDashboardHost } from './runtime.js'
 import { createSampleWorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import { FixtureMsxConnector } from '../../../packages/connectors/msx/index.js'
 import { createLocalStoreMsxConnector } from '../../../packages/connectors/local-store/index.js'
 import type { MsxConnector } from '../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
+import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import type { AgentCapability } from '../../../packages/common/index.js'
 
 const port = parsePort(process.env['PORT'])
@@ -19,15 +20,45 @@ const host = process.env['HOST']?.trim() || (mode === 'easy-auth' ? '0.0.0.0' : 
 if (mode === 'azure-cli') assertLoopbackHost(host)
 const staticRoot = resolve(process.env['TLC_WEB_STATIC_ROOT']?.trim() || 'apps/desktop/dist/revamp')
 // Sample mode uses the in-memory fixture by default, or the relational SQLite test store when TLC_DATA_STORE=sqlite.
+const localStoreMsx = mode === 'sample' ? createLocalStoreMsxConnector() : undefined
 const sampleMsx: MsxConnector | undefined = mode === 'sample'
-    ? (createLocalStoreMsxConnector() ?? new FixtureMsxConnector())
+    ? (localStoreMsx ?? new FixtureMsxConnector())
     : undefined
+const meetingUnavailableMessage = 'Meeting capture requires the SQLite test store (sample data) or a live Graph connection.'
 const sampleRuntime = sampleMsx
-    ? new ThinSliceOrchestrator(
-        sampleMsx,
-        new LocalPdfMcemGuidanceConnector(resolve('docs/knowledge/MCEM Overview.pdf')),
-        createSampleTaskAgents()
-    )
+    ? Object.assign(
+        new ThinSliceOrchestrator(
+            sampleMsx,
+            new LocalPdfMcemGuidanceConnector(resolve('docs/knowledge/MCEM Overview.pdf')),
+            createSampleTaskAgents()
+        ),
+        localStoreMsx
+            ? {
+                listMeetingTranscripts: (opportunityId?: string) => localStoreMsx.listMeetingTranscripts(opportunityId),
+                getMeetingTranscript: async (transcriptId: string) => (await localStoreMsx.getMeetingTranscript(transcriptId)) ?? null,
+                proposeMeetingChangeSet: (request: { opportunityId: string; transcriptId?: string; rawTranscript?: { content: string; format?: 'vtt' | 'text'; meetingType?: 'customer' | 'internal' } }) => {
+                    const transcript = request.rawTranscript
+                        ? parseTranscriptContent(request.rawTranscript.content, {
+                            opportunityId: request.opportunityId,
+                            ...(request.rawTranscript.format ? { format: request.rawTranscript.format } : {}),
+                            ...(request.rawTranscript.meetingType ? { meetingType: request.rawTranscript.meetingType } : {})
+                        })
+                        : undefined
+                    return localStoreMsx.proposeMeetingChangeSet({
+                        opportunityId: request.opportunityId,
+                        ...(request.transcriptId ? { transcriptId: request.transcriptId } : {}),
+                        ...(transcript ? { transcript } : {})
+                    })
+                },
+                applyMeetingChangeSet: (input: Parameters<typeof localStoreMsx['applyMeetingChangeSet']>[0]) => localStoreMsx.applyMeetingChangeSet(input)
+            }
+            : {
+                listMeetingTranscripts: async () => { throw new Error(meetingUnavailableMessage) },
+                getMeetingTranscript: async () => { throw new Error(meetingUnavailableMessage) },
+                proposeMeetingChangeSet: async () => { throw new Error(meetingUnavailableMessage) },
+                applyMeetingChangeSet: async () => { throw new Error(meetingUnavailableMessage) }
+            }
+    ) as WebRuntime
     : undefined
 const createRuntime = sampleRuntime
     ? () => sampleRuntime
@@ -48,6 +79,7 @@ const serveStatic = buildStaticHandler(staticRoot, mode === 'sample' ? 'sample' 
 const handleApi = buildWebApiHandler({
     createRuntime,
     resolveWorkflowHost,
+    resolveSellerDashboardHost: () => createWebSellerDashboardHost(mode === 'sample' ? 'sample' : 'live'),
     ...(authenticate ? { authenticate } : {}),
     ...(mode !== 'easy-auth' ? { shutdown: closeLocalServer } : {}),
     onError: (error, correlationId) => {

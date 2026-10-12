@@ -18,6 +18,11 @@ import {
     mcemResponseSchema,
     mcemStageTransitionRequestSchema,
     mcemStageTransitionResultSchema,
+    meetingChangeSetApprovalSchema,
+    meetingChangeSetProposalSchema,
+    meetingChangeSetResultSchema,
+    meetingTranscriptSchema,
+    meetingTranscriptSummarySchema,
     milestoneSchema,
     milestoneActivitySchema,
     createMilestoneActivityRequestSchema,
@@ -42,6 +47,12 @@ import {
     type McemResponse,
     type McemStageTransitionRequest,
     type McemStageTransitionResult,
+    type MeetingChangeSetApproval,
+    type MeetingChangeSetProposal,
+    type MeetingChangeSetResult,
+    type MeetingTranscript,
+    type MeetingTranscriptSummary,
+    type MeetingType,
     type Milestone,
     type MilestoneActivity,
     type MilestoneTeamJoinResult,
@@ -55,6 +66,7 @@ import { createOutlookDraftMessage } from '../../desktop/electron/main/outlook-c
 import { createResponseDocumentBuffer } from '../../desktop/electron/main/response-document.js'
 import { invokeWorkflowHost, type WorkflowHost, type WorkflowHostOperation } from '../../../packages/orchestrator/workflows/index.js'
 import { createBrowserOnlyVoiceHost, type SharedVoiceInputHost } from '../../../packages/orchestrator/voice-input.js'
+import type { SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 
 const accountIdSchema = z.string().min(1).max(200)
 const maximumBodyBytes = 1_048_576
@@ -74,6 +86,10 @@ export interface WebRuntime {
     listDiscoverableMilestones(opportunityId: string): Promise<Milestone[]>
     listMilestoneActivities(opportunityId: string, milestoneId: string): Promise<MilestoneActivity[]>
     createMilestoneActivity(opportunityId: string, milestoneId: string, request: CreateMilestoneActivityRequest): Promise<MilestoneActivity>
+    listMeetingTranscripts(opportunityId?: string): Promise<MeetingTranscriptSummary[]>
+    getMeetingTranscript(transcriptId: string): Promise<MeetingTranscript | null>
+    proposeMeetingChangeSet(request: { opportunityId: string; transcriptId?: string; rawTranscript?: { content: string; format?: 'vtt' | 'text'; meetingType?: MeetingType } }): Promise<MeetingChangeSetProposal>
+    applyMeetingChangeSet(input: { proposal: MeetingChangeSetProposal; approval: MeetingChangeSetApproval }): Promise<MeetingChangeSetResult>
     updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone>
     updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
     transitionOpportunityStage(request: McemStageTransitionRequest): Promise<McemStageTransitionResult>
@@ -88,6 +104,7 @@ export interface AuthenticatedRequest {
 }
 
 export interface WebApiOptions {
+    resolveSellerDashboardHost?(authentication: AuthenticatedRequest): Promise<SellerDashboardHost> | SellerDashboardHost
     resolveVoiceHost?(authentication: AuthenticatedRequest): SharedVoiceInputHost
     createRuntime(authentication: AuthenticatedRequest): Promise<WebRuntime> | WebRuntime
     resolveWorkflowHost?(authentication: AuthenticatedRequest): Promise<WorkflowHost> | WorkflowHost
@@ -126,6 +143,11 @@ export function buildWebApiHandler(options: WebApiOptions) {
 
             if (request.method === 'GET' && url.pathname === '/api/me') {
                 sendJson(response, 200, { email: authentication.userEmail })
+                return true
+            }
+            if (request.method === 'POST' && url.pathname === '/api/seller-dashboard' && options.resolveSellerDashboardHost) {
+                const host = await options.resolveSellerDashboardHost(authentication)
+                sendJson(response, 200, await host.invoke(await readJsonBody(request)))
                 return true
             }
             if (request.method === 'POST' && url.pathname === '/api/voice') {
@@ -297,6 +319,55 @@ export function buildWebApiHandler(options: WebApiOptions) {
             if (request.method === 'POST' && url.pathname === '/api/agent-task') {
                 const input = agentTaskRequestSchema.parse(await readJsonBody(request))
                 sendJson(response, 200, agentTaskResponseSchema.parse(await runtime.runAgentTask(input)))
+                return true
+            }
+
+            if (request.method === 'GET' && url.pathname === '/api/meeting-transcripts') {
+                const opportunityId = url.searchParams.get('opportunityId')
+                sendJson(response, 200, meetingTranscriptSummarySchema.array().parse(
+                    await runtime.listMeetingTranscripts(opportunityId ? accountIdSchema.parse(opportunityId) : undefined)
+                ))
+                return true
+            }
+
+            const meetingTranscriptMatch = /^\/api\/meeting-transcripts\/([^/]+)$/.exec(url.pathname)
+            if (request.method === 'GET' && meetingTranscriptMatch) {
+                const transcriptId = accountIdSchema.parse(decodeURIComponent(meetingTranscriptMatch[1]!))
+                sendJson(response, 200, meetingTranscriptSchema.nullable().parse(await runtime.getMeetingTranscript(transcriptId)))
+                return true
+            }
+
+            const meetingChangeSetMatch = /^\/api\/opportunities\/([^/]+)\/meeting-change-set$/.exec(url.pathname)
+            if (request.method === 'POST' && meetingChangeSetMatch) {
+                const opportunityId = accountIdSchema.parse(decodeURIComponent(meetingChangeSetMatch[1]!))
+                const body = z.object({
+                    transcriptId: z.string().min(1).max(200).optional(),
+                    rawTranscript: z.object({
+                        content: z.string().min(1),
+                        format: z.enum(['vtt', 'text']).optional(),
+                        meetingType: z.enum(['customer', 'internal']).optional()
+                    }).optional()
+                }).parse(await readJsonBody(request))
+                sendJson(response, 200, meetingChangeSetProposalSchema.parse(await runtime.proposeMeetingChangeSet({
+                    opportunityId,
+                    ...(body.transcriptId ? { transcriptId: body.transcriptId } : {}),
+                    ...(body.rawTranscript ? {
+                        rawTranscript: {
+                            content: body.rawTranscript.content,
+                            ...(body.rawTranscript.format ? { format: body.rawTranscript.format } : {}),
+                            ...(body.rawTranscript.meetingType ? { meetingType: body.rawTranscript.meetingType } : {})
+                        }
+                    } : {})
+                })))
+                return true
+            }
+
+            if (request.method === 'POST' && url.pathname === '/api/meeting-change-set/apply') {
+                const body = z.object({
+                    proposal: meetingChangeSetProposalSchema,
+                    approval: meetingChangeSetApprovalSchema
+                }).parse(await readJsonBody(request))
+                sendJson(response, 200, meetingChangeSetResultSchema.parse(await runtime.applyMeetingChangeSet(body)))
                 return true
             }
 

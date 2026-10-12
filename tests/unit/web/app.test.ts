@@ -365,6 +365,85 @@ describe('hosted web API', () => {
         expect(createRuntime).not.toHaveBeenCalled()
     })
 
+    it('lists meeting transcripts scoped to an opportunity query parameter', async () => {
+        const listMeetingTranscripts = vi.fn(async () => [
+            { id: 'transcript-1', subject: 'Executive review', occurredAt: '2026-04-01T10:00:00.000Z', meetingType: 'customer' as const, source: 'teams' as const, segmentCount: 3 }
+        ])
+        const createRuntime = vi.fn(() => ({ ...runtime(), listMeetingTranscripts }))
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime }))
+
+        const response = await fetch(`${baseUrl}/api/meeting-transcripts?opportunityId=opportunity-1`, { headers: authenticationHeaders })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toMatchObject([{ id: 'transcript-1', subject: 'Executive review' }])
+        expect(listMeetingTranscripts).toHaveBeenCalledWith('opportunity-1')
+    })
+
+    it('fetches a single meeting transcript by id', async () => {
+        const getMeetingTranscript = vi.fn(async () => ({
+            id: 'transcript-1', opportunityId: 'opportunity-1', meetingType: 'customer' as const, source: 'teams' as const,
+            segments: [{ segmentId: 'seg-1', speaker: 'Avery Johnson', text: 'Thanks for joining.', startMs: 0, endMs: 2000 }]
+        }))
+        const createRuntime = vi.fn(() => ({ ...runtime(), getMeetingTranscript }))
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime }))
+
+        const response = await fetch(`${baseUrl}/api/meeting-transcripts/transcript-1`, { headers: authenticationHeaders })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toMatchObject({ id: 'transcript-1' })
+        expect(getMeetingTranscript).toHaveBeenCalledWith('transcript-1')
+    })
+
+    it('proposes a meeting change set from a pasted transcript', async () => {
+        const proposal = {
+            changeSetId: 'cs-1', transcriptId: 'transcript-1', opportunityId: 'opportunity-1', meetingType: 'customer' as const,
+            slots: [], newMilestones: [], unmappedSignals: [], suggestedMilestoneIds: [], proposedAt: '2026-04-01T10:05:00.000Z'
+        }
+        const proposeMeetingChangeSet = vi.fn(async () => proposal)
+        const createRuntime = vi.fn(() => ({ ...runtime(), proposeMeetingChangeSet }))
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime }))
+
+        const response = await fetch(`${baseUrl}/api/opportunities/opportunity-1/meeting-change-set`, {
+            method: 'POST',
+            headers: { ...authenticationHeaders, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+            body: JSON.stringify({ rawTranscript: { content: 'Avery: Thanks for joining.', meetingType: 'customer' } })
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toMatchObject({ changeSetId: 'cs-1' })
+        expect(proposeMeetingChangeSet).toHaveBeenCalledWith({
+            opportunityId: 'opportunity-1',
+            rawTranscript: { content: 'Avery: Thanks for joining.', meetingType: 'customer' }
+        })
+    })
+
+    it('applies an approved meeting change set all-or-none', async () => {
+        const result = {
+            state: 'applied' as const, changeSetId: 'cs-1',
+            auditNote: 'Meeting inject (customer): applied 1 field update(s) and 0 new milestone(s). Reason: test.',
+            items: [{ id: 'slot-1', kind: 'field' as const, state: 'applied' as const, detail: 'Purchase timeline: This Year' }]
+        }
+        const applyMeetingChangeSet = vi.fn(async () => result)
+        const createRuntime = vi.fn(() => ({ ...runtime(), applyMeetingChangeSet }))
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime }))
+
+        const response = await fetch(`${baseUrl}/api/meeting-change-set/apply`, {
+            method: 'POST',
+            headers: { ...authenticationHeaders, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+            body: JSON.stringify({
+                proposal: { changeSetId: 'cs-1', transcriptId: 'transcript-1', opportunityId: 'opportunity-1', meetingType: 'customer', slots: [], newMilestones: [], unmappedSignals: [], suggestedMilestoneIds: [], proposedAt: '2026-04-01T10:05:00.000Z' },
+                approval: { changeSetId: 'cs-1', opportunityId: 'opportunity-1', approvedSlotIds: ['slot-1'], approvedNewMilestoneTempIds: [], selectedMilestoneIds: [], reason: 'test' }
+            })
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toMatchObject({ state: 'applied' })
+        expect(applyMeetingChangeSet).toHaveBeenCalledWith({
+            proposal: expect.objectContaining({ changeSetId: 'cs-1' }),
+            approval: expect.objectContaining({ reason: 'test' })
+        })
+    })
+
     function listen(handler: ReturnType<typeof buildWebApiHandler>): Promise<string> {
         server = createServer((request, response) => void handler(request, response))
         return new Promise((resolve) => {
@@ -397,6 +476,10 @@ function runtime(): WebRuntime {
         updateOpportunity: vi.fn(),
         transitionOpportunityStage: vi.fn(),
         runMcemCoach: vi.fn(),
-        runAgentTask: vi.fn()
+        runAgentTask: vi.fn(),
+        listMeetingTranscripts: vi.fn(async () => []),
+        getMeetingTranscript: vi.fn(async () => null),
+        proposeMeetingChangeSet: vi.fn(),
+        applyMeetingChangeSet: vi.fn()
     }
 }

@@ -5,16 +5,18 @@ import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { z } from 'zod'
-import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, agentTaskRequestSchema, createMilestoneActivityRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, mcemRequestSchema, mcemStageTransitionRequestSchema, milestoneUpdateSchema, opportunityUpdateSchema, seDomainSchema, type AuthStatus, type DesktopDataStatus, type McpServer, type PerformanceReporter } from '../../../../packages/common/index.js'
+import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, agentTaskRequestSchema, createMilestoneActivityRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, mcemRequestSchema, mcemStageTransitionRequestSchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, milestoneUpdateSchema, opportunityUpdateSchema, seDomainSchema, type AuthStatus, type DesktopDataStatus, type McpServer, type PerformanceReporter } from '../../../../packages/common/index.js'
 import {
   loadFoundryEnvironment,
   type FoundryEnvironment
 } from '../../../../packages/common/configuration/foundry-environment.js'
-import { FixtureMsxConnector, LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../../packages/connectors/msx/index.js'
+import { FixtureMsxConnector, LiveMeetingCaptureConnector, LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../../packages/connectors/msx/index.js'
 import { createLocalStoreMsxConnector } from '../../../../packages/connectors/local-store/index.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../../packages/connectors/foundry/index.js'
+import { createFoundryMeetingExtractor } from '../../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
+import { parseTranscriptContent } from '../../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
 import { createLivePlayWorkflowHost, createSampleWorkflowHost } from '../../../../packages/orchestrator/workflows/index.js'
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
@@ -29,6 +31,8 @@ import { createWorkflowIpcHandlers } from './workflow-ipc.js'
 import { SharedVoiceInputHost } from '../../../../packages/orchestrator/voice-input.js'
 import { WindowsVoiceCaptureDriver } from '../../../../packages/connectors/common/windows-voice.js'
 import { createVoiceIpcHandler, voiceIpcChannel } from './voice-ipc.js'
+import { createSellerDashboardHost } from '../../../../packages/orchestrator/seller-dashboard.js'
+import { createSellerDashboardIpcHandler, sellerDashboardIpcChannel } from './seller-dashboard-ipc.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -94,6 +98,10 @@ const tokenProvider = new AzureCliMsxTokenProvider({
     }
     : {})
 })
+const sellerDashboardHost = createSellerDashboardHost({
+  mode: dataMode,
+  resolveUserEmail: async () => (await tokenProvider.getAuthStatus()).userEmail
+})
 const reportPerformance: PerformanceReporter = (event) => {
   console.info(`[performance] ${JSON.stringify(event)}`)
 }
@@ -108,9 +116,21 @@ const liveMsxConnector = dataMode === 'sample'
   ? undefined
   : new LiveMsxConnector(tokenProvider, fetch, undefined, reportPerformance, msxWriteMetadataFromEnvironment(process.env), portfolioPreferenceStore)
 // Sample mode uses the in-memory fixture by default, or the relational SQLite test store when TLC_DATA_STORE=sqlite.
-const msxConnector = liveMsxConnector ?? createLocalStoreMsxConnector() ?? new FixtureMsxConnector()
+const localStoreMsxConnector = liveMsxConnector ? undefined : createLocalStoreMsxConnector()
+const msxConnector = liveMsxConnector ?? localStoreMsxConnector ?? new FixtureMsxConnector()
+// Meeting capture: absent for the in-memory fixture; the SQLite test store implements it directly,
+// live wraps the delegated MSX connection (Graph transcript acquisition is not wired yet - paste/upload only).
+const meetingConnector = liveMsxConnector ? new LiveMeetingCaptureConnector(liveMsxConnector) : localStoreMsxConnector
 const foundryOpenAIClient = runtimeEnvironment
   ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry)
+  : undefined
+/** Foundry model-backed meeting-signal extractor when TLC_MEETING_EXTRACTOR=foundry; else the deterministic offline extractor. */
+const meetingExtractor = runtimeEnvironment && foundryOpenAIClient && (process.env['TLC_MEETING_EXTRACTOR'] ?? '').toLowerCase() === 'foundry'
+  ? createFoundryMeetingExtractor({
+    openAIClient: foundryOpenAIClient,
+    model: process.env['TLC_MEETING_MODEL']?.trim() || 'gpt-6.1-sol',
+    requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs
+  })
   : undefined
 const taskAgents: TaskAgentRegistry = Object.fromEntries(
   (['account-pulse', 'mcem-coach', 'pursuit-executive', 'risk-solution-play'] as const).map((capability) => {
@@ -208,6 +228,11 @@ function assertTrustedSender(event: IpcMainInvokeEvent): void {
 }
 
 function registerIpc(): void {
+  const invokeSellerDashboard = createSellerDashboardIpcHandler(sellerDashboardHost)
+  ipcMain.handle(sellerDashboardIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return invokeSellerDashboard(request)
+  })
   const invokeVoice = createVoiceIpcHandler(voiceHost)
   ipcMain.handle(voiceIpcChannel, (event, request: unknown) => {
     assertTrustedSender(event)
@@ -290,6 +315,49 @@ function registerIpc(): void {
   ipcMain.handle('tlc:create-milestone-activity', (event, opportunityId: unknown, milestoneId: unknown, request: unknown) => {
     assertTrustedSender(event)
     return orchestrator.createMilestoneActivity(z.string().min(1).max(200).parse(opportunityId), z.string().min(1).max(200).parse(milestoneId), createMilestoneActivityRequestSchema.parse(request))
+  })
+  ipcMain.handle('tlc:list-meeting-transcripts', (event, opportunityId: unknown) => {
+    assertTrustedSender(event)
+    if (!meetingConnector) throw new Error('Meeting capture requires the SQLite test store (sample data) or a live Graph connection.')
+    return meetingConnector.listMeetingTranscripts(opportunityId === undefined ? undefined : z.string().min(1).max(200).parse(opportunityId))
+  })
+  ipcMain.handle('tlc:get-meeting-transcript', async (event, transcriptId: unknown) => {
+    assertTrustedSender(event)
+    if (!meetingConnector) throw new Error('Meeting capture requires the SQLite test store (sample data) or a live Graph connection.')
+    return (await meetingConnector.getMeetingTranscript(z.string().min(1).max(200).parse(transcriptId))) ?? null
+  })
+  ipcMain.handle('tlc:propose-meeting-change-set', (event, request: unknown) => {
+    assertTrustedSender(event)
+    if (!meetingConnector) throw new Error('Meeting capture requires the SQLite test store (sample data) or a live Graph connection.')
+    const params = z.object({
+      opportunityId: z.string().min(1).max(200),
+      transcriptId: z.string().min(1).max(200).optional(),
+      rawTranscript: z.object({
+        content: z.string().min(1),
+        format: z.enum(['vtt', 'text']).optional(),
+        meetingType: z.enum(['customer', 'internal']).optional()
+      }).optional()
+    }).parse(request)
+    const transcript = params.rawTranscript
+      ? parseTranscriptContent(params.rawTranscript.content, {
+        opportunityId: params.opportunityId,
+        ...(params.rawTranscript.format ? { format: params.rawTranscript.format } : {}),
+        ...(params.rawTranscript.meetingType ? { meetingType: params.rawTranscript.meetingType } : {})
+      })
+      : undefined
+    return meetingConnector.proposeMeetingChangeSet({
+      opportunityId: params.opportunityId,
+      ...(params.transcriptId ? { transcriptId: params.transcriptId } : {}),
+      ...(transcript ? { transcript } : {})
+    }, meetingExtractor)
+  })
+  ipcMain.handle('tlc:apply-meeting-change-set', (event, proposal: unknown, approval: unknown) => {
+    assertTrustedSender(event)
+    if (!meetingConnector) throw new Error('Meeting capture requires the SQLite test store (sample data) or a live Graph connection.')
+    return meetingConnector.applyMeetingChangeSet({
+      proposal: meetingChangeSetProposalSchema.parse(proposal),
+      approval: meetingChangeSetApprovalSchema.parse(approval)
+    })
   })
   ipcMain.handle('tlc:update-milestone', (event, opportunityId: unknown, milestoneId: unknown, update: unknown) => {
     assertTrustedSender(event)

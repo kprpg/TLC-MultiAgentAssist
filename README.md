@@ -24,15 +24,6 @@ Every surface runs in one of two modes:
 
 See [Documentation](#documentation) for the full user guide, FAQ, and runbooks.
 
-## Voice search
-
-The main portfolio search supports a microphone button and **Ctrl+Alt+M** on all
-three current surfaces. Speech is processed offline on the user's device, shown
-as a preview, then inserted for review; Enter/result selection remains explicit.
-Desktop and local Windows VS Code use installed English Windows speech
-recognition; Web uses a bundled offline model. Remote VS Code voice is disabled
-to prevent remote microphone capture. See [voice search setup and privacy](docs/user-guide/VOICE-SEARCH.md).
-
 ## VS Code extension
 
 Requires **VS Code or VS Code Insiders 1.90.0 or later**. The extension is self-contained (no Node.js, npm, or native binaries), embeds its own MCP registry and tool policy, and starts in sample mode.
@@ -118,6 +109,29 @@ npm run web:start:live
 ```
 
 Build an Azure App Service-ready package with `npm run web:release`, or push a `web-v*` tag to publish the ZIP to GitHub Releases. Full deployment details: [web setup and hosting runbook](docs/runbooks/web-app.md).
+
+## Seller Dashboard
+
+The separate **Seller Dashboard** pane is available on Desktop, Web, and the
+VS Code webview. Its four sections cover Pipeline & Hygiene, ACR & Insights,
+Consumption & Growth, and U2C Progress without changing existing panes.
+Sample mode uses one fictitious offline snapshot; official attainment stays fixed
+under working-view filters. Desktop and local Windows VS Code can read the seller's own validated,
+Windows-user-encrypted MCAPS collector profile, with explicit refresh approval.
+Missing consumption/history sources remain unavailable, never synthetic live data.
+All Web modes, including local Azure CLI Web, deny host-user private profiles until
+HTTP caller authentication is bound to the seller identity; Web sample mode remains available.
+See [setup and methodology](docs/user-guide/SELLER-DASHBOARD.md) and the
+[source analysis/implementation plan](docs/Seller-Dashboard-Implementation.md).
+
+## Voice search
+
+The main portfolio search supports a microphone button and **Ctrl+Alt+M** on all
+three current surfaces. Speech is processed offline on the user's device, shown
+as a preview, then inserted for review; Enter/result selection remains explicit.
+Desktop and local Windows VS Code use installed English Windows speech
+recognition; Web uses a bundled offline model. Remote VS Code voice is disabled
+to prevent remote microphone capture. See [voice search setup and privacy](docs/user-guide/VOICE-SEARCH.md).
 
 ## Development
 

@@ -34,7 +34,8 @@ function runtime(): WebRuntime {
         listOpportunities: vi.fn(), discoverOpportunities: vi.fn(), joinDealTeam: vi.fn(), leaveDealTeam: vi.fn(),
         joinMilestoneTeam: vi.fn(), leaveMilestoneTeam: vi.fn(), listMilestones: vi.fn(), listDiscoverableMilestones: vi.fn(),
         listMilestoneActivities: vi.fn(), createMilestoneActivity: vi.fn(), updateMilestone: vi.fn(),
-        updateOpportunity: vi.fn(), transitionOpportunityStage: vi.fn(), runMcemCoach: vi.fn(), runAgentTask: vi.fn()
+        updateOpportunity: vi.fn(), transitionOpportunityStage: vi.fn(), runMcemCoach: vi.fn(), runAgentTask: vi.fn(),
+        listMeetingTranscripts: vi.fn(), getMeetingTranscript: vi.fn(), proposeMeetingChangeSet: vi.fn(), applyMeetingChangeSet: vi.fn()
     }
 }
 

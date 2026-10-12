@@ -17,12 +17,12 @@ export function AppHeader({
     onSearchSelect,
     contextKey
 }: {
-    tab: 'portfolio' | 'plays' | 'discover'
+    tab: 'portfolio' | 'plays' | 'discover' | 'dashboard'
     mode: 'sample' | 'live'
     accountsExpanded: boolean
     detailsExpanded: boolean
     actionsExpanded: boolean
-    onSelectTab(tab: 'portfolio' | 'plays' | 'discover'): void
+    onSelectTab(tab: 'portfolio' | 'plays' | 'discover' | 'dashboard'): void
     onToggleAccounts(): void
     onToggleDetails(): void
     onToggleActions(): void
@@ -36,6 +36,7 @@ export function AppHeader({
                 <button className={tab === 'discover' ? 'tab active' : 'tab'} onClick={() => onSelectTab('discover')}>Discover</button>
                 <button className={tab === 'portfolio' ? 'tab active' : 'tab'} onClick={() => onSelectTab('portfolio')}>Portfolio</button>
                 <button className={tab === 'plays' ? 'tab active' : 'tab'} onClick={() => onSelectTab('plays')}>Plays</button>
+                <button className={tab === 'dashboard' ? 'tab active' : 'tab'} onClick={() => onSelectTab('dashboard')}>Dashboard</button>
             </nav>
             <PortfolioSearch onSelect={onSearchSelect} contextKey={contextKey ?? `${tab}:${mode}`} />
             {tab === 'portfolio' && (
