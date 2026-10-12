@@ -20,7 +20,7 @@ async function expectDashboard(page: Page): Promise<void> {
 }
 
 async function openSellerDashboard(page: Page): Promise<void> {
-    await page.getByRole('button', { name: 'Dashboard', exact: true }).click()
+    await page.getByRole('button', { name: 'Dashboards', exact: true }).click()
     const sellerDashboard = page.getByRole('tab', { name: 'Seller Dashboard', exact: true })
     await expect(sellerDashboard).toBeVisible()
     await sellerDashboard.click()
