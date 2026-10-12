@@ -1090,7 +1090,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         shell={shell} client={client} contextKey={`${workspaceView}:${centerTab}:${account?.id ?? ''}:${opportunity?.id ?? ''}`}
         onSelect={chooseSearchResult} />
       <div className="command-actions">
-        <button className="dashboard-mobile-entry" aria-label="Open Dashboard" title="Dashboard" onClick={() => setWorkspaceView('dashboard')}><DataBarVertical20Regular /></button>
+        <button className="dashboard-mobile-entry" aria-label="Open Dashboards" title="Dashboards" onClick={() => setWorkspaceView('dashboard')}><DataBarVertical20Regular /></button>
         <span className="mode-badge">{modeLabel}</span>
         <FeedbackButton onOpenIssue={client.openEvidence} />
         <button className="profile-button" title="Signed-in user" aria-label="Signed-in user"><Person20Regular /></button>
@@ -1108,7 +1108,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         <button className="rail-button" title="Guidance" aria-label="Guidance"><Sparkle20Regular /></button>
         <button className={`rail-button ${workspaceView === 'workflows' ? 'active' : ''}`} title="Workflows" aria-label="Workflows" onClick={() => setWorkspaceView('workflows')}><ClipboardTaskListLtr20Regular /></button>
         <button className={`rail-button ${workspaceView === 'discover' ? 'active' : ''}`} title="Discover opportunities" aria-label="Discover opportunities" onClick={() => setWorkspaceView('discover')}><Person20Regular /></button>
-        <button className={`rail-button ${workspaceView === 'dashboard' ? 'active' : ''}`} title="Dashboard" aria-label="Dashboard" onClick={() => setWorkspaceView('dashboard')}><DataBarVertical20Regular /></button>
+        <button className={`rail-button ${workspaceView === 'dashboard' ? 'active' : ''}`} title="Dashboards" aria-label="Dashboards" onClick={() => setWorkspaceView('dashboard')}><DataBarVertical20Regular /></button>
       </nav>
 
       {workspaceView === 'dashboard' && <DashboardWorkspace invokeSellerDashboard={client.invokeSellerDashboard} />}
@@ -1723,7 +1723,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     </nav>}
     {workspaceView === 'dashboard' && <nav className="mobile-nav workflow-mobile-nav" aria-label="Mobile workspace navigation">
       <button onClick={() => setWorkspaceView('accounts')}><Building20Regular /><span>Accounts</span></button>
-      <button className="active"><DataBarVertical20Regular /><span>Dashboard</span></button>
+      <button className="active"><DataBarVertical20Regular /><span>Dashboards</span></button>
     </nav>}
   </div>
 }
