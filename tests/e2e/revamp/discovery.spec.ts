@@ -82,6 +82,26 @@ async function verifyPortfolioActionColors(page: Page, host: 'desktop' | 'web' |
 
 async function verifyDiscoveryControls(page: Page, host: 'desktop' | 'web' | 'vscode', accent = 'rgb(15, 108, 189)', danger = 'rgb(209, 52, 56)'): Promise<void> {
   const panel = page.getByRole('region', { name: 'Discover opportunities' })
+  await expect(panel.getByText('Review all active opportunities for visible accounts and add or remove yourself from the Deal Team — or expand an opportunity to join a milestone team without joining the Deal Team. Deal Team or milestone-team membership brings an opportunity into Portfolio.', { exact: true })).toBeVisible()
+  if (host !== 'vscode') {
+    const toolbar = panel.locator('.discover-toolbar')
+    const switcher = toolbar.getByRole('group', { name: 'Solution Engineer domain' })
+    const domainButtons = switcher.getByRole('button')
+    await expect(domainButtons).toHaveCount(8)
+    const [toolbarBox, switcherBox, ...buttonBoxes] = await Promise.all([
+      toolbar.boundingBox(),
+      switcher.boundingBox(),
+      ...Array.from({ length: 8 }, (_, index) => domainButtons.nth(index).boundingBox())
+    ])
+    expect(toolbarBox).not.toBeNull()
+    expect(switcherBox).not.toBeNull()
+    expect(switcherBox!.width / toolbarBox!.width).toBeGreaterThan(0.8)
+    const buttonTops = buttonBoxes.map((box) => {
+      expect(box).not.toBeNull()
+      return box!.y
+    })
+    expect(Math.max(...buttonTops) - Math.min(...buttonTops)).toBeLessThan(2)
+  }
   const table = panel.getByRole('table', { name: 'Discovered opportunities' })
   const names = table.locator('tbody > tr:not(.discover-milestones-row) > td:first-child strong')
   await expect(names).toHaveText(['Zulu renewal', 'Alpha analysis', 'Beta platform', 'Alpha infrastructure'])
