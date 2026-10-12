@@ -1641,10 +1641,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
       {workspaceView === 'discover' && <section className="workflow-launcher discover-launcher" aria-label="Discover opportunities">
         <header className="workflow-launcher-header">
-          <div><p className="eyebrow">DEAL TEAM DISCOVERY</p><h1>Discover opportunities</h1><p>Review all active opportunities for your visible accounts by Solution Engineer domain, then add or remove yourself from each opportunity's Deal Team — or expand an opportunity to join a milestone team without joining the Deal Team.</p></div>
+          <div><p className="eyebrow">DEAL TEAM DISCOVERY</p><h1>Discover opportunities</h1><p>Review all active opportunities for visible accounts and add or remove yourself from the Deal Team — or expand an opportunity to join a milestone team without joining the Deal Team. Deal Team or milestone-team membership brings an opportunity into Portfolio.</p></div>
         </header>
 
-        <div className="workflow-toolbar">
+        <div className="workflow-toolbar discover-toolbar">
           <div className="scope-switcher" role="group" aria-label="Solution Engineer domain">
             {seDomainList.map((domain) => <button key={domain.id} className={discoverDomain === domain.id ? 'active' : ''} title={domain.description} onClick={() => void loadDiscover(domain.id)}>{domain.label}</button>)}
           </div>
