@@ -19,12 +19,19 @@ async function expectDashboard(page: Page): Promise<void> {
     await expect(page.getByLabel('Seller fiscal quarter')).toHaveValue('q2')
 }
 
+async function openSellerDashboard(page: Page): Promise<void> {
+    await page.getByRole('button', { name: 'Dashboard', exact: true }).click()
+    const sellerDashboard = page.getByRole('tab', { name: 'Seller Dashboard', exact: true })
+    await expect(sellerDashboard).toBeVisible()
+    await sellerDashboard.click()
+}
+
 test('Seller Dashboard Web keeps panes isolated and supports report filters, queues, scenario, mobile and themes', async ({ page }) => {
     const errors: Error[] = []
     page.on('pageerror', (error) => errors.push(error))
     await page.setViewportSize({ width: 1440, height: 1100 })
     await page.goto('/')
-    await page.getByRole('button', { name: 'Seller Dashboard', exact: true }).click()
+    await openSellerDashboard(page)
     await expectDashboard(page)
     const lightBackground = await page.locator('.seller-dashboard').evaluate((element) => getComputedStyle(element).backgroundColor)
     await expect(page.getByRole('region', { name: 'Accounts blade' })).toHaveCount(0)
@@ -100,7 +107,8 @@ test('Seller Dashboard Web keeps panes isolated and supports report filters, que
     await page.getByRole('button', { name: 'Accounts', exact: true }).click()
     await expect(page.getByRole('region', { name: 'Accounts blade' })).toBeVisible()
     await page.setViewportSize({ width: 420, height: 1000 })
-    await page.getByRole('button', { name: 'Open Seller Dashboard', exact: true }).click()
+    await page.getByRole('button', { name: 'Open Dashboard', exact: true }).click()
+    await page.getByRole('tab', { name: 'Seller Dashboard', exact: true }).click()
     await expectDashboard(page)
     await page.getByRole('tab', { name: 'U2C Progress', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Uncommitted to committed progress', exact: true })).toBeVisible()
@@ -113,7 +121,7 @@ test('Seller Dashboard Web keeps panes isolated and supports report filters, que
     await page.setViewportSize({ width: 1440, height: 1400 })
     await page.emulateMedia({ colorScheme: 'dark' })
     await page.reload()
-    await page.getByRole('button', { name: 'Seller Dashboard', exact: true }).click()
+    await openSellerDashboard(page)
     await expectDashboard(page)
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
     expect(await page.locator('.seller-dashboard').evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(lightBackground)
@@ -172,7 +180,7 @@ test('Seller Dashboard Web profile denial clears prior data and explains support
     const snapshot = createSampleSellerDashboard()
     snapshot.mode = 'live'
     await page.evaluate((response) => { window.sellerDashboardTest.response = response }, snapshot)
-    await page.getByRole('button', { name: 'Seller Dashboard', exact: true }).click()
+    await openSellerDashboard(page)
     await expectDashboard(page)
     await expect(page.getByRole('button', { name: 'Refresh live sources', exact: true })).toBeVisible()
 
@@ -210,7 +218,7 @@ test('Seller Dashboard stale queues use milestone history, not parent opportunit
 
     await mountSellerWebview(page)
     await page.evaluate((response) => { window.sellerDashboardTest.response = response }, snapshot)
-    await page.getByRole('button', { name: 'Seller Dashboard', exact: true }).click()
+    await openSellerDashboard(page)
     await expectDashboard(page)
     await page.getByLabel('Pipeline inventory view').selectOption('stale')
     const stale = page.getByRole('table', { name: 'Stale 45+ days', exact: true })
@@ -238,7 +246,7 @@ test('Seller Dashboard VS Code webview shares the report and keeps failed reload
     page.on('pageerror', (error) => errors.push(error))
     await page.setViewportSize({ width: 1440, height: 1100 })
     await mountSellerWebview(page)
-    await page.getByRole('button', { name: 'Seller Dashboard', exact: true }).click()
+    await openSellerDashboard(page)
     await expectDashboard(page)
     await page.getByRole('tab', { name: 'Pipeline & Hygiene', exact: true }).press('End')
     await expect(page.getByRole('tab', { name: 'U2C Progress', exact: true })).toBeFocused()
@@ -306,7 +314,7 @@ test('Seller Dashboard VS Code webview shares the report and keeps failed reload
     await proof(page, 'Seller-Dashboard-VSCode.png')
     await page.getByRole('button', { name: 'Portfolio', exact: true }).click()
     await expect(page.getByRole('region', { name: 'Seller Dashboard', exact: true })).toHaveCount(0)
-    await page.getByRole('button', { name: 'Seller Dashboard', exact: true }).click()
+    await openSellerDashboard(page)
     await expectDashboard(page)
     expect(errors).toEqual([])
 })
@@ -323,7 +331,7 @@ test('Seller Dashboard Desktop loads the same synthetic report through trusted E
         const errors: Error[] = []
         window.on('pageerror', (error) => errors.push(error))
         await window.setViewportSize({ width: 1400, height: 1100 })
-        await window.getByRole('button', { name: 'Seller Dashboard', exact: true }).click()
+        await openSellerDashboard(window)
         await expectDashboard(window)
         await window.getByRole('tab', { name: 'ACR & Insights', exact: true }).click()
         await expect(window.getByRole('table', { name: 'Official metric reconciliation', exact: true })).toContainText('ACR - Core')

@@ -9,8 +9,19 @@ import {
 } from '../../../apps/shared/seller-dashboard-analysis.js'
 import { SellerDashboardOverview, SellerDashboardSectionContent } from '../../../apps/shared/seller-dashboard-sections.js'
 import { SellerDashboardTable } from '../../../apps/shared/seller-dashboard-table.js'
+import { DashboardWorkspace } from '../../../apps/shared/dashboard-workspace.js'
 
 describe('Seller Dashboard analysis and rendering', () => {
+    it('renders Seller Dashboard beneath the Dashboard workspace navigation', () => {
+        const markup = renderToStaticMarkup(createElement(DashboardWorkspace, { invokeSellerDashboard: vi.fn() }))
+
+        expect(markup).toContain('aria-label="Dashboard workspace"')
+        expect(markup).toContain('aria-label="Dashboards"')
+        expect(markup).toContain('role="tab"')
+        expect(markup).toContain('aria-selected="true"')
+        expect(markup).toContain('Seller Dashboard')
+    })
+
     it('uses Microsoft fiscal boundaries and defaults to the source as-of quarter', () => {
         const { report } = createSampleSellerDashboard()
         expect(defaultSellerDashboardFilters(report).quarter).toBe('q2')

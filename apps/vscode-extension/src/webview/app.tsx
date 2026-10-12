@@ -23,7 +23,7 @@ import { sortMilestones, sortOpportunities, type MilestoneSort, type Opportunity
 import { DiscoveryControls, DiscoverySortHeader } from '../../../shared/discovery-controls.js'
 import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportunities, toggleDiscoverySort, type DiscoveryFilters, type DiscoverySort } from '../../../shared/discovery.js'
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
-import { SellerDashboardPane } from '../../../shared/seller-dashboard.js'
+import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
 import type {
     AccountCandidateView,
     AccountView,
@@ -46,7 +46,7 @@ import type {
     WorkflowResultCardView
 } from './view-types.js'
 
-type Tab = 'portfolio' | 'plays' | 'discover' | 'seller-dashboard'
+type Tab = 'portfolio' | 'plays' | 'discover' | 'dashboard'
 type Loadable<T> = { status: 'idle' | 'loading' | 'error' | 'ready'; data?: T; error?: string }
 
 // Routes each Play's queue-item guidance handoff to the most relevant agent.
@@ -1604,6 +1604,7 @@ function DiscoverPanel(): ReactElement {
     const [domain, setDomain] = useState<SeDomainView>('infra')
     const [refreshVersion, setRefreshVersion] = useState(0)
     const [items, setItems] = useState<Loadable<DiscoverableOpportunityView[]>>({ status: 'idle' })
+    const [accounts, setAccounts] = useState<AccountView[]>([])
     const [filters, setFilters] = useState<DiscoveryFilters>({ include: [], exclude: [] })
     const [sort, setSort] = useState<DiscoverySort | null>(null)
     const [joining, setJoining] = useState<string | undefined>(undefined)
@@ -1614,14 +1615,24 @@ function DiscoverPanel(): ReactElement {
     const [milestoneBusyId, setMilestoneBusyId] = useState<string | undefined>(undefined)
     const opportunities = items.data ?? []
     const visibleOpportunities = sortDiscoveryOpportunities(filterDiscoveryOpportunities(opportunities, filters), sort)
+    const customers = discoveryCustomers([
+        ...opportunities,
+        ...accounts
+            .filter((item) => item.visibility !== 'hidden')
+            .map((item) => ({ accountId: item.id, accountName: item.name }))
+    ])
     const displayedDiscoverMilestones = (opportunityId: string): MilestoneView[] =>
         filterVisibleMilestones(discoverMilestones[opportunityId] ?? [])
 
     useEffect(() => {
         let active = true
         setItems({ status: 'loading' })
-        dataClient.discoverOpportunities(domain)
-            .then((data) => { if (active) setItems({ status: 'ready', data }) })
+        Promise.all([dataClient.discoverOpportunities(domain), dataClient.listAccounts(false)])
+            .then(([data, visibleAccounts]) => {
+                if (!active) return
+                setItems({ status: 'ready', data })
+                setAccounts(visibleAccounts)
+            })
             .catch((error: unknown) => { if (active) setItems({ status: 'error', error: error instanceof Error ? error.message : 'Discovery failed.' }) })
         return () => { active = false }
     }, [domain, refreshVersion])
@@ -1708,7 +1719,7 @@ function DiscoverPanel(): ReactElement {
                     <button className="secondary" disabled={items.status === 'loading'} onClick={() => setRefreshVersion((version) => version + 1)}>Refresh</button>
                 </div>
             </header>
-            <DiscoveryControls customers={discoveryCustomers(opportunities)} filters={filters} onChange={setFilters} visibleCount={visibleOpportunities.length} totalCount={opportunities.length} loading={items.status === 'idle' || items.status === 'loading'} />
+            <DiscoveryControls customers={customers} filters={filters} onChange={setFilters} visibleCount={visibleOpportunities.length} totalCount={opportunities.length} loading={items.status === 'idle' || items.status === 'loading'} />
             {note && <p className="discover-note" role="status">{note}</p>}
             {items.status === 'loading' && <p>Loading opportunities…</p>}
             {items.status === 'error' && <p className="error-text">{items.error}</p>}
@@ -1805,11 +1816,11 @@ export function App(): ReactElement {
                     setDetailsExpanded(true)
                 }}
             />
-            <main className={`app-body${tab === 'plays' ? ' app-body--plays' : tab === 'seller-dashboard' ? ' app-body--seller-dashboard' : ''}`}>
+            <main className={`app-body${tab === 'plays' ? ' app-body--plays' : tab === 'dashboard' ? ' app-body--dashboard' : ''}`}>
                 {tab === 'portfolio' ? (
                     <PortfolioPanel focus={focus} accountsExpanded={accountsExpanded} detailsExpanded={detailsExpanded} actionsExpanded={actionsExpanded} />
-                ) : tab === 'discover' ? <DiscoverPanel /> : tab === 'seller-dashboard'
-                    ? <SellerDashboardPane invoke={dataClient.invokeSellerDashboard} /> : <PlaysPanel runRequest={runRequest} />}
+                ) : tab === 'discover' ? <DiscoverPanel /> : tab === 'dashboard'
+                    ? <DashboardWorkspace invokeSellerDashboard={dataClient.invokeSellerDashboard} /> : <PlaysPanel runRequest={runRequest} />}
             </main>
         </div>
     )

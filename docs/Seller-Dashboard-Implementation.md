@@ -104,8 +104,9 @@ nominal opportunity dollars, and monthly run-rate must not masquerade as earning
 
 - New focused shared components own dashboard state; top-level App changes are
   limited to navigation and mounting.
-- Desktop/Web get a labelled Seller Dashboard navigation entry and mobile access;
-  VS Code gets a fourth top-level tab.
+- Desktop/Web get a labelled Dashboard navigation entry and mobile access; VS Code
+  gets a Dashboard top-level tab alongside Discover, Portfolio, and Plays. Seller
+  Dashboard is the first child tab inside that shared dashboard workspace.
 - All four sections use the same filters, accessible tabs, paginated/sortable
   record tables, source-quality badges, empty/unknown states, and methodology.
 - Existing Fluent/VS Code theme tokens are mapped into the feature stylesheet.
@@ -143,8 +144,8 @@ nominal opportunity dollars, and monthly run-rate must not masquerade as earning
 
 ## Acceptance criteria
 
-- Seller Dashboard is independent and reachable on all three surfaces; navigation
-  back to existing panes still works.
+- Seller Dashboard is reachable beneath the Dashboard workspace on all three
+  surfaces; navigation back to existing panes still works.
 - Offline/sample mode renders four populated report sections with clearly synthetic data.
 - Configured Desktop/local Windows VS Code live mode reads the protected collector output and uses the
   same validated UI, with no sample substitution.

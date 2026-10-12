@@ -246,7 +246,7 @@ button {
     overflow-y: hidden;
 }
 
-.seller-dashboard-mobile-entry {
+.dashboard-mobile-entry {
     display: none;
     border: 0;
     color: var(--cp-accent);
@@ -2187,7 +2187,7 @@ body.resizing-blade .blade {
 }
 
 @media (max-width: 900px) {
-    .seller-dashboard-mobile-entry {
+    .dashboard-mobile-entry {
         display: grid;
         place-items: center;
     }

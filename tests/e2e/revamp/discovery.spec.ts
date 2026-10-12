@@ -240,6 +240,9 @@ test('filters and sorts Discovery in the web UI', async ({ page }) => {
   await verifyPortfolioActionColors(page, 'web', 'rgb(15, 108, 189)', 'rgb(17, 94, 163)')
   await page.locator('.rail-button[title="Discover opportunities"]').click()
   await verifyDiscoveryControls(page, 'web')
+  const panel = page.getByRole('region', { name: 'Discover opportunities' })
+  await panel.getByRole('button', { name: 'Customers equals all', exact: true }).click()
+  await expect(panel.getByRole('dialog', { name: 'Customer filter' }).getByRole('checkbox', { name: 'Beta Health', exact: true })).toBeVisible()
   expect(errors).toEqual([])
 })
 
