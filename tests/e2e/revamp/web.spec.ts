@@ -1,5 +1,20 @@
 import { expect, test } from '@playwright/test'
 import { workflowDefinitions, workflowGuidanceDefinition, workflowGuidanceOutput, workflowOutput, workflowRun } from './workflow-fixtures.js'
+import { expectCompleteSamplePortfolio } from './sample-portfolio.js'
+import { expectOpportunityAndMilestoneRemoval } from './membership-removal.js'
+import { expectOpportunitiesToFillCollapsedWorkspace } from './opportunities-layout.js'
+
+test('shows all eight sample customers with opportunity, milestone, and evidence data in Web', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await page.goto('/')
+    await expectCompleteSamplePortfolio(page)
+})
+
+test('removes the current user from opportunity and milestone teams in Web', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await page.goto('/')
+    await expectOpportunityAndMilestoneRemoval(page)
+})
 
 test('opens structured feedback in the product GitHub repository', async ({ page }) => {
     await page.addInitScript(() => {
@@ -85,8 +100,8 @@ test('curates a customer from account search through Discovery and downstream vi
     await page.locator('.rail-button[title="Discover opportunities"]').click()
     await page.locator('.discover-launcher .scope-switcher button').filter({ hasText: /^Data$/ }).click()
     const joinedRow = page.locator('.discover-table tbody tr').filter({ hasText: 'Clinical data platform modernization' })
-    page.once('dialog', (confirmation) => confirmation.accept())
     await joinedRow.locator('button').filter({ hasText: 'Remove me' }).click()
+    await page.getByRole('dialog', { name: 'Remove from Deal Team' }).getByRole('button', { name: 'Remove membership' }).click()
     await expect(joinedRow.locator('button').filter({ hasText: 'Add me' })).toBeVisible()
 
     await page.locator('.rail-button[title="Accounts"]').click()
@@ -115,11 +130,65 @@ test('sends an opportunity-scoped workflow exception to existing guidance', asyn
     await page.getByRole('button', { name: 'Workflows' }).click()
     const launcher = page.getByRole('region', { name: 'Workflow Launcher' })
     await launcher.getByRole('button', { name: /^Stage mismatch review/ }).click()
-    await launcher.getByRole('button', { name: 'Send to Guidance' }).click()
+    await launcher.getByRole('button', { name: 'Send to MCEM Coach' }).click()
 
     await expect(page.getByRole('tab', { name: 'Multi-Agent Guidance' })).toHaveAttribute('aria-selected', 'true')
     await expect(page.locator('.agent-response')).toContainText('MCEM Coach')
     await expect(page.locator('.agent-response')).toContainText('Grid operations modernization')
+    await expect(page.locator('.agent-response')).toContainText(prompt)
+})
+
+test('sends a stale opportunity workflow item to Pursuit guidance', async ({ page }) => {
+    const completedRun = workflowRun('WF-001', 'completed', 'complete')
+    const output = workflowOutput('WF-001')
+    const queueItem = output.queueItems[0]
+    if (!queueItem) throw new Error('WF-001 fixture must include a queue item.')
+    output.queueItems[0] = {
+        ...queueItem,
+        accountId: 'account-contoso',
+        opportunityId: 'opp-grid-modernization'
+    }
+    const prompt = 'Review the stale opportunity using Evidence IDs: evidence-1.'
+    let guidanceRequest: Record<string, unknown> | undefined
+    await page.route('**/api/workflows/*', async (route) => {
+        const operation = new URL(route.request().url()).pathname.split('/').at(-1)
+        if (operation === 'list') await route.fulfill({ json: workflowDefinitions.filter(({ id }) => id === 'WF-001') })
+        else if (operation === 'history') await route.fulfill({ json: [completedRun] })
+        else if (operation === 'guidance') {
+            guidanceRequest = route.request().postDataJSON() as Record<string, unknown>
+            await route.fulfill({
+                json: {
+                    contractVersion: '1.0',
+                    workflowId: 'WF-001',
+                    resultRef: 'result:WF-001',
+                    capability: 'pursuit-executive',
+                    scope: { kind: 'opportunity', accountId: 'account-contoso', opportunityId: 'opp-grid-modernization' },
+                    prompt,
+                    context: {
+                        cardTitle: 'Stale opportunities',
+                        queueItemId: 'queue-1',
+                        queueItemTitle: 'Review Northwind renewal',
+                        facts: [],
+                        evidenceIds: ['evidence-1']
+                    }
+                }
+            })
+        } else await route.fulfill({ json: { run: completedRun, output } })
+    })
+
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Workflows' }).click()
+    const launcher = page.getByRole('region', { name: 'Workflow Launcher' })
+    await launcher.getByRole('button', { name: /^Stale opportunity sweep/ }).click()
+    await launcher.getByRole('button', { name: 'Send to Pursuit' }).click()
+
+    expect(guidanceRequest).toMatchObject({
+        runId: completedRun.runId,
+        queueItemId: 'queue-1',
+        capability: 'pursuit-executive'
+    })
+    await expect(page.getByRole('tab', { name: 'Multi-Agent Guidance' })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('.agent-response')).toContainText('Pursuit')
     await expect(page.locator('.agent-response')).toContainText(prompt)
 })
 
@@ -714,6 +783,11 @@ test('resizes blades by dragging and restores persisted widths after collapse an
 
     await page.reload()
     await expect.poll(async () => (await accountsBlade.boundingBox())!.width).toBeCloseTo(finalWidth, 0)
+})
+
+test('expands Opportunities while preserving collapsed pane controls in Web', async ({ page }) => {
+    await page.goto('/')
+    await expectOpportunitiesToFillCollapsedWorkspace(page)
 })
 
 test('uses mobile drill-down navigation without horizontal overflow', async ({ page }) => {

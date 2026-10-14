@@ -298,6 +298,10 @@ button {
     flex-basis: 286px;
 }
 
+.opportunity-blade.fill-available-space:not(.collapsed) {
+    flex: 1 1 auto;
+}
+
 .action-blade {
     flex-basis: 310px;
     border-right: 0;
@@ -426,6 +430,70 @@ body.resizing-blade .blade {
     background: var(--cp-surface);
 }
 
+.membership-removal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.45);
+}
+
+.membership-removal-dialog {
+    width: min(440px, 100%);
+    max-height: calc(100vh - 48px);
+    overflow: auto;
+    padding: 20px;
+    color: var(--cp-text);
+    background: var(--cp-panel-strong);
+    border: 1px solid var(--cp-border-strong);
+    border-radius: 8px;
+    box-shadow: var(--cp-shadow);
+}
+
+.membership-removal-dialog h2 {
+    margin: 0 0 10px;
+    font-size: 18px;
+}
+
+.membership-removal-dialog p {
+    margin: 0;
+    color: var(--cp-text-muted);
+}
+
+.membership-removal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 20px;
+}
+
+.membership-removal-actions button {
+    min-height: 32px;
+    padding: 5px 12px;
+    border: 1px solid var(--cp-border-strong);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.membership-removal-cancel {
+    color: var(--cp-text);
+    background: var(--cp-surface);
+}
+
+.membership-removal-confirm {
+    color: #fff;
+    background: var(--cp-danger);
+    border-color: var(--cp-danger) !important;
+}
+
+.membership-removal-actions button:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
 .blade-body {
     min-height: 0;
     overflow: auto;
@@ -493,6 +561,25 @@ body.resizing-blade .blade {
     display: flex;
     flex-direction: column;
     gap: 14px;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.milestone-activities-surface {
+    width: min(700px, calc(100vw - 32px));
+    height: min(680px, calc(100vh - 32px));
+    max-height: calc(100vh - 32px);
+    overflow: hidden;
+}
+
+.milestone-activities-body {
+    display: grid;
+    height: 100%;
+    max-height: 100%;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .milestone-activities-list {
@@ -841,11 +928,35 @@ body.resizing-blade .blade {
 }
 
 .center-pane {
+    position: relative;
     min-width: 360px;
     min-height: 0;
     flex: 1 1 520px;
     overflow: auto;
     background: var(--cp-bg);
+}
+
+.guidance-collapse-button {
+    position: absolute;
+    z-index: 6;
+    top: 10px;
+    right: 10px;
+}
+
+.center-pane.guidance-collapsed {
+    min-width: 44px;
+    max-width: 44px;
+    flex: 0 0 44px;
+    overflow: hidden;
+}
+
+.center-pane.guidance-collapsed > :not(.guidance-collapse-button) {
+    display: none;
+}
+
+.center-pane.guidance-collapsed .guidance-collapse-button {
+    position: static;
+    margin: 10px 7px;
 }
 
 .center-pane.stage-board-active {
@@ -2249,6 +2360,16 @@ body.resizing-blade .blade {
     .blade.mobile-active,
     .center-pane.mobile-active {
         display: flex;
+    }
+
+    .center-pane.guidance-collapsed {
+        max-width: none;
+        flex: 1 1 auto;
+        overflow: auto;
+    }
+
+    .center-pane.guidance-collapsed > :not(.guidance-collapse-button) {
+        display: revert;
     }
 
     .center-pane.mobile-active {

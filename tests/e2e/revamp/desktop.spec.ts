@@ -3,6 +3,59 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { workflowDefinitions, workflowOutput, workflowRun } from './workflow-fixtures.js'
+import { expectCompleteSamplePortfolio } from './sample-portfolio.js'
+import { expectOpportunityAndMilestoneRemoval } from './membership-removal.js'
+import { expectOpportunitiesToFillCollapsedWorkspace } from './opportunities-layout.js'
+
+test('shows all eight sample customers with opportunity, milestone, and evidence data in Desktop', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-sample-portfolio-'))
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_UI_MODE: '' }
+    })
+
+    try {
+        const window = await app.firstWindow()
+        await window.setViewportSize({ width: 1600, height: 900 })
+        await expectCompleteSamplePortfolio(window)
+    } finally {
+        await app.close().catch(() => undefined)
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
+test('removes the current user from opportunity and milestone teams in Desktop', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-membership-removal-'))
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_UI_MODE: '' }
+    })
+
+    try {
+        const window = await app.firstWindow()
+        await window.setViewportSize({ width: 1600, height: 900 })
+        await expectOpportunityAndMilestoneRemoval(window)
+    } finally {
+        await app.close().catch(() => undefined)
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
+test('expands Opportunities while preserving collapsed pane controls in Desktop', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-opportunities-layout-'))
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_UI_MODE: '' }
+    })
+
+    try {
+        const window = await app.firstWindow()
+        await expectOpportunitiesToFillCollapsedWorkspace(window)
+    } finally {
+        await app.close().catch(() => undefined)
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
 
 test('curates customer accounts through the Desktop IPC bridge', async () => {
     const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-curation-test-'))

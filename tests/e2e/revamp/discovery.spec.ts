@@ -137,10 +137,31 @@ async function verifyDiscoveryControls(page: Page, host: 'desktop' | 'web' | 'vs
   await expect(betaRow).toContainText('On deal team')
   await expect(names).toHaveText(['Alpha analysis', 'Beta platform', 'Zulu renewal', 'Alpha infrastructure'])
   await expectActionColor(betaRow.getByRole('button', { name: 'Remove me', exact: true }), betaRow.locator('td').first(), danger)
-  page.once('dialog', (dialog) => dialog.accept())
-  await betaRow.getByRole('button', { name: 'Remove me', exact: true }).click()
+  if (host === 'vscode') {
+    await betaRow.getByRole('button', { name: 'Remove me', exact: true }).click()
+    const confirmation = page.getByRole('dialog', { name: 'Remove from Deal Team' })
+    await expect(confirmation).toBeVisible()
+    await confirmation.getByRole('button', { name: 'Remove membership' }).click()
+  } else {
+    page.once('dialog', (dialog) => dialog.accept())
+    await betaRow.getByRole('button', { name: 'Remove me', exact: true }).click()
+  }
   await expect(betaRow.getByRole('button', { name: 'Add me', exact: true })).toBeVisible()
   await expect(names).toHaveText(['Alpha analysis', 'Zulu renewal', 'Alpha infrastructure', 'Beta platform'])
+
+  if (host === 'vscode') {
+    await betaRow.getByRole('button', { name: 'Show milestones for Beta platform' }).click()
+    const milestonesRow = table.getByRole('row', { name: 'Beta platform milestones' })
+    const milestoneAdd = milestonesRow.getByRole('button', { name: 'Add me to the team for Customer outcome validation' })
+    await milestoneAdd.click()
+    const milestoneRemove = milestonesRow.getByRole('button', { name: 'Remove me from the team for Customer outcome validation' })
+    await expect(milestoneRemove).toHaveAttribute('aria-pressed', 'true')
+    await milestoneRemove.click()
+    const confirmation = page.getByRole('dialog', { name: 'Remove from milestone team' })
+    await expect(confirmation).toBeVisible()
+    await confirmation.getByRole('button', { name: 'Remove membership' }).click()
+    await expect(milestoneAdd).toHaveAttribute('aria-pressed', 'false')
+  }
 
   await panel.getByRole('button', { name: 'Customers equals all', exact: true }).click()
   const editor = panel.getByRole('dialog', { name: 'Customer filter' })
@@ -312,11 +333,13 @@ for (const theme of [
     body: `<!doctype html><html><head><style>:root{${theme.colors};--vscode-focusBorder:#0078d4;--vscode-font-family:"Segoe UI",sans-serif;--vscode-button-background:#0e639c;--vscode-button-foreground:#ffffff;--vscode-list-hoverBackground:transparent;--vscode-toolbar-hoverBackground:transparent}</style></head><body><div id="root" data-mode="sample"></div></body></html>`
   }))
   await page.addInitScript(({ rows, accounts }) => {
+    window.confirm = () => false
+    let milestoneMember = false
     Object.defineProperty(window, 'acquireVsCodeApi', {
       value: () => ({
         getState: () => undefined,
         setState: () => undefined,
-        postMessage: (message: { kind: string; id: string; method: string; params?: { domain?: string; opportunityId?: string; accountId?: string } }) => {
+        postMessage: (message: { kind: string; id: string; method: string; params?: { domain?: string; opportunityId?: string; accountId?: string; milestoneId?: string } }) => {
           if (message.kind !== 'request') return
           let result: unknown
           if (message.method === 'getCurrentUserEmail') result = 'sample@example.test'
@@ -326,6 +349,23 @@ for (const theme of [
           else if (message.method === 'discoverOpportunities') result = message.params?.domain === 'data'
             ? rows.filter((item) => item.id === 'zulu').map((item) => ({ ...item, domain: 'data' }))
             : rows
+          else if (message.method === 'listDiscoverableMilestones') result = [{
+            id: `${message.params?.opportunityId}-milestone`,
+            opportunityId: message.params?.opportunityId,
+            name: 'Customer outcome validation',
+            status: 'On Track',
+            commitment: 'Best case',
+            onMilestoneTeam: milestoneMember
+          }]
+          else if (message.method === 'joinMilestoneTeam' || message.method === 'leaveMilestoneTeam') {
+            milestoneMember = message.method === 'joinMilestoneTeam'
+            result = {
+              opportunityId: message.params?.opportunityId,
+              milestoneId: message.params?.milestoneId,
+              onMilestoneTeam: milestoneMember,
+              ...(milestoneMember ? { alreadyMember: false } : { alreadyAbsent: false })
+            }
+          }
           else if (message.method === 'joinDealTeam' || message.method === 'leaveDealTeam') {
             const onDealTeam = message.method === 'joinDealTeam'
             for (const row of rows) if (row.id === message.params?.opportunityId) row.onDealTeam = onDealTeam

@@ -37,6 +37,12 @@ import {
     type OpportunityUpdate,
     type SeDomainId
 } from '../../../packages/common/index.js'
+import {
+    additionalSampleAccounts,
+    additionalSampleMilestones,
+    additionalSampleObservationsByOpportunity,
+    additionalSampleOpportunities
+} from '../../../packages/common/fixtures/additional-sample-portfolio.js'
 import { milestoneRecommendations, summarizeMilestones } from '../../../packages/agents/mcem-coach/src/milestone-signals.js'
 
 /**
@@ -47,13 +53,15 @@ import { milestoneRecommendations, summarizeMilestones } from '../../../packages
 
 const roleByStage = ['Account Executive', 'Specialist / SSP', 'Solution Engineer', 'Cloud Solution Architect', 'CSAM']
 const criteriaLabels = ['Customer outcome', 'Decision team', 'Technical validation', 'Business case', 'Next committed step']
+const criteriaIds = ['customer-outcome', 'decision-team', 'technical-validation', 'business-case', 'next-step'] as const
 
 const sampleAccounts: readonly Account[] = Object.freeze([
     accountSchema.parse({ id: 'account-contoso', name: 'Contoso Energy', segment: 'Strategic', tpid: '1000001' }),
     accountSchema.parse({ id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise', tpid: '1000002' }),
     accountSchema.parse({ id: 'account-northwind', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003' }),
     accountSchema.parse({ id: 'account-zava', name: 'Zava Inc.', segment: 'Strategic', tpid: '1000004' }),
-    accountSchema.parse({ id: 'account-adventureworks', name: 'Adventure Works Cycles', segment: 'Enterprise', tpid: '1000005' })
+    accountSchema.parse({ id: 'account-adventureworks', name: 'Adventure Works Cycles', segment: 'Enterprise', tpid: '1000005' }),
+    ...additionalSampleAccounts
 ])
 
 const sampleOpportunities: readonly Opportunity[] = Object.freeze([
@@ -67,7 +75,8 @@ const sampleOpportunities: readonly Opportunity[] = Object.freeze([
     { id: 'opp-customer-data-platform', accountId: 'account-fabrikam', name: 'Customer data platform - ready to advance', owner: 'Morgan Lee', recordedStage: 2, value: 3_200_000, currency: 'USD', closeDate: '2027-01-15' },
     { id: 'opp-zava-ai-platform', accountId: 'account-zava', name: 'Zava AI platform foundation', owner: 'Avery Johnson', recordedStage: 2, value: 2_900_000, currency: 'USD', closeDate: '2027-04-02' },
     { id: 'opp-zava-migration', accountId: 'account-zava', name: 'Zava datacenter exit', recordedStage: 1, value: 1_600_000, currency: 'USD', closeDate: '2027-05-28' },
-    { id: 'opp-aw-commerce', accountId: 'account-adventureworks', name: 'Adventure Works commerce replatform', owner: 'Morgan Diaz', recordedStage: 3, value: 3_100_000, currency: 'USD', closeDate: '2027-01-08' }
+    { id: 'opp-aw-commerce', accountId: 'account-adventureworks', name: 'Adventure Works commerce replatform', owner: 'Morgan Diaz', recordedStage: 3, value: 3_100_000, currency: 'USD', closeDate: '2027-01-08' },
+    ...additionalSampleOpportunities
 ].map((opportunity) => opportunitySchema.parse(opportunity)))
 
 function offsetDate(isoDate: string, days: number): string {
@@ -88,6 +97,8 @@ const milestoneStatuses = ['On Track', 'At Risk', 'In Progress', 'Blocked', 'Com
 const milestoneCommitments = ['Committed', 'Best case', 'Uncommitted']
 
 const sampleMilestones: readonly Milestone[] = Object.freeze(sampleOpportunities.flatMap((opportunity, index) => {
+    const shared = additionalSampleMilestones.filter((milestone) => milestone.opportunityId === opportunity.id)
+    if (shared.length > 0) return shared.map((milestone) => milestoneSchema.parse(milestone))
     const count = 3 + (index % 2) // 3 or 4 milestones
     const start = index % milestonePool.length
     return Array.from({ length: count }, (_unused, position) => {
@@ -385,6 +396,7 @@ function accountName(accountId: string): string {
 
 export function buildSampleEvaluation(opportunity: Opportunity, now: () => string = () => new Date().toISOString(), milestones: readonly Milestone[] = []): McemResponse {
     const readyToAdvance = opportunity.name.includes('ready to advance')
+    const sharedObservations = additionalSampleObservationsByOpportunity[opportunity.id]
     const evidenceBasedStage = readyToAdvance ? Math.min(5, opportunity.recordedStage + 1) : Math.max(1, opportunity.recordedStage - 1)
     const generatedAt = now()
     const evidenceIds = [`sample-msx-${opportunity.id}`, `sample-mcem-stage-${opportunity.recordedStage}`]
@@ -416,17 +428,22 @@ export function buildSampleEvaluation(opportunity: Opportunity, now: () => strin
         summary: milestoneSummary.headline ? `${baseSummary} ${milestoneSummary.headline}` : baseSummary,
         recordedStage: opportunity.recordedStage,
         evidenceBasedStage,
-        criteria: criteriaLabels.map((label, index) => ({
-            id: `criterion-${index + 1}`,
-            label,
-            status: readyToAdvance || index < 2 ? 'met' : index === 2 ? 'partial' : 'missing',
-            rationale: readyToAdvance
-                ? `${label} evidence is documented and customer validated.`
-                : index < 2 ? `${label} evidence is documented.` : `${label} requires customer confirmation.`,
-            evidenceIds
-        })),
+        criteria: criteriaLabels.map((label, index) => {
+            const observation = sharedObservations?.find((item) => item.criterionId === criteriaIds[index])
+            return {
+                id: criteriaIds[index] ?? `criterion-${index + 1}`,
+                label,
+                status: observation?.status ?? (readyToAdvance || index < 2 ? 'met' : index === 2 ? 'partial' : 'missing'),
+                rationale: observation?.detail ?? (readyToAdvance
+                    ? `${label} evidence is documented and customer validated.`
+                    : index < 2 ? `${label} evidence is documented.` : `${label} requires customer confirmation.`),
+                evidenceIds
+            }
+        }),
         recommendations: [...baseRecommendations, ...milestoneRecs],
-        missingData: readyToAdvance ? [] : ['Validated business case', 'Customer-confirmed next step'],
+        missingData: sharedObservations
+            ? sharedObservations.filter((observation) => observation.status !== 'met').map((observation) => observation.detail)
+            : readyToAdvance ? [] : ['Validated business case', 'Customer-confirmed next step'],
         evidence: [
             { id: evidenceIds[0]!, source: 'msx', recordId: opportunity.id, title: 'Sanitized MSX opportunity snapshot', url: `https://example.com/sample/msx/${opportunity.id}`, retrievedAt: generatedAt, accessContext: 'sample', quality: 'observed', excerpt: 'Static VS Code sample data; no live MSX request was made.' },
             { id: evidenceIds[1]!, source: 'mcem', recordId: `stage-${opportunity.recordedStage}`, title: `MCEM Stage ${opportunity.recordedStage} guidance`, url: `https://example.com/sample/mcem/stage-${opportunity.recordedStage}`, retrievedAt: generatedAt, accessContext: 'sample', quality: 'authoritative', excerpt: 'Versioned stage criteria used for the sample evaluation.' }
