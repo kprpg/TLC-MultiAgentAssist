@@ -11,13 +11,36 @@ function connector(): LocalStoreMsxConnector {
 }
 
 describe('local-store MSX connector', () => {
-  it('seeds accounts across the portfolio including Zava and Adventure Works', async () => {
+  it('seeds the enriched portfolio alongside the relational Northwind showcase', async () => {
     const accounts = await connector().listAccounts()
     const names = accounts.map((account) => account.name)
     expect(names).toContain('Zava Inc.')
     expect(names).toContain('Adventure Works Cycles')
     expect(names).toContain('Contoso Energy')
-    expect(accounts.length).toBeGreaterThanOrEqual(5)
+    expect(names).toEqual(expect.arrayContaining([
+      'Fourth Coffee',
+      'Tailspin Toys',
+      'Wide World Importers',
+      'Woodgrove Bank'
+    ]))
+    expect(accounts).toHaveLength(9)
+  })
+
+  it('preserves enriched opportunity owners and varied milestone data', async () => {
+    const msx = connector()
+    const fourthCoffee = await msx.listOpportunities('account-fourth-coffee')
+    expect(fourthCoffee).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'opp-fourth-coffee-loyalty', owner: 'Priya Shah' }),
+      expect.objectContaining({ id: 'opp-fourth-coffee-analytics', owner: 'Marcus Chen' })
+    ]))
+
+    const tailspinMilestones = await msx.listMilestones('opp-tailspin-ecommerce')
+    expect(tailspinMilestones).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'ms-tailspin-commerce-security', status: 'Blocked' }),
+      expect.objectContaining({ id: 'ms-tailspin-commerce-sponsor', status: 'At Risk' })
+    ]))
+    expect(tailspinMilestones.find((milestone) => milestone.id === 'ms-tailspin-commerce-security')).not.toHaveProperty('targetDate')
+    expect(tailspinMilestones.find((milestone) => milestone.id === 'ms-tailspin-commerce-sponsor')).not.toHaveProperty('owner')
   })
 
   it('exposes opportunities across MCEM stages 1-5', async () => {

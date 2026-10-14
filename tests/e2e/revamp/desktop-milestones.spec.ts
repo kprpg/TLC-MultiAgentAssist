@@ -88,7 +88,7 @@ test('creates an Activity (Task) regarding a milestone from the milestone Action
 
     try {
         const window = await app.firstWindow()
-        await window.setViewportSize({ width: 1400, height: 900 })
+        await window.setViewportSize({ width: 1200, height: 600 })
 
         await window.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
         const opportunitiesBlade = window.getByRole('region', { name: 'Opportunities blade' })
@@ -101,6 +101,11 @@ test('creates an Activity (Task) regarding a milestone from the milestone Action
 
         const dialog = window.getByRole('dialog')
         await expect(dialog).toContainText('Activities —')
+        await expect(dialog.getByRole('button', { name: 'Close' })).toBeInViewport()
+        await expect(dialog.getByRole('button', { name: 'Create task' })).toBeInViewport()
+        const dialogBox = await dialog.boundingBox()
+        expect(dialogBox).not.toBeNull()
+        expect((dialogBox?.y ?? 0) + (dialogBox?.height ?? 0)).toBeLessThanOrEqual(600)
         await dialog.getByLabel('Subject').fill('Architecture review session')
         await dialog.getByRole('button', { name: 'Create task' }).click()
         await expect(dialog.getByText('Architecture review session')).toBeVisible()

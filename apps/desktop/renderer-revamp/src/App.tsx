@@ -54,6 +54,7 @@ import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js
 import type { PortfolioSearchResult } from '../../../shared/portfolio-search.js'
 import { PortfolioSearch } from './portfolio-search.js'
 import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
+import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
 
 type Shell = 'desktop' | 'web'
 type WorkspaceView = 'accounts' | 'workflows' | 'discover' | 'dashboard'
@@ -65,6 +66,9 @@ type BladeWidths = Record<Blade, number>
 type MilestoneField = 'status' | 'riskDetails' | 'targetDate' | 'customerCommitment' | 'comments'
 type MilestoneEdit = { milestoneId: string; field: MilestoneField; value: string }
 type PendingStageMove = { opportunity: Opportunity; targetStage: number; evaluation: McemResponse }
+type PendingMembershipRemoval =
+  | { kind: 'deal-team'; opportunityId: string; name: string }
+  | { kind: 'milestone-team'; source: 'portfolio' | 'discovery'; opportunityId: string; milestone: Milestone }
 type BoardDrag = { pointerId: number; opportunityId: string; sourceStage: number; startX: number; startY: number; targetStage: number | null; dragging: boolean }
 type WorkflowDescription = { summary: string; reads: string; useIt: string }
 
@@ -219,6 +223,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [collapsed, setCollapsed] = useState<Set<Blade>>(new Set())
   const [bladeWidths, setBladeWidths] = useState<BladeWidths>(loadBladeWidths)
   const [actionsOpen, setActionsOpen] = useState(true)
+  const [guidanceCollapsed, setGuidanceCollapsed] = useState(false)
   const [mobileBlade, setMobileBlade] = useState<Blade | 'center'>('accounts')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -232,6 +237,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [discoverLoadedDomain, setDiscoverLoadedDomain] = useState<SeDomainId | null>(null)
   const [joiningOpportunityId, setJoiningOpportunityId] = useState<string | null>(null)
   const [milestoneTeamBusyId, setMilestoneTeamBusyId] = useState<string | null>(null)
+  const [pendingMembershipRemoval, setPendingMembershipRemoval] = useState<PendingMembershipRemoval | null>(null)
   const [activitiesMilestone, setActivitiesMilestone] = useState<Milestone | null>(null)
   const [activities, setActivities] = useState<MilestoneActivity[]>([])
   const [activitiesLoading, setActivitiesLoading] = useState(false)
@@ -829,8 +835,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   }
 
   async function leaveDealTeam(opportunityId: string) {
-      const item = discoverResults.find((candidate) => candidate.id === opportunityId)
-      if (!window.confirm(`Remove yourself from the Deal Team for "${item?.name ?? 'this opportunity'}"? It will be removed from Portfolio and downstream analysis.`)) return
       setError('')
       setJoiningOpportunityId(opportunityId)
       try {
@@ -864,7 +868,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   }
 
   async function leaveMilestoneTeam(milestone: Milestone) {
-    if (!window.confirm(`Remove yourself from the team for milestone "${milestone.name}"? If this is your only membership on the opportunity, the opportunity will leave your Portfolio.`)) return
     setError('')
     setMilestoneTeamBusyId(milestone.id)
     try {
@@ -897,9 +900,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     }
   }
 
-  async function toggleDiscoverMilestone(opportunityId: string, milestone: Milestone) {
-    const joining = milestone.onMilestoneTeam !== true
-    if (!joining && !window.confirm(`Remove yourself from the team for milestone "${milestone.name}"? If this is your only membership on the opportunity, the opportunity will leave your Portfolio.`)) return
+  async function updateDiscoverMilestoneTeam(opportunityId: string, milestone: Milestone, joining: boolean) {
     setError('')
     setMilestoneTeamBusyId(milestone.id)
     try {
@@ -915,6 +916,23 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     } finally {
       setMilestoneTeamBusyId(null)
     }
+  }
+
+  function toggleDiscoverMilestone(opportunityId: string, milestone: Milestone) {
+    if (milestone.onMilestoneTeam) {
+      setPendingMembershipRemoval({ kind: 'milestone-team', source: 'discovery', opportunityId, milestone })
+      return
+    }
+    void updateDiscoverMilestoneTeam(opportunityId, milestone, true)
+  }
+
+  async function confirmMembershipRemoval() {
+    const pending = pendingMembershipRemoval
+    if (!pending) return
+    if (pending.kind === 'deal-team') await leaveDealTeam(pending.opportunityId)
+    else if (pending.source === 'portfolio') await leaveMilestoneTeam(pending.milestone)
+    else await updateDiscoverMilestoneTeam(pending.opportunityId, pending.milestone, false)
+    setPendingMembershipRemoval(null)
   }
 
   async function openMilestoneActivities(milestone: Milestone) {
@@ -1078,6 +1096,9 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   }
 
   const status = result ? stageStatus(result) : null
+  const opportunitiesFillAvailableSpace = collapsed.has('accounts')
+    && guidanceCollapsed
+    && (!opportunity || !actionsOpen || collapsed.has('actions'))
   const modeLabel = client.mode === 'web-live'
     ? 'WEB · CONNECTED DATA'
     : shell === 'web' ? 'STATIC WEB · SAMPLE DATA' : 'DESKTOP · CONNECTED DATA'
@@ -1165,7 +1186,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       </Dialog>
 
       <Dialog open={activitiesMilestone !== null} onOpenChange={(_, data) => { if (!data.open) setActivitiesMilestone(null) }}>
-        <DialogSurface><DialogBody><DialogTitle>Activities — {activitiesMilestone?.name}</DialogTitle><DialogContent className="milestone-activities-dialog">
+        <DialogSurface className="milestone-activities-surface"><DialogBody className="milestone-activities-body"><DialogTitle>Activities — {activitiesMilestone?.name}</DialogTitle><DialogContent className="milestone-activities-dialog">
           <div className="milestone-activities-list" aria-label="Milestone activities" aria-busy={activitiesLoading}>
             {activitiesLoading && <Spinner size="tiny" label="Loading activities…" />}
             {!activitiesLoading && activities.length === 0 && <p className="muted">No activities yet. Create a task below.</p>}
@@ -1190,7 +1211,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         </DialogActions></DialogBody></DialogSurface>
       </Dialog>
 
-      {account && <section className={`blade opportunity-blade ${collapsed.has('opportunities') ? 'collapsed' : ''} ${mobileBlade === 'opportunities' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('opportunities') ? undefined : bladeWidths.opportunities }} aria-label="Opportunities blade">
+      {account && <section className={`blade opportunity-blade ${collapsed.has('opportunities') ? 'collapsed' : ''} ${opportunitiesFillAvailableSpace ? 'fill-available-space' : ''} ${mobileBlade === 'opportunities' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('opportunities') || opportunitiesFillAvailableSpace ? undefined : bladeWidths.opportunities }} aria-label="Opportunities blade">
         <BladeHeader title="Opportunities" subtitle={account.name} collapsed={collapsed.has('opportunities')} refreshing={loading} actions={<Menu checkedValues={{ opportunitySort: [opportunitySort] }} positioning="below-end">
           <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button" icon={<ArrowSort20Regular />} aria-label="Sort opportunities" title={`Sort opportunities by ${opportunitySort === 'closeDate' ? 'Close Date' : opportunitySort === 'stage' ? 'Stage' : 'Value'} (${opportunitySortDirection})`} /></MenuTrigger>
           <MenuPopover><MenuList aria-label="Sort opportunities by">
@@ -1291,7 +1312,9 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                         title={milestone.onMilestoneTeam ? 'Remove me from milestone team' : 'Add me to milestone team'}
                         aria-label={milestone.onMilestoneTeam ? `Remove me from the team for ${milestone.name}` : `Add me to the team for ${milestone.name}`}
                         aria-pressed={milestone.onMilestoneTeam === true}
-                        onClick={() => void (milestone.onMilestoneTeam ? leaveMilestoneTeam(milestone) : joinMilestoneTeam(milestone))}
+                        onClick={() => milestone.onMilestoneTeam
+                          ? setPendingMembershipRemoval({ kind: 'milestone-team', source: 'portfolio', opportunityId: milestone.opportunityId, milestone })
+                          : void joinMilestoneTeam(milestone)}
                       />
                       <strong>{milestone.name}</strong>
                     </span></td>
@@ -1334,7 +1357,15 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         {!collapsed.has('opportunities') && <BladeResizeHandle blade="opportunities" label="Opportunities blade" edge="end" width={bladeWidths.opportunities} onResize={(width) => resizeBlade('opportunities', width)} />}
       </section>}
 
-      <section className={`center-pane ${mobileBlade === 'center' ? 'mobile-active' : ''} ${opportunity && centerTab === 'stages' ? 'stage-board-active' : ''}`} aria-label="Opportunity workbench">
+      <section className={`center-pane ${guidanceCollapsed ? 'guidance-collapsed' : ''} ${mobileBlade === 'center' ? 'mobile-active' : ''} ${opportunity && centerTab === 'stages' ? 'stage-board-active' : ''}`} aria-label="Opportunity workbench">
+        <Button
+          appearance="subtle"
+          className="icon-button desktop-only guidance-collapse-button"
+          icon={guidanceCollapsed ? <ChevronDoubleRight20Regular /> : <ChevronDoubleLeft20Regular />}
+          onClick={() => setGuidanceCollapsed((current) => !current)}
+          aria-label={`${guidanceCollapsed ? 'Expand' : 'Collapse'} Guidance pane`}
+          title={`${guidanceCollapsed ? 'Expand' : 'Collapse'} Guidance`}
+        />
         {!opportunity && <div className="landing-state">
           <span className="landing-icon">{account ? <Building20Regular /> : <Apps20Regular />}</span>
           <p className="eyebrow">{account ? 'ACCOUNT SELECTED' : 'MY ACCOUNT PORTFOLIO'}</p>
@@ -1575,7 +1606,8 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         {selectedWorkflowOutput && <WorkflowResult
           output={selectedWorkflowOutput}
           guidanceLoading={workflowGuidanceLoading}
-          onSendGuidance={workflowGuidanceCapability(selectedWorkflowOutput.workflowId) ? sendWorkflowToGuidance : undefined}
+          guidanceLabel={agentCapabilities.find(({ id }) => id === workflowGuidanceCapability(selectedWorkflowOutput.workflowId))?.label ?? 'Guidance'}
+          onSendGuidance={sendWorkflowToGuidance}
         />}
 
         <div className="workflow-grid">
@@ -1676,7 +1708,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                 <td>{item.closeDate}</td>
                 <td>
                   {item.onDealTeam
-                    ? <div className="deal-team-actions"><span className="deal-team-joined"><CheckmarkCircle20Filled /> On deal team</span><Button size="small" appearance="subtle" className="text-action danger-action" disabled={joiningOpportunityId === item.id} onClick={() => void leaveDealTeam(item.id)}>Remove me</Button></div>
+                    ? <div className="deal-team-actions"><span className="deal-team-joined"><CheckmarkCircle20Filled /> On deal team</span><Button size="small" appearance="subtle" className="text-action danger-action" disabled={joiningOpportunityId === item.id} onClick={() => setPendingMembershipRemoval({ kind: 'deal-team', opportunityId: item.id, name: item.name })}>Remove me</Button></div>
                     : <Button size="small" appearance="primary" disabled={joiningOpportunityId === item.id} icon={joiningOpportunityId === item.id ? <Spinner size="tiny" /> : <Person20Regular />} onClick={() => void joinDealTeam(item.id)}>Add me</Button>}
                 </td>
                 </tr>
@@ -1707,6 +1739,18 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       </section>}
     </main>
 
+    {pendingMembershipRemoval && <MembershipRemovalPrompt
+      title={pendingMembershipRemoval.kind === 'deal-team' ? 'Remove from Deal Team' : 'Remove from milestone team'}
+      message={pendingMembershipRemoval.kind === 'deal-team'
+        ? `Remove yourself from the Deal Team for "${pendingMembershipRemoval.name}"? The opportunity remains in Portfolio if you still belong to one of its milestone teams.`
+        : `Remove yourself from the team for milestone "${pendingMembershipRemoval.milestone.name}"? The opportunity remains in Portfolio if you are still on its Deal Team or another milestone team.`}
+      busy={pendingMembershipRemoval.kind === 'deal-team'
+        ? joiningOpportunityId === pendingMembershipRemoval.opportunityId
+        : milestoneTeamBusyId === pendingMembershipRemoval.milestone.id}
+      onCancel={() => setPendingMembershipRemoval(null)}
+      onConfirm={confirmMembershipRemoval}
+    />}
+
     {workspaceView === 'accounts' && opportunity && <nav className="mobile-nav" aria-label="Mobile workspace navigation">
       <button className={mobileBlade === 'accounts' ? 'active' : ''} onClick={() => setMobileBlade('accounts')}><Building20Regular /><span>Accounts</span></button>
       <button className={mobileBlade === 'opportunities' ? 'active' : ''} onClick={() => setMobileBlade('opportunities')}><List20Regular /><span>Opportunities</span></button>
@@ -1731,10 +1775,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 function WorkflowResult({
   output,
   guidanceLoading,
+  guidanceLabel,
   onSendGuidance
 }: {
   output: InitialWorkflowOutput
   guidanceLoading: string | null
+  guidanceLabel: string
   onSendGuidance?: (queueItemId: string) => void
 }) {
   const card = output.card
@@ -1745,7 +1791,7 @@ function WorkflowResult({
     {card.kind === 'timeline' && <ol className="workflow-timeline">{card.events.map((event) => <li key={`${event.at}-${event.label}`}><time dateTime={event.at}>{new Date(event.at).toLocaleString()}</time><span>{event.label}</span></li>)}</ol>}
     {card.kind === 'action-list' && <ul className="workflow-actions">{card.actions.map((action) => <li key={action.id}><span className={`priority ${action.priority.toLowerCase()}`}>{action.priority}</span><strong>{action.label}</strong></li>)}</ul>}
     {card.kind === 'exception-list' && <ul className="workflow-actions">{card.exceptions.map((exception) => <li key={exception.id}><span className={`priority ${exception.priority.toLowerCase()}`}>{exception.priority}</span><div><strong>{exception.title}</strong><p>{exception.detail}</p></div></li>)}</ul>}
-    <section className="workflow-queue" aria-label="Operational queue"><h3>Operational queue <span>{output.queueItems.length}</span></h3>{output.queueItems.length === 0 ? <p>No queued follow-up.</p> : output.queueItems.map((item) => <article key={item.id}><span className={`priority ${item.priority.toLowerCase()}`}>{item.priority}</span><div><strong>{item.title}</strong><p>{item.owner ?? 'Unassigned'}{item.dueDate ? ` · Due ${item.dueDate}` : ''}</p></div>{onSendGuidance && item.accountId && item.opportunityId && <Button appearance="subtle" className="text-action" icon={<Sparkle20Regular />} disabled={guidanceLoading !== null} onClick={() => onSendGuidance(item.id)}>{guidanceLoading === item.id ? 'Sending…' : 'Send to Guidance'}</Button>}</article>)}</section>
+    <section className="workflow-queue" aria-label="Operational queue"><h3>Operational queue <span>{output.queueItems.length}</span></h3>{output.queueItems.length === 0 ? <p>No queued follow-up.</p> : output.queueItems.map((item) => <article key={item.id}><span className={`priority ${item.priority.toLowerCase()}`}>{item.priority}</span><div><strong>{item.title}</strong><p>{item.owner ?? 'Unassigned'}{item.dueDate ? ` · Due ${item.dueDate}` : ''}</p></div>{onSendGuidance && item.accountId && item.opportunityId && <Button appearance="subtle" className="text-action" icon={<Sparkle20Regular />} disabled={guidanceLoading !== null} onClick={() => onSendGuidance(item.id)}>{guidanceLoading === item.id ? 'Sending…' : `Send to ${guidanceLabel}`}</Button>}</article>)}</section>
   </section>
 }
 

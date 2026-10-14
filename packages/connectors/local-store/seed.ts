@@ -5,6 +5,11 @@
  * decision-team / risk tables (stakeholder / contact / competitor) so meeting-signal
  * extraction and injection can be tested end to end.
  */
+import {
+  additionalSampleAccounts,
+  additionalSampleMilestones,
+  additionalSampleOpportunities
+} from '../../common/fixtures/additional-sample-portfolio.js'
 
 /** Verified live Dataverse option-set codes (code ↔ label). */
 export const MILESTONE_STATUS: Readonly<Record<number, string>> = {
@@ -43,14 +48,37 @@ export const seedAccounts: readonly Row[] = [
   { id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise', tpid: '1000002', visibility: 'visible' },
   { id: 'account-northwind', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003', visibility: 'visible' },
   { id: 'account-zava', name: 'Zava Inc.', segment: 'Strategic', tpid: '1000004', visibility: 'visible' },
-  { id: 'account-adventureworks', name: 'Adventure Works Cycles', segment: 'Enterprise', tpid: '1000005', visibility: 'visible' }
+  { id: 'account-adventureworks', name: 'Adventure Works Cycles', segment: 'Enterprise', tpid: '1000005', visibility: 'visible' },
+  ...additionalSampleAccounts.map((account) => ({
+    id: account.id,
+    name: account.name,
+    segment: account.segment ?? null,
+    tpid: account.tpid ?? null,
+    visibility: 'visible'
+  }))
 ]
+
+const additionalOwnerNames = [...new Set([
+  ...additionalSampleOpportunities.map((opportunity) => opportunity.owner),
+  ...additionalSampleMilestones.map((milestone) => milestone.owner)
+].filter((owner): owner is string => owner !== undefined))]
+
+function additionalOwnerId(owner: string): string {
+  return `user-${owner.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`
+}
 
 export const seedSystemUsers: readonly Row[] = [
   { id: SAMPLE_USER_ID, fullname: 'Girish Pillai', initials: 'GP', email: 'girish.pillai@example.com', alias: 'gpillai' },
   { id: 'user-avery', fullname: 'Avery Johnson', initials: 'AJ', email: 'avery.johnson@example.com', alias: 'averyj' },
   { id: 'user-jordan', fullname: 'Jordan Lee', initials: 'JL', email: 'jordan.lee@example.com', alias: 'jordanl' },
-  { id: 'user-morgan', fullname: 'Morgan Diaz', initials: 'MD', email: 'morgan.diaz@example.com', alias: 'morgand' }
+  { id: 'user-morgan', fullname: 'Morgan Diaz', initials: 'MD', email: 'morgan.diaz@example.com', alias: 'morgand' },
+  ...additionalOwnerNames.map((owner) => ({
+    id: additionalOwnerId(owner),
+    fullname: owner,
+    initials: owner.split(/\s+/).map((part) => part[0]).join('').toUpperCase(),
+    email: null,
+    alias: null
+  }))
 ]
 
 // Opportunities across MCEM stages 1-5 with a spread of populated vs. deliberately empty fields.
@@ -73,7 +101,17 @@ export const seedOpportunities: readonly Row[] = [
   // Showcase: milestone-team-only (NOT on the Deal Team, but a milestone membership keeps it in the Portfolio).
   { id: 'opp-ms-only-showcase', account_id: 'account-contoso', name: 'Milestone-only workstream (no Deal Team)', owner_id: 'user-avery', recorded_stage: 2, estimated_value: 1_350_000, currency: 'USD', estimated_close_date: '2027-03-30', description: null, est_completion_date: null, consumption_recurring: 12_000, solution_area: 'Cloud and AI Platforms', technical_capability: 'Analytics', budget_amount: null, budget_status: null, purchase_timeframe: null, timeline: null, purchase_process: null, decision_maker: null, need: null, customer_need: null, customer_pain_points: null, current_situation: null, proposed_solution: null, final_decision_date: null, identify_competitors: null, identify_customer_contacts: null, close_probability: 40, opportunity_rating: 2, qualification_comments: null, primary_competitor_id: null, other_competitor: null, forecast_category: 100000002 },
   // Showcase: greenfield discovery candidate. Present in the opportunity table (so it can enter the Portfolio on milestone join) and in the discovery catalog, but with NO Deal Team and NO milestone membership — the user expands it in Discovery and joins its milestone team.
-  { id: 'disc-contoso-greenfield', account_id: 'account-contoso', name: 'Greenfield AI expansion (join a milestone in Discovery)', owner_id: null, recorded_stage: 2, estimated_value: 2_050_000, currency: 'USD', estimated_close_date: '2027-04-18', description: null, est_completion_date: null, consumption_recurring: null, solution_area: 'Cloud and AI Platforms', technical_capability: 'Azure AI and ML', budget_amount: null, budget_status: null, purchase_timeframe: null, timeline: null, purchase_process: null, decision_maker: null, need: null, customer_need: null, customer_pain_points: null, current_situation: null, proposed_solution: null, final_decision_date: null, identify_competitors: null, identify_customer_contacts: null, close_probability: 30, opportunity_rating: 2, qualification_comments: null, primary_competitor_id: null, other_competitor: null, forecast_category: 100000002 }
+  { id: 'disc-contoso-greenfield', account_id: 'account-contoso', name: 'Greenfield AI expansion (join a milestone in Discovery)', owner_id: null, recorded_stage: 2, estimated_value: 2_050_000, currency: 'USD', estimated_close_date: '2027-04-18', description: null, est_completion_date: null, consumption_recurring: null, solution_area: 'Cloud and AI Platforms', technical_capability: 'Azure AI and ML', budget_amount: null, budget_status: null, purchase_timeframe: null, timeline: null, purchase_process: null, decision_maker: null, need: null, customer_need: null, customer_pain_points: null, current_situation: null, proposed_solution: null, final_decision_date: null, identify_competitors: null, identify_customer_contacts: null, close_probability: 30, opportunity_rating: 2, qualification_comments: null, primary_competitor_id: null, other_competitor: null, forecast_category: 100000002 },
+  ...additionalSampleOpportunities.map((opportunity) => ({
+    id: opportunity.id,
+    account_id: opportunity.accountId,
+    name: opportunity.name,
+    owner_id: opportunity.owner ? additionalOwnerId(opportunity.owner) : null,
+    recorded_stage: opportunity.recordedStage,
+    estimated_value: opportunity.value,
+    currency: opportunity.currency,
+    estimated_close_date: opportunity.closeDate
+  }))
 ]
 
 const UNCOMMITTED = 861980000
@@ -111,7 +149,27 @@ export const seedMilestones: readonly Row[] = [
   // Showcase: milestone-team-only opportunity — the user is on this milestone team (seedMilestoneTeam) but not the Deal Team.
   { id: 'ms-only-review', opportunity_id: 'opp-ms-only-showcase', name: 'Executive alignment review', status: 861980000, milestone_date: '2027-01-20', owner_id: 'user-avery', commitment: COMMITTED, monthly_use: 1200, risk_details: null, forecast_comments: null, conversation: null, customer_budget_approved: 606820000 },
   // Showcase: greenfield discovery milestone — no membership, so the user can join it from Discovery.
-  { id: 'ms-greenfield-outcome', opportunity_id: 'disc-contoso-greenfield', name: 'Customer outcome validation', status: 861980000, milestone_date: '2027-02-10', owner_id: null, commitment: UNCOMMITTED, monthly_use: null, risk_details: null, forecast_comments: null, conversation: null, customer_budget_approved: null }
+  { id: 'ms-greenfield-outcome', opportunity_id: 'disc-contoso-greenfield', name: 'Customer outcome validation', status: 861980000, milestone_date: '2027-02-10', owner_id: null, commitment: UNCOMMITTED, monthly_use: null, risk_details: null, forecast_comments: null, conversation: null, customer_budget_approved: null },
+  ...additionalSampleMilestones.map((milestone) => ({
+    id: milestone.id,
+    opportunity_id: milestone.opportunityId,
+    name: milestone.name,
+    status: milestone.status === 'Completed'
+      ? 861980003
+      : milestone.status === 'At Risk'
+        ? 861980001
+        : milestone.status === 'Blocked'
+          ? 861980002
+          : 861980000,
+    milestone_date: milestone.targetDate ?? null,
+    owner_id: milestone.owner ? additionalOwnerId(milestone.owner) : null,
+    commitment: milestone.commitment === 'Committed' ? COMMITTED : UNCOMMITTED,
+    monthly_use: milestone.estimatedMonthlyUsage ?? null,
+    risk_details: milestone.riskDetails ?? null,
+    forecast_comments: milestone.comments ?? null,
+    conversation: null,
+    customer_budget_approved: null
+  }))
 ]
 
 export const seedContacts: readonly Row[] = [

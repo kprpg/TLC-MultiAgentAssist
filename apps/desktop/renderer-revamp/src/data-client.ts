@@ -70,6 +70,12 @@ import { milestoneRecommendations, summarizeMilestones } from '../../../../packa
 import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest, type VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema, type SellerDashboardRequest, type SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
 import { createSampleSellerDashboard } from '../../../../packages/common/fixtures/seller-dashboard.js'
+import {
+    additionalSampleAccounts,
+    additionalSampleMilestones,
+    additionalSampleObservationsByOpportunity,
+    additionalSampleOpportunities
+} from '../../../../packages/common/fixtures/additional-sample-portfolio.js'
 
 export interface RevampDataClient {
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
@@ -291,7 +297,8 @@ const accounts: Account[] = [
     { id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise', tpid: '1000002' },
     { id: 'account-northwind', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003' },
     { id: 'account-zava', name: 'Zava Inc.', segment: 'Strategic', tpid: '1000004' },
-    { id: 'account-adventureworks', name: 'Adventure Works Cycles', segment: 'Enterprise', tpid: '1000005' }
+    { id: 'account-adventureworks', name: 'Adventure Works Cycles', segment: 'Enterprise', tpid: '1000005' },
+    ...additionalSampleAccounts
 ]
 
 const opportunities: Opportunity[] = [
@@ -305,7 +312,8 @@ const opportunities: Opportunity[] = [
     { id: 'opp-customer-data-platform', accountId: 'account-fabrikam', name: 'Customer data platform - ready to advance', owner: 'Morgan Lee', recordedStage: 2, value: 3200000, currency: 'USD', closeDate: '2027-01-15' },
     { id: 'opp-zava-ai-platform', accountId: 'account-zava', name: 'Zava AI platform foundation', owner: 'Avery Johnson', recordedStage: 2, value: 2900000, currency: 'USD', closeDate: '2027-04-02' },
     { id: 'opp-zava-migration', accountId: 'account-zava', name: 'Zava datacenter exit', recordedStage: 1, value: 1600000, currency: 'USD', closeDate: '2027-05-28' },
-    { id: 'opp-aw-commerce', accountId: 'account-adventureworks', name: 'Adventure Works commerce replatform', owner: 'Morgan Diaz', recordedStage: 3, value: 3100000, currency: 'USD', closeDate: '2027-01-08' }
+    { id: 'opp-aw-commerce', accountId: 'account-adventureworks', name: 'Adventure Works commerce replatform', owner: 'Morgan Diaz', recordedStage: 3, value: 3100000, currency: 'USD', closeDate: '2027-01-08' },
+    ...additionalSampleOpportunities
 ]
 
 const discoverableOpportunities: DiscoverableOpportunity[] = [
@@ -343,16 +351,19 @@ function sampleAccountRows(includeHidden = false): Account[] {
         .filter((account) => includeHidden || account.visibility !== 'hidden')
 }
 
-const milestones: Milestone[] = opportunities.flatMap((opportunity, index) => [{
-    id: `${opportunity.id}-milestone`,
-    opportunityId: opportunity.id,
-    name: index % 2 === 0 ? 'Customer outcome validation' : 'Technical validation workshop',
-    status: index % 3 === 0 ? 'On track' : 'In progress',
-    targetDate: opportunity.closeDate,
-    estimatedMonthlyUsage: opportunity.value / 12,
-    owner: opportunity.owner ?? 'Account team',
-    commitment: index % 2 === 0 ? 'Committed' : 'Best case'
-}])
+const milestones: Milestone[] = opportunities.flatMap((opportunity, index) => {
+    const shared = additionalSampleMilestones.filter((milestone) => milestone.opportunityId === opportunity.id)
+    return shared.length > 0 ? shared : [{
+        id: `${opportunity.id}-milestone`,
+        opportunityId: opportunity.id,
+        name: index % 2 === 0 ? 'Customer outcome validation' : 'Technical validation workshop',
+        status: index % 3 === 0 ? 'On track' : 'In progress',
+        targetDate: opportunity.closeDate,
+        estimatedMonthlyUsage: opportunity.value / 12,
+        owner: opportunity.owner ?? 'Account team',
+        commitment: index % 2 === 0 ? 'Committed' : 'Best case'
+    }]
+})
 // A representative subset of milestones the signed-in sample user is on, so both the "+" (join)
 // and "-" (leave) states are visible in the in-browser sample. Independent of Deal Team membership.
 const milestoneTeamIds = new Set(milestones.filter((_milestone, index) => index % 2 === 0).map((milestone) => milestone.id))
@@ -375,10 +386,12 @@ const milestoneActivities: MilestoneActivity[] = [{
 }]
 let webSampleActivitySequence = 0
 const criteriaLabels = ['Customer outcome', 'Decision team', 'Technical validation', 'Business case', 'Next committed step']
+const criteriaIds = ['customer-outcome', 'decision-team', 'technical-validation', 'business-case', 'next-step'] as const
 const roleByStage = ['Account Executive', 'Specialist / SSP', 'Solution Engineer', 'Cloud Solution Architect', 'CSAM']
 
 function buildWebEvaluation(opportunity: Opportunity, opportunityMilestones: readonly Milestone[] = []): McemResponse {
     const readyToAdvance = opportunity.name.includes('ready to advance')
+    const sharedObservations = additionalSampleObservationsByOpportunity[opportunity.id]
     const evidenceBasedStage = readyToAdvance ? Math.min(5, opportunity.recordedStage + 1) : Math.max(1, opportunity.recordedStage - 1)
     const generatedAt = new Date().toISOString()
     const evidenceIds = [`web-msx-${opportunity.id}`, `web-mcem-stage-${opportunity.recordedStage}`]
@@ -410,17 +423,22 @@ function buildWebEvaluation(opportunity: Opportunity, opportunityMilestones: rea
         summary: milestoneSummary.headline ? `${baseSummary} ${milestoneSummary.headline}` : baseSummary,
         recordedStage: opportunity.recordedStage,
         evidenceBasedStage,
-        criteria: criteriaLabels.map((label, index) => ({
-            id: `criterion-${index + 1}`,
-            label,
-            status: readyToAdvance || index < 2 ? 'met' : index === 2 ? 'partial' : 'missing',
-            rationale: readyToAdvance
-                ? `${label} evidence is documented and customer validated.`
-                : index < 2 ? `${label} evidence is documented.` : `${label} requires customer confirmation.`,
-            evidenceIds
-        })),
+        criteria: criteriaLabels.map((label, index) => {
+            const observation = sharedObservations?.find((item) => item.criterionId === criteriaIds[index])
+            return {
+                id: criteriaIds[index] ?? `criterion-${index + 1}`,
+                label,
+                status: observation?.status ?? (readyToAdvance || index < 2 ? 'met' : index === 2 ? 'partial' : 'missing'),
+                rationale: observation?.detail ?? (readyToAdvance
+                    ? `${label} evidence is documented and customer validated.`
+                    : index < 2 ? `${label} evidence is documented.` : `${label} requires customer confirmation.`),
+                evidenceIds
+            }
+        }),
         recommendations: [...baseRecommendations, ...milestoneRecs],
-        missingData: readyToAdvance ? [] : ['Validated business case', 'Customer-confirmed next step'],
+        missingData: sharedObservations
+            ? sharedObservations.filter((observation) => observation.status !== 'met').map((observation) => observation.detail)
+            : readyToAdvance ? [] : ['Validated business case', 'Customer-confirmed next step'],
         evidence: [
             { id: evidenceIds[0]!, source: 'msx', recordId: opportunity.id, title: 'Sanitized MSX opportunity snapshot', retrievedAt: generatedAt, accessContext: 'sample', quality: 'observed', excerpt: 'Static web preview data; no live MSX request was made.' },
             { id: evidenceIds[1]!, source: 'mcem', recordId: `stage-${opportunity.recordedStage}`, title: `MCEM Stage ${opportunity.recordedStage} guidance`, retrievedAt: generatedAt, accessContext: 'sample', quality: 'authoritative', excerpt: 'Versioned stage criteria used for the sample evaluation.' }

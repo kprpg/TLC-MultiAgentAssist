@@ -24,6 +24,8 @@ import { DiscoveryControls, DiscoverySortHeader } from '../../../shared/discover
 import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportunities, toggleDiscoverySort, type DiscoveryFilters, type DiscoverySort } from '../../../shared/discovery.js'
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
+import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
+import { workflowGuidanceCapability } from '../../../shared/workflow-guidance.js'
 import type {
     AccountCandidateView,
     AccountView,
@@ -49,24 +51,8 @@ import type {
 type Tab = 'portfolio' | 'plays' | 'discover' | 'dashboard'
 type Loadable<T> = { status: 'idle' | 'loading' | 'error' | 'ready'; data?: T; error?: string }
 
-// Routes each Play's queue-item guidance handoff to the most relevant agent.
-const GUIDANCE_AGENT_BY_WORKFLOW: Readonly<Record<string, AgentCapability>> = {
-    'WF-001': 'pursuit-executive',
-    'WF-002': 'mcem-coach',
-    'WF-003': 'mcem-coach',
-    'WF-004': 'pursuit-executive',
-    'WF-005': 'mcem-coach',
-    'WF-006': 'risk-solution-play',
-    'WF-007': 'account-pulse',
-    'WF-008': 'risk-solution-play',
-    'WF-009': 'account-pulse',
-    'WF-010': 'account-pulse',
-    'WF-011': 'account-pulse',
-    'WF-012': 'mcem-coach'
-}
-
 function guidanceAgentFor(workflowId: string): AgentCapability {
-    return GUIDANCE_AGENT_BY_WORKFLOW[workflowId] ?? 'mcem-coach'
+    return workflowGuidanceCapability(workflowId)
 }
 
 function agentLabel(capability: AgentCapability): string {
@@ -777,13 +763,12 @@ function MilestonesEditor({ opportunityId, currency, milestones, onChanged, onNo
     const [edit, setEdit] = useState<{ milestoneId: string; field: (typeof MILESTONE_FIELDS)[number]['id']; value: string } | undefined>(undefined)
     const [saving, setSaving] = useState(false)
     const [membershipBusyId, setMembershipBusyId] = useState<string | undefined>(undefined)
+    const [pendingMembershipRemoval, setPendingMembershipRemoval] = useState<MilestoneView | undefined>(undefined)
     const [activitiesForId, setActivitiesForId] = useState<string | undefined>(undefined)
 
     const sorted = sortMilestones(filterVisibleMilestones(milestones), sortBy, direction)
 
-    const toggleMilestoneTeam = useCallback(async (milestone: MilestoneView) => {
-        const joining = milestone.onMilestoneTeam !== true
-        if (!joining && !window.confirm(`Remove yourself from the team for milestone "${milestone.name}"? If this is your only membership on the opportunity, the opportunity will leave your Portfolio.`)) return
+    const updateMilestoneTeam = useCallback(async (milestone: MilestoneView, joining: boolean) => {
         setMembershipBusyId(milestone.id)
         try {
             if (joining) await dataClient.joinMilestoneTeam(opportunityId, milestone.id)
@@ -795,6 +780,14 @@ function MilestonesEditor({ opportunityId, currency, milestones, onChanged, onNo
             setMembershipBusyId(undefined)
         }
     }, [opportunityId, onChanged, onNote])
+
+    const toggleMilestoneTeam = useCallback((milestone: MilestoneView) => {
+        if (milestone.onMilestoneTeam) {
+            setPendingMembershipRemoval(milestone)
+            return
+        }
+        void updateMilestoneTeam(milestone, true)
+    }, [updateMilestoneTeam])
 
     const save = useCallback(async () => {
         if (!edit) return
@@ -817,6 +810,7 @@ function MilestonesEditor({ opportunityId, currency, milestones, onChanged, onNo
     }, [edit, opportunityId, onChanged, onNote])
 
     return (
+        <>
         <div>
             <div className="list-toolbar">
                 <label>Sort
@@ -915,6 +909,17 @@ function MilestonesEditor({ opportunityId, currency, milestones, onChanged, onNo
                 </table>
             </div>
         </div>
+        {pendingMembershipRemoval && <MembershipRemovalPrompt
+            title="Remove from milestone team"
+            message={`Remove yourself from the team for milestone "${pendingMembershipRemoval.name}"? The opportunity remains in Portfolio if you are still on its Deal Team or another milestone team.`}
+            busy={membershipBusyId === pendingMembershipRemoval.id}
+            onCancel={() => setPendingMembershipRemoval(undefined)}
+            onConfirm={async () => {
+                await updateMilestoneTeam(pendingMembershipRemoval, false)
+                setPendingMembershipRemoval(undefined)
+            }}
+        />}
+        </>
     )
 }
 
@@ -1613,6 +1618,11 @@ function DiscoverPanel(): ReactElement {
     const [discoverMilestones, setDiscoverMilestones] = useState<Record<string, MilestoneView[]>>({})
     const [milestonesLoadingId, setMilestonesLoadingId] = useState<string | undefined>(undefined)
     const [milestoneBusyId, setMilestoneBusyId] = useState<string | undefined>(undefined)
+    const [pendingMembershipRemoval, setPendingMembershipRemoval] = useState<
+        { kind: 'deal-team'; item: DiscoverableOpportunityView }
+        | { kind: 'milestone-team'; opportunityId: string; milestone: MilestoneView }
+        | undefined
+    >(undefined)
     const opportunities = items.data ?? []
     const visibleOpportunities = sortDiscoveryOpportunities(filterDiscoveryOpportunities(opportunities, filters), sort)
     const customers = discoveryCustomers([
@@ -1654,7 +1664,6 @@ function DiscoverPanel(): ReactElement {
     }
 
     const leave = async (item: DiscoverableOpportunityView): Promise<void> => {
-        if (!window.confirm(`Remove yourself from the Deal Team for "${item.name}"? It will be removed from Portfolio and downstream analysis.`)) return
         setJoining(item.id)
         setNote(undefined)
         try {
@@ -1685,9 +1694,7 @@ function DiscoverPanel(): ReactElement {
         }
     }
 
-    const toggleMilestone = async (opportunityId: string, milestone: MilestoneView): Promise<void> => {
-        const joiningMilestone = milestone.onMilestoneTeam !== true
-        if (!joiningMilestone && !window.confirm(`Remove yourself from the team for milestone "${milestone.name}"? If this is your only membership on the opportunity, the opportunity will leave your Portfolio.`)) return
+    const updateMilestoneTeam = async (opportunityId: string, milestone: MilestoneView, joiningMilestone: boolean): Promise<void> => {
         setMilestoneBusyId(milestone.id)
         setNote(undefined)
         try {
@@ -1703,6 +1710,22 @@ function DiscoverPanel(): ReactElement {
         } finally {
             setMilestoneBusyId(undefined)
         }
+    }
+
+    const toggleMilestone = (opportunityId: string, milestone: MilestoneView): void => {
+        if (milestone.onMilestoneTeam) {
+            setPendingMembershipRemoval({ kind: 'milestone-team', opportunityId, milestone })
+            return
+        }
+        void updateMilestoneTeam(opportunityId, milestone, true)
+    }
+
+    const confirmMembershipRemoval = async (): Promise<void> => {
+        const pending = pendingMembershipRemoval
+        if (!pending) return
+        if (pending.kind === 'deal-team') await leave(pending.item)
+        else await updateMilestoneTeam(pending.opportunityId, pending.milestone, false)
+        setPendingMembershipRemoval(undefined)
     }
 
     return (
@@ -1742,7 +1765,7 @@ function DiscoverPanel(): ReactElement {
                                     <td>{item.recordedStage}</td>
                                     <td>
                                         {item.onDealTeam
-                                            ? <span className="deal-team-actions"><span className="deal-team-joined">On deal team</span><button className="link danger-link" disabled={joining === item.id} onClick={() => void leave(item)}>{joining === item.id ? 'Removing…' : 'Remove me'}</button></span>
+                                            ? <span className="deal-team-actions"><span className="deal-team-joined">On deal team</span><button className="link danger-link" disabled={joining === item.id} onClick={() => setPendingMembershipRemoval({ kind: 'deal-team', item })}>{joining === item.id ? 'Removing…' : 'Remove me'}</button></span>
                                             : <button className="tab" disabled={joining === item.id} onClick={() => void join(item.id)}>{joining === item.id ? 'Adding…' : 'Add me'}</button>}
                                     </td>
                                 </tr>
@@ -1774,6 +1797,17 @@ function DiscoverPanel(): ReactElement {
                     </table>
                 </div>
             )}
+            {pendingMembershipRemoval && <MembershipRemovalPrompt
+                title={pendingMembershipRemoval.kind === 'deal-team' ? 'Remove from Deal Team' : 'Remove from milestone team'}
+                message={pendingMembershipRemoval.kind === 'deal-team'
+                    ? `Remove yourself from the Deal Team for "${pendingMembershipRemoval.item.name}"? The opportunity remains in Portfolio if you still belong to one of its milestone teams.`
+                    : `Remove yourself from the team for milestone "${pendingMembershipRemoval.milestone.name}"? The opportunity remains in Portfolio if you are still on its Deal Team or another milestone team.`}
+                busy={pendingMembershipRemoval.kind === 'deal-team'
+                    ? joining === pendingMembershipRemoval.item.id
+                    : milestoneBusyId === pendingMembershipRemoval.milestone.id}
+                onCancel={() => setPendingMembershipRemoval(undefined)}
+                onConfirm={confirmMembershipRemoval}
+            />}
         </section>
     )
 }

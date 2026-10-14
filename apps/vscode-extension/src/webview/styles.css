@@ -1894,6 +1894,69 @@ textarea {
     background: rgba(0, 0, 0, 0.45);
 }
 
+.membership-removal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 110;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.45);
+}
+
+.membership-removal-dialog {
+    width: min(440px, 100%);
+    max-height: calc(100vh - 48px);
+    overflow: auto;
+    padding: 20px;
+    color: var(--vscode-foreground);
+    background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border));
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.membership-removal-dialog h2 {
+    margin: 0 0 10px;
+    font-size: 18px;
+}
+
+.membership-removal-dialog p {
+    margin: 0;
+}
+
+.membership-removal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 20px;
+}
+
+.membership-removal-actions button {
+    min-height: 30px;
+    padding: 4px 12px;
+    border: 1px solid var(--vscode-button-border, transparent);
+    border-radius: 2px;
+    cursor: pointer;
+}
+
+.membership-removal-cancel {
+    color: var(--vscode-button-secondaryForeground);
+    background: var(--vscode-button-secondaryBackground);
+}
+
+.membership-removal-confirm {
+    color: var(--vscode-button-foreground);
+    background: var(--vscode-inputValidation-errorBackground, #a1260d);
+    border-color: var(--vscode-inputValidation-errorBorder, #be1100) !important;
+}
+
+.membership-removal-actions button:disabled {
+    cursor: default;
+    opacity: 0.6;
+}
+
 .meeting-modal {
     width: 760px;
     max-width: 96vw;

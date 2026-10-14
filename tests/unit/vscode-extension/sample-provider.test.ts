@@ -12,9 +12,29 @@ import {
 describe('vscode-extension sample data', () => {
     it('lists sanitized accounts and opportunities', () => {
         const accounts = listSampleAccounts()
-        expect(accounts.length).toBeGreaterThan(0)
+        expect(accounts.map((account) => account.name)).toEqual([
+            'Contoso Energy',
+            'Fabrikam Retail',
+            'Zava Inc.',
+            'Adventure Works Cycles',
+            'Fourth Coffee',
+            'Tailspin Toys',
+            'Wide World Importers',
+            'Woodgrove Bank'
+        ])
         const opportunities = listSampleOpportunities(accounts[0]!.id)
         expect(opportunities.every((opportunity) => opportunity.accountId === accounts[0]!.id)).toBe(true)
+    })
+
+    it('uses the shared enriched milestone permutations', () => {
+        const milestones = listSampleMilestones('opp-tailspin-ecommerce')
+        expect(milestones).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'ms-tailspin-commerce-discovery', status: 'In Progress' }),
+            expect.objectContaining({ id: 'ms-tailspin-commerce-security', status: 'Blocked' }),
+            expect.objectContaining({ id: 'ms-tailspin-commerce-sponsor', status: 'At Risk' })
+        ]))
+        expect(milestones.find((milestone) => milestone.id === 'ms-tailspin-commerce-security')).not.toHaveProperty('targetDate')
+        expect(milestones.find((milestone) => milestone.id === 'ms-tailspin-commerce-sponsor')).not.toHaveProperty('owner')
     })
 
     it('gives each opportunity several distinct milestones', () => {
@@ -31,6 +51,20 @@ describe('vscode-extension sample data', () => {
         const evaluation = buildSampleEvaluation(opportunity, () => '2026-09-15T00:00:00.000Z')
         expect(evaluation.state).toBe('complete')
         expect(evaluation.criteria.length).toBe(5)
+    })
+
+    it('uses shared criterion observations for enriched opportunities', () => {
+        const opportunity = findSampleOpportunity('opp-tailspin-ecommerce')!
+        const evaluation = buildSampleEvaluation(opportunity, () => '2026-09-15T00:00:00.000Z')
+        expect(evaluation.criteria.map((criterion) => criterion.status)).toEqual([
+            'partial',
+            'missing',
+            'missing',
+            'partial',
+            'partial'
+        ])
+        expect(evaluation.criteria[1]?.rationale).toContain('executive sponsor')
+        expect(evaluation.missingData).toHaveLength(5)
     })
 
     it('builds a schema-valid agent response', () => {

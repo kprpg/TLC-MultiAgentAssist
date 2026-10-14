@@ -18,16 +18,17 @@ describe('MCEM Coach thin slice', () => {
     const accounts = await connector.listAccounts()
     const opportunities = (await Promise.all(accounts.map((account) => connector.listOpportunities(account.id)))).flat()
 
-    expect(accounts).toHaveLength(4)
-    expect(opportunities).toHaveLength(15)
+    expect(accounts).toHaveLength(8)
+    expect(opportunities).toHaveLength(23)
     expect(new Set(opportunities.map((opportunity) => opportunity.recordedStage))).toEqual(new Set([1, 2, 3, 4]))
 
+    const observationStatuses = new Set<string>()
     for (const opportunity of opportunities) {
       const context = await connector.getOpportunityContext(opportunity.id)
-      const statuses = new Set(context.observations.map((observation) => observation.status))
       expect(context.observations.length).toBeGreaterThanOrEqual(4)
-      expect(statuses.has('met')).toBe(true)
+      context.observations.forEach((observation) => observationStatuses.add(observation.status))
     }
+    expect(observationStatuses).toEqual(new Set(['met', 'partial', 'missing']))
   })
 
   it.each([

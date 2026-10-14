@@ -19,6 +19,12 @@ import {
   type OpportunityUpdate,
   type SeDomainId
 } from '../../common/index.js'
+import {
+  additionalSampleAccounts,
+  additionalSampleMilestones,
+  additionalSampleObservationsByOpportunity,
+  additionalSampleOpportunities
+} from '../../common/fixtures/additional-sample-portfolio.js'
 import type { MsxConnector, OpportunityContext } from '../common/index.js'
 
 export {
@@ -35,7 +41,8 @@ const accounts: Account[] = [
   { id: 'account-fabrikam', name: 'Fabrikam Retail', segment: 'Enterprise', tpid: '1000002' },
   { id: 'account-northwind', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003' },
   { id: 'account-zava', name: 'Zava Inc.', segment: 'Strategic', tpid: '1000004' },
-  { id: 'account-adventureworks', name: 'Adventure Works Cycles', segment: 'Enterprise', tpid: '1000005' }
+  { id: 'account-adventureworks', name: 'Adventure Works Cycles', segment: 'Enterprise', tpid: '1000005' },
+  ...additionalSampleAccounts
 ]
 
 const opportunities: Opportunity[] = [
@@ -176,12 +183,15 @@ const opportunities: Opportunity[] = [
     value: 3100000,
     currency: 'USD',
     closeDate: '2027-01-08'
-  }
+  },
+  ...additionalSampleOpportunities
 ]
 
 const milestonesByOpportunity: Record<string, Milestone[]> = Object.fromEntries(opportunities.map((opportunity) => [
   opportunity.id,
-  [{
+  additionalSampleMilestones.filter((milestone) => milestone.opportunityId === opportunity.id).length > 0
+    ? additionalSampleMilestones.filter((milestone) => milestone.opportunityId === opportunity.id)
+    : [{
     id: `${opportunity.id}-milestone`,
     opportunityId: opportunity.id,
     name: 'Customer outcome validation',
@@ -189,10 +199,14 @@ const milestonesByOpportunity: Record<string, Milestone[]> = Object.fromEntries(
     targetDate: opportunity.closeDate,
     owner: 'Account team',
     commitment: 'Best case'
-  }]
+    }]
 ]))
 
 const observationsByOpportunity: Record<string, OpportunityContext['observations']> = {
+  ...Object.fromEntries(Object.entries(additionalSampleObservationsByOpportunity).map(([opportunityId, observations]) => [
+    opportunityId,
+    [...observations]
+  ])),
   'opp-grid-modernization': [
     { criterionId: 'customer-outcome', status: 'partial', detail: 'Reliability improvement is named but has no baseline or target.' },
     { criterionId: 'decision-team', status: 'missing', detail: 'Economic buyer and procurement path are not recorded.' },

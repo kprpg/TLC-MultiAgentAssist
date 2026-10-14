@@ -210,10 +210,15 @@ export function MeetingCaptureLauncher({ client, opportunityId, opportunityName,
 
     useEffect(() => {
         setOpen(false); setProposal(undefined); setPasteContent(''); setTranscriptId(''); setTab('pick')
+        setTranscripts([])
+    }, [opportunityId])
+
+    useEffect(() => {
+        if (!open || tab !== 'pick') return
         client.listMeetingTranscripts(opportunityId)
             .then((list) => { setTranscripts(list); if (list[0]) setTranscriptId(list[0].id) })
             .catch(() => setTranscripts([]))
-    }, [client, opportunityId])
+    }, [client, opportunityId, open, tab])
 
     useEffect(() => {
         if (!open) return

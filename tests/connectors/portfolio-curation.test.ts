@@ -24,7 +24,11 @@ describe('portfolio account curation', () => {
       'account-contoso',
       'account-fabrikam',
       'account-zava',
-      'account-adventureworks'
+      'account-adventureworks',
+      'account-fourth-coffee',
+      'account-tailspin-toys',
+      'account-wide-world-importers',
+      'account-woodgrove-bank'
     ])
 
     const candidates = await connector.searchAccounts({ matchBy: 'name', query: 'Northwind' })
