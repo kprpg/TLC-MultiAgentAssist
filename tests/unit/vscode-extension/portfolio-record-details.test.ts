@@ -12,6 +12,7 @@ describe('portfolio record details', () => {
             accountId: 'account-1',
             name: 'Grid operations modernization',
             owner: 'Avery Johnson',
+            opportunityIntent: ['Billed', 'Consumption'],
             recordedStage: 3,
             value: 4_200_000,
             currency: 'USD',
@@ -23,6 +24,7 @@ describe('portfolio record details', () => {
             title: opportunity.name,
             details: [
                 { label: 'Opportunity owner', value: 'Avery Johnson' },
+                { label: 'Opportunity intent', value: 'Billed, Consumption' },
                 { label: 'Stage owner', value: 'Solution Engineer' },
                 { label: 'Recorded stage', value: '3' },
                 { label: 'Value', value: '$4.2M' },

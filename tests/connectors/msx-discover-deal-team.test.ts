@@ -21,7 +21,7 @@ describe('LiveMsxConnector.discoverOpportunities', () => {
           discoverFilter = filter
           return json({
             value: [
-              { opportunityid: 'opp-existing', _parentaccountid_value: 'account-a', '_parentaccountid_value@OData.Community.Display.V1.FormattedValue': 'Alpha', name: 'Already mine', msp_activesalesstage: 2, estimatedvalue: 1000, 'msp_solutionarea@OData.Community.Display.V1.FormattedValue': 'Cloud and AI Platforms', 'msp_technicalcapability@OData.Community.Display.V1.FormattedValue': 'Advanced Networking' },
+              { opportunityid: 'opp-existing', _parentaccountid_value: 'account-a', '_parentaccountid_value@OData.Community.Display.V1.FormattedValue': 'Alpha', name: 'Already mine', msp_activesalesstage: 2, estimatedvalue: 1000, 'msp_solutionarea@OData.Community.Display.V1.FormattedValue': 'Cloud and AI Platforms', 'msp_technicalcapability@OData.Community.Display.V1.FormattedValue': 'Advanced Networking', 'msp_opportunitytype@OData.Community.Display.V1.FormattedValue': 'Billed; Consumption' },
               { opportunityid: 'opp-new', _parentaccountid_value: 'account-b', '_parentaccountid_value@OData.Community.Display.V1.FormattedValue': 'Beta', name: 'New infra deal', msp_activesalesstage: 1, estimatedvalue: 2000, 'msp_technicalcapability@OData.Community.Display.V1.FormattedValue': 'Azure Arc' },
               { opportunityid: 'opp-unassigned', _parentaccountid_value: 'account-z', name: 'Not my account', msp_activesalesstage: 1, estimatedvalue: 500, 'msp_technicalcapability@OData.Community.Display.V1.FormattedValue': 'Azure Arc' }
             ]
@@ -43,7 +43,7 @@ describe('LiveMsxConnector.discoverOpportunities', () => {
     // Scoped to assigned accounts: an opportunity in an unassigned account is excluded.
     expect(results.map((item) => item.id)).toEqual(['opp-existing', 'opp-new'])
     expect(results).toEqual([
-      expect.objectContaining({ id: 'opp-existing', domain: 'infra', onDealTeam: true, accountName: 'Alpha', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'Advanced Networking' }),
+      expect.objectContaining({ id: 'opp-existing', domain: 'infra', onDealTeam: true, accountName: 'Alpha', opportunityIntent: ['Billed', 'Consumption'], solutionArea: 'Cloud and AI Platforms', technicalCapability: 'Advanced Networking' }),
       expect.objectContaining({ id: 'opp-new', domain: 'infra', onDealTeam: false, accountName: 'Beta', technicalCapability: 'Azure Arc' })
     ])
   })

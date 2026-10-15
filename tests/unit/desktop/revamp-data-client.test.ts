@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDataClient, createWebApiClient } from '../../../apps/desktop/renderer-revamp/src/data-client.js'
-import { contractVersion } from '../../../packages/common/index.js'
+import { contractVersion, workflowContractVersion } from '../../../packages/common/index.js'
 
 describe('revamp live web data client', () => {
     it('uses the account-curation and Deal Team removal routes', async () => {
@@ -33,7 +33,7 @@ describe('revamp live web data client', () => {
 
     it('uses the shared guidance envelope over the desktop IPC bridge', async () => {
         const handoff = {
-            contractVersion,
+            contractVersion: workflowContractVersion,
             workflowId: 'WF-003',
             resultRef: 'result-1',
             capability: 'mcem-coach',
@@ -48,7 +48,7 @@ describe('revamp live web data client', () => {
             '11111111-1111-4111-8111-111111111111', 'queue-1', 'mcem-coach'
         )).resolves.toEqual(handoff)
         expect(invokeWorkflow).toHaveBeenCalledWith('guidance', {
-            contractVersion,
+            contractVersion: workflowContractVersion,
             runId: '11111111-1111-4111-8111-111111111111',
             queueItemId: 'queue-1',
             capability: 'mcem-coach'
@@ -60,7 +60,7 @@ describe('revamp live web data client', () => {
         const runId = '11111111-1111-4111-8111-111111111111'
         const correlationId = '22222222-2222-4222-8222-222222222222'
         const definition = {
-            contractVersion, id: 'WF-001', name: 'Pipeline review', version: '1.0.0', scope: 'portfolio',
+            contractVersion: workflowContractVersion, id: 'WF-001', name: 'Pipeline review', version: '1.0.0', scope: 'portfolio',
             personaTargets: ['AE'], category: 'portfolio-hygiene', executionMode: 'deterministic',
             connectorPlan: [{ connector: 'dataverse-mcp', operation: 'read_query', required: true }],
             inputSchemaRef: 'wf-001.input.v1', outputSchemaRef: 'wf-001.output.v1',
@@ -68,11 +68,11 @@ describe('revamp live web data client', () => {
             ui: { cardStyle: 'record-table', resultPriority: 'high', showInQuickLaunch: true }
         }
         const run = {
-            contractVersion, runId, workflowId: 'WF-001', status: 'queued', scope: { kind: 'portfolio' },
+            contractVersion: workflowContractVersion, runId, workflowId: 'WF-001', status: 'queued', scope: { kind: 'portfolio' },
             connectorCalls: [], telemetry: { correlationId, cacheHit: false }
         }
         const guidance = {
-            contractVersion,
+            contractVersion: workflowContractVersion,
             workflowId: 'WF-003',
             resultRef: 'result-1',
             capability: 'mcem-coach',
@@ -96,7 +96,7 @@ describe('revamp live web data client', () => {
             return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
         })
         const client = createWebApiClient(fetcher)
-        const startRequest = { contractVersion, workflowId: 'WF-001', scope: { kind: 'portfolio' as const }, input: {}, correlationId }
+        const startRequest = { contractVersion: workflowContractVersion, workflowId: 'WF-001', scope: { kind: 'portfolio' as const }, input: {}, correlationId }
 
         await client.listWorkflowDefinitions('portfolio')
         await client.startWorkflow(startRequest)
@@ -106,12 +106,12 @@ describe('revamp live web data client', () => {
         await expect(client.prepareWorkflowGuidance(runId, 'queue-1', 'mcem-coach')).resolves.toEqual(guidance)
 
         expect(fetcher.mock.calls.map(([path, init]) => [path, init?.body])).toEqual([
-            ['/api/workflows/list', JSON.stringify({ contractVersion, scope: 'portfolio' })],
+            ['/api/workflows/list', JSON.stringify({ contractVersion: workflowContractVersion, scope: 'portfolio' })],
             ['/api/workflows/start', JSON.stringify(startRequest)],
-            ['/api/workflows/get', JSON.stringify({ contractVersion, runId })],
-            ['/api/workflows/cancel', JSON.stringify({ contractVersion, runId })],
-            ['/api/workflows/history', JSON.stringify({ contractVersion, scope: { kind: 'portfolio' }, limit: 10 })],
-            ['/api/workflows/guidance', JSON.stringify({ contractVersion, runId, queueItemId: 'queue-1', capability: 'mcem-coach' })]
+            ['/api/workflows/get', JSON.stringify({ contractVersion: workflowContractVersion, runId })],
+            ['/api/workflows/cancel', JSON.stringify({ contractVersion: workflowContractVersion, runId })],
+            ['/api/workflows/history', JSON.stringify({ contractVersion: workflowContractVersion, scope: { kind: 'portfolio' }, limit: 10 })],
+            ['/api/workflows/guidance', JSON.stringify({ contractVersion: workflowContractVersion, runId, queueItemId: 'queue-1', capability: 'mcem-coach' })]
         ])
     })
 

@@ -34,6 +34,8 @@ describe('LiveMsxConnector', () => {
               name: 'Second opportunity',
               estimatedvalue: 0,
               msp_consumptionconsumedrecurring: 275000,
+              msp_opportunitytype: '606820001',
+              'msp_opportunitytype@OData.Community.Display.V1.FormattedValue': 'Consumption',
               description: null
             },
             { opportunityid: 'opp-2', _parentaccountid_value: 'account-a', name: 'First opportunity', msp_activesalesstage: 2, estimatedvalue: 1500000, description: null }
@@ -75,8 +77,9 @@ describe('LiveMsxConnector', () => {
     ])
     await expect(connector.listOpportunities('account-a')).resolves.toHaveLength(1)
     await expect(connector.listOpportunities('account-b')).resolves.toEqual([
-      expect.objectContaining({ id: 'opp-1', owner: 'Morgan Lee', value: 275000 })
+      expect.objectContaining({ id: 'opp-1', owner: 'Morgan Lee', opportunityIntent: ['Consumption'], value: 275000 })
     ])
+    expect(request.mock.calls.find(([input]) => String(input).includes('/opportunities'))?.[0].toString()).toContain('msp_opportunitytype')
     expect((await connector.listOpportunities('account-b'))[0]).not.toHaveProperty('comments')
     await expect(connector.listMilestones('opp-2')).resolves.toEqual([{
       id: 'milestone-1',

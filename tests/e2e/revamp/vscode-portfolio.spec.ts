@@ -30,10 +30,10 @@ const accounts: AccountView[] = [
     { id: 'hidden', name: 'Hidden customer', visibility: 'hidden' }
 ]
 const opportunities: OpportunityView[] = [
-    { id: 'alpha-one', accountId: 'alpha', name: 'Alpha analysis', recordedStage: 2, value: 100, currency: 'USD', closeDate: '2026-12-01' },
-    { id: 'alpha-two', accountId: 'alpha', name: 'Alpha renewal', recordedStage: 3, value: 200, currency: 'USD', closeDate: '2026-12-02' },
-    { id: 'beta-one', accountId: 'beta', name: 'Beta platform', recordedStage: 1, value: 300, currency: 'USD', closeDate: '2026-12-03' },
-    { id: 'hidden-one', accountId: 'hidden', name: 'Hidden project', recordedStage: 1, value: 400, currency: 'USD', closeDate: '2026-12-04' }
+    { id: 'alpha-one', accountId: 'alpha', name: 'Alpha analysis', opportunityIntent: ['Consumption'], recordedStage: 2, value: 100, currency: 'USD', closeDate: '2026-12-01' },
+    { id: 'alpha-two', accountId: 'alpha', name: 'Alpha renewal', opportunityIntent: ['Billed'], recordedStage: 3, value: 200, currency: 'USD', closeDate: '2026-12-02' },
+    { id: 'beta-one', accountId: 'beta', name: 'Beta platform', opportunityIntent: ['Billed', 'Consumption'], recordedStage: 1, value: 300, currency: 'USD', closeDate: '2026-12-03' },
+    { id: 'hidden-one', accountId: 'hidden', name: 'Hidden project', opportunityIntent: ['Billed'], recordedStage: 1, value: 400, currency: 'USD', closeDate: '2026-12-04' }
 ]
 
 async function mountWebview(page: Page): Promise<void> {
@@ -108,6 +108,9 @@ test('searches across the portfolio from other tabs, restores panels, and suppor
     const errors: Error[] = []
     page.on('pageerror', (error) => errors.push(error))
     await mountWebview(page)
+    const opportunityTable = page.locator('#portfolio-accounts-panel .opportunity-table')
+    await expect(opportunityTable.getByRole('columnheader', { name: 'Opportunity intent' })).toBeVisible()
+    await expect(opportunityTable.getByRole('row').filter({ hasText: 'Alpha analysis' }).getByRole('cell').nth(1)).toHaveText('Consumption')
     await page.getByRole('button', { name: 'Hide Accounts panel', exact: true }).click()
     await page.getByRole('button', { name: 'Hide opportunity details panel', exact: true }).click()
     await page.getByRole('button', { name: 'Discover', exact: true }).click()

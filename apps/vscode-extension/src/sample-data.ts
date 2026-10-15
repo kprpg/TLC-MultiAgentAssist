@@ -43,6 +43,7 @@ import {
     additionalSampleObservationsByOpportunity,
     additionalSampleOpportunities
 } from '../../../packages/common/fixtures/additional-sample-portfolio.js'
+import { withSampleOpportunityIntents } from '../../../packages/common/fixtures/sample-opportunity-intent.js'
 import { milestoneRecommendations, summarizeMilestones } from '../../../packages/agents/mcem-coach/src/milestone-signals.js'
 
 /**
@@ -64,7 +65,7 @@ const sampleAccounts: readonly Account[] = Object.freeze([
     ...additionalSampleAccounts
 ])
 
-const sampleOpportunities: readonly Opportunity[] = Object.freeze([
+const sampleOpportunities: readonly Opportunity[] = Object.freeze(withSampleOpportunityIntents([
     { id: 'opp-grid-modernization', accountId: 'account-contoso', name: 'Grid operations modernization', owner: 'Avery Johnson', recordedStage: 3, value: 4_200_000, currency: 'USD', closeDate: '2026-10-30' },
     { id: 'opp-cloud-security-readiness', accountId: 'account-contoso', name: 'Cloud security readiness', owner: 'Jordan Lee', recordedStage: 1, value: 900_000, currency: 'USD', closeDate: '2027-02-26' },
     { id: 'opp-data-estate-consolidation', accountId: 'account-contoso', name: 'Data estate consolidation', recordedStage: 2, value: 2_650_000, currency: 'USD', closeDate: '2027-01-29' },
@@ -77,7 +78,7 @@ const sampleOpportunities: readonly Opportunity[] = Object.freeze([
     { id: 'opp-zava-migration', accountId: 'account-zava', name: 'Zava datacenter exit', recordedStage: 1, value: 1_600_000, currency: 'USD', closeDate: '2027-05-28' },
     { id: 'opp-aw-commerce', accountId: 'account-adventureworks', name: 'Adventure Works commerce replatform', owner: 'Morgan Diaz', recordedStage: 3, value: 3_100_000, currency: 'USD', closeDate: '2027-01-08' },
     ...additionalSampleOpportunities
-].map((opportunity) => opportunitySchema.parse(opportunity)))
+].map((opportunity) => opportunitySchema.parse(opportunity))))
 
 function offsetDate(isoDate: string, days: number): string {
     const date = new Date(`${isoDate}T00:00:00.000Z`)

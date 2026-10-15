@@ -1245,6 +1245,7 @@ var opportunitySchema = z.object({
 	accountId: z.string().min(1),
 	name: z.string().min(1),
 	owner: z.string().min(1).optional(),
+	opportunityIntent: z.array(z.string().trim().min(1)).max(10).optional(),
 	recordedStage: z.number().int().min(1).max(5),
 	value: z.number().nonnegative(),
 	currency: z.string().length(3),
@@ -1373,7 +1374,7 @@ var discoverableOpportunitySchema = opportunitySchema.extend({
 	onDealTeam: z.boolean()
 });
 var mcemStageTransitionRequestSchema = z.object({
-	contractVersion: z.literal("1.0"),
+	contractVersion: z.literal("1.1"),
 	accountId: z.string().min(1),
 	opportunityId: z.string().min(1),
 	targetStage: z.number().int().min(1).max(5),
@@ -1443,21 +1444,21 @@ var recommendationSchema = z.object({
 	});
 });
 var mcemRequestSchema = z.object({
-	contractVersion: z.literal("1.0"),
+	contractVersion: z.literal("1.1"),
 	accountId: z.string().min(1),
 	opportunityId: z.string().min(1),
 	prompt: z.string().min(3).max(1e3)
 });
 var agentCapabilitySchema = z.enum(workflowAgentCapabilityValues);
 var agentTaskRequestSchema = z.object({
-	contractVersion: z.literal("1.0"),
+	contractVersion: z.literal("1.1"),
 	capability: agentCapabilitySchema,
 	accountId: z.string().min(1),
 	opportunityId: z.string().min(1),
 	prompt: z.string().min(3).max(1e3)
 });
 z.object({
-	contractVersion: z.literal("1.0"),
+	contractVersion: z.literal("1.1"),
 	correlationId: z.string().uuid(),
 	capability: agentCapabilitySchema,
 	agentVersion: z.string().min(1),
@@ -1472,7 +1473,7 @@ z.object({
 	sourceHealth: z.array(sourceHealthSchema).min(1)
 });
 var emailComposeRequestSchema = z.object({
-	contractVersion: z.literal("1.0"),
+	contractVersion: z.literal("1.1"),
 	recipients: z.array(z.string().email()).min(1).max(20),
 	subject: z.string().trim().min(1).max(255),
 	responseTitle: z.string().trim().min(1).max(255),
@@ -1480,7 +1481,7 @@ var emailComposeRequestSchema = z.object({
 }).strict();
 z.object({ state: z.literal("opened") }).strict();
 var exportResponseRequestSchema = z.object({
-	contractVersion: z.literal("1.0"),
+	contractVersion: z.literal("1.1"),
 	responseTitle: z.string().trim().min(1).max(255),
 	responseMarkdown: z.string().min(1).max(2e5),
 	generatedAt: z.string().datetime()
@@ -1490,7 +1491,7 @@ z.discriminatedUnion("state", [z.object({
 	filePath: z.string().min(1)
 }).strict(), z.object({ state: z.literal("cancelled") }).strict()]);
 var mcemResponseSchema = z.object({
-	contractVersion: z.literal("1.0"),
+	contractVersion: z.literal("1.1"),
 	correlationId: z.string().uuid(),
 	capability: z.literal("mcem-coach"),
 	agentVersion: z.string().min(1),
@@ -2468,6 +2469,137 @@ async function loadFoundryEnvironment(filePath) {
 	return foundryEnvironmentSchema.parse(candidate);
 }
 //#endregion
+//#region packages/common/fixtures/sample-discovery.ts
+var sampleDiscoveryMetadataByOpportunityId = Object.freeze({
+	"opp-grid-modernization": {
+		domain: "data",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Cloud Scale Analytics"
+	},
+	"opp-cloud-security-readiness": {
+		domain: "security",
+		solutionArea: "Security",
+		technicalCapability: "Threat Protection"
+	},
+	"opp-data-estate-consolidation": {
+		domain: "data",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Cloud Scale Analytics"
+	},
+	"opp-resilient-cloud-foundation": {
+		domain: "infra",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Well Architected"
+	},
+	"opp-ai-service": {
+		domain: "ai-apps",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Azure AI and ML"
+	},
+	"opp-store-modernization": {
+		domain: "infra",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "IoT"
+	},
+	"opp-unified-commerce": {
+		domain: "ai-apps",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Modernize/New Cloud Native Apps with AKS and Azure Cosmos/Postgres DB"
+	},
+	"opp-customer-data-platform": {
+		domain: "data",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Cloud Scale Analytics"
+	},
+	"opp-zava-ai-platform": {
+		domain: "ai-apps",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Azure AI and ML"
+	},
+	"opp-zava-migration": {
+		domain: "infra",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Windows & SQL Server Migration to Azure"
+	},
+	"opp-aw-commerce": {
+		domain: "ai-apps",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Modernize/New Cloud Native Apps with AKS and Azure Cosmos/Postgres DB"
+	},
+	"opp-ms-only-showcase": {
+		domain: "data",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Cloud Scale Analytics"
+	},
+	"opp-fourth-coffee-loyalty": {
+		domain: "ai-apps",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Azure AI and ML"
+	},
+	"opp-fourth-coffee-analytics": {
+		domain: "data",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Cloud Scale Analytics"
+	},
+	"opp-tailspin-ecommerce": {
+		domain: "ai-apps",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Modernize/New Cloud Native Apps with AKS and Azure Cosmos/Postgres DB"
+	},
+	"opp-tailspin-forecasting": {
+		domain: "data",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Cloud Scale Analytics"
+	},
+	"opp-wwi-control-tower": {
+		domain: "data",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Cloud Scale Analytics"
+	},
+	"opp-wwi-warehouse-edge": {
+		domain: "infra",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Azure Stack Edge"
+	},
+	"opp-woodgrove-fraud-ai": {
+		domain: "security",
+		solutionArea: "Security",
+		technicalCapability: "Fraud Protection"
+	},
+	"opp-woodgrove-regulatory-data": {
+		domain: "data",
+		solutionArea: "Cloud and AI Platforms",
+		technicalCapability: "Cloud Scale Analytics"
+	}
+});
+function samplePortfolioDiscoveryOpportunities(accounts, opportunities) {
+	const accountNames = new Map(accounts.map((account) => [account.id, account.name]));
+	return opportunities.flatMap((opportunity) => {
+		const metadata = sampleDiscoveryMetadataByOpportunityId[opportunity.id];
+		const accountName = accountNames.get(opportunity.accountId);
+		if (!metadata || !accountName) return [];
+		return [{
+			...opportunity,
+			accountName,
+			...metadata,
+			onDealTeam: true
+		}];
+	});
+}
+//#endregion
+//#region packages/common/fixtures/sample-opportunity-intent.ts
+var sampleIntents = [
+	["Consumption"],
+	["Billed"],
+	["Billed", "Consumption"]
+];
+function withSampleOpportunityIntents(opportunities) {
+	return opportunities.map((opportunity, index) => ({
+		...opportunity,
+		opportunityIntent: [...sampleIntents[index % sampleIntents.length]]
+	}));
+}
+//#endregion
 //#region packages/connectors/common/portfolio-preferences.ts
 var preferencesSchema = z.object({
 	manualAccountIds: z.array(z.string().min(1)),
@@ -2951,7 +3083,7 @@ var LiveMsxConnector = class {
 	}
 	/** Fetches open opportunities within the given assigned accounts, filtered by the domain clauses. */
 	async requestOpportunitiesForAccounts(accountIds, domainClauses) {
-		const select = "opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description,msp_solutionarea,msp_technicalcapability,msp_conversation";
+		const select = "opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description,msp_solutionarea,msp_technicalcapability,msp_conversation,msp_opportunitytype";
 		const rows = [];
 		for (let offset = 0; offset < accountIds.length; offset += 40) {
 			const filterClauses = [
@@ -3291,7 +3423,7 @@ var LiveMsxConnector = class {
 		}));
 		const milestoneOpportunityIds = await this.milestoneTeamOpportunityIds();
 		const opportunityIds = unique([...dealTeamRows.map((row) => row._msp_parentopportunityid_value).filter(isPresent), ...milestoneOpportunityIds]);
-		const activeOpportunities = (await measurePerformance("msx.opportunities", this.performanceReporter, () => this.requestByIds("opportunities", "opportunityid", opportunityIds, "opportunityid,statecode,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description"))).filter((row) => row._parentaccountid_value && (row.statecode === void 0 || row.statecode === 0));
+		const activeOpportunities = (await measurePerformance("msx.opportunities", this.performanceReporter, () => this.requestByIds("opportunities", "opportunityid", opportunityIds, "opportunityid,statecode,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description,msp_opportunitytype"))).filter((row) => row._parentaccountid_value && (row.statecode === void 0 || row.statecode === 0));
 		const dealTeamAccountIds = unique(activeOpportunities.map((row) => row._parentaccountid_value).filter(isPresent));
 		const accountIds = unique([
 			...dealTeamAccountIds,
@@ -3336,11 +3468,13 @@ var LiveMsxConnector = class {
 		const numericStage = row.msp_activesalesstage;
 		const recordedStage = Number.isInteger(parsedStage) ? parsedStage : numericStage && numericStage >= 1 && numericStage <= 5 ? numericStage : 1;
 		const closeDate = row.msp_estcompletiondate ?? row.estimatedclosedate;
+		const opportunityIntent = formattedValue(row, "msp_opportunitytype")?.split(";").map((value) => value.trim()).filter(Boolean);
 		return {
 			id: row.opportunityid,
 			accountId: row._parentaccountid_value,
 			name: row.name,
 			...formattedValue(row, "_ownerid_value") ? { owner: formattedValue(row, "_ownerid_value") } : {},
+			...opportunityIntent?.length ? { opportunityIntent } : {},
 			recordedStage,
 			value: row.estimatedvalue || row.msp_consumptionconsumedrecurring || 0,
 			currency: "USD",
@@ -4347,7 +4481,7 @@ var accounts = [
 	},
 	...additionalSampleAccounts
 ];
-var opportunities = [
+var opportunities = withSampleOpportunityIntents([
 	{
 		id: "opp-grid-modernization",
 		accountId: "account-contoso",
@@ -4487,7 +4621,7 @@ var opportunities = [
 		closeDate: "2027-01-08"
 	},
 	...additionalSampleOpportunities
-];
+]);
 var milestonesByOpportunity = Object.fromEntries(opportunities.map((opportunity) => [opportunity.id, additionalSampleMilestones.filter((milestone) => milestone.opportunityId === opportunity.id).length > 0 ? additionalSampleMilestones.filter((milestone) => milestone.opportunityId === opportunity.id) : [{
 	id: `${opportunity.id}-milestone`,
 	opportunityId: opportunity.id,
@@ -4891,6 +5025,7 @@ var observationsByOpportunity = {
 	]
 };
 var discoverableOpportunities = [
+	...samplePortfolioDiscoveryOpportunities(accounts, opportunities),
 	{
 		id: "opp-discover-hybrid-networking",
 		accountId: "account-contoso",
@@ -6597,6 +6732,23 @@ var seedOptionValues = [
 ];
 /** SE-domain discovery catalog across all 8 domains ("Add me" candidates, not yet on the deal team). */
 var seedDiscoverable = [
+	...seedOpportunities.flatMap((opportunity) => {
+		const id = String(opportunity["id"]);
+		const metadata = sampleDiscoveryMetadataByOpportunityId[id];
+		if (!metadata) return [];
+		return [{
+			id,
+			account_id: String(opportunity["account_id"]),
+			name: String(opportunity["name"]),
+			recorded_stage: Number(opportunity["recorded_stage"]),
+			value: Number(opportunity["estimated_value"]),
+			currency: String(opportunity["currency"]),
+			close_date: String(opportunity["estimated_close_date"]),
+			domain: metadata.domain,
+			solution_area: metadata.solutionArea,
+			technical_capability: metadata.technicalCapability
+		}];
+	}),
 	{
 		id: "disc-contoso-infra",
 		account_id: "account-contoso",
@@ -8623,7 +8775,7 @@ function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
 	const baseSummary = evidenceBasedStage > context.opportunity.recordedStage ? `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the completed exit criteria support progression to Stage ${evidenceBasedStage}.` : evidenceBasedStage === context.opportunity.recordedStage ? `The available evidence supports recorded Stage ${context.opportunity.recordedStage}.` : `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the available evidence supports Stage ${evidenceBasedStage}.`;
 	const summary = milestoneSummary.headline ? `${baseSummary} ${milestoneSummary.headline}` : baseSummary;
 	return mcemResponseSchema.parse({
-		contractVersion: "1.0",
+		contractVersion: "1.1",
 		correlationId,
 		capability: "mcem-coach",
 		agentVersion: mcemCoachVersion,
@@ -11315,7 +11467,7 @@ var ThinSliceOrchestrator = class {
 		].includes(source.state));
 		const responseContent = addMsxOpportunityLink(content.trim(), opportunityContext.opportunity.id);
 		return {
-			contractVersion: "1.0",
+			contractVersion: "1.1",
 			correlationId: randomUUID(),
 			capability: request.capability,
 			agentVersion: configuredAgent.version,

@@ -9,7 +9,7 @@ export * from './meeting.js'
 export * from './voice.js'
 export * from './seller-dashboard.js'
 
-export const contractVersion = '1.0' as const
+export const contractVersion = '1.1' as const
 
 export const dataModeSchema = z.enum(['sample', 'live'])
 export const sourceStateSchema = z.enum([
@@ -46,6 +46,7 @@ export const opportunitySchema = z.object({
   accountId: z.string().min(1),
   name: z.string().min(1),
   owner: z.string().min(1).optional(),
+  opportunityIntent: z.array(z.string().trim().min(1)).max(10).optional(),
   recordedStage: z.number().int().min(1).max(5),
   value: z.number().nonnegative(),
   currency: z.string().length(3),

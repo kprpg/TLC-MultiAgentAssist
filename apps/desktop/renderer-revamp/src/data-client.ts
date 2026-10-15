@@ -3,6 +3,7 @@ import {
     accountCandidateSchema,
     agentTaskResponseSchema,
     contractVersion,
+    workflowContractVersion,
     dealTeamJoinResultSchema,
     dealTeamLeaveResultSchema,
     discoverableOpportunitySchema,
@@ -76,6 +77,7 @@ import {
     additionalSampleObservationsByOpportunity,
     additionalSampleOpportunities
 } from '../../../../packages/common/fixtures/additional-sample-portfolio.js'
+import { withSampleOpportunityIntents } from '../../../../packages/common/fixtures/sample-opportunity-intent.js'
 import { samplePortfolioDiscoveryOpportunities } from '../../../../packages/common/fixtures/sample-discovery.js'
 
 export interface RevampDataClient {
@@ -238,17 +240,17 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
             return { state: 'saved', filePath: fileName }
         },
         openEvidence: async (url) => { window.open(url, '_blank', 'noopener,noreferrer') },
-        listWorkflowDefinitions: async (scope) => workflowDefinitionSchema.array().parse(await invokeWorkflow('list', { contractVersion, ...(scope ? { scope } : {}) })),
+        listWorkflowDefinitions: async (scope) => workflowDefinitionSchema.array().parse(await invokeWorkflow('list', { contractVersion: workflowContractVersion, ...(scope ? { scope } : {}) })),
         startWorkflow: async (request) => workflowRunSchema.parse(await invokeWorkflow('start', request)),
-        getWorkflowRun: async (runId) => workflowRunViewSchema.parse(await invokeWorkflow('get', { contractVersion, runId })),
-        cancelWorkflowRun: async (runId) => workflowRunSchema.parse(await invokeWorkflow('cancel', { contractVersion, runId })),
+        getWorkflowRun: async (runId) => workflowRunViewSchema.parse(await invokeWorkflow('get', { contractVersion: workflowContractVersion, runId })),
+        cancelWorkflowRun: async (runId) => workflowRunSchema.parse(await invokeWorkflow('cancel', { contractVersion: workflowContractVersion, runId })),
         listWorkflowRuns: async (scope, limit) => workflowRunSchema.array().parse(await invokeWorkflow('history', {
-            contractVersion,
+            contractVersion: workflowContractVersion,
             ...(scope ? { scope } : {}),
             ...(limit === undefined ? {} : { limit })
         })),
         prepareWorkflowGuidance: async (runId, queueItemId, capability) => workflowGuidanceHandoffSchema.parse(await invokeWorkflow('guidance', {
-            contractVersion, runId, queueItemId, capability
+            contractVersion: workflowContractVersion, runId, queueItemId, capability
         }))
     }
 }
@@ -302,7 +304,7 @@ const accounts: Account[] = [
     ...additionalSampleAccounts
 ]
 
-const opportunities: Opportunity[] = [
+const opportunities: Opportunity[] = withSampleOpportunityIntents([
     { id: 'opp-grid-modernization', accountId: 'account-contoso', name: 'Grid operations modernization', owner: 'Avery Johnson', recordedStage: 3, value: 4200000, currency: 'USD', closeDate: '2026-10-30' },
     { id: 'opp-cloud-security-readiness', accountId: 'account-contoso', name: 'Cloud security readiness', owner: 'Jordan Lee', recordedStage: 1, value: 900000, currency: 'USD', closeDate: '2027-02-26' },
     { id: 'opp-data-estate-consolidation', accountId: 'account-contoso', name: 'Data estate consolidation', recordedStage: 2, value: 2650000, currency: 'USD', closeDate: '2027-01-29' },
@@ -315,7 +317,7 @@ const opportunities: Opportunity[] = [
     { id: 'opp-zava-migration', accountId: 'account-zava', name: 'Zava datacenter exit', recordedStage: 1, value: 1600000, currency: 'USD', closeDate: '2027-05-28' },
     { id: 'opp-aw-commerce', accountId: 'account-adventureworks', name: 'Adventure Works commerce replatform', owner: 'Morgan Diaz', recordedStage: 3, value: 3100000, currency: 'USD', closeDate: '2027-01-08' },
     ...additionalSampleOpportunities
-]
+])
 
 const discoverableOpportunities: DiscoverableOpportunity[] = [
     ...samplePortfolioDiscoveryOpportunities(accounts, opportunities),
@@ -676,17 +678,17 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         openEmailCompose: (request) => bridge.openEmailCompose(request),
         exportAgentResponse: (request) => bridge.exportAgentResponse(request),
         openEvidence: (url) => bridge.openEvidence(url),
-        listWorkflowDefinitions: async (scope) => workflowDefinitionSchema.array().parse(await bridge.invokeWorkflow('list', { contractVersion, ...(scope ? { scope } : {}) })),
+        listWorkflowDefinitions: async (scope) => workflowDefinitionSchema.array().parse(await bridge.invokeWorkflow('list', { contractVersion: workflowContractVersion, ...(scope ? { scope } : {}) })),
         startWorkflow: async (request) => workflowRunSchema.parse(await bridge.invokeWorkflow('start', request)),
-        getWorkflowRun: async (runId) => workflowRunViewSchema.parse(await bridge.invokeWorkflow('get', { contractVersion, runId })),
-        cancelWorkflowRun: async (runId) => workflowRunSchema.parse(await bridge.invokeWorkflow('cancel', { contractVersion, runId })),
+        getWorkflowRun: async (runId) => workflowRunViewSchema.parse(await bridge.invokeWorkflow('get', { contractVersion: workflowContractVersion, runId })),
+        cancelWorkflowRun: async (runId) => workflowRunSchema.parse(await bridge.invokeWorkflow('cancel', { contractVersion: workflowContractVersion, runId })),
         listWorkflowRuns: async (scope, limit) => workflowRunSchema.array().parse(await bridge.invokeWorkflow('history', {
-            contractVersion,
+            contractVersion: workflowContractVersion,
             ...(scope ? { scope } : {}),
             ...(limit === undefined ? {} : { limit })
         })),
         prepareWorkflowGuidance: async (runId, queueItemId, capability) => workflowGuidanceHandoffSchema.parse(await bridge.invokeWorkflow('guidance', {
-            contractVersion, runId, queueItemId, capability
+            contractVersion: workflowContractVersion, runId, queueItemId, capability
         }))
     }
 }

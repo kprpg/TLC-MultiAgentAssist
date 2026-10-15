@@ -33,6 +33,10 @@ After correcting MSX data or access, refresh the account context in the app. If 
 
 Accounts are derived from your eligible opportunities. The app does not use the selected account to retrieve every opportunity under that account. Each displayed opportunity must independently satisfy the active deal-team membership and active-record rules above.
 
+### Where does Opportunity Intent come from?
+
+The Opportunities table shows the formatted **Opportunity Intent** values recorded in MSX, such as **Billed** or **Consumption**. When an opportunity has multiple intent values, the app displays all of them. **Not specified** means MSX did not return a populated intent value for that opportunity.
+
 ## Data access
 
 ### Does the app grant me access to additional MSX records?
