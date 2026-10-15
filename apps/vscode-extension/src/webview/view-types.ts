@@ -22,6 +22,7 @@ export interface OpportunityView {
     accountId: string
     name: string
     owner?: string
+    opportunityIntent?: string[]
     recordedStage: number
     value: number
     currency: string

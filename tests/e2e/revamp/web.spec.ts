@@ -4,6 +4,16 @@ import { expectCompleteSamplePortfolio } from './sample-portfolio.js'
 import { expectOpportunityAndMilestoneRemoval } from './membership-removal.js'
 import { expectOpportunitiesToFillCollapsedWorkspace } from './opportunities-layout.js'
 
+test('shows Opportunity Intent in the shared Web opportunity table', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await page.goto('/')
+    await page.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
+
+    const opportunities = page.getByRole('table', { name: 'Contoso Energy opportunities' })
+    await expect(opportunities.getByRole('columnheader', { name: 'Opportunity Intent' })).toBeVisible()
+    await expect(opportunities.getByRole('row').filter({ hasText: 'Grid operations modernization' }).getByRole('cell').nth(1)).toHaveText('Consumption')
+})
+
 test('shows all eight sample customers with opportunity, milestone, and evidence data in Web', async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 900 })
     await page.goto('/')

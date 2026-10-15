@@ -34,7 +34,7 @@ import {
   Warning20Filled
 } from '@fluentui/react-icons'
 import type { Account, AccountCandidate, AgentCapability, AgentTaskResponse, CustomerCommitment, DiscoverableOpportunity, McemResponse, Milestone, MilestoneActivity, MilestoneStatus, MilestoneUpdate, Opportunity, ScopeRef, SeDomainId, TaskCategory, WorkflowDefinition, WorkflowRun } from '../../../../packages/common/index.js'
-import { contractVersion, taskCategorySchema } from '../../../../packages/common/contracts/index.js'
+import { contractVersion, taskCategorySchema, workflowContractVersion } from '../../../../packages/common/contracts/index.js'
 import { seDomainList } from '../../../../packages/common/configuration/se-domains.js'
 import { addMsxOpportunityLink } from '../../../../packages/common/sharing/opportunity-link.js'
 import { agentCapabilities } from '../../../../packages/common/types/agent-capabilities.js'
@@ -55,6 +55,7 @@ import type { PortfolioSearchResult } from '../../../shared/portfolio-search.js'
 import { PortfolioSearch } from './portfolio-search.js'
 import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
+import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
 
 type Shell = 'desktop' | 'web'
 type WorkspaceView = 'accounts' | 'workflows' | 'discover' | 'dashboard'
@@ -397,7 +398,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     if (!scope) return
     setWorkflowError('')
     try {
-      let run = await client.startWorkflow({ contractVersion, workflowId: definition.id, scope, input: workflowInput(definition.id) })
+      let run = await client.startWorkflow({ contractVersion: workflowContractVersion, workflowId: definition.id, scope, input: workflowInput(definition.id) })
       let output: InitialWorkflowOutput | undefined
       setActiveWorkflowRun(run)
       while (run.status === 'queued' || run.status === 'running') {
@@ -1220,6 +1221,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
               <thead>
                 <tr>
                   <th scope="col">Opportunity</th>
+                  <th scope="col">Opportunity Intent</th>
                   <th scope="col">Stage</th>
                   <th scope="col">Value</th>
                   <th scope="col">Close</th>
@@ -1232,7 +1234,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                   return <tr key={item.id} className={selected ? 'selected' : ''}>
                     <td className="opportunity-name-cell">
                       <Tooltip
-                        content={<div className="opportunity-tooltip-content"><b>{item.name}</b><span>Opportunity owner: {item.owner ?? 'Not assigned'}</span><span>Stage owner: {stageOwner(item.recordedStage)}</span><span>Recorded stage: {item.recordedStage}</span><span>Value: {formatMoney(item.value, item.currency)}</span><span>Close: {item.closeDate}</span></div>}
+                        content={<div className="opportunity-tooltip-content"><b>{item.name}</b><span>Opportunity owner: {item.owner ?? 'Not assigned'}</span><span>Opportunity intent: {formatOpportunityIntent(item.opportunityIntent)}</span><span>Stage owner: {stageOwner(item.recordedStage)}</span><span>Recorded stage: {item.recordedStage}</span><span>Value: {formatMoney(item.value, item.currency)}</span><span>Close: {item.closeDate}</span></div>}
                         positioning="above"
                         relationship="description"
                       >
@@ -1242,6 +1244,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                         </button>
                       </Tooltip>
                     </td>
+                    <td className="opportunity-intent-cell">{formatOpportunityIntent(item.opportunityIntent)}</td>
                     <td>Stage {item.recordedStage}</td>
                     <td>{formatMoney(item.value, item.currency)}</td>
                     <td>{item.closeDate}</td>
@@ -1253,7 +1256,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                     </td>
                   </tr>
                 })}
-                {!loading && sortedOpportunities.length === 0 && <tr><td colSpan={5} className="tree-state">No active opportunities found.</td></tr>}
+                {!loading && sortedOpportunities.length === 0 && <tr><td colSpan={6} className="tree-state">No active opportunities found.</td></tr>}
               </tbody>
             </table>
           </div>

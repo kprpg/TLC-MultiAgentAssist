@@ -562,6 +562,10 @@ body.resizing-blade .blade {
     vertical-align: top;
 }
 
+.opportunity-intent-cell {
+    overflow-wrap: anywhere;
+}
+
 .milestone-name-cell {
     display: flex;
     align-items: center;

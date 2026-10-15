@@ -25,6 +25,7 @@ import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportun
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
+import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
 import { workflowGuidanceCapability } from '../../../shared/workflow-guidance.js'
 import type {
     AccountCandidateView,
@@ -1473,10 +1474,11 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
                     <table className="record-table opportunity-table">
                         <colgroup>
                             <col className="opportunity-name-column" />
+                            <col className="opportunity-intent-column" />
                             <col className="opportunity-stage-column" />
                             <col className="opportunity-comments-column" />
                         </colgroup>
-                        <RecordTableHeader nameLabel="Opportunity name" />
+                        <RecordTableHeader nameLabel="Opportunity name" showOpportunityIntent />
                         <tbody>
                             {sortedOpportunities.map((opportunity) => (
                                 <Fragment key={opportunity.id}>
@@ -1493,12 +1495,13 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
                                                 )}
                                             </RecordTooltip>
                                         </td>
+                                        <td className="opportunity-intent-cell">{formatOpportunityIntent(opportunity.opportunityIntent)}</td>
                                         <td><span className="badge">Stage {opportunity.recordedStage}</span></td>
                                         <td className="opportunity-comments-cell"><CommentsButton title="Opportunity comments" onClick={() => { setCommentsFor(opportunity.id); setCommentsText(opportunity.comments ?? '') }} /></td>
                                     </tr>
                                     {commentsFor === opportunity.id && (
                                         <tr className="record-editor-row">
-                                            <td colSpan={3}>
+                                            <td colSpan={4}>
                                                 <div className="record-editor">
                                                     <label>Opportunity comments</label>
                                                     <textarea rows={2} value={commentsText} onChange={(event) => setCommentsText(event.target.value)} />

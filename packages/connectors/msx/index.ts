@@ -26,6 +26,7 @@ import {
   additionalSampleOpportunities
 } from '../../common/fixtures/additional-sample-portfolio.js'
 import { samplePortfolioDiscoveryOpportunities } from '../../common/fixtures/sample-discovery.js'
+import { withSampleOpportunityIntents } from '../../common/fixtures/sample-opportunity-intent.js'
 import type { MsxConnector, OpportunityContext } from '../common/index.js'
 
 export {
@@ -46,7 +47,7 @@ const accounts: Account[] = [
   ...additionalSampleAccounts
 ]
 
-const opportunities: Opportunity[] = [
+const opportunities: Opportunity[] = withSampleOpportunityIntents([
   {
     id: 'opp-grid-modernization',
     accountId: 'account-contoso',
@@ -186,7 +187,7 @@ const opportunities: Opportunity[] = [
     closeDate: '2027-01-08'
   },
   ...additionalSampleOpportunities
-]
+])
 
 const milestonesByOpportunity: Record<string, Milestone[]> = Object.fromEntries(opportunities.map((opportunity) => [
   opportunity.id,

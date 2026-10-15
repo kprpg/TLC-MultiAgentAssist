@@ -1334,15 +1334,23 @@ textarea {
 }
 
 .opportunity-name-column {
-    width: 52%;
+    width: 42%;
+}
+
+.opportunity-intent-column {
+    width: 24%;
 }
 
 .opportunity-stage-column {
-    width: 20%;
+    width: 14%;
 }
 
 .opportunity-comments-column {
-    width: 28%;
+    width: 20%;
+}
+
+.opportunity-intent-cell {
+    overflow-wrap: anywhere;
 }
 
 .record-table th {

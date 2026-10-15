@@ -19,6 +19,8 @@ export async function expectCompleteSamplePortfolio(page: Page): Promise<void> {
     await accountsBlade.getByRole('button', { name: new RegExp(sample.account) }).click()
     const opportunities = page.getByRole('table', { name: `${sample.account} opportunities` })
     await expect(opportunities.getByRole('row')).not.toHaveCount(1)
+    await expect(opportunities.getByRole('columnheader', { name: 'Opportunity Intent' })).toBeVisible()
+    await expect(opportunities.getByRole('cell').filter({ hasText: /Billed|Consumption/ }).first()).toBeVisible()
 
     await opportunities.getByRole('button', { name: new RegExp(`^${sample.opportunity} `) }).click()
     const milestones = page.getByRole('region', { name: `${sample.opportunity} milestones` })

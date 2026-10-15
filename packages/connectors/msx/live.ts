@@ -79,6 +79,7 @@ interface OpportunityRow {
   description?: string | null
   msp_solutionarea?: number
   msp_technicalcapability?: number
+  msp_opportunitytype?: string
   [key: string]: unknown
 }
 
@@ -599,7 +600,7 @@ export class LiveMsxConnector implements MsxConnector {
 
   /** Fetches open opportunities within the given assigned accounts, filtered by the domain clauses. */
   private async requestOpportunitiesForAccounts(accountIds: string[], domainClauses: string[]): Promise<OpportunityRow[]> {
-    const select = 'opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description,msp_solutionarea,msp_technicalcapability,msp_conversation'
+    const select = 'opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description,msp_solutionarea,msp_technicalcapability,msp_conversation,msp_opportunitytype'
     const rows: OpportunityRow[] = []
     for (let offset = 0; offset < accountIds.length; offset += 40) {
       const chunk = accountIds.slice(offset, offset + 40)
@@ -943,7 +944,7 @@ export class LiveMsxConnector implements MsxConnector {
       'opportunities',
       'opportunityid',
       opportunityIds,
-      'opportunityid,statecode,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description'
+      'opportunityid,statecode,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description,msp_opportunitytype'
     ))
     const activeOpportunities = opportunityRows.filter((row) => row._parentaccountid_value && (row.statecode === undefined || row.statecode === 0))
     const dealTeamAccountIds = unique(
@@ -1005,12 +1006,17 @@ export class LiveMsxConnector implements MsxConnector {
       ? parsedStage
       : numericStage && numericStage >= 1 && numericStage <= 5 ? numericStage : 1
     const closeDate = row.msp_estcompletiondate ?? row.estimatedclosedate
+    const opportunityIntent = formattedValue(row, 'msp_opportunitytype')
+      ?.split(';')
+      .map((value) => value.trim())
+      .filter(Boolean)
 
     return {
       id: row.opportunityid,
       accountId: row._parentaccountid_value!,
       name: row.name,
       ...(formattedValue(row, '_ownerid_value') ? { owner: formattedValue(row, '_ownerid_value') } : {}),
+      ...(opportunityIntent?.length ? { opportunityIntent } : {}),
       recordedStage,
       value: row.estimatedvalue || row.msp_consumptionconsumedrecurring || 0,
       currency: 'USD',

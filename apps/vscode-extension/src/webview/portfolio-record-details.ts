@@ -1,5 +1,6 @@
 import { mcemStages } from './mcem-stages.js'
 import type { MilestoneView, OpportunityView } from './view-types.js'
+import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
 
 export interface RecordTooltipContent {
     title: string
@@ -24,6 +25,7 @@ export function opportunityTooltipContent(opportunity: OpportunityView): RecordT
         title: opportunity.name,
         details: [
             { label: 'Opportunity owner', value: opportunity.owner ?? 'Not assigned' },
+            { label: 'Opportunity intent', value: formatOpportunityIntent(opportunity.opportunityIntent) },
             { label: 'Stage owner', value: stageOwner },
             { label: 'Recorded stage', value: String(opportunity.recordedStage) },
             { label: 'Value', value: formatMoney(opportunity.value, opportunity.currency) },
