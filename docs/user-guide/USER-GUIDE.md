@@ -56,7 +56,7 @@ TLC Assist installs as a self-contained VS Code extension and opens inside the e
 1. Install `tlc-assist-vscode-<version>.vsix` from the GitHub Releases page (see the [VS Code extension install guide](VSCODE-EXTENSION-INSTALL.md) for the full steps). Only **VS Code / VS Code Insiders 1.90.0+** is required — no Node.js, npm, sign-in, or network.
 2. Run **Developer: Reload Window**, then select the **TLC Assist** icon in the Activity Bar, or run **TLC: Open Assist** from the Command Palette (`Ctrl+Shift+P`).
 
-The extension starts in **sample** mode (sanitized fixtures, no network). To use live data, run **TLC: Use Live Data (MSX/Dataverse)** from the Command Palette (or set `tlc.mode` to `live` in **Settings**) and sign in with VS Code's built-in Microsoft account; the Foundry agents additionally use the Azure CLI (`az login`).
+The extension starts in **sample** mode (sanitized fixtures, no network). To use live data, run **TLC: Use Live Data (MSX/Dataverse)** from the Command Palette (or set `tlc.mode` to `live` in **Settings**) and sign in with VS Code's built-in Microsoft account. The same provider supplies delegated tokens for MSX and Foundry.
 
 ### Switching the data source (sample, SQLite test store, or live)
 
@@ -70,7 +70,7 @@ Two independent toggles control where data comes from:
 - **Switch sample ⇄ live at runtime** from the Command Palette (`Ctrl+Shift+P`): **TLC: Use Live Data (MSX/Dataverse)** or **TLC: Use Sample Data**. The status bar flips between `TLC Assist: Live` and `Sample`, and the panes reload.
 - **TLC: Test Live Connection** only *verifies* connectivity to Dataverse — it does **not** switch the data source. Use **Use Live Data** to actually switch.
 - You can also set `tlc.mode` / `tlc.dataStore` in **Settings** (`Ctrl+,`, search "tlc").
-- **Live requires sign-in:** VS Code's Microsoft account (`@microsoft.com`) and, for the Foundry agents, `az login`. If the delegated token cannot be acquired, the extension shows an error toast and stays on sample — see **Output → TLC Assist** for details.
+- **Live requires sign-in:** VS Code's Microsoft account (`@microsoft.com`) must have access to MSX and the configured Foundry project. If a delegated token cannot be acquired, the extension shows an error toast and stays on sample — see **Output → TLC Assist** for details.
 
 > **Developing with F5?** The repo includes Extension Development Host launch configs — **Run TLC Assist Extension** (fixtures), **(SQLite test store)**, and **(Live MSX/Dataverse)** — that set the startup data source. After rebuilding the extension, run **Developer: Reload Window** in the Extension Development Host (or relaunch) so the new build loads before switching modes.
 
@@ -112,7 +112,7 @@ The Windows desktop application is a standalone Electron window that delivers th
 ## Install and launch the desktop app
 
 1. Download the Windows installer (`TLC-MultiAgent-Assist-<version>-Windows-x64.exe`) or the portable ZIP from the [latest release](https://github.com/kprpg/TLC-MultiAgentAssist/releases/latest), unblock it, and run it. See the [complete desktop installation guide](DESKTOP-INSTALL.md) for detailed steps and troubleshooting.
-2. Launch **TLC Multi-Agent Assist** from the Start Menu. The desktop app uses the Azure CLI token cached on your machine, so run `az login` in advance for live mode.
+2. Launch **TLC Multi-Agent Assist** from the Start Menu. The desktop app opens your system browser for Microsoft sign-in when live mode first needs a resource token.
 
 After sign-in you land on the empty workspace with your account portfolio in the left blade; no account is opened until you select one.
 
@@ -465,7 +465,7 @@ A small badge next to your profile in the top-right corner indicates the data mo
 | -------------------------- | ---------------------------------------------------------------------------------------- |
 | `STATIC WEB · SAMPLE DATA` | Sanitized sample data, offline. No MSX or Foundry traffic.                               |
 | `WEB · CONNECTED DATA`     | Live web mode running behind Azure Easy Auth. MSX and Foundry are called on your behalf. |
-| `DESKTOP`                  | Electron desktop client using your local Azure CLI token.                                |
+| `DESKTOP`                  | Electron desktop client using interactive Microsoft browser sign-in.                     |
 
 All grounded evidence lines carry a source indicator so you can tell at a glance whether a data point came from MSX, MCEM, or a sample file.
 

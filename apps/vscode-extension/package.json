@@ -204,7 +204,7 @@
             "foundry"
           ],
           "default": "deterministic",
-          "markdownDescription": "How meeting-capture extracts MCEM signals from a transcript. `deterministic` uses the built-in offline rules (no network). `foundry` sends the transcript to a deployed Microsoft Foundry model (see `#tlc.meetingModel#`) using Structured Outputs, authenticated with Azure CLI. Requires the SQLite test store or a live connection."
+          "markdownDescription": "How meeting-capture extracts MCEM signals from a transcript. `deterministic` uses the built-in offline rules (no network). `foundry` sends the transcript to a deployed Microsoft Foundry model (see `#tlc.meetingModel#`) using Structured Outputs, authenticated with VS Code's Microsoft sign-in. Requires the SQLite test store or a live connection."
         },
         "tlc.meetingModel": {
           "type": "string",
@@ -224,7 +224,7 @@
         "tlc.useFoundryAgents": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "In `live` mode, call the real Microsoft Foundry agents (traces appear in Foundry) using Azure CLI auth (`az login`). When `false`, use the built-in deterministic guidance renderer instead."
+          "markdownDescription": "In `live` mode, call the real Microsoft Foundry agents (traces appear in Foundry) using VS Code's Microsoft sign-in. When `false`, use the built-in deterministic guidance renderer instead."
         }
       }
     }

@@ -20,7 +20,7 @@ TLC MultiAgent Assist is an account assistant that combines live MSX opportunity
 Every surface runs in one of two modes:
 
 - **Sample mode** (default) — bundled sanitized data. No sign-in, no network; explore without touching MSX, Foundry, Azure, or Microsoft Entra ID.
-- **Live mode** — real opportunity data over **MSX OData** and **Dataverse MCP**, plus Microsoft Foundry agents. Requires a corporate Microsoft identity and, for the Foundry agents, the Azure CLI (`az login`).
+- **Live mode** — real opportunity data over **MSX OData** and **Dataverse MCP**, plus Microsoft Foundry agents. Requires a corporate Microsoft identity through VS Code's built-in Microsoft sign-in.
 
 See [Documentation](#documentation) for the full user guide, FAQ, and runbooks.
 
@@ -47,8 +47,8 @@ Two independent toggles, set in **Settings** (search "tlc") or via the F5 launch
 Switch at runtime from the Command Palette: **TLC: Use Live Data (MSX/Dataverse)** or **TLC: Use Sample Data**. The status bar flips between `TLC Assist: Live` and `Sample`. (**TLC: Test Live Connection** only tests connectivity; it does not switch.)
 
 - **SQLite test store** — a relational database (accounts, opportunities, milestones, stakeholders, meetings/transcripts) whose injected values persist for the session, ideal for exercising writes and meeting capture offline. Set `tlc.dataStore` = `sqlite`, or press **F5** and pick **Run TLC Assist Extension (SQLite test store)**.
-- **Live mode** — sign in first: run `az login` (for the Foundry agents) and sign into VS Code with your corporate Microsoft account (for the delegated MSX token). Then run **TLC: Use Live Data (MSX/Dataverse)** or set `tlc.mode` = `live`. If the delegated token cannot be acquired, the extension shows an error and stays on sample — check **Output → TLC Assist**.
-- **Foundry meeting extraction** — set `tlc.meetingExtractor` = `foundry` (optional `tlc.meetingModel`, default `gpt-6.1-sol`) to extract transcript signals with a deployed Foundry model instead of the offline rules. Uses `az login`; no API key is stored.
+- **Live mode** — sign into VS Code with your corporate Microsoft account. The extension uses that Microsoft authentication provider for both delegated MSX access and Foundry agents. Then run **TLC: Use Live Data (MSX/Dataverse)** or set `tlc.mode` = `live`. If a delegated token cannot be acquired, the extension shows an error and stays on sample — check **Output → TLC Assist**.
+- **Foundry meeting extraction** — set `tlc.meetingExtractor` = `foundry` (optional `tlc.meetingModel`, default `gpt-6.1-sol`) to extract transcript signals with a deployed Foundry model instead of the offline rules. Uses VS Code's Microsoft sign-in; no API key is stored.
 
 **Meeting capture (live mode):** on an opportunity's **Overview → Milestones** header, paste or upload a transcript. Signals for the milestones you select (commitment, risk) are written to the real milestone records; other signals and recommended next steps are captured into a dated note on the opportunity's comments. Writes are all-or-none (validate → apply → compensate). Microsoft Graph meeting acquisition is not wired yet.
 
@@ -149,7 +149,7 @@ npm install
 | Web (live) | `az login` then `npm run web:start:live` | Uses the private Foundry environment file plus an Azure CLI sign-in. |
 | VS Code extension | **F5** in VS Code | See the launch configs under [VS Code extension](#vs-code-extension), or the [command-line build/install/run guide](docs/user-guide/VSCODE-EXTENSION-CLI.md). |
 
-Packaged desktop releases seed the non-secret shared Foundry configuration automatically and use Azure CLI sign-in (run `az login` first). The private developer file above stays ignored and can override the shared default. Downloaded artifacts may need to be unblocked before launch (right-click → **Properties** → **Unblock**).
+Packaged desktop releases seed the non-secret shared Foundry configuration automatically and open the system browser for Microsoft sign-in. The private developer file above stays ignored and can override the shared default. Downloaded artifacts may need to be unblocked before launch (right-click → **Properties** → **Unblock**).
 
 ### Release workflows
 

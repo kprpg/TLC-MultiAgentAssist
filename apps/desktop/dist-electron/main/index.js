@@ -11389,6 +11389,29 @@ function readMicrosoftCorpId(accessToken, expectedUserDomain = "@microsoft.com")
 }
 //#endregion
 //#region apps/desktop/electron/main/packaged-configuration.ts
+function sameConfiguration(left, right) {
+	return JSON.stringify(left) === JSON.stringify(right);
+}
+function isLegacyBundledConfiguration(existing, template) {
+	return existing.environment === "shared" && existing.environment === template.environment && existing.authentication.mode === "azure-cli" && existing.authentication.appRegistration === void 0 && template.authentication.mode === "interactive-browser" && existing.authentication.expectedUserDomain === template.authentication.expectedUserDomain && existing.authentication.foundryTenantId === template.authentication.foundryTenantId && sameConfiguration(existing.authentication.scopes, template.authentication.scopes) && sameConfiguration(existing.foundry, template.foundry);
+}
+async function migrateLegacyBundledConfiguration(filePath, templatePath) {
+	let existingCandidate;
+	let templateCandidate;
+	try {
+		existingCandidate = JSON.parse(await readFile(filePath, "utf8"));
+		templateCandidate = JSON.parse(await readFile(templatePath, "utf8"));
+	} catch {
+		return;
+	}
+	const existing = foundryEnvironmentSchema.safeParse(existingCandidate);
+	const template = foundryEnvironmentSchema.safeParse(templateCandidate);
+	if (!existing.success || !template.success || !isLegacyBundledConfiguration(existing.data, template.data)) return;
+	await writeFile(filePath, `${JSON.stringify({
+		...existing.data,
+		authentication: template.data.authentication
+	}, null, 2)}\n`, "utf8");
+}
 async function prepareFoundryEnvironmentFile(options) {
 	const environment = options.environment ?? process.env;
 	const workingDirectory = options.workingDirectory ?? process.cwd();
@@ -11401,6 +11424,7 @@ async function prepareFoundryEnvironmentFile(options) {
 	const filePath = join(options.userDataPath, "foundry.environment.json");
 	try {
 		await stat(filePath);
+		await migrateLegacyBundledConfiguration(filePath, options.templatePath);
 		return {
 			filePath,
 			created: false,

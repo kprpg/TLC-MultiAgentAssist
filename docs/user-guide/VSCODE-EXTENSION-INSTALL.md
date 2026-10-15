@@ -21,7 +21,7 @@ any extra install.
 | Install the extension | VS Code / VS Code Insiders **1.90.0+** and the `.vsix`. Nothing else. |
 | Run in **sample** mode (default) | Nothing more — no sign-in, no network, no Azure CLI. |
 | Run in **live** mode | A corporate Microsoft identity (VS Code's built-in Microsoft sign-in) with MSX/Dataverse access, and network access to `microsoftsales.crm.dynamics.com`. |
-| Use the real Microsoft Foundry agents (on by default in live mode) | **Azure CLI** installed and `az login` completed, plus access to the configured Foundry project. Turn off `tlc.useFoundryAgents` to use the built-in deterministic guidance instead. |
+| Use the real Microsoft Foundry agents (on by default in live mode) | The Microsoft account signed into VS Code must have access to the configured Foundry project. Turn off `tlc.useFoundryAgents` to use the built-in deterministic guidance instead. |
 | Wire VS Code's own MCP client to Dataverse (optional) | The MCP config bundle described in [Optional: MCP configuration](#optional-mcp-configuration). |
 
 > The separate **MCP configuration bundle** on the release page is optional. The extension
@@ -81,7 +81,7 @@ The extension starts in **sample** mode (sanitized fixtures, no network calls).
    connectivity; it does not switch the data source.)
 2. When prompted, sign in with your authorized corporate Microsoft account (VS Code's
    built-in Microsoft sign-in).
-3. For the real Foundry agents, make sure the Azure CLI is installed and run `az login`
+3. For the real Foundry agents, sign into VS Code with the authorized Microsoft account
    first. If you do not want to use Foundry, turn off `tlc.useFoundryAgents` to use the
    built-in deterministic guidance.
 4. Run **TLC: Use Sample Data** at any time to switch back. If the delegated token cannot be

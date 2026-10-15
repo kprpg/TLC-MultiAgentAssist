@@ -1,8 +1,8 @@
 import * as vscode from 'vscode'
 import { createLocalStoreDataProvider, createSampleDataProvider, type ExtensionDataProvider } from './data-provider.js'
-import { createLiveDataProvider } from './live-provider.js'
+import { configuredFoundryTenantId, createLiveDataProvider } from './live-provider.js'
 import { WorkbenchPanel } from './webview-controller.js'
-import { acquireDelegatedToken } from './authentication.js'
+import { acquireDelegatedToken, createVsCodeTokenCredential } from './authentication.js'
 import { ConnectionTreeProvider, PlaysTreeProvider, PortfolioTreeProvider, type PortfolioNode } from './tree/trees.js'
 import { McpHttpClient } from '../../../packages/connectors/mcp/index.js'
 
@@ -133,11 +133,13 @@ export function activate(context: vscode.ExtensionContext): void {
             process.env['TLC_MEETING_MODEL'] = config.get<string>('meetingModel', 'gpt-6.1-sol')
         }
     }
+    const foundryTenantId = configuredFoundryTenantId()
+    const foundryCredential = foundryTenantId ? createVsCodeTokenCredential(foundryTenantId) : undefined
     const makeSampleProvider = (): ExtensionDataProvider => {
         syncMeetingExtractionEnv()
         if (useLocalStore()) {
             try {
-                return createLocalStoreDataProvider()
+                return createLocalStoreDataProvider(foundryCredential)
             } catch (error) {
                 // node:sqlite may be unavailable on older VS Code runtimes — fall back to fixtures.
                 void vscode.window.showWarningMessage(`TLC Assist could not open the SQLite test store (${error instanceof Error ? error.message : String(error)}). Using in-memory sample data.`)
@@ -271,7 +273,8 @@ export function activate(context: vscode.ExtensionContext): void {
                 if (info.required) output.show(true)
             },
             vscode.workspace.getConfiguration('tlc').get<boolean>('useFoundryAgents', true),
-            vscode.Uri.joinPath(context.globalStorageUri, 'portfolio-preferences.json').fsPath))
+            vscode.Uri.joinPath(context.globalStorageUri, 'portfolio-preferences.json').fsPath,
+            foundryCredential))
             void vscode.window.showInformationMessage(`TLC Assist is now using live data for ${account} (MSX OData + Dataverse MCP).`)
         } catch (error) {
             const detail = error instanceof Error ? error.message : String(error)
