@@ -189,7 +189,7 @@ function MeetingReviewModal({ client, proposal, opportunityName, milestones, onC
     )
 }
 
-/** Meeting-capture launcher shown in the Milestones section header (Teams pick or paste/upload). */
+/** Meeting-capture launcher shown in the Opportunities blade header (Teams pick or paste/upload). */
 export function MeetingCaptureLauncher({ client, opportunityId, opportunityName, milestones, onApplied, onNote }: {
     client: RevampDataClient
     opportunityId: string

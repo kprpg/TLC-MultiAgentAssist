@@ -76,6 +76,7 @@ import {
     additionalSampleObservationsByOpportunity,
     additionalSampleOpportunities
 } from '../../../../packages/common/fixtures/additional-sample-portfolio.js'
+import { samplePortfolioDiscoveryOpportunities } from '../../../../packages/common/fixtures/sample-discovery.js'
 
 export interface RevampDataClient {
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
@@ -317,6 +318,7 @@ const opportunities: Opportunity[] = [
 ]
 
 const discoverableOpportunities: DiscoverableOpportunity[] = [
+    ...samplePortfolioDiscoveryOpportunities(accounts, opportunities),
     { id: 'opp-discover-hybrid-networking', accountId: 'account-contoso', accountName: 'Contoso Energy', name: 'Hybrid networking modernization', recordedStage: 2, value: 1850000, currency: 'USD', closeDate: '2027-02-12', domain: 'infra', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'Advanced Networking', onDealTeam: false },
     { id: 'opp-discover-vmware-migration', accountId: 'account-fabrikam', accountName: 'Fabrikam Retail', name: 'Datacenter exit to Azure VMware Solution', recordedStage: 1, value: 2950000, currency: 'USD', closeDate: '2027-04-02', domain: 'infra', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'Azure VMware Solutions', onDealTeam: false },
     { id: 'opp-discover-synapse-analytics', accountId: 'account-contoso', accountName: 'Contoso Energy', name: 'Enterprise analytics on Synapse and Power BI', recordedStage: 2, value: 2100000, currency: 'USD', closeDate: '2027-01-22', domain: 'data', solutionArea: 'Cloud and AI Platforms', technicalCapability: 'New Analytics with Synapse & PowerBI', onDealTeam: false },

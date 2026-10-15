@@ -10,6 +10,7 @@ import {
   additionalSampleMilestones,
   additionalSampleOpportunities
 } from '../../common/fixtures/additional-sample-portfolio.js'
+import { sampleDiscoveryMetadataByOpportunityId } from '../../common/fixtures/sample-discovery.js'
 
 /** Verified live Dataverse option-set codes (code ↔ label). */
 export const MILESTONE_STATUS: Readonly<Record<number, string>> = {
@@ -242,6 +243,23 @@ export const seedOptionValues: readonly Row[] = [
 
 /** SE-domain discovery catalog across all 8 domains ("Add me" candidates, not yet on the deal team). */
 export const seedDiscoverable: readonly Row[] = [
+  ...seedOpportunities.flatMap((opportunity) => {
+    const id = String(opportunity['id'])
+    const metadata = sampleDiscoveryMetadataByOpportunityId[id]
+    if (!metadata) return []
+    return [{
+      id,
+      account_id: String(opportunity['account_id']),
+      name: String(opportunity['name']),
+      recorded_stage: Number(opportunity['recorded_stage']),
+      value: Number(opportunity['estimated_value']),
+      currency: String(opportunity['currency']),
+      close_date: String(opportunity['estimated_close_date']),
+      domain: metadata.domain,
+      solution_area: metadata.solutionArea,
+      technical_capability: metadata.technicalCapability
+    }]
+  }),
   { id: 'disc-contoso-infra', account_id: 'account-contoso', name: 'Hybrid networking modernization', recorded_stage: 2, value: 1_850_000, currency: 'USD', close_date: '2027-03-01', domain: 'infra', solution_area: 'Cloud and AI Platforms', technical_capability: 'Advanced Networking' },
   { id: 'disc-contoso-data', account_id: 'account-contoso', name: 'Lakehouse analytics foundation', recorded_stage: 1, value: 1_250_000, currency: 'USD', close_date: '2027-04-10', domain: 'data', solution_area: 'Cloud and AI Platforms', technical_capability: 'Analytics' },
   { id: 'disc-fabrikam-aiapps', account_id: 'account-fabrikam', name: 'Cloud-native apps modernization', recorded_stage: 2, value: 2_300_000, currency: 'USD', close_date: '2027-02-20', domain: 'ai-apps', solution_area: 'Digital and App Innovation', technical_capability: 'Cloud Native Apps with AKS' },

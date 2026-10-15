@@ -188,9 +188,19 @@ describe('local-store MSX connector', () => {
     }
   })
 
+  it('includes Fourth Coffee portfolio opportunities in their Discovery domains', async () => {
+    const msx = connector()
+    await expect(msx.discoverOpportunities('ai-apps')).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'opp-fourth-coffee-loyalty', accountName: 'Fourth Coffee', onDealTeam: true })
+    ]))
+    await expect(msx.discoverOpportunities('data')).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'opp-fourth-coffee-analytics', accountName: 'Fourth Coffee', onDealTeam: true })
+    ]))
+  })
+
   it('promotes a discovered opportunity into the portfolio on join', async () => {
     const msx = connector()
-    const [candidate] = await msx.discoverOpportunities('security')
+    const candidate = (await msx.discoverOpportunities('security')).find((opportunity) => !opportunity.onDealTeam)
     expect(candidate?.onDealTeam).toBe(false)
     const result = await msx.joinDealTeam(candidate!.id)
     expect(result.onDealTeam).toBe(true)
