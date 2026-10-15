@@ -32,6 +32,7 @@ import {
     type WorkflowGuidanceHandoff,
     type WorkflowRun
 } from '../../../packages/common/index.js'
+import type { TokenCredential } from '@azure/core-auth'
 import {
     createSampleWorkflowHost,
     type WorkflowHost,
@@ -124,7 +125,7 @@ function opportunityForOrThrow(opportunityId: string): Opportunity {
  * {@link LocalStoreMsxConnector}; selected when `TLC_DATA_STORE=sqlite` or the `tlc.dataStore`
  * setting is `sqlite`. No network calls are made.
  */
-export function createLocalStoreDataProvider(): ExtensionDataProvider {
+export function createLocalStoreDataProvider(foundryCredential?: TokenCredential): ExtensionDataProvider {
     const connector = new LocalStoreMsxConnector(new LocalStore())
     const orchestrator = new ThinSliceOrchestrator(connector, new ExtensionMcemGuidanceConnector(), buildLiveTaskAgents())
     const host: WorkflowHost = createSampleWorkflowHost(async () => {
@@ -135,7 +136,7 @@ export function createLocalStoreDataProvider(): ExtensionDataProvider {
             opportunityIds: opportunities.map((candidate) => candidate.id)
         }
     })
-    const meetingExtractor = buildFoundryMeetingExtractor()
+    const meetingExtractor = buildFoundryMeetingExtractor(process.env, foundryCredential)
     return buildLiveDataProvider({ orchestrator, host, account: 'sample.user@example.com', meetingConnector: connector, ...(meetingExtractor ? { meetingExtractor } : {}), dispose: async () => { /* in-memory store */ } }, 'sample')
 }
 

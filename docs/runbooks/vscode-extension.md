@@ -22,7 +22,7 @@ its reference overview is in the extension [README](../../apps/vscode-extension/
 - Packaging uses `@vscode/vsce`, which is already a dev dependency of the extension —
   no global install needed.
 
-Live mode additionally requires an authenticated Azure CLI session (`az login`) and
+Live mode additionally requires the Microsoft account signed into VS Code to have
 access to MSX and the configured Microsoft Foundry project. Sample mode needs none of
 this.
 
@@ -185,8 +185,8 @@ the [install guide](../user-guide/VSCODE-EXTENSION-INSTALL.md).
 End-user install steps and prerequisites are in the
 [VS Code extension install guide](../user-guide/VSCODE-EXTENSION-INSTALL.md). In short: the
 only requirement to install is VS Code (or Insiders) 1.90.0+ and the `.vsix`; sample mode
-needs nothing more, and live mode additionally needs a corporate Microsoft identity and (for
-Foundry agents) the Azure CLI. VSIX installs are not auto-updated, so re-install the newer
+needs nothing more, and live mode additionally needs a corporate Microsoft identity with MSX
+and Foundry access. VSIX installs are not auto-updated, so re-install the newer
 `.vsix` to upgrade.
 
 ## Debugger (F5) vs. installed extension
@@ -213,7 +213,7 @@ Guidance:
 ## Settings that affect behavior
 
 - `tlc.mode` (`sample` | `live`) — `sample` uses sanitized fixtures and makes no network
-  calls; `live` requires delegated Microsoft identity and `az login`.
+  calls; `live` requires a delegated Microsoft identity with MSX and Foundry access.
 - `tlc.openOnStartup` — open the workbench automatically on activation.
 - `workbench.colorCustomizations` with `editorHoverWidget.*` — set in **user settings** to
   recolor native toolbar tooltips (the Extension Development Host does not load this repo's
@@ -228,4 +228,4 @@ Guidance:
   are not also running an Extension Development Host for the same editor.
 - **`vsce` packaging error about missing files** — run `npm run ext:build` first so
   `dist/` exists, then package.
-- **Live mode shows auth errors** — run `az login`, or switch `tlc.mode` to `sample`.
+- **Live mode shows auth errors** — confirm VS Code is signed into the authorized Microsoft account, or switch `tlc.mode` to `sample`.

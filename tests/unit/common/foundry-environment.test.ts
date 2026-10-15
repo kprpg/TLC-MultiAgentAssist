@@ -58,13 +58,20 @@ describe('Foundry environment configuration', () => {
     )
   })
 
-  it('ships a valid non-secret shared default for Azure CLI authentication', async () => {
+  it('ships a valid non-secret shared default for interactive browser authentication', async () => {
     const filePath = fileURLToPath(new URL('../../../config/foundry.environment.default.json', import.meta.url))
     const content = await readFile(filePath, 'utf8')
 
     await expect(loadFoundryEnvironment(filePath)).resolves.toMatchObject({
       environment: 'shared',
-      authentication: { mode: 'azure-cli' },
+      authentication: {
+        mode: 'interactive-browser',
+        appRegistration: {
+          tenantId: appTenantId,
+          clientId: 'd4a694ba-9ed0-4467-9c06-f7dfe41ceb8c',
+          redirectUri: 'http://localhost'
+        }
+      },
       foundry: {
         projectEndpoint: 'https://multiagentacctteam.services.ai.azure.com/api/projects/multiagentacctteam'
       }

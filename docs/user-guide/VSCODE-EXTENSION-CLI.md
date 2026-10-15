@@ -16,7 +16,7 @@ terminal at the repository root.
 - The **`code`** (VS Code) and/or **`code-insiders`** (VS Code Insiders) CLI on your `PATH`.
   Install it from the Command Palette (`Ctrl+Shift+P`) → **Shell Command: Install 'code'
   command in PATH**, then verify with `code --version` or `code-insiders --version`.
-- Live mode only: an authenticated Azure CLI session (`az login`) and access to MSX and the
+- Live mode only: sign into VS Code with a Microsoft account that has access to MSX and the
   configured Microsoft Foundry project. Sample mode needs none of this.
 
 Run every command below from the **repository root**.
@@ -86,9 +86,9 @@ Host** window loaded directly from your working tree (not the installed `.vsix`)
 | Run TLC Assist Extension (SQLite + Foundry extraction) | adds `TLC_MEETING_EXTRACTOR=foundry`, `TLC_MEETING_MODEL=gpt-6.1-sol` |
 | Run TLC Assist Extension (Live MSX/Dataverse) | `TLC_MODE=live` |
 
-For live mode, sign in **before** launching: run `az login` (for the Foundry agents) and sign
-into VS Code with your corporate Microsoft account (for the delegated MSX token). After
-changing extension code, re-run the launch (or rebuild) and **Developer: Reload Window** in
+For live mode, sign in to VS Code with the authorized Microsoft account before launching. That sign-in
+provides delegated tokens for MSX and Microsoft Foundry. After changing extension code, re-run the
+launch (or rebuild) and **Developer: Reload Window** in
 the Extension Development Host so the new build loads. If the delegated token cannot be
 acquired, the extension reports an error and stays on sample — check **Output → TLC Assist**.
 
@@ -124,4 +124,4 @@ only tests connectivity; it does not switch.)
   not also running an Extension Development Host for the same editor.
 - **`vsce` packaging error about missing files** — run `npm run ext:build` first so `dist/`
   exists, then package.
-- **Live mode shows auth errors** — run `az login`, or switch `tlc.mode` to `sample`.
+- **Live mode shows auth errors** — confirm VS Code is signed into the authorized Microsoft account, or switch `tlc.mode` to `sample`.

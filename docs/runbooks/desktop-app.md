@@ -20,8 +20,8 @@ Live mode additionally requires:
 
 - Access to MSX and the configured Microsoft Foundry project
 - The four deployed Foundry agents named in the environment file
-- Azure CLI and an authenticated corporate session for the bundled `azure-cli` mode (run `az login`)
-- A Microsoft Entra public-client app registration only when switching to `interactive-browser` mode instead of the bundled Azure CLI configuration
+- A browser sign-in with an authorized corporate identity for the bundled `interactive-browser` mode
+- Azure CLI only when a development or custom configuration explicitly uses `azure-cli` mode
 
 Check the installed versions:
 
@@ -50,7 +50,7 @@ Edit `config/foundry.environment.json` with your own values:
 
 - `foundry.projectEndpoint`: copy the project endpoint from the Microsoft Foundry project overview. Its format is `https://<account>.services.ai.azure.com/api/projects/<project>`.
 - `foundry.agents`: set the deployed name, type, and invocation protocol for each of the four agents.
-- `authentication.appRegistration` (only when `authentication.mode` is `interactive-browser`; omit it for the default `azure-cli` mode, which signs in through the Azure CLI):
+- `authentication.appRegistration` (required when `authentication.mode` is `interactive-browser`; omit it only for a development `azure-cli` configuration):
   - `tenantId`: your Microsoft Entra tenant ID.
   - `clientId`: the Application (client) ID of your public-client app registration.
   - `redirectUri`: a redirect URI configured under **Mobile and desktop applications**, normally `http://localhost`.
@@ -95,7 +95,7 @@ Each developer can therefore use a different Foundry project and app registratio
 
 ## Launch the app
 
-The example uses `"mode": "azure-cli"`, preserving the existing local development sign-in flow for MSX and Foundry. Opening a prepared message in Outlook does not start a Microsoft Graph sign-in flow.
+The example uses `"mode": "azure-cli"` for local development. Packaged releases use `"mode": "interactive-browser"` and open the system browser when a resource token is first needed. Opening a prepared message in Outlook does not start a Microsoft Graph sign-in flow.
 
 Sign in with your own corporate identity:
 
@@ -103,7 +103,7 @@ Sign in with your own corporate identity:
 az login
 ```
 
-To use the app registration directly instead, set `authentication.mode` to `interactive-browser`. Replace the example tenant ID and client ID first; placeholder IDs will not authenticate.
+To use an app registration in a custom configuration, set `authentication.mode` to `interactive-browser`. Replace the example tenant ID and client ID first; placeholder IDs will not authenticate.
 
 The app validates the token identity against `authentication.expectedUserDomain` and displays the discovered identity in the toolbar.
 
@@ -130,6 +130,8 @@ npm run desktop:start
 - In `azure-cli` mode, Electron asks `AzureCliCredential` for resource-specific tokens. MSX uses the active Azure CLI identity, Foundry targets `authentication.foundryTenantId`, and Graph uses Azure CLI unless an app registration is configured. Tokens stay in the Electron main process and are not exposed to the renderer.
 - In `interactive-browser` mode, Electron opens the system browser for delegated Microsoft Entra sign-in using the configured public-client app registration. MSX, Foundry, and Graph receive separate resource tokens; no client secret is stored in the app.
 - In sample mode, no Azure or Microsoft Entra authentication occurs.
+
+Packaged upgrades migrate the untouched legacy shared `azure-cli` configuration to the bundled interactive-browser configuration. Customized files and explicit `TLC_FOUNDRY_ENV_FILE` overrides are preserved.
 
 Known template UUIDs and `YOUR-*` endpoints are rejected before credentials are created.
 
