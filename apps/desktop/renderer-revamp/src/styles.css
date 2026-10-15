@@ -474,6 +474,11 @@ body.resizing-blade .blade {
     color: var(--cp-text-muted);
 }
 
+.membership-removal-dialog .membership-removal-error {
+    margin-top: 12px;
+    color: var(--cp-danger);
+}
+
 .membership-removal-actions {
     display: flex;
     justify-content: flex-end;

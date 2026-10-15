@@ -27,8 +27,8 @@ import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
 import { workflowGuidanceCapability } from '../../../shared/workflow-guidance.js'
+import { AddCustomerButton, type CustomerSearchClient } from '../../../shared/add-customer.js'
 import type {
-    AccountCandidateView,
     AccountView,
     AgentCapability,
     AgentTaskView,
@@ -51,6 +51,12 @@ import type {
 
 type Tab = 'portfolio' | 'plays' | 'discover' | 'dashboard'
 type Loadable<T> = { status: 'idle' | 'loading' | 'error' | 'ready'; data?: T; error?: string }
+
+const customerSearchClient: CustomerSearchClient = {
+    searchAccounts: ({ query, matchBy }) => dataClient.searchAccounts(query, matchBy),
+    addAccount: (accountId) => dataClient.addAccount(accountId),
+    setAccountVisibility: (accountId, visibility) => dataClient.setAccountVisibility(accountId, visibility)
+}
 
 function guidanceAgentFor(workflowId: string): AgentCapability {
     return workflowGuidanceCapability(workflowId)
@@ -776,7 +782,8 @@ function MilestonesEditor({ opportunityId, currency, milestones, onChanged, onNo
             else await dataClient.leaveMilestoneTeam(opportunityId, milestone.id)
             onChanged()
         } catch (error) {
-            onNote((error as Error).message)
+            if (!joining) throw error
+            onNote(error instanceof Error ? error.message : 'Could not join the milestone team.')
         } finally {
             setMembershipBusyId(undefined)
         }
@@ -1272,10 +1279,6 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
     const [sub, setSub] = useState<SubTab>('overview')
     const [note, setNote] = useState<string | undefined>(undefined)
     const [showHiddenAccounts, setShowHiddenAccounts] = useState(false)
-    const [showAccountSearch, setShowAccountSearch] = useState(false)
-    const [accountMatchBy, setAccountMatchBy] = useState<'name' | 'tpid'>('name')
-    const [accountQuery, setAccountQuery] = useState('')
-    const [accountCandidates, setAccountCandidates] = useState<AccountCandidateView[]>([])
     const [accountBusy, setAccountBusy] = useState(false)
     const opportunityRequestId = useRef(0)
     const mcemRequestId = useRef(0)
@@ -1382,37 +1385,6 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
         }
     }, [commentsText, loadOpportunities])
 
-    const searchAccounts = useCallback(async () => {
-        setAccountBusy(true)
-        setNote(undefined)
-        try {
-            setAccountCandidates(await dataClient.searchAccounts(accountQuery, accountMatchBy))
-        } catch (error) {
-            setNote(error instanceof Error ? error.message : 'Account search failed.')
-        } finally {
-            setAccountBusy(false)
-        }
-    }, [accountMatchBy, accountQuery])
-
-    const addOrUnhideAccount = useCallback(async (candidate: AccountCandidateView) => {
-        setAccountBusy(true)
-        setNote(undefined)
-        try {
-            if (candidate.state === 'hidden') await dataClient.setAccountVisibility(candidate.id, 'visible')
-            else if (candidate.state === 'not-added') await dataClient.addAccount(candidate.id)
-            await loadAccounts(showHiddenAccounts)
-            setShowAccountSearch(false)
-            setAccountQuery('')
-            setAccountCandidates([])
-            setAccountId(candidate.id)
-            setNote(`${candidate.name} is now available in Portfolio and Discovery. Use Discovery to add its opportunities to your Deal Team working set.`)
-        } catch (error) {
-            setNote(error instanceof Error ? error.message : 'Could not add account.')
-        } finally {
-            setAccountBusy(false)
-        }
-    }, [loadAccounts, showHiddenAccounts])
-
     const changeAccountVisibility = useCallback(async (item: AccountView, visibility: 'visible' | 'hidden') => {
         if (visibility === 'hidden' && !window.confirm(`Hide ${item.name} from Portfolio, Discovery, Plays, and downstream analysis? Deal Team membership will not change.`)) return
         setAccountBusy(true)
@@ -1435,24 +1407,13 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
         <div className={portfolioLayoutClassName({ accountsExpanded, detailsExpanded, actionsExpanded })}>
             {accountsExpanded && <section id="portfolio-accounts-panel" className="pane">
                 <div className="account-management-header"><h3 className="section-heading">Accounts</h3><div>
-                    <button className="secondary" onClick={() => setShowAccountSearch((current) => !current)}>Add customer</button>
+                    <AddCustomerButton client={customerSearchClient} onAdded={async (account) => {
+                        await loadAccounts(showHiddenAccounts)
+                        setAccountId(account.id)
+                        setNote(`${account.name} is now available in Portfolio and Discovery. Use Discovery to add its opportunities to your Deal Team working set.`)
+                    }} />
                     <button className="link" onClick={() => { const next = !showHiddenAccounts; setShowHiddenAccounts(next); void loadAccounts(next) }}>{showHiddenAccounts ? 'Hide hidden' : 'Show hidden'}</button>
                 </div></div>
-                {showAccountSearch && <div className="account-search-box">
-                    <label>Search by
-                        <select value={accountMatchBy} onChange={(event) => { setAccountMatchBy(event.target.value as 'name' | 'tpid'); setAccountCandidates([]) }}>
-                            <option value="name">Account name</option>
-                            <option value="tpid">TPID</option>
-                        </select>
-                    </label>
-                    <label>{accountMatchBy === 'name' ? 'Account name' : 'TPID'}
-                        <input value={accountQuery} onChange={(event) => setAccountQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void searchAccounts() }} />
-                    </label>
-                    <button disabled={accountBusy || (accountMatchBy === 'name' ? accountQuery.trim().length < 2 : !accountQuery.trim())} onClick={() => void searchAccounts()}>{accountBusy ? 'Searching...' : 'Search'}</button>
-                    <div className="account-candidates">
-                        {accountCandidates.map((candidate) => <div key={candidate.id}><span><strong>{candidate.name}</strong><small>{candidate.tpid ? `TPID ${candidate.tpid}` : candidate.segment}</small></span><button disabled={accountBusy || candidate.state === 'visible'} onClick={() => void addOrUnhideAccount(candidate)}>{candidate.state === 'visible' ? 'Already added' : candidate.state === 'hidden' ? 'Unhide' : 'Add'}</button></div>)}
-                    </div>
-                </div>}
                 <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
                     {accounts.data?.filter((item) => item.visibility !== 'hidden').map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
                 </select>
@@ -1674,9 +1635,7 @@ function DiscoverPanel(): ReactElement {
             setItems((current) => current.status === 'ready' && current.data
                 ? { status: 'ready', data: current.data.map((candidate) => candidate.id === item.id ? { ...candidate, onDealTeam: result.onDealTeam } : candidate) }
                 : current)
-            setNote(result.alreadyAbsent ? 'You were already absent from this Deal Team.' : 'Removed you from the Deal Team and downstream working set.')
-        } catch (error) {
-            setNote(error instanceof Error ? error.message : 'Could not leave the Deal Team.')
+            setNote(result.alreadyAbsent ? 'You were already absent from this Deal Team.' : 'Removed you from the Deal Team. The opportunity remains in Portfolio if you still belong to a milestone team.')
         } finally {
             setJoining(undefined)
         }
@@ -1709,6 +1668,7 @@ function DiscoverPanel(): ReactElement {
             }))
             setNote(joiningMilestone ? 'Added you to the milestone team. The opportunity now appears in your portfolio.' : 'Removed you from the milestone team.')
         } catch (error) {
+            if (!joiningMilestone) throw error
             setNote(error instanceof Error ? error.message : 'Could not update the milestone team.')
         } finally {
             setMilestoneBusyId(undefined)
@@ -1736,6 +1696,10 @@ function DiscoverPanel(): ReactElement {
             <header className="discover-header">
                 <h2>Discover opportunities</h2>
                 <p>Review all active opportunities for visible accounts and add or remove yourself from the Deal Team — or expand an opportunity to join a milestone team without joining the Deal Team. Deal Team or milestone-team membership brings an opportunity into Portfolio.</p>
+                <AddCustomerButton client={customerSearchClient} onAdded={() => {
+                    setFilters({ include: [], exclude: [] })
+                    setRefreshVersion((version) => version + 1)
+                }} />
                 <div className="discover-domain-toolbar">
                     <nav className="tabs" role="tablist" aria-label="Solution Engineer domain">
                         {SE_DOMAINS.map((option) => (

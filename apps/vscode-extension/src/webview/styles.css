@@ -1934,6 +1934,11 @@ textarea {
     margin: 0;
 }
 
+.membership-removal-dialog .membership-removal-error {
+    margin-top: 12px;
+    color: var(--vscode-errorForeground, #a1260d);
+}
+
 .membership-removal-actions {
     display: flex;
     justify-content: flex-end;

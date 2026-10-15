@@ -166,6 +166,45 @@ describe('LiveMsxConnector.joinDealTeam', () => {
       })
     })
 
+    it('preserves membership after a rejected delete and reloads the portfolio after a successful retry', async () => {
+      const membershipId = '00000000-0000-4000-8000-000000000def'
+      const accountId = '00000000-0000-4000-8000-000000000fed'
+      let member = true
+      let deletes = 0
+      const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input))
+        if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+        if (url.pathname.endsWith('/msp_dealteams')) {
+          expect(url.searchParams.get('$filter')).toContain('_msp_dealteamuserid_value eq user-id')
+          return json({ value: member ? [{ msp_dealteamid: membershipId, _msp_parentopportunityid_value: validGuid }] : [] })
+        }
+        if (url.pathname.endsWith('/opportunities')) return json({ value: [{
+          opportunityid: validGuid, _parentaccountid_value: accountId, name: 'Selected opportunity', statecode: 0
+        }] })
+        if (url.pathname.endsWith('/accounts')) return json({ value: [{ accountid: accountId, name: 'Selected customer' }] })
+        if (url.pathname.endsWith(`/msp_dealteams(${membershipId})`) && init?.method === 'DELETE') {
+          if (++deletes === 1) return new Response(JSON.stringify({ error: { message: 'Delete denied.' } }), { status: 403 })
+          member = false
+          return new Response(null, { status: 204 })
+        }
+        throw new Error(`Unexpected request: ${url} ${init?.method}`)
+      })
+      const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch)
+
+      await expect(connector.listOpportunities(accountId)).resolves.toEqual([
+        expect.objectContaining({ id: validGuid })
+      ])
+      await expect(connector.leaveDealTeam(validGuid)).rejects.toThrow(/403/)
+      await expect(connector.listOpportunities(accountId)).resolves.toEqual([
+        expect.objectContaining({ id: validGuid })
+      ])
+      await expect(connector.leaveDealTeam(validGuid)).resolves.toEqual({
+        opportunityId: validGuid, onDealTeam: false, alreadyAbsent: false
+      })
+      await expect(connector.listOpportunities(accountId)).resolves.toEqual([])
+      expect(deletes).toBe(2)
+    })
+
     it('refuses to guess when duplicate active memberships exist', async () => {
       const request = vi.fn(async (input: string | URL | Request) => {
         const url = new URL(String(input))
