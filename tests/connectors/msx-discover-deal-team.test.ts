@@ -292,9 +292,10 @@ describe('FixtureMsxConnector discovery', () => {
     const infra = await connector.discoverOpportunities('infra')
     expect(infra.length).toBeGreaterThan(0)
     expect(infra.every((item) => item.domain === 'infra')).toBe(true)
-    expect(infra.every((item) => item.onDealTeam === false)).toBe(true)
+    expect(infra.some((item) => item.onDealTeam)).toBe(true)
+    expect(infra.some((item) => !item.onDealTeam)).toBe(true)
 
-    const target = infra[0]!
+    const target = infra.find((item) => !item.onDealTeam)!
     const join = await connector.joinDealTeam(target.id)
     expect(join).toEqual({ opportunityId: target.id, onDealTeam: true, alreadyMember: false })
 
@@ -314,6 +315,16 @@ describe('FixtureMsxConnector discovery', () => {
     const aiApps = await connector.discoverOpportunities('ai-apps')
     expect(data.every((item) => item.domain === 'data')).toBe(true)
     expect(aiApps.every((item) => item.domain === 'ai-apps')).toBe(true)
+  })
+
+  it('includes Fourth Coffee portfolio opportunities in their Discovery domains', async () => {
+    const connector = new FixtureMsxConnector()
+    await expect(connector.discoverOpportunities('ai-apps')).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'opp-fourth-coffee-loyalty', accountName: 'Fourth Coffee', onDealTeam: true })
+    ]))
+    await expect(connector.discoverOpportunities('data')).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'opp-fourth-coffee-analytics', accountName: 'Fourth Coffee', onDealTeam: true })
+    ]))
   })
 
   it('surfaces the specialist domains beyond the three core buckets', async () => {
@@ -370,7 +381,7 @@ describe('FixtureMsxConnector milestone team membership', () => {
 
   it('joins a milestone for a discoverable opportunity (greenfield) without joining the Deal Team', async () => {
     const connector = new FixtureMsxConnector()
-    const discovered = (await connector.discoverOpportunities('infra'))[0]!
+    const discovered = (await connector.discoverOpportunities('infra')).find((item) => !item.onDealTeam)!
     expect(discovered.onDealTeam).toBe(false)
 
     const milestones = await connector.listDiscoverableMilestones(discovered.id)

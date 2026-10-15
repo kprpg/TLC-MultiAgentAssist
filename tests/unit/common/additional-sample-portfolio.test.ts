@@ -5,6 +5,7 @@ import {
   additionalSampleObservationsByOpportunity,
   additionalSampleOpportunities
 } from '../../../packages/common/fixtures/additional-sample-portfolio.js'
+import { sampleDiscoveryMetadataByOpportunityId } from '../../../packages/common/fixtures/sample-discovery.js'
 
 describe('additional sample portfolio fixture', () => {
   it('has unique, fully connected account and opportunity records', () => {
@@ -26,6 +27,16 @@ describe('additional sample portfolio fixture', () => {
     for (const opportunity of additionalSampleOpportunities) {
       expect(additionalSampleMilestones.filter((milestone) => milestone.opportunityId === opportunity.id)).toHaveLength(3)
       expect(additionalSampleObservationsByOpportunity[opportunity.id]).toHaveLength(5)
+    }
+  })
+
+  it('classifies every additional opportunity for sample Discovery', () => {
+    for (const opportunity of additionalSampleOpportunities) {
+      expect(sampleDiscoveryMetadataByOpportunityId[opportunity.id]).toEqual(expect.objectContaining({
+        domain: expect.any(String),
+        solutionArea: expect.any(String),
+        technicalCapability: expect.any(String)
+      }))
     }
   })
 

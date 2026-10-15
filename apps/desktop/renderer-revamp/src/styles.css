@@ -384,10 +384,21 @@ body.resizing-blade .blade {
 
 .blade-header-actions {
     display: flex;
+    align-items: center;
 }
 
 .blade-header-actions button>span {
     color: inherit;
+}
+
+.blade-header-actions .meeting-launch-button {
+    min-width: max-content;
+    height: 30px;
+    white-space: nowrap;
+}
+
+.blade-header-actions .meeting-launch-button>span {
+    margin-top: 0;
 }
 
 .icon-button {
@@ -1542,6 +1553,38 @@ body.resizing-blade .blade {
     color: var(--cp-text-muted);
 }
 
+.workflow-guidance-result {
+    display: grid;
+    gap: 10px;
+    margin-left: 38px;
+    padding: 12px;
+    background: var(--cp-surface-soft);
+    border: 1px solid var(--cp-border);
+    border-left: 3px solid var(--cp-accent);
+    border-radius: 4px;
+}
+
+.workflow-guidance-result>header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.workflow-guidance-result>header p {
+    margin: 0;
+}
+
+.workflow-guidance-result>header span {
+    color: var(--cp-text-muted);
+    font-size: 11px;
+}
+
+.workflow-guidance-result .agent-response-markdown {
+    padding: 0;
+    border: 0;
+}
+
 .workflow-activity {
     display: grid;
     gap: 12px;
@@ -2521,7 +2564,7 @@ body.resizing-blade .blade {
 
 }
 
-        /* Meeting capture: launcher (Milestones header) and review modal (Fluent Dialog). */
+        /* Meeting capture: launcher (Opportunities header) and review modal (Fluent Dialog). */
         .meeting-launcher {
             position: relative;
         }

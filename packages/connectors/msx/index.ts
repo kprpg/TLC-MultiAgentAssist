@@ -25,6 +25,7 @@ import {
   additionalSampleObservationsByOpportunity,
   additionalSampleOpportunities
 } from '../../common/fixtures/additional-sample-portfolio.js'
+import { samplePortfolioDiscoveryOpportunities } from '../../common/fixtures/sample-discovery.js'
 import type { MsxConnector, OpportunityContext } from '../common/index.js'
 
 export {
@@ -312,6 +313,7 @@ const observationsByOpportunity: Record<string, OpportunityContext['observations
 }
 
 const discoverableOpportunities: DiscoverableOpportunity[] = [
+  ...samplePortfolioDiscoveryOpportunities(accounts, opportunities),
   {
     id: 'opp-discover-hybrid-networking',
     accountId: 'account-contoso',

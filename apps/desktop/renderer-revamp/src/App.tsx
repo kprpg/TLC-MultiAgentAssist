@@ -286,6 +286,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [selectedWorkflowOutput, setSelectedWorkflowOutput] = useState<InitialWorkflowOutput | null>(null)
   const [workflowActivityOpen, setWorkflowActivityOpen] = useState(false)
   const [workflowGuidanceLoading, setWorkflowGuidanceLoading] = useState<string | null>(null)
+  const [workflowGuidanceResults, setWorkflowGuidanceResults] = useState<Record<string, AgentTaskResponse>>({})
   const boardDragRef = useRef<BoardDrag | null>(null)
   const boardViewportRef = useRef<HTMLDivElement | null>(null)
   const milestonePanelRef = useRef<HTMLDivElement | null>(null)
@@ -452,21 +453,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         handoff.scope.opportunityId,
         handoff.prompt
       )
-      const nextAccount = accounts.find(({ id }) => id === handoff.scope.accountId)
-      const nextOpportunity = searchOpportunities.find(({ id }) => id === handoff.scope.opportunityId)
-      if (nextAccount) {
-        setAccount(nextAccount)
-        setOpportunities(searchOpportunities.filter(({ accountId }) => accountId === nextAccount.id))
-      }
-      if (nextOpportunity) setOpportunity(nextOpportunity)
-      setCapability(handoff.capability)
-      setAgentResult(response)
-      setTaskPrompt(handoff.prompt)
-      setCenterTab('guidance')
-      setWorkspaceView('accounts')
-      setMobileBlade('center')
+      const resultKey = `${selectedWorkflowRun.runId}:${queueItemId}`
+      setWorkflowGuidanceResults((current) => ({ ...current, [resultKey]: response }))
     } catch (cause) {
-      setWorkflowError(cause instanceof Error ? cause.message : 'The workflow result could not be sent to Guidance.')
+      setWorkflowError(cause instanceof Error ? cause.message : 'The workflow follow-up could not be generated.')
     } finally {
       setWorkflowGuidanceLoading(null)
     }
@@ -1212,14 +1202,17 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       </Dialog>
 
       {account && <section className={`blade opportunity-blade ${collapsed.has('opportunities') ? 'collapsed' : ''} ${opportunitiesFillAvailableSpace ? 'fill-available-space' : ''} ${mobileBlade === 'opportunities' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('opportunities') || opportunitiesFillAvailableSpace ? undefined : bladeWidths.opportunities }} aria-label="Opportunities blade">
-        <BladeHeader title="Opportunities" subtitle={account.name} collapsed={collapsed.has('opportunities')} refreshing={loading} actions={<Menu checkedValues={{ opportunitySort: [opportunitySort] }} positioning="below-end">
-          <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button" icon={<ArrowSort20Regular />} aria-label="Sort opportunities" title={`Sort opportunities by ${opportunitySort === 'closeDate' ? 'Close Date' : opportunitySort === 'stage' ? 'Stage' : 'Value'} (${opportunitySortDirection})`} /></MenuTrigger>
-          <MenuPopover><MenuList aria-label="Sort opportunities by">
-            <MenuItemRadio name="opportunitySort" value="closeDate" onClick={() => chooseOpportunitySort('closeDate')}>Close Date</MenuItemRadio>
-            <MenuItemRadio name="opportunitySort" value="stage" onClick={() => chooseOpportunitySort('stage')}>Stage</MenuItemRadio>
-            <MenuItemRadio name="opportunitySort" value="value" onClick={() => chooseOpportunitySort('value')}>$ Value</MenuItemRadio>
-          </MenuList></MenuPopover>
-        </Menu>} onRefresh={() => void refreshOpportunities()} onToggle={() => toggleBlade('opportunities')} onClose={closeOpportunities} />
+        <BladeHeader title="Opportunities" subtitle={account.name} collapsed={collapsed.has('opportunities')} refreshing={loading} actions={<>
+          {opportunity && <MeetingCaptureLauncher client={client} opportunityId={opportunity.id} opportunityName={opportunity.name} milestones={milestones} onApplied={() => void refreshOpportunityContext()} onNote={setError} />}
+          <Menu checkedValues={{ opportunitySort: [opportunitySort] }} positioning="below-end">
+            <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button" icon={<ArrowSort20Regular />} aria-label="Sort opportunities" title={`Sort opportunities by ${opportunitySort === 'closeDate' ? 'Close Date' : opportunitySort === 'stage' ? 'Stage' : 'Value'} (${opportunitySortDirection})`} /></MenuTrigger>
+            <MenuPopover><MenuList aria-label="Sort opportunities by">
+              <MenuItemRadio name="opportunitySort" value="closeDate" onClick={() => chooseOpportunitySort('closeDate')}>Close Date</MenuItemRadio>
+              <MenuItemRadio name="opportunitySort" value="stage" onClick={() => chooseOpportunitySort('stage')}>Stage</MenuItemRadio>
+              <MenuItemRadio name="opportunitySort" value="value" onClick={() => chooseOpportunitySort('value')}>$ Value</MenuItemRadio>
+            </MenuList></MenuPopover>
+          </Menu>
+        </>} onRefresh={() => void refreshOpportunities()} onToggle={() => toggleBlade('opportunities')} onClose={closeOpportunities} />
         {!collapsed.has('opportunities') && <div className="blade-body opportunity-table-shell" aria-label={`${account.name} opportunities and milestones`}>
           {!loading && sortedOpportunities.length === 0 && <MessageBar intent="info">This account is in your account list but has no opportunities where you are currently a Deal Team member. Use Discovery to add yourself.</MessageBar>}
           <div className="opportunity-table-wrap">
@@ -1274,7 +1267,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
             <div className="milestone-tree-header">
               <span>Milestones</span>
               <div className="milestone-tree-actions">
-                <MeetingCaptureLauncher client={client} opportunityId={opportunity.id} opportunityName={opportunity.name} milestones={milestones} onApplied={() => void refreshOpportunityContext()} onNote={setError} />
                 <Menu checkedValues={{ milestoneSort: [milestoneSort] }} positioning="below-end">
                   <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="tree-refresh-button" icon={<ArrowSort20Regular />} aria-label="Sort milestones" title={`Sort milestones by ${milestoneSort === 'targetDate' ? 'Milestone Est. Date' : milestoneSort === 'estimatedMonthlyUsage' ? 'Est. Change in Monthly Usage' : milestoneSort === 'commitment' ? 'Customer Commitment' : 'Milestone Status'} (${milestoneSortDirection})`} /></MenuTrigger>
                   <MenuPopover><MenuList aria-label="Sort milestones by">
@@ -1605,8 +1597,11 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
         {selectedWorkflowOutput && <WorkflowResult
           output={selectedWorkflowOutput}
+          runId={selectedWorkflowRun?.runId}
           guidanceLoading={workflowGuidanceLoading}
           guidanceLabel={agentCapabilities.find(({ id }) => id === workflowGuidanceCapability(selectedWorkflowOutput.workflowId))?.label ?? 'Guidance'}
+          guidanceResults={workflowGuidanceResults}
+          onOpenEvidence={(url) => void client.openEvidence(url)}
           onSendGuidance={sendWorkflowToGuidance}
         />}
 
@@ -1774,13 +1769,19 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
 function WorkflowResult({
   output,
+  runId,
   guidanceLoading,
   guidanceLabel,
+  guidanceResults,
+  onOpenEvidence,
   onSendGuidance
 }: {
   output: InitialWorkflowOutput
+  runId?: string
   guidanceLoading: string | null
   guidanceLabel: string
+  guidanceResults: Readonly<Record<string, AgentTaskResponse>>
+  onOpenEvidence: (url: string) => void
   onSendGuidance?: (queueItemId: string) => void
 }) {
   const card = output.card
@@ -1791,7 +1792,18 @@ function WorkflowResult({
     {card.kind === 'timeline' && <ol className="workflow-timeline">{card.events.map((event) => <li key={`${event.at}-${event.label}`}><time dateTime={event.at}>{new Date(event.at).toLocaleString()}</time><span>{event.label}</span></li>)}</ol>}
     {card.kind === 'action-list' && <ul className="workflow-actions">{card.actions.map((action) => <li key={action.id}><span className={`priority ${action.priority.toLowerCase()}`}>{action.priority}</span><strong>{action.label}</strong></li>)}</ul>}
     {card.kind === 'exception-list' && <ul className="workflow-actions">{card.exceptions.map((exception) => <li key={exception.id}><span className={`priority ${exception.priority.toLowerCase()}`}>{exception.priority}</span><div><strong>{exception.title}</strong><p>{exception.detail}</p></div></li>)}</ul>}
-    <section className="workflow-queue" aria-label="Operational queue"><h3>Operational queue <span>{output.queueItems.length}</span></h3>{output.queueItems.length === 0 ? <p>No queued follow-up.</p> : output.queueItems.map((item) => <article key={item.id}><span className={`priority ${item.priority.toLowerCase()}`}>{item.priority}</span><div><strong>{item.title}</strong><p>{item.owner ?? 'Unassigned'}{item.dueDate ? ` · Due ${item.dueDate}` : ''}</p></div>{onSendGuidance && item.accountId && item.opportunityId && <Button appearance="subtle" className="text-action" icon={<Sparkle20Regular />} disabled={guidanceLoading !== null} onClick={() => onSendGuidance(item.id)}>{guidanceLoading === item.id ? 'Sending…' : `Send to ${guidanceLabel}`}</Button>}</article>)}</section>
+    <section className="workflow-queue" aria-label="Operational queue"><h3>Operational queue <span>{output.queueItems.length}</span></h3>{output.queueItems.length === 0 ? <p>No queued follow-up.</p> : output.queueItems.map((item) => {
+      const guidanceResult = runId ? guidanceResults[`${runId}:${item.id}`] : undefined
+      return <Fragment key={item.id}>
+        <article><span className={`priority ${item.priority.toLowerCase()}`}>{item.priority}</span><div><strong>{item.title}</strong><p>{item.owner ?? 'Unassigned'}{item.dueDate ? ` · Due ${item.dueDate}` : ''}</p></div>{onSendGuidance && item.accountId && item.opportunityId && <Button appearance="subtle" className="text-action" icon={<Sparkle20Regular />} disabled={guidanceLoading !== null} onClick={() => onSendGuidance(item.id)}>{guidanceLoading === item.id ? 'Sending…' : `Send to ${guidanceLabel}`}</Button>}</article>
+        {guidanceResult && <section className="workflow-guidance-result" aria-label={`${guidanceLabel} result for ${item.title}`}>
+          <header><div><p className="eyebrow">{guidanceLabel}</p><strong>Workflow follow-up</strong></div><span>Agent {guidanceResult.agentVersion}</span></header>
+          <div className="agent-response-markdown">
+            <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ a: ({ href, children }) => <a href={href} onClick={(event) => { event.preventDefault(); if (href) onOpenEvidence(href) }}>{children}</a> }}>{formatResponseMarkdown(guidanceResult.content)}</Markdown>
+          </div>
+        </section>}
+      </Fragment>
+    })}</section>
   </section>
 }
 

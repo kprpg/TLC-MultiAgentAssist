@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { workflowDefinitions, workflowGuidanceDefinition, workflowGuidanceOutput, workflowOutput, workflowRun } from './workflow-fixtures.js'
+import { accountPulseWorkflowDefinition, riskPlayWorkflowDefinition, workflowDefinitions, workflowGuidanceDefinition, workflowGuidanceOutput, workflowOutput, workflowRun } from './workflow-fixtures.js'
 import { expectCompleteSamplePortfolio } from './sample-portfolio.js'
 import { expectOpportunityAndMilestoneRemoval } from './membership-removal.js'
 import { expectOpportunitiesToFillCollapsedWorkspace } from './opportunities-layout.js'
@@ -109,7 +109,19 @@ test('curates a customer from account search through Discovery and downstream vi
     await expect(page.getByText('This account is in your account list but has no opportunities where you are currently a Deal Team member.')).toBeVisible()
 })
 
-test('sends an opportunity-scoped workflow exception to existing guidance', async ({ page }) => {
+test('shows Fourth Coffee portfolio opportunities in sample Discovery', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Discover opportunities' }).click()
+    const discovery = page.getByRole('region', { name: 'Discover opportunities' })
+
+    await discovery.getByRole('button', { name: 'AI & Apps' }).click()
+    await expect(discovery.getByRole('row', { name: /Customer loyalty Copilot.*Fourth Coffee/ })).toContainText('On deal team')
+
+    await discovery.getByRole('button', { name: 'Data' }).click()
+    await expect(discovery.getByRole('row', { name: /Store analytics modernization - ready to advance.*Fourth Coffee/ })).toContainText('On deal team')
+})
+
+test('shows an opportunity-scoped MCEM Coach follow-up inline with workflow results', async ({ page }) => {
     const completedRun = workflowRun('WF-003', 'completed', 'complete')
     const prompt = 'Review WF-003 result using Evidence IDs: tool-call-1. Cite only these IDs.'
     await page.route('**/api/workflows/*', async (route) => {
@@ -132,13 +144,14 @@ test('sends an opportunity-scoped workflow exception to existing guidance', asyn
     await launcher.getByRole('button', { name: /^Stage mismatch review/ }).click()
     await launcher.getByRole('button', { name: 'Send to MCEM Coach' }).click()
 
-    await expect(page.getByRole('tab', { name: 'Multi-Agent Guidance' })).toHaveAttribute('aria-selected', 'true')
-    await expect(page.locator('.agent-response')).toContainText('MCEM Coach')
-    await expect(page.locator('.agent-response')).toContainText('Grid operations modernization')
-    await expect(page.locator('.agent-response')).toContainText(prompt)
+    const inlineResult = launcher.getByRole('region', { name: /MCEM Coach result for/ })
+    await expect(inlineResult).toContainText('MCEM Coach')
+    await expect(inlineResult).toContainText('Grid operations modernization')
+    await expect(inlineResult).toContainText(prompt)
+    await expect(launcher).toBeVisible()
 })
 
-test('sends a stale opportunity workflow item to Pursuit guidance', async ({ page }) => {
+test('shows a stale opportunity Pursuit follow-up inline with workflow results', async ({ page }) => {
     const completedRun = workflowRun('WF-001', 'completed', 'complete')
     const output = workflowOutput('WF-001')
     const queueItem = output.queueItems[0]
@@ -187,9 +200,121 @@ test('sends a stale opportunity workflow item to Pursuit guidance', async ({ pag
         queueItemId: 'queue-1',
         capability: 'pursuit-executive'
     })
-    await expect(page.getByRole('tab', { name: 'Multi-Agent Guidance' })).toHaveAttribute('aria-selected', 'true')
-    await expect(page.locator('.agent-response')).toContainText('Pursuit')
-    await expect(page.locator('.agent-response')).toContainText(prompt)
+    const inlineResult = launcher.getByRole('region', { name: /Pursuit result for/ })
+    await expect(inlineResult).toContainText('Pursuit')
+    await expect(inlineResult).toContainText(prompt)
+    await expect(launcher).toBeVisible()
+})
+
+test('shows a meeting-prep workflow Account Pulse follow-up inline with workflow results', async ({ page }) => {
+    const completedRun = workflowRun('WF-007', 'completed', 'complete')
+    const output = workflowOutput('WF-007')
+    const queueItem = output.queueItems[0]
+    if (!queueItem) throw new Error('WF-007 fixture must include a queue item.')
+    output.queueItems[0] = {
+        ...queueItem,
+        title: 'Prepare for next meeting: Executive architecture review',
+        accountId: 'account-contoso',
+        opportunityId: 'opp-grid-modernization'
+    }
+    const prompt = 'Review the upcoming meeting using Evidence IDs: evidence-1.'
+    let guidanceRequest: Record<string, unknown> | undefined
+    await page.route('**/api/workflows/*', async (route) => {
+        const operation = new URL(route.request().url()).pathname.split('/').at(-1)
+        if (operation === 'list') await route.fulfill({ json: [accountPulseWorkflowDefinition] })
+        else if (operation === 'history') await route.fulfill({ json: [completedRun] })
+        else if (operation === 'guidance') {
+            guidanceRequest = route.request().postDataJSON() as Record<string, unknown>
+            await route.fulfill({
+                json: {
+                    contractVersion: '1.0',
+                    workflowId: 'WF-007',
+                    resultRef: 'result:WF-007',
+                    capability: 'account-pulse',
+                    scope: { kind: 'opportunity', accountId: 'account-contoso', opportunityId: 'opp-grid-modernization' },
+                    prompt,
+                    context: {
+                        cardTitle: 'Next meeting prep pack',
+                        queueItemId: 'queue-1',
+                        queueItemTitle: 'Prepare for next meeting: Executive architecture review',
+                        facts: [],
+                        evidenceIds: ['evidence-1']
+                    }
+                }
+            })
+        } else await route.fulfill({ json: { run: completedRun, output } })
+    })
+
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Workflows' }).click()
+    const launcher = page.getByRole('region', { name: 'Workflow Launcher' })
+    await launcher.getByRole('button', { name: /^Next meeting prep pack/ }).click()
+    await launcher.getByRole('button', { name: 'Send to Account Pulse' }).click()
+
+    expect(guidanceRequest).toMatchObject({
+        runId: completedRun.runId,
+        queueItemId: 'queue-1',
+        capability: 'account-pulse'
+    })
+    const inlineResult = launcher.getByRole('region', { name: /Account Pulse result for/ })
+    await expect(inlineResult).toContainText('Account Pulse')
+    await expect(inlineResult).toContainText(prompt)
+    await expect(launcher).toBeVisible()
+})
+
+test('shows a commit-risk workflow Risk Solution Play follow-up inline with workflow results', async ({ page }) => {
+    const completedRun = workflowRun('WF-006', 'completed', 'complete')
+    const output = workflowOutput('WF-006')
+    const queueItem = output.queueItems[0]
+    if (!queueItem) throw new Error('WF-006 fixture must include a queue item.')
+    output.queueItems[0] = {
+        ...queueItem,
+        accountId: 'account-contoso',
+        opportunityId: 'opp-grid-modernization'
+    }
+    const prompt = 'Review the commit-risk conflict using Evidence IDs: evidence-1.'
+    let guidanceRequest: Record<string, unknown> | undefined
+    await page.route('**/api/workflows/*', async (route) => {
+        const operation = new URL(route.request().url()).pathname.split('/').at(-1)
+        if (operation === 'list') await route.fulfill({ json: [riskPlayWorkflowDefinition] })
+        else if (operation === 'history') await route.fulfill({ json: [completedRun] })
+        else if (operation === 'guidance') {
+            guidanceRequest = route.request().postDataJSON() as Record<string, unknown>
+            await route.fulfill({
+                json: {
+                    contractVersion: '1.0',
+                    workflowId: 'WF-006',
+                    resultRef: 'result:WF-006',
+                    capability: 'risk-solution-play',
+                    scope: { kind: 'opportunity', accountId: 'account-contoso', opportunityId: 'opp-grid-modernization' },
+                    prompt,
+                    context: {
+                        cardTitle: 'Stale opportunities',
+                        queueItemId: 'queue-1',
+                        queueItemTitle: 'Review Northwind renewal',
+                        facts: [],
+                        evidenceIds: ['evidence-1']
+                    }
+                }
+            })
+        } else await route.fulfill({ json: { run: completedRun, output } })
+    })
+
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Workflows' }).click()
+    const launcher = page.getByRole('region', { name: 'Workflow Launcher' })
+    await launcher.getByRole('button', { name: /^Commit-risk conflict list/ }).click()
+    await launcher.getByRole('button', { name: 'Send to Risk & Play' }).click()
+
+    expect(guidanceRequest).toMatchObject({
+        runId: completedRun.runId,
+        queueItemId: 'queue-1',
+        capability: 'risk-solution-play'
+    })
+    const inlineResult = launcher.getByRole('region', { name: /Risk & Play result for/ })
+    await expect(inlineResult).toContainText('Risk & Play')
+    await expect(inlineResult).toContainText(prompt)
+    await expect(launcher).toBeVisible()
 })
 
 test('reviews recent workflow runs with typed results and activity detail', async ({ page }) => {
@@ -540,16 +665,29 @@ test('sorts opportunities by close date, stage, and value across refreshes', asy
 test('offers milestone sorting beside the milestone refresh control', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('button', { name: /Contoso Energy/ }).first().click()
-    await page.getByRole('region', { name: 'Opportunities blade' }).getByRole('button', { name: /^Grid operations modernization / }).click()
+    const opportunitiesBlade = page.getByRole('region', { name: 'Opportunities blade' })
+    await opportunitiesBlade.getByRole('button', { name: /^Grid operations modernization / }).click()
 
     const milestoneGroup = page.getByRole('region', { name: 'Grid operations modernization milestones' })
+    const opportunityHeader = opportunitiesBlade.locator('.blade-header')
+    const meetingCaptureButton = opportunityHeader.getByRole('button', { name: 'Meeting capture' })
+    const opportunitySortButton = opportunityHeader.getByRole('button', { name: 'Sort opportunities' })
     const sortButton = milestoneGroup.getByRole('button', { name: 'Sort milestones' })
     const refreshButton = milestoneGroup.getByRole('button', { name: 'Refresh Milestones' })
-    const [sortBox, refreshBox] = await Promise.all([sortButton.boundingBox(), refreshButton.boundingBox()])
+    const [meetingCaptureBox, opportunitySortBox, sortBox, refreshBox] = await Promise.all([
+        meetingCaptureButton.boundingBox(),
+        opportunitySortButton.boundingBox(),
+        sortButton.boundingBox(),
+        refreshButton.boundingBox()
+    ])
 
+    expect(meetingCaptureBox).not.toBeNull()
+    expect(opportunitySortBox).not.toBeNull()
     expect(sortBox).not.toBeNull()
     expect(refreshBox).not.toBeNull()
+    expect(meetingCaptureBox!.x).toBeLessThan(opportunitySortBox!.x)
     expect(sortBox!.x).toBeLessThan(refreshBox!.x)
+    await expect(milestoneGroup.getByRole('button', { name: 'Meeting capture' })).toHaveCount(0)
 
     await sortButton.click()
     await expect(page.getByRole('menuitemradio', { name: 'Milestone Est. Date' })).toBeVisible()

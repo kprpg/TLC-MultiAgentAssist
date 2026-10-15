@@ -10,6 +10,10 @@ export const workflowDefinitions: WorkflowDefinition[] = [
 
 export const workflowGuidanceDefinition = definition('WF-003', 'Stage mismatch review', ['Specialist', 'SE'], ['dataverse-mcp', 'msx-mcp'])
 
+export const accountPulseWorkflowDefinition = definition('WF-007', 'Next meeting prep pack', ['AE', 'SE'], ['dataverse-mcp', 'msx-mcp'])
+
+export const riskPlayWorkflowDefinition = definition('WF-006', 'Commit-risk conflict list', ['Manager', 'CSAM'], ['dataverse-mcp', 'msx-mcp'])
+
 export function workflowRun(workflowId: string, status: WorkflowRun['status'], state?: WorkflowRun['state']): WorkflowRun {
     const terminal = status === 'completed' || status === 'failed' || status === 'cancelled'
     return {

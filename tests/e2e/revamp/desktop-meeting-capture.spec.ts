@@ -23,8 +23,10 @@ test('captures meeting signals from a seeded Teams transcript and applies the ap
         const opportunitiesBlade = window.getByRole('region', { name: 'Opportunities blade' })
         await opportunitiesBlade.getByRole('button', { name: /^Grid operations modernization/ }).click()
 
-        const launcher = window.getByRole('button', { name: 'Meeting capture' })
+        const opportunityHeader = opportunitiesBlade.locator('.blade-header')
+        const launcher = opportunityHeader.getByRole('button', { name: 'Meeting capture' })
         await expect(launcher).toBeVisible()
+        await expect(opportunitiesBlade.getByRole('region', { name: 'Grid operations modernization milestones' }).getByRole('button', { name: 'Meeting capture' })).toHaveCount(0)
         await launcher.click()
 
         // The Teams-pick tab is the default and must show the seeded transcript, not an empty state.
