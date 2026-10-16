@@ -186,6 +186,10 @@ Adding an account does **not** add all of its opportunities to your Portfolio. O
 
 To leave a Deal Team, select **Remove me**, then **Remove membership** in the confirmation dialog. **Cancel** or **Escape** leaves membership unchanged. If MSX rejects the removal, the dialog stays open with the error so you can retry or cancel; the opportunity is not marked as removed. After a successful removal, an opportunity that remains visible in Discovery offers **Add me** again. Discovery may still list it for rejoining, and it remains in Portfolio if you still belong to one of its milestone teams.
 
+In live mode, TLC verifies that MSX no longer returns an active Deal Team membership for the signed-in user and selected opportunity before confirming removal. If the delete request succeeds but membership is still reported, or verification fails, the confirmation dialog shows the error instead of reporting success. Discovery's **On deal team** label is based only on actual Deal Team membership, never on milestone-team membership or simply being present in Portfolio.
+
+An **HTTP 403** during removal means MSX refused the delete operation; this is separate from milestone-team membership. Removal requires your MSX security role to include the privilege to delete Deal Team membership rows, which is separate from the ability to add yourself. When MSX reports a missing privilege, the dialog names it (for example, `prvDeletemsp_dealteam`) so you can ask an MSX administrator to grant it, or to remove your membership for you. Other denial reasons are shown after "MSX said:". If removal also fails or is unavailable in native MSX, the same permission is the likely cause. TLC does not switch identities or substitute another write operation to work around an authorization denial.
+
 The resulting working set is:
 
 - visible accounts from Deal Team membership plus manually added accounts;

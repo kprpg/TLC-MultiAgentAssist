@@ -31,10 +31,12 @@ host.
 - **Plays**: run named workflows (stale opportunity sweep, overdue milestone triage,
   governance exceptions, and more) and review typed result cards and operational queues.
 
-Only visible opportunities where the signed-in user is a current Deal Team member enter
-Portfolio, milestones, agents, and Plays. Adding an account alone never expands that
-downstream working set. Hide/Unhide is a TLC-only preference and does not change MSX Deal
-Team membership.
+Visible active opportunities where the signed-in user is a current Deal Team member
+or belongs to a milestone team enter Portfolio, milestones, agents, and Plays.
+Discovery's **On deal team** label uses only actual Deal Team membership; a milestone-only
+opportunity offers **Add me** even though it remains in Portfolio. Adding an account
+alone never expands that downstream working set. Hide/Unhide is a TLC-only preference
+and does not change MSX Deal Team membership.
 
 In live mode, configure `TLC_MSX_ACCOUNT_TPID_FIELD` with the tenant-verified logical
 field name to enable TPID search. Name search remains available without it. Account
@@ -52,6 +54,11 @@ npm run --workspace apps/vscode-extension build
 
 Then open the repository in VS Code and press `F5` to launch the Extension Development
 Host. Run **TLC: Open Assist** or select TLC in the Activity Bar.
+
+After changing extension-host or connector code, stop the running debug session
+(`Shift+F5`) and launch it again (`F5`). The pre-launch task rebuilds the host and webview;
+rebuilding files or refreshing Discovery alone does not replace code already loaded in
+an existing Extension Development Host.
 
 Watch mode during development:
 
