@@ -1,0 +1,312 @@
+{
+  "kind": "opportunity-batch",
+  "account": {
+    "id": "account-fabrikam",
+    "label": "Fabrikam Retail"
+  },
+  "opportunities": [
+    {
+      "opportunity": {
+        "clientOpportunityKey": "opp-retail-ai-service",
+        "name": "AI-assisted retail service",
+        "intent": [
+          {
+            "value": 606820000,
+            "label": "Billed"
+          },
+          {
+            "value": 606820001,
+            "label": "Consumption"
+          }
+        ],
+        "estimatedValue": 2750000,
+        "priceList": {
+          "id": "price-list-usd-standard",
+          "label": "USD Standard Price List"
+        },
+        "currency": {
+          "id": "currency-usd",
+          "label": "US Dollar"
+        },
+        "owner": {
+          "id": "user-morgan",
+          "label": "Morgan Lee"
+        },
+        "estimatedCloseDate": "2027-03-31",
+        "need": "Improve assisted-service resolution and reduce wait time.",
+        "solutionArea": {
+          "value": 394380000,
+          "label": "Cloud and AI Platforms"
+        },
+        "technicalCapability": {
+          "value": 861980002,
+          "label": "Azure AI and ML"
+        }
+      },
+      "milestones": [
+        {
+          "clientMilestoneKey": "ms-retail-ai-pilot",
+          "name": "Retail service AI pilot",
+          "category": {
+            "value": 861980000,
+            "label": "POC/Pilot"
+          },
+          "milestoneDate": "2027-01-31",
+          "workload": {
+            "id": "workload-azure-ai-ml",
+            "label": "Azure AI and ML"
+          },
+          "owner": {
+            "id": "user-morgan",
+            "label": "Morgan Lee"
+          },
+          "status": {
+            "value": 861980000,
+            "label": "On Track"
+          },
+          "commitment": {
+            "value": 861980003,
+            "label": "Committed"
+          },
+          "estimatedMonthlyUsage": 95000,
+          "comments": "Validate service quality and responsible AI controls.",
+          "customerBudgetApproved": {
+            "value": 606820000,
+            "label": "Yes"
+          }
+        },
+        {
+          "clientMilestoneKey": "ms-retail-ai-production",
+          "name": "Retail service AI production",
+          "category": {
+            "value": 861980002,
+            "label": "Production"
+          },
+          "milestoneDate": "2027-03-15",
+          "workload": {
+            "id": "workload-azure-ai-ml",
+            "label": "Azure AI and ML"
+          },
+          "owner": {
+            "id": "user-morgan",
+            "label": "Morgan Lee"
+          },
+          "status": {
+            "value": 861980001,
+            "label": "At Risk"
+          },
+          "commitment": {
+            "value": 861980000,
+            "label": "Uncommitted"
+          },
+          "estimatedMonthlyUsage": 210000,
+          "comments": "Expand the approved pilot to production channels.",
+          "riskDetails": "Production data-access approval is not complete.",
+          "customerBudgetApproved": {
+            "value": 606820000,
+            "label": "Yes"
+          }
+        }
+      ]
+    },
+    {
+      "opportunity": {
+        "clientOpportunityKey": "opp-unified-commerce",
+        "name": "Unified commerce modernization",
+        "intent": [
+          {
+            "value": 606820001,
+            "label": "Consumption"
+          }
+        ],
+        "estimatedValue": 3800000,
+        "priceList": {
+          "id": "price-list-usd-standard",
+          "label": "USD Standard Price List"
+        },
+        "currency": {
+          "id": "currency-usd",
+          "label": "US Dollar"
+        },
+        "owner": {
+          "id": "user-morgan",
+          "label": "Morgan Lee"
+        },
+        "estimatedCloseDate": "2027-05-15",
+        "need": "Consolidate fragmented storefront and fulfillment platforms.",
+        "solutionArea": {
+          "value": 394380002,
+          "label": "AI Business Solutions"
+        },
+        "technicalCapability": {
+          "value": 861980034,
+          "label": "Commerce"
+        }
+      },
+      "milestones": [
+        {
+          "clientMilestoneKey": "ms-commerce-design",
+          "name": "Commerce target design",
+          "category": {
+            "value": 861980009,
+            "label": "Intent (MW, BA, Sec)"
+          },
+          "milestoneDate": "2027-02-28",
+          "workload": {
+            "id": "workload-commerce",
+            "label": "Commerce"
+          },
+          "owner": {
+            "id": "user-morgan",
+            "label": "Morgan Lee"
+          },
+          "status": {
+            "value": 861980000,
+            "label": "On Track"
+          },
+          "commitment": {
+            "value": 861980000,
+            "label": "Uncommitted"
+          },
+          "estimatedMonthlyUsage": 120000,
+          "comments": "Confirm the cross-channel target architecture.",
+          "customerBudgetApproved": {
+            "value": 606820001,
+            "label": "No"
+          }
+        },
+        {
+          "clientMilestoneKey": "ms-commerce-production",
+          "name": "Commerce production launch",
+          "category": {
+            "value": 861980002,
+            "label": "Production"
+          },
+          "milestoneDate": "2027-05-01",
+          "workload": {
+            "id": "workload-commerce",
+            "label": "Commerce"
+          },
+          "owner": {
+            "id": "user-morgan",
+            "label": "Morgan Lee"
+          },
+          "status": {
+            "value": 861980002,
+            "label": "Blocked"
+          },
+          "commitment": {
+            "value": 861980000,
+            "label": "Uncommitted"
+          },
+          "estimatedMonthlyUsage": 310000,
+          "comments": "Launch the first production market.",
+          "riskDetails": "The target payment provider has not been selected.",
+          "customerBudgetApproved": {
+            "value": 606820001,
+            "label": "No"
+          }
+        }
+      ]
+    },
+    {
+      "opportunity": {
+        "clientOpportunityKey": "opp-retail-cloud-security",
+        "name": "Retail cloud security modernization",
+        "intent": [
+          {
+            "value": 606820000,
+            "label": "Billed"
+          }
+        ],
+        "estimatedValue": 1950000,
+        "priceList": {
+          "id": "price-list-usd-standard",
+          "label": "USD Standard Price List"
+        },
+        "currency": {
+          "id": "currency-usd",
+          "label": "US Dollar"
+        },
+        "owner": {
+          "id": "user-avery",
+          "label": "Avery Johnson"
+        },
+        "estimatedCloseDate": "2027-04-30",
+        "need": "Standardize cloud security controls across retail environments.",
+        "solutionArea": {
+          "value": 861980005,
+          "label": "Security"
+        },
+        "technicalCapability": {
+          "value": 861980063,
+          "label": "Cloud Security"
+        }
+      },
+      "milestones": [
+        {
+          "clientMilestoneKey": "ms-security-baseline",
+          "name": "Cloud security baseline",
+          "category": {
+            "value": 861980009,
+            "label": "Intent (MW, BA, Sec)"
+          },
+          "milestoneDate": "2027-02-15",
+          "workload": {
+            "id": "workload-cloud-security",
+            "label": "Cloud Security"
+          },
+          "owner": {
+            "id": "user-avery",
+            "label": "Avery Johnson"
+          },
+          "status": {
+            "value": 861980003,
+            "label": "Completed"
+          },
+          "commitment": {
+            "value": 861980003,
+            "label": "Committed"
+          },
+          "estimatedMonthlyUsage": 60000,
+          "comments": "Complete the cross-environment security baseline.",
+          "customerBudgetApproved": {
+            "value": 606820000,
+            "label": "Yes"
+          }
+        },
+        {
+          "clientMilestoneKey": "ms-security-rollout",
+          "name": "Cloud security rollout",
+          "category": {
+            "value": 861980002,
+            "label": "Production"
+          },
+          "milestoneDate": "2027-04-15",
+          "workload": {
+            "id": "workload-cloud-security",
+            "label": "Cloud Security"
+          },
+          "owner": {
+            "id": "user-avery",
+            "label": "Avery Johnson"
+          },
+          "status": {
+            "value": 861980000,
+            "label": "On Track"
+          },
+          "commitment": {
+            "value": 861980003,
+            "label": "Committed"
+          },
+          "estimatedMonthlyUsage": 145000,
+          "comments": "Deploy the approved controls to production subscriptions.",
+          "customerBudgetApproved": {
+            "value": 606820000,
+            "label": "Yes"
+          }
+        }
+      ]
+    }
+  ]
+}

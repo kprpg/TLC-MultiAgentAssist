@@ -1,0 +1,2 @@
+clientOpportunityKey,name,opportunityIntent,estimatedValue,priceListId,priceListLabel,currencyId,currencyLabel,ownerId,ownerLabel,estimatedCloseDate,need,solutionArea,technicalCapability
+opp-grid-observability,Grid observability modernization,Consumption,1450000,price-list-usd-standard,USD Standard Price List,currency-usd,US Dollar,user-avery,Avery Johnson,2027-06-30,Unify telemetry and improve outage response.,Cloud and AI Platforms,Cloud Scale Analytics
