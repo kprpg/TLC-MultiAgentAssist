@@ -1,0 +1,140 @@
+{
+  "kind": "opportunity-batch",
+  "account": {
+    "id": "account-contoso",
+    "label": "Contoso Energy"
+  },
+  "opportunities": [
+    {
+      "opportunity": {
+        "clientOpportunityKey": "opp-grid-observability",
+        "name": "Grid observability modernization",
+        "intent": [
+          {
+            "value": 606820001,
+            "label": "Consumption"
+          }
+        ],
+        "estimatedValue": 1450000,
+        "priceList": {
+          "id": "price-list-usd-standard",
+          "label": "USD Standard Price List"
+        },
+        "currency": {
+          "id": "currency-usd",
+          "label": "US Dollar"
+        },
+        "owner": {
+          "id": "user-avery",
+          "label": "Avery Johnson"
+        },
+        "estimatedCloseDate": "2027-06-30",
+        "need": "Unify telemetry and improve outage response.",
+        "solutionArea": {
+          "value": 394380000,
+          "label": "Cloud and AI Platforms"
+        },
+        "technicalCapability": {
+          "value": 861980077,
+          "label": "Cloud Scale Analytics"
+        }
+      },
+      "milestones": [
+        {
+          "clientMilestoneKey": "ms-grid-pilot",
+          "name": "Grid telemetry pilot",
+          "category": {
+            "value": 861980000,
+            "label": "POC/Pilot"
+          },
+          "milestoneDate": "2027-02-15",
+          "workload": {
+            "id": "workload-cloud-scale-analytics",
+            "label": "Cloud Scale Analytics"
+          },
+          "owner": {
+            "id": "user-avery",
+            "label": "Avery Johnson"
+          },
+          "status": {
+            "value": 861980000,
+            "label": "On Track"
+          },
+          "commitment": {
+            "value": 861980000,
+            "label": "Uncommitted"
+          },
+          "estimatedMonthlyUsage": 75000,
+          "comments": "Validate priority substations and telemetry quality.",
+          "customerBudgetApproved": {
+            "value": 606820000,
+            "label": "Yes"
+          }
+        },
+        {
+          "clientMilestoneKey": "ms-grid-production",
+          "name": "Production telemetry rollout",
+          "category": {
+            "value": 861980002,
+            "label": "Production"
+          },
+          "milestoneDate": "2027-04-30",
+          "workload": {
+            "id": "workload-cloud-scale-analytics",
+            "label": "Cloud Scale Analytics"
+          },
+          "owner": {
+            "id": "user-avery",
+            "label": "Avery Johnson"
+          },
+          "status": {
+            "value": 861980001,
+            "label": "At Risk"
+          },
+          "commitment": {
+            "value": 861980003,
+            "label": "Committed"
+          },
+          "estimatedMonthlyUsage": 180000,
+          "comments": "Roll out the approved production telemetry scope.",
+          "riskDetails": "Data-retention approval is pending.",
+          "customerBudgetApproved": {
+            "value": 606820000,
+            "label": "Yes"
+          }
+        },
+        {
+          "clientMilestoneKey": "ms-grid-optimization",
+          "name": "Telemetry cost optimization",
+          "category": {
+            "value": 861980008,
+            "label": "Optimization"
+          },
+          "milestoneDate": "2027-06-15",
+          "workload": {
+            "id": "workload-well-architected",
+            "label": "Well Architected"
+          },
+          "owner": {
+            "id": "user-avery",
+            "label": "Avery Johnson"
+          },
+          "status": {
+            "value": 861980000,
+            "label": "On Track"
+          },
+          "commitment": {
+            "value": 861980000,
+            "label": "Uncommitted"
+          },
+          "estimatedMonthlyUsage": 250000,
+          "comments": "Measure production efficiency and optimize retention tiers.",
+          "customerBudgetApproved": {
+            "value": 606820000,
+            "label": "Yes"
+          }
+        }
+      ]
+    }
+  ]
+}
