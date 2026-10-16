@@ -27,13 +27,12 @@ import {
   PanelRight20Regular,
   Person20Regular,
   Power20Regular,
-  Search20Regular,
   ArrowSort20Regular,
   Sparkle20Regular,
   Subtract20Regular,
   Warning20Filled
 } from '@fluentui/react-icons'
-import type { Account, AccountCandidate, AgentCapability, AgentTaskResponse, CustomerCommitment, DiscoverableOpportunity, McemResponse, Milestone, MilestoneActivity, MilestoneStatus, MilestoneUpdate, Opportunity, ScopeRef, SeDomainId, TaskCategory, WorkflowDefinition, WorkflowRun } from '../../../../packages/common/index.js'
+import type { Account, AgentCapability, AgentTaskResponse, CustomerCommitment, DiscoverableOpportunity, McemResponse, Milestone, MilestoneActivity, MilestoneStatus, MilestoneUpdate, Opportunity, ScopeRef, SeDomainId, TaskCategory, WorkflowDefinition, WorkflowRun } from '../../../../packages/common/index.js'
 import { contractVersion, taskCategorySchema, workflowContractVersion } from '../../../../packages/common/contracts/index.js'
 import { seDomainList } from '../../../../packages/common/configuration/se-domains.js'
 import { addMsxOpportunityLink } from '../../../../packages/common/sharing/opportunity-link.js'
@@ -56,6 +55,7 @@ import { PortfolioSearch } from './portfolio-search.js'
 import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
+import { AddCustomerButton } from '../../../shared/add-customer.js'
 
 type Shell = 'desktop' | 'web'
 type WorkspaceView = 'accounts' | 'workflows' | 'discover' | 'dashboard'
@@ -247,11 +247,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [expandedDiscoverId, setExpandedDiscoverId] = useState<string | null>(null)
   const [discoverMilestones, setDiscoverMilestones] = useState<Record<string, Milestone[]>>({})
   const [discoverMilestonesLoadingId, setDiscoverMilestonesLoadingId] = useState<string | null>(null)
-  const [accountDialogOpen, setAccountDialogOpen] = useState(false)
-  const [accountMatchBy, setAccountMatchBy] = useState<'name' | 'tpid'>('name')
-  const [accountQuery, setAccountQuery] = useState('')
-  const [accountCandidates, setAccountCandidates] = useState<AccountCandidate[]>([])
-  const [accountSearchBusy, setAccountSearchBusy] = useState(false)
   const [accountMutationId, setAccountMutationId] = useState<string | null>(null)
   const [showHiddenAccounts, setShowHiddenAccounts] = useState(false)
   const [exiting, setExiting] = useState(false)
@@ -837,8 +832,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           const items = await client.listOpportunities(account.id)
           setOpportunities(items)
         }
-      } catch (cause) {
-        handleError(cause)
       } finally {
         setJoiningOpportunityId(null)
       }
@@ -865,8 +858,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       await client.leaveMilestoneTeam(milestone.opportunityId, milestone.id)
       setMilestones((current) => current.map((item) => item.id === milestone.id ? { ...item, onMilestoneTeam: false } : item))
       await refreshAccounts(showHiddenAccounts)
-    } catch (cause) {
-      handleError(cause)
     } finally {
       setMilestoneTeamBusyId(null)
     }
@@ -903,6 +894,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       }))
       await refreshAccounts(showHiddenAccounts)
     } catch (cause) {
+      if (!joining) throw cause
       handleError(cause)
     } finally {
       setMilestoneTeamBusyId(null)
@@ -964,36 +956,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     }
   }
 
-  async function searchAccountCandidates() {
-      setError('')
-      setAccountSearchBusy(true)
-      try {
-        setAccountCandidates(await client.searchAccounts({ query: accountQuery, matchBy: accountMatchBy }))
-      } catch (cause) {
-        handleError(cause)
-      } finally {
-        setAccountSearchBusy(false)
-      }
-    }
-
-  async function addAccount(candidate: AccountCandidate) {
-      setError('')
-      setAccountMutationId(candidate.id)
-      try {
-        if (candidate.state === 'hidden') await client.setAccountVisibility(candidate.id, 'visible')
-        else if (candidate.state === 'not-added') await client.addAccount(candidate.id)
-        await refreshAccounts(showHiddenAccounts)
-        setAccountDialogOpen(false)
-        setAccountQuery('')
-        setAccountCandidates([])
-        setWorkspaceView('discover')
-        await loadDiscover(discoverDomain)
-      } catch (cause) {
-        handleError(cause)
-      } finally {
-        setAccountMutationId(null)
-      }
-    }
+  async function customerAdded() {
+    await refreshAccounts(showHiddenAccounts)
+    setDiscoverFilters({ include: [], exclude: [] })
+    setWorkspaceView('discover')
+    await loadDiscover(discoverDomain)
+  }
 
   async function setAccountVisibility(item: Account, visibility: 'visible' | 'hidden') {
       if (visibility === 'hidden' && !window.confirm(`Hide "${item.name}" from TLC Portfolio, Discovery, Plays, and downstream analysis? Deal Team membership will not be changed.`)) return
@@ -1128,9 +1096,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       {workspaceView === 'accounts' && <>
       <section className={`blade account-blade ${collapsed.has('accounts') ? 'collapsed' : ''} ${mobileBlade === 'accounts' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('accounts') ? undefined : bladeWidths.accounts }} aria-label="Accounts blade">
         <BladeHeader title="Accounts" subtitle={`${accounts.length} customer accounts`} collapsed={collapsed.has('accounts')} refreshing={loading || searchLoading} actions={<>
-          <Tooltip content="Add customer by name or TPID" relationship="label">
-            <Button appearance="subtle" className="icon-button" icon={<Add20Regular />} onClick={() => setAccountDialogOpen(true)} aria-label="Add customer" />
-          </Tooltip>
+          <AddCustomerButton client={client} onAdded={customerAdded} className="icon-button"><Add20Regular /></AddCustomerButton>
           <Tooltip content={showHiddenAccounts ? 'Hide hidden customers' : 'Show hidden customers'} relationship="label">
             <Button appearance="subtle" className="icon-button" icon={showHiddenAccounts ? <EyeOff20Regular /> : <Eye20Regular />} onClick={() => void toggleHiddenAccounts()} aria-pressed={showHiddenAccounts} aria-label={showHiddenAccounts ? 'Hide hidden customers' : 'Show hidden customers'} />
           </Tooltip>
@@ -1152,29 +1118,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         {collapsed.has('accounts') && <button className="collapsed-symbol" onClick={() => toggleBlade('accounts')} aria-label="Expand Accounts"><Building20Regular /></button>}
         {!collapsed.has('accounts') && <BladeResizeHandle blade="accounts" label="Accounts blade" edge="end" width={bladeWidths.accounts} onResize={(width) => resizeBlade('accounts', width)} />}
       </section>
-
-      <Dialog open={accountDialogOpen} onOpenChange={(_, data) => { if (!accountSearchBusy && !accountMutationId) setAccountDialogOpen(data.open) }}>
-        <DialogSurface><DialogBody><DialogTitle>Add customer account</DialogTitle><DialogContent className="account-search-dialog">
-          <p>Add an account to the main account tree. Opportunities enter Portfolio only after Deal Team membership is added in Discovery.</p>
-          <div className="account-search-mode" role="group" aria-label="Search account by">
-            <Button appearance={accountMatchBy === 'name' ? 'primary' : 'secondary'} onClick={() => { setAccountMatchBy('name'); setAccountCandidates([]) }}>Account name</Button>
-            <Button appearance={accountMatchBy === 'tpid' ? 'primary' : 'secondary'} onClick={() => { setAccountMatchBy('tpid'); setAccountCandidates([]) }}>TPID</Button>
-          </div>
-          <Field label={accountMatchBy === 'name' ? 'Account name' : 'TPID'}>
-            <Input value={accountQuery} onChange={(_, data) => setAccountQuery(data.value)} onKeyDown={(event) => { if (event.key === 'Enter') void searchAccountCandidates() }} />
-          </Field>
-          <Button appearance="primary" icon={accountSearchBusy ? <Spinner size="tiny" /> : <Search20Regular />} disabled={accountSearchBusy || (accountMatchBy === 'name' ? accountQuery.trim().length < 2 : accountQuery.trim().length === 0)} onClick={() => void searchAccountCandidates()}>Search</Button>
-          <div className="account-candidate-list" aria-live="polite">
-            {!accountSearchBusy && accountCandidates.length === 0 && accountQuery && <span>No matching accounts loaded.</span>}
-            {accountCandidates.map((candidate) => <div key={candidate.id} className="account-candidate">
-              <span><strong>{candidate.name}</strong><small>{candidate.segment}{candidate.tpid ? ` · TPID ${candidate.tpid}` : ''}</small></span>
-              <Button size="small" appearance="primary" disabled={candidate.state === 'visible' || accountMutationId === candidate.id} onClick={() => void addAccount(candidate)}>
-                {candidate.state === 'visible' ? 'Already added' : candidate.state === 'hidden' ? 'Unhide' : 'Add account'}
-              </Button>
-            </div>)}
-          </div>
-        </DialogContent><DialogActions><Button disabled={accountSearchBusy || Boolean(accountMutationId)} onClick={() => setAccountDialogOpen(false)}>Close</Button></DialogActions></DialogBody></DialogSurface>
-      </Dialog>
 
       <Dialog open={activitiesMilestone !== null} onOpenChange={(_, data) => { if (!data.open) setActivitiesMilestone(null) }}>
         <DialogSurface className="milestone-activities-surface"><DialogBody className="milestone-activities-body"><DialogTitle>Activities — {activitiesMilestone?.name}</DialogTitle><DialogContent className="milestone-activities-dialog">
@@ -1672,6 +1615,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       {workspaceView === 'discover' && <section className="workflow-launcher discover-launcher" aria-label="Discover opportunities">
         <header className="workflow-launcher-header">
           <div><p className="eyebrow">DEAL TEAM DISCOVERY</p><h1>Discover opportunities</h1><p>Review all active opportunities for visible accounts and add or remove yourself from the Deal Team — or expand an opportunity to join a milestone team without joining the Deal Team. Deal Team or milestone-team membership brings an opportunity into Portfolio.</p></div>
+          <AddCustomerButton client={client} onAdded={customerAdded} />
         </header>
 
         <div className="workflow-toolbar discover-toolbar">
@@ -1683,6 +1627,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
         <DiscoveryControls customers={discoverCustomers} filters={discoverFilters} onChange={setDiscoverFilters} visibleCount={visibleDiscoverResults.length} totalCount={discoverResults.length} loading={discoverLoading} />
 
+        {error && <MessageBar intent="error" role="alert">{error}</MessageBar>}
         <div className="discover-body">
           {discoverLoading && <div className="discover-loading"><Spinner size="small" label="Loading opportunities…" /></div>}
           {!discoverLoading && discoverResults.length === 0 && <MessageBar intent="info">No active opportunities were found for this domain.</MessageBar>}

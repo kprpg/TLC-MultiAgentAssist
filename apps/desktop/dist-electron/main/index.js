@@ -3066,7 +3066,6 @@ var LiveMsxConnector = class {
 		const accountNameById = new Map(portfolio.accounts.filter((account) => account.visibility !== "hidden").map((account) => [account.id, account.name]));
 		const assignedAccountIds = [...accountNameById.keys()];
 		if (assignedAccountIds.length === 0) return [];
-		const dealTeamOpportunityIds = new Set(portfolio.opportunities.map((opportunity) => opportunity.id));
 		return (await measurePerformance("msx.discover-opportunities", this.performanceReporter, () => this.requestOpportunitiesForAccounts(assignedAccountIds, domainClauses))).filter((row) => row._parentaccountid_value && accountNameById.has(row._parentaccountid_value)).map((row) => {
 			const accountName = accountNameById.get(row._parentaccountid_value) ?? formattedValue(row, "_parentaccountid_value");
 			const solutionArea = formattedValue(row, "msp_solutionarea");
@@ -3077,7 +3076,7 @@ var LiveMsxConnector = class {
 				...accountName ? { accountName } : {},
 				...solutionArea ? { solutionArea } : {},
 				...technicalCapability ? { technicalCapability } : {},
-				onDealTeam: dealTeamOpportunityIds.has(row.opportunityid)
+				onDealTeam: portfolio.dealTeamOpportunityIds.has(row.opportunityid)
 			};
 		}).sort((left, right) => left.name.localeCompare(right.name));
 	}
@@ -3137,11 +3136,12 @@ var LiveMsxConnector = class {
 			...this.writeMetadata.dealTeam
 		};
 		const userId = await this.getCurrentUserId();
-		const existing = await this.requestAll(dealTeam.entitySet, {
+		const membershipQuery = {
 			"$select": "msp_dealteamid",
 			"$filter": `statecode eq 0 and ${dealTeam.userLookupField} eq ${userId} and ${dealTeam.opportunityLookupField} eq ${opportunityId}`,
 			"$top": "2"
-		});
+		};
+		const existing = await this.requestAll(dealTeam.entitySet, membershipQuery);
 		if (existing.length === 0) {
 			this.portfolioPromise = void 0;
 			return {
@@ -3157,6 +3157,7 @@ var LiveMsxConnector = class {
 		this.portfolioPromise = void 0;
 		this.observationPromises.delete(opportunityId);
 		this.milestonePromises.delete(opportunityId);
+		if ((await this.requestAll(dealTeam.entitySet, membershipQuery)).length > 0) throw new Error("MSX still reports you on this Deal Team after the delete request. Removal could not be confirmed. Refresh and try again.");
 		return {
 			opportunityId,
 			onDealTeam: false,
@@ -3422,7 +3423,8 @@ var LiveMsxConnector = class {
 			"$filter": `statecode eq 0 and _msp_dealteamuserid_value eq ${userId}`
 		}));
 		const milestoneOpportunityIds = await this.milestoneTeamOpportunityIds();
-		const opportunityIds = unique([...dealTeamRows.map((row) => row._msp_parentopportunityid_value).filter(isPresent), ...milestoneOpportunityIds]);
+		const dealTeamOpportunityIds = new Set(dealTeamRows.map((row) => row._msp_parentopportunityid_value).filter(isPresent));
+		const opportunityIds = unique([...dealTeamOpportunityIds, ...milestoneOpportunityIds]);
 		const activeOpportunities = (await measurePerformance("msx.opportunities", this.performanceReporter, () => this.requestByIds("opportunities", "opportunityid", opportunityIds, "opportunityid,statecode,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description,msp_opportunitytype"))).filter((row) => row._parentaccountid_value && (row.statecode === void 0 || row.statecode === 0));
 		const dealTeamAccountIds = unique(activeOpportunities.map((row) => row._parentaccountid_value).filter(isPresent));
 		const accountIds = unique([
@@ -3438,7 +3440,8 @@ var LiveMsxConnector = class {
 		const visibleAccountIds = new Set(accounts.filter((account) => account.visibility !== "hidden").map((account) => account.id));
 		return {
 			accounts,
-			opportunities: activeOpportunities.filter((row) => row._parentaccountid_value && visibleAccountIds.has(row._parentaccountid_value)).map((row) => this.mapOpportunity(row)).sort((left, right) => left.name.localeCompare(right.name))
+			opportunities: activeOpportunities.filter((row) => row._parentaccountid_value && visibleAccountIds.has(row._parentaccountid_value)).map((row) => this.mapOpportunity(row)).sort((left, right) => left.name.localeCompare(right.name)),
+			dealTeamOpportunityIds
 		};
 	}
 	mapAccount(row, preferences = {
@@ -3532,7 +3535,7 @@ var LiveMsxConnector = class {
 			},
 			body: JSON.stringify(body)
 		});
-		if (!response.ok) throw new MsxRequestError(`MSX update failed with status ${response.status}.`, response.status);
+		if (!response.ok) throw new MsxRequestError(`MSX update failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status);
 	}
 	async post(path, body) {
 		const url = new URL(path, this.baseUrl);
@@ -3547,7 +3550,7 @@ var LiveMsxConnector = class {
 			},
 			body: JSON.stringify(body)
 		});
-		if (!response.ok) throw new MsxRequestError(`MSX create failed with status ${response.status}.`, response.status);
+		if (!response.ok) throw new MsxRequestError(`MSX create failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status);
 	}
 	/** POSTs and returns the created row (via `Prefer: return=representation`). */
 	async postReturningEntity(path, body) {
@@ -3564,7 +3567,7 @@ var LiveMsxConnector = class {
 			},
 			body: JSON.stringify(body)
 		});
-		if (!response.ok) throw new MsxRequestError(`MSX create failed with status ${response.status}.`, response.status);
+		if (!response.ok) throw new MsxRequestError(`MSX create failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status);
 		return await response.json();
 	}
 	async delete(path) {
@@ -3579,7 +3582,7 @@ var LiveMsxConnector = class {
 				"If-Match": "*"
 			}
 		});
-		if (!response.ok) throw new MsxRequestError(`MSX delete failed with status ${response.status}.`, response.status);
+		if (!response.ok) throw new MsxRequestError(`MSX delete failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status);
 	}
 	assertTrustedUrl(url) {
 		if (url.origin !== this.baseUrl.origin || !url.pathname.startsWith(this.baseUrl.pathname)) throw new MsxRequestError("MSX returned an untrusted continuation URL.");
@@ -3594,6 +3597,19 @@ function isPresent(value) {
 function formattedValue(row, field) {
 	const value = row[`${field}${formattedValueSuffix}`];
 	return typeof value === "string" && value.trim() ? value.trim() : void 0;
+}
+/** Dataverse's own error text so a bare status code is actionable; never includes request data. A missing-privilege denial is summarized without the principal's internal identifiers. */
+async function serviceErrorDetail(response) {
+	try {
+		const body = await response.json();
+		const text = (typeof body?.error?.message === "string" ? body.error.message : "").replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+		const privilege = /\bis missing (prv[A-Za-z0-9_]{1,80})/.exec(text)?.[1];
+		if (privilege) return ` (your MSX security role is missing the ${privilege} privilege; ask an MSX administrator to grant it or to make this change for you)`;
+		const summary = text.replace(/\.$/, "").slice(0, 300);
+		return summary ? ` (MSX said: ${summary})` : "";
+	} catch {
+		return "";
+	}
 }
 function escapeODataStringLiteral(value) {
 	return value.replaceAll("'", "''");

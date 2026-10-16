@@ -154,6 +154,8 @@ Agents consume connector interfaces or orchestrator-provided evidence. They must
 
 The current browser-safe shared UI modules in `apps/shared` include `portfolio-search.ts`, which supplies the same matching and result-limit rules to Desktop/Web and the VS Code webview. The extension's focused `portfolio-search.tsx` component owns search loading and interaction; `next-best-actions.tsx` renders MCEM recommendations and their cited evidence without changing the host or orchestrator contracts.
 
+`add-customer.tsx` and `add-customer.css` provide the shared customer search/add dialog for both Portfolio and Discovery across Desktop, Web, and the VS Code webview. They use the existing host account-search and preference operations without importing Node-backed contracts into the webview.
+
 Seller Dashboard uses shared `seller-dashboard.tsx`, `seller-dashboard-sections.tsx`,
 `seller-dashboard-table.tsx`, `seller-dashboard-analysis.ts`, and feature-scoped
 `seller-dashboard.css` in `apps/shared`. Its browser-safe, independently versioned

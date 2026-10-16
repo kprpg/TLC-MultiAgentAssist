@@ -132,7 +132,7 @@ describe('LiveMsxConnector.joinDealTeam', () => {
         if (url.pathname.endsWith('/msp_dealteams') && (init?.method ?? 'GET') === 'GET') {
           expect(url.searchParams.get('$filter')).toContain(`_msp_parentopportunityid_value eq ${validGuid}`)
           expect(url.searchParams.get('$filter')).toContain('_msp_dealteamuserid_value eq user-id')
-          return json({ value: [{ msp_dealteamid: membershipId }] })
+          return json({ value: deleted.length === 0 ? [{ msp_dealteamid: membershipId }] : [] })
         }
         if (url.pathname.endsWith(`/msp_dealteams(${membershipId})`) && init?.method === 'DELETE') {
           deleted.push(url.pathname)
@@ -150,6 +150,35 @@ describe('LiveMsxConnector.joinDealTeam', () => {
       expect(deleted).toHaveLength(1)
     })
 
+    it.each(['still-present', 'read-unavailable'] as const)('does not report removal success when verification is %s', async (verification) => {
+      const membershipId = '00000000-0000-4000-8000-000000000def'
+      let reads = 0
+      let deletes = 0
+      const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input))
+        if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+        if (url.pathname.endsWith('/msp_dealteams')) {
+          reads += 1
+          expect(url.searchParams.get('$filter')).toContain(`_msp_parentopportunityid_value eq ${validGuid}`)
+          expect(url.searchParams.get('$filter')).toContain('_msp_dealteamuserid_value eq user-id')
+          if (reads === 2 && verification === 'read-unavailable') return new Response(null, { status: 503 })
+          return json({ value: [{ msp_dealteamid: membershipId }] })
+        }
+        if (url.pathname.endsWith(`/msp_dealteams(${membershipId})`) && init?.method === 'DELETE') {
+          deletes += 1
+          return new Response(null, { status: 204 })
+        }
+        throw new Error(`Unexpected request: ${url} ${init?.method}`)
+      })
+      const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch)
+
+      await expect(connector.leaveDealTeam(validGuid)).rejects.toThrow(
+        verification === 'still-present' ? /MSX still reports you on this Deal Team/ : /503/
+      )
+      expect(reads).toBe(2)
+      expect(deletes).toBe(1)
+    })
+
     it('is idempotent when the signed-in user has no matching membership', async () => {
       const request = vi.fn(async (input: string | URL | Request) => {
         const url = new URL(String(input))
@@ -164,6 +193,83 @@ describe('LiveMsxConnector.joinDealTeam', () => {
         onDealTeam: false,
         alreadyAbsent: true
       })
+    })
+
+    it('preserves membership after a rejected delete and reloads the portfolio after a successful retry', async () => {
+      const membershipId = '00000000-0000-4000-8000-000000000def'
+      const accountId = '00000000-0000-4000-8000-000000000fed'
+      let member = true
+      let deletes = 0
+      const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input))
+        if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+        if (url.pathname.endsWith('/msp_dealteams')) {
+          expect(url.searchParams.get('$filter')).toContain('_msp_dealteamuserid_value eq user-id')
+          return json({ value: member ? [{ msp_dealteamid: membershipId, _msp_parentopportunityid_value: validGuid }] : [] })
+        }
+        if (url.pathname.endsWith('/opportunities')) return json({ value: [{
+          opportunityid: validGuid, _parentaccountid_value: accountId, name: 'Selected opportunity', statecode: 0
+        }] })
+        if (url.pathname.endsWith('/accounts')) return json({ value: [{ accountid: accountId, name: 'Selected customer' }] })
+        if (url.pathname.endsWith(`/msp_dealteams(${membershipId})`) && init?.method === 'DELETE') {
+          if (++deletes === 1) return new Response(JSON.stringify({ error: { message: 'Delete denied.' } }), { status: 403 })
+          member = false
+          return new Response(null, { status: 204 })
+        }
+        throw new Error(`Unexpected request: ${url} ${init?.method}`)
+      })
+      const connector = new LiveMsxConnector({ getAccessToken: async () => 'token' }, request as typeof fetch)
+
+      await expect(connector.listOpportunities(accountId)).resolves.toEqual([
+        expect.objectContaining({ id: validGuid })
+      ])
+      await expect(connector.leaveDealTeam(validGuid)).rejects.toThrow(/403/)
+      await expect(connector.listOpportunities(accountId)).resolves.toEqual([
+        expect.objectContaining({ id: validGuid })
+      ])
+      await expect(connector.leaveDealTeam(validGuid)).resolves.toEqual({
+        opportunityId: validGuid, onDealTeam: false, alreadyAbsent: false
+      })
+      await expect(connector.listOpportunities(accountId)).resolves.toEqual([])
+      expect(deletes).toBe(2)
+    })
+
+    it('explains a missing-privilege denial without exposing the principal identifiers, and does not change membership', async () => {
+      const membershipId = '00000000-0000-4000-8000-000000000def'
+      const methods: string[] = []
+      const message = 'Principal user (Id=8a496494-f17e-e511-80e1-3863bb35ce00, type=8, roleCount=20, privilegeCount=1967, accessMode=\'0 Read-Write\', AADObjectId=\'37e0eb1b-241e-4dd7-bf6d-8bb6ffc40e6b\', MetadataCachePrivilegesCount=18444, businessUnitId=1e81e2cb-be7c-e411-b21a-6c3be5a82b30), is missing prvDeletemsp_dealteam privilege (Id=00000000-0000-0000-0000-000000000001)'
+      const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input))
+        methods.push(init?.method ?? 'GET')
+        if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+        if (url.pathname.endsWith('/msp_dealteams') && (init?.method ?? 'GET') === 'GET') return json({ value: [{ msp_dealteamid: membershipId }] })
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ error: { code: '0x80040220', message } }), { status: 403 })
+        throw new Error(`Unexpected request: ${url} ${init?.method}`)
+      })
+      const connector = new LiveMsxConnector({ getAccessToken: async () => 'secret-token' }, request as typeof fetch)
+
+      await expect(connector.leaveDealTeam(validGuid)).rejects.toThrow(
+        'MSX delete failed with status 403 (your MSX security role is missing the prvDeletemsp_dealteam privilege; ask an MSX administrator to grant it or to make this change for you).'
+      )
+      expect(methods.filter((method) => method !== 'GET' && method !== 'DELETE')).toEqual([])
+      expect(methods.filter((method) => method === 'DELETE')).toHaveLength(1)
+    })
+
+    it('surfaces other service-provided denial reasons, bounded and without request data', async () => {
+      const membershipId = '00000000-0000-4000-8000-000000000def'
+      const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(String(input))
+        if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+        if (url.pathname.endsWith('/msp_dealteams') && (init?.method ?? 'GET') === 'GET') return json({ value: [{ msp_dealteamid: membershipId }] })
+        if (init?.method === 'DELETE') return new Response(JSON.stringify({ error: { message: `Access\ndenied.${'x'.repeat(400)}` } }), { status: 403 })
+        throw new Error(`Unexpected request: ${url} ${init?.method}`)
+      })
+      const connector = new LiveMsxConnector({ getAccessToken: async () => 'secret-token' }, request as typeof fetch)
+
+      const detail = await connector.leaveDealTeam(validGuid).then(() => '', (error: Error) => error.message)
+      expect(detail).toMatch(/^MSX delete failed with status 403 \(MSX said: Access denied\.x+\)\.$/)
+      expect(detail.length).toBeLessThan(400)
+      expect(detail).not.toContain('secret-token')
     })
 
     it('refuses to guess when duplicate active memberships exist', async () => {
@@ -535,6 +641,9 @@ describe('LiveMsxConnector milestone team membership (Dataverse access team)', (
 
     const opportunities = await connector.listOpportunities('account-x')
     expect(opportunities.map((item) => item.id)).toContain(opportunityGuid)
+    await expect(connector.discoverOpportunities('infra')).resolves.toEqual([
+      expect.objectContaining({ id: opportunityGuid, onDealTeam: false })
+    ])
   })
 
   it('discovers the Milestone Team template id by name once and caches it', async () => {

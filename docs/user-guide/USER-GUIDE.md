@@ -178,9 +178,17 @@ Select an account either from the left blade or from the large hero cards in the
 
 ### 3.1 Adding an account by name or TPID
 
-Select **Add customer** in the Accounts blade header, choose **Account name** or **TPID**, search, and then select **Add account**. A manually added account appears immediately even when it has no Deal Team opportunities.
+Select **Add customer** in **Discover opportunities** or in the Accounts/Portfolio header, choose **Account name** or **TPID**, search, and then select **Add account**. The same search dialog is available in Desktop, Web, and the VS Code workbench, including when your account list is empty. Search looks for active customers you can access in MSX, not just customers where you already belong to a Deal Team. A manually added account appears immediately even when it has no Deal Team opportunities.
+
+After adding or unhiding a customer from Discovery, the opportunity list refreshes and customer filters are cleared so the new customer's opportunities are not excluded by an older filter. Choose the relevant Solution Engineer domain to see its matching opportunities. Adding a customer does not grant MSX permissions or automatically join any team. Search and add errors appear inside the dialog; an empty search result is shown only after a successful search. Live TPID search requires the verified account TPID field to be configured by your administrator; name search does not require that setting.
 
 Adding an account does **not** add all of its opportunities to your Portfolio. Open **Discover opportunities**, choose the appropriate Solution Engineer domain, and use **Add me** or **Remove me** to maintain your actual opportunity-level Deal Team memberships. You can also **expand an opportunity in Discovery** (the chevron beside its name) to list its milestones and use the **+ / −** toggle to join a milestone team without joining the Deal Team — joining a milestone brings that opportunity into your Portfolio.
+
+To leave a Deal Team, select **Remove me**, then **Remove membership** in the confirmation dialog. **Cancel** or **Escape** leaves membership unchanged. If MSX rejects the removal, the dialog stays open with the error so you can retry or cancel; the opportunity is not marked as removed. After a successful removal, an opportunity that remains visible in Discovery offers **Add me** again. Discovery may still list it for rejoining, and it remains in Portfolio if you still belong to one of its milestone teams.
+
+In live mode, TLC verifies that MSX no longer returns an active Deal Team membership for the signed-in user and selected opportunity before confirming removal. If the delete request succeeds but membership is still reported, or verification fails, the confirmation dialog shows the error instead of reporting success. Discovery's **On deal team** label is based only on actual Deal Team membership, never on milestone-team membership or simply being present in Portfolio.
+
+An **HTTP 403** during removal means MSX refused the delete operation; this is separate from milestone-team membership. Removal requires your MSX security role to include the privilege to delete Deal Team membership rows, which is separate from the ability to add yourself. When MSX reports a missing privilege, the dialog names it (for example, `prvDeletemsp_dealteam`) so you can ask an MSX administrator to grant it, or to remove your membership for you. Other denial reasons are shown after "MSX said:". If removal also fails or is unavailable in native MSX, the same permission is the likely cause. TLC does not switch identities or substitute another write operation to work around an authorization denial.
 
 The resulting working set is:
 

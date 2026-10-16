@@ -137,15 +137,25 @@ async function verifyDiscoveryControls(page: Page, host: 'desktop' | 'web' | 'vs
   await expect(betaRow).toContainText('On deal team')
   await expect(names).toHaveText(['Alpha analysis', 'Beta platform', 'Zulu renewal', 'Alpha infrastructure'])
   await expectActionColor(betaRow.getByRole('button', { name: 'Remove me', exact: true }), betaRow.locator('td').first(), danger)
-  if (host === 'vscode') {
-    await betaRow.getByRole('button', { name: 'Remove me', exact: true }).click()
-    const confirmation = page.getByRole('dialog', { name: 'Remove from Deal Team' })
-    await expect(confirmation).toBeVisible()
-    await confirmation.getByRole('button', { name: 'Remove membership' }).click()
-  } else {
-    page.once('dialog', (dialog) => dialog.accept())
-    await betaRow.getByRole('button', { name: 'Remove me', exact: true }).click()
-  }
+  const remove = betaRow.getByRole('button', { name: 'Remove me', exact: true })
+  const confirmation = page.getByRole('dialog', { name: 'Remove from Deal Team' })
+  await remove.click()
+  await expect(confirmation).toBeVisible()
+  await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(confirmation).not.toBeVisible()
+  await expect(betaRow).toContainText('On deal team')
+  await remove.click()
+  await page.keyboard.press('Escape')
+  await expect(confirmation).not.toBeVisible()
+  await expect(betaRow).toContainText('On deal team')
+  await remove.click()
+  await confirmation.getByRole('button', { name: 'Remove membership' }).click()
+  await expect(confirmation.getByRole('alert')).toContainText('MSX could not remove your Deal Team membership.')
+  await expect(betaRow).toContainText('On deal team')
+  await confirmation.getByRole('button', { name: 'Remove membership' }).click()
+  await expect(confirmation).not.toBeVisible()
+  await expect(betaRow.getByRole('button', { name: 'Add me', exact: true })).toBeVisible()
+  await panel.getByRole('button', { name: 'Refresh', exact: true }).click()
   await expect(betaRow.getByRole('button', { name: 'Add me', exact: true })).toBeVisible()
   await expect(names).toHaveText(['Alpha analysis', 'Zulu renewal', 'Alpha infrastructure', 'Beta platform'])
 
@@ -256,6 +266,7 @@ async function verifyDiscoveryControls(page: Page, host: 'desktop' | 'web' | 'vs
 
 test('filters and sorts Discovery in the web UI', async ({ page }) => {
   const rows = structuredClone(discoveryRows)
+  let removalAttempts = 0
   const errors: Error[] = []
   page.on('pageerror', (error) => errors.push(error))
   await page.route('**/', async (route) => {
@@ -273,6 +284,10 @@ test('filters and sorts Discovery in the web UI', async ({ page }) => {
     } else if (path.endsWith('/deal-team')) {
       const id = path.split('/')[3]
       const onDealTeam = route.request().method() === 'POST'
+      if (!onDealTeam && ++removalAttempts === 1) {
+        await route.fulfill({ status: 403, json: { error: 'MSX could not remove your Deal Team membership.' } })
+        return
+      }
       for (const row of rows) if (row.id === id) row.onDealTeam = onDealTeam
       await route.fulfill({ json: { opportunityId: id, onDealTeam, ...(onDealTeam ? { alreadyMember: false } : { alreadyAbsent: false }) } })
     } else await route.fulfill({ status: 500, json: { error: `Unexpected test request: ${path}` } })
@@ -299,6 +314,7 @@ test('filters and sorts Discovery through the desktop IPC bridge', async () => {
     const errors: Error[] = []
     page.on('pageerror', (error) => errors.push(error))
     await app.evaluate(({ ipcMain }, rows) => {
+      let removalAttempts = 0
       for (const channel of ['tlc:discover-opportunities', 'tlc:join-deal-team', 'tlc:leave-deal-team']) ipcMain.removeHandler(channel)
       ipcMain.handle('tlc:discover-opportunities', (_event, domain: string) => domain === 'data'
         ? rows.filter((item) => item.id === 'zulu').map((item) => ({ ...item, domain: 'data' }))
@@ -308,6 +324,7 @@ test('filters and sorts Discovery through the desktop IPC bridge', async () => {
         return { opportunityId: id, onDealTeam: true, alreadyMember: false }
       })
       ipcMain.handle('tlc:leave-deal-team', (_event, id: string) => {
+        if (++removalAttempts === 1) throw new Error('MSX could not remove your Deal Team membership.')
         for (const row of rows) if (row.id === id) row.onDealTeam = false
         return { opportunityId: id, onDealTeam: false, alreadyAbsent: false }
       })
@@ -335,6 +352,7 @@ for (const theme of [
   await page.addInitScript(({ rows, accounts }) => {
     window.confirm = () => false
     let milestoneMember = false
+    let removalAttempts = 0
     Object.defineProperty(window, 'acquireVsCodeApi', {
       value: () => ({
         getState: () => undefined,
@@ -368,6 +386,13 @@ for (const theme of [
           }
           else if (message.method === 'joinDealTeam' || message.method === 'leaveDealTeam') {
             const onDealTeam = message.method === 'joinDealTeam'
+            if (!onDealTeam && ++removalAttempts === 1) {
+              window.postMessage({
+                kind: 'response', id: message.id, ok: false,
+                error: { message: 'MSX could not remove your Deal Team membership.' }
+              }, window.location.origin)
+              return
+            }
             for (const row of rows) if (row.id === message.params?.opportunityId) row.onDealTeam = onDealTeam
             result = { opportunityId: message.params?.opportunityId, onDealTeam, ...(onDealTeam ? { alreadyMember: false } : { alreadyAbsent: false }) }
           } else throw new Error(`Unexpected test request: ${message.method}`)

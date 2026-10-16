@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  FixtureMsxConnector
+  FixtureMsxConnector,
+  LiveMsxConnector
 } from '../../packages/connectors/msx/index.js'
 import {
   JsonFilePortfolioPreferenceStore,
@@ -17,6 +18,48 @@ afterEach(async () => {
 })
 
 describe('portfolio account curation', () => {
+  it('searches and persists a live customer without any existing team memberships', async () => {
+    const accountId = '00000000-0000-4000-8000-000000000abc'
+    const opportunityId = '00000000-0000-4000-8000-000000000def'
+    const store = new MemoryPortfolioPreferenceStore()
+    const requests: URL[] = []
+    const request = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = new URL(String(input))
+      requests.push(url)
+      expect(init?.method ?? 'GET').toBe('GET')
+      let body: unknown
+      if (url.pathname.endsWith('/WhoAmI')) body = { UserId: 'user-with-no-memberships' }
+      else if (url.pathname.endsWith('/msp_dealteams')) body = { value: [] }
+      else if (url.pathname.endsWith('/accounts')) body = { value: [{ accountid: accountId, name: 'Northwind Health' }] }
+      else if (url.pathname.endsWith('/opportunities')) {
+        expect(url.searchParams.get('$filter')).toContain(`_parentaccountid_value eq ${accountId}`)
+        body = { value: [{ opportunityid: opportunityId, _parentaccountid_value: accountId, name: 'Clinical data platform modernization' }] }
+      } else throw new Error(`Unexpected request: ${url}`)
+      return new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } })
+    }
+    const connector = new LiveMsxConnector({ getAccessToken: async () => 'test-token' }, request, undefined, undefined, {}, store)
+
+    await expect(connector.listAccounts()).resolves.toEqual([])
+    await expect(connector.searchAccounts({ query: 'Northwind', matchBy: 'name' })).resolves.toEqual([
+      expect.objectContaining({ id: accountId, state: 'not-added' })
+    ])
+    const search = requests.find((url) => url.searchParams.get('$filter')?.includes('contains(name,'))
+    expect(search?.searchParams.get('$filter')).toBe("statecode eq 0 and contains(name,'Northwind')")
+    await expect(connector.addAccount(accountId)).resolves.toEqual(expect.objectContaining({
+      id: accountId, provenance: 'manual', visibility: 'visible'
+    }))
+    await expect(connector.listOpportunities(accountId)).resolves.toEqual([])
+
+    const reloaded = new LiveMsxConnector({ getAccessToken: async () => 'test-token' }, request, undefined, undefined, {}, store)
+    await expect(reloaded.listAccounts()).resolves.toEqual([
+      expect.objectContaining({ id: accountId, provenance: 'manual', visibility: 'visible' })
+    ])
+    await expect(reloaded.discoverOpportunities('data')).resolves.toEqual([
+      expect.objectContaining({ id: opportunityId, accountId, accountName: 'Northwind Health', onDealTeam: false })
+    ])
+    await expect(reloaded.listOpportunities(accountId)).resolves.toEqual([])
+  })
+
   it('keeps a manually added account as an empty tree node until Deal Team membership changes', async () => {
     const connector = new FixtureMsxConnector()
 

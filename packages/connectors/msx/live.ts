@@ -59,6 +59,12 @@ interface DealTeamRow {
   _msp_parentopportunityid_value?: string
 }
 
+interface MsxPortfolio {
+  accounts: Account[]
+  opportunities: Opportunity[]
+  dealTeamOpportunityIds: ReadonlySet<string>
+}
+
 interface AccountRow {
   accountid: string
   name: string
@@ -301,7 +307,7 @@ export class MsxRequestError extends Error {
 
 export class LiveMsxConnector implements MsxConnector {
   private readonly baseUrl: URL
-  private portfolioPromise: Promise<{ accounts: Account[]; opportunities: Opportunity[] }> | undefined
+  private portfolioPromise: Promise<MsxPortfolio> | undefined
   private readonly observationPromises = new Map<string, Promise<CriterionObservation[]>>()
   private readonly milestonePromises = new Map<string, Promise<MilestoneRow[]>>()
   private currentUserIdPromise: Promise<string> | undefined
@@ -564,9 +570,8 @@ export class LiveMsxConnector implements MsxConnector {
     const domainMatch = [capabilityClause, conversationClause].filter(Boolean).join(' or ')
     const domainClauses: string[] = domainMatch ? [`(${domainMatch})`] : []
 
-    // Scope discovery to the signed-in user's assigned customers: reuse the deal-team-derived
-    // portfolio, whose accounts are exactly the accounts MSX surfaces for this user. Opportunities
-    // in those accounts that the user is not yet on the deal team for are the discovery targets.
+    // Portfolio includes milestone-team opportunities as well as Deal Team opportunities.
+    // Reuse its visible accounts for scope, but keep actual Deal Team membership separate.
     const portfolio = await this.getPortfolio()
     const accountNameById = new Map(
       portfolio.accounts
@@ -575,8 +580,6 @@ export class LiveMsxConnector implements MsxConnector {
     )
     const assignedAccountIds = [...accountNameById.keys()]
     if (assignedAccountIds.length === 0) return []
-    const dealTeamOpportunityIds = new Set(portfolio.opportunities.map((opportunity) => opportunity.id))
-
     const rows = await measurePerformance('msx.discover-opportunities', this.performanceReporter, () =>
       this.requestOpportunitiesForAccounts(assignedAccountIds, domainClauses))
 
@@ -592,7 +595,7 @@ export class LiveMsxConnector implements MsxConnector {
           ...(accountName ? { accountName } : {}),
           ...(solutionArea ? { solutionArea } : {}),
           ...(technicalCapability ? { technicalCapability } : {}),
-          onDealTeam: dealTeamOpportunityIds.has(row.opportunityid)
+          onDealTeam: portfolio.dealTeamOpportunityIds.has(row.opportunityid)
         }
       })
       .sort((left, right) => left.name.localeCompare(right.name))
@@ -647,11 +650,12 @@ export class LiveMsxConnector implements MsxConnector {
     }
     const dealTeam = { ...defaultDealTeamWriteMetadata, ...this.writeMetadata.dealTeam }
     const userId = await this.getCurrentUserId()
-    const existing = await this.requestAll<DealTeamMemberRow>(dealTeam.entitySet, {
+    const membershipQuery = {
       '$select': 'msp_dealteamid',
       '$filter': `statecode eq 0 and ${dealTeam.userLookupField} eq ${userId} and ${dealTeam.opportunityLookupField} eq ${opportunityId}`,
       '$top': '2'
-    })
+    }
+    const existing = await this.requestAll<DealTeamMemberRow>(dealTeam.entitySet, membershipQuery)
     if (existing.length === 0) {
       this.portfolioPromise = undefined
       return { opportunityId, onDealTeam: false, alreadyAbsent: true }
@@ -667,6 +671,10 @@ export class LiveMsxConnector implements MsxConnector {
     this.portfolioPromise = undefined
     this.observationPromises.delete(opportunityId)
     this.milestonePromises.delete(opportunityId)
+    const remaining = await this.requestAll<DealTeamMemberRow>(dealTeam.entitySet, membershipQuery)
+    if (remaining.length > 0) {
+      throw new Error('MSX still reports you on this Deal Team after the delete request. Removal could not be confirmed. Refresh and try again.')
+    }
     return { opportunityId, onDealTeam: false, alreadyAbsent: false }
   }
 
@@ -920,7 +928,7 @@ export class LiveMsxConnector implements MsxConnector {
     return milestones
   }
 
-  private getPortfolio(): Promise<{ accounts: Account[]; opportunities: Opportunity[] }> {
+  private getPortfolio(): Promise<MsxPortfolio> {
     this.portfolioPromise ??= this.loadPortfolio().catch((error: unknown) => {
       this.portfolioPromise = undefined
       throw error
@@ -928,7 +936,7 @@ export class LiveMsxConnector implements MsxConnector {
     return this.portfolioPromise
   }
 
-  private async loadPortfolio(): Promise<{ accounts: Account[]; opportunities: Opportunity[] }> {
+  private async loadPortfolio(): Promise<MsxPortfolio> {
     const userId = await measurePerformance('msx.identity', this.performanceReporter, () => this.getCurrentUserId())
     const preferences = await this.preferenceStore.read(userId)
     const dealTeamRows = await measurePerformance('msx.deal-team', this.performanceReporter, () => this.requestAll<DealTeamRow>('msp_dealteams', {
@@ -936,8 +944,9 @@ export class LiveMsxConnector implements MsxConnector {
       '$filter': `statecode eq 0 and _msp_dealteamuserid_value eq ${userId}`
     }))
     const milestoneOpportunityIds = await this.milestoneTeamOpportunityIds()
+    const dealTeamOpportunityIds = new Set(dealTeamRows.map((row) => row._msp_parentopportunityid_value).filter(isPresent))
     const opportunityIds = unique([
-      ...dealTeamRows.map((row) => row._msp_parentopportunityid_value).filter(isPresent),
+      ...dealTeamOpportunityIds,
       ...milestoneOpportunityIds
     ])
     const opportunityRows = await measurePerformance('msx.opportunities', this.performanceReporter, () => this.requestByIds<OpportunityRow>(
@@ -970,7 +979,7 @@ export class LiveMsxConnector implements MsxConnector {
       .map((row) => this.mapOpportunity(row))
       .sort((left, right) => left.name.localeCompare(right.name))
 
-    return { accounts, opportunities }
+    return { accounts, opportunities, dealTeamOpportunityIds }
   }
 
   private mapAccount(
@@ -1090,7 +1099,7 @@ export class LiveMsxConnector implements MsxConnector {
       body: JSON.stringify(body)
     })
     if (!response.ok) {
-      throw new MsxRequestError(`MSX update failed with status ${response.status}.`, response.status)
+      throw new MsxRequestError(`MSX update failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status)
     }
   }
 
@@ -1108,7 +1117,7 @@ export class LiveMsxConnector implements MsxConnector {
       body: JSON.stringify(body)
     })
     if (!response.ok) {
-      throw new MsxRequestError(`MSX create failed with status ${response.status}.`, response.status)
+      throw new MsxRequestError(`MSX create failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status)
     }
   }
 
@@ -1128,7 +1137,7 @@ export class LiveMsxConnector implements MsxConnector {
       body: JSON.stringify(body)
     })
     if (!response.ok) {
-      throw new MsxRequestError(`MSX create failed with status ${response.status}.`, response.status)
+      throw new MsxRequestError(`MSX create failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status)
     }
     return await response.json() as T
   }
@@ -1146,7 +1155,7 @@ export class LiveMsxConnector implements MsxConnector {
       }
     })
     if (!response.ok) {
-      throw new MsxRequestError(`MSX delete failed with status ${response.status}.`, response.status)
+      throw new MsxRequestError(`MSX delete failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status)
     }
   }
 
@@ -1168,6 +1177,22 @@ function isPresent(value: string | undefined): value is string {
 function formattedValue(row: Record<string, unknown>, field: string): string | undefined {
   const value = row[`${field}${formattedValueSuffix}`]
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+/** Dataverse's own error text so a bare status code is actionable; never includes request data. A missing-privilege denial is summarized without the principal's internal identifiers. */
+async function serviceErrorDetail(response: Response): Promise<string> {
+  try {
+    const body = await response.json() as { error?: { message?: unknown } }
+    const message = typeof body?.error?.message === 'string' ? body.error.message : ''
+    // eslint-disable-next-line no-control-regex
+    const text = message.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim()
+    const privilege = /\bis missing (prv[A-Za-z0-9_]{1,80})/.exec(text)?.[1]
+    if (privilege) return ` (your MSX security role is missing the ${privilege} privilege; ask an MSX administrator to grant it or to make this change for you)`
+    const summary = text.replace(/\.$/, '').slice(0, 300)
+    return summary ? ` (MSX said: ${summary})` : ''
+  } catch {
+    return ''
+  }
 }
 
 function escapeODataStringLiteral(value: string): string {
