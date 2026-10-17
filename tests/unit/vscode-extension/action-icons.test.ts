@@ -14,6 +14,19 @@ const actions = [
 ] as const
 
 describe('native VS Code action icons', () => {
+  it('offers customer removal in the Portfolio toolbar, inline action, context menu, and Command Palette', () => {
+    const command = 'tlc.removeCustomer'
+    expect(manifest.contributes.menus['view/title']).toContainEqual({
+      command, when: 'view == tlcPortfolio', group: 'navigation@2'
+    })
+    expect(manifest.contributes.menus['view/item/context']).toEqual(expect.arrayContaining([
+      { command, when: 'view == tlcPortfolio && viewItem == accountVisible', group: 'inline' },
+      { command, when: 'view == tlcPortfolio && viewItem == accountVisible', group: 'navigation' }
+    ]))
+    expect(manifest.contributes.commands.some((item) => item.command === command)).toBe(true)
+    expect(manifest.contributes.menus.commandPalette.some((item) => item.command === command && item.when === 'false')).toBe(false)
+  })
+
   it.each(actions)('gives %s a colored icon without changing its accessible label', (id, title, icon) => {
     const command = manifest.contributes.commands.find((candidate) => candidate.command === id)
     expect(command?.title).toBe(title)

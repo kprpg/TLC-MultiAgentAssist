@@ -177,6 +177,11 @@
           "command": "tlc.removeCustomer",
           "when": "view == tlcPortfolio && viewItem == accountVisible",
           "group": "inline"
+        },
+        {
+          "command": "tlc.removeCustomer",
+          "when": "view == tlcPortfolio && viewItem == accountVisible",
+          "group": "navigation"
         }
       ],
       "commandPalette": [
