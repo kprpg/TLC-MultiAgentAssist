@@ -1,8 +1,94 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDataClient, createWebApiClient } from '../../../apps/desktop/renderer-revamp/src/data-client.js'
 import { contractVersion, workflowContractVersion } from '../../../packages/common/index.js'
+import { LocalStore } from '../../../packages/connectors/local-store/index.js'
+import { LocalStoreRecordCreation } from '../../../packages/connectors/local-store/record-creation.js'
+import { SAMPLE_USER_ID } from '../../../packages/connectors/local-store/seed.js'
 
 describe('revamp live web data client', () => {
+    it('reports the search data mode from the existing host configuration', async () => {
+        await expect(createWebApiClient().getDataMode()).resolves.toBe('live')
+        const bridge = { getDataStatus: vi.fn().mockResolvedValue({ mode: 'sample', auth: { state: 'ready' } }) }
+        vi.stubGlobal('window', { tlc: bridge })
+        try {
+            await expect(createDataClient('desktop').getDataMode()).resolves.toBe('sample')
+            bridge.getDataStatus.mockResolvedValue({ mode: 'live', auth: { state: 'ready' } })
+            await expect(createDataClient('desktop').getDataMode()).resolves.toBe('live')
+        } finally {
+            vi.unstubAllGlobals()
+        }
+    })
+
+    it('sends versioned preview, confirmation and draft requests over the Web and Desktop bridges', async () => {
+        const store = new LocalStore()
+        try {
+            const catalog = new LocalStoreRecordCreation(store, SAMPLE_USER_ID).getCatalog('account-contoso')
+            const parent = catalog.opportunities.find((item) => item.id === 'opp-grid-modernization')!
+            expect(parent.currency).toMatchObject({ isoCode: 'USD' })
+            const draft = {
+                kind: 'existing-opportunity-milestone-batch' as const,
+                account: catalog.account,
+                opportunity: { id: parent.id, label: parent.label },
+                milestones: [{
+                    clientMilestoneKey: 'ms-new',
+                    name: 'Pilot',
+                    category: catalog.choices.category[0]!,
+                    milestoneDate: '2027-02-15',
+                    workload: catalog.workloads[0]!
+                }]
+            }
+            const preview = {
+                contractVersion, batchId: 'batch-1', digest: 'a'.repeat(64),
+                target: 'draft' as const, catalogRevision: catalog.revision, normalizedDraft: draft,
+                mutationCount: 1, warnings: ['Draft only.'], expiresAt: '2027-02-01T00:00:00.000Z'
+            }
+            const result = {
+                contractVersion, batchId: 'batch-1', target: 'draft' as const, state: 'drafted' as const, created: [],
+                audit: { correlationId: 'batch-1', opportunityCount: 0, milestoneCount: 1 },
+                message: 'Draft created. No Opportunity or Milestone was written to MSX.'
+            }
+            const exported = {
+                contractVersion, result,
+                files: [{ name: 'creation-manifest.json', content: '{}', mimeType: 'application/json' }]
+            }
+            const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) => {
+                const path = String(input)
+                const body = path.includes('/catalog') ? catalog : path.includes('/preview') ? preview : path.includes('/draft') ? exported : result
+                return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+            })
+            const web = createWebApiClient(fetcher)
+            await expect(web.getRecordCreationCatalog('account-contoso')).resolves.toEqual(catalog)
+            await expect(web.previewRecordCreation('draft', draft)).resolves.toEqual(preview)
+            await expect(web.commitRecordCreation(preview)).resolves.toEqual(result)
+            await expect(web.exportRecordCreationDraft(preview)).resolves.toEqual(exported)
+            expect(fetcher.mock.calls.map(([path]) => String(path))).toEqual([
+                '/api/record-creation/catalog?accountId=account-contoso',
+                '/api/record-creation/preview', '/api/record-creation/commit', '/api/record-creation/draft'
+            ])
+            expect(JSON.parse(String(fetcher.mock.calls[1]![1]?.body))).toEqual({ contractVersion, target: 'draft', draft })
+            expect(JSON.parse(String(fetcher.mock.calls[2]![1]?.body))).toEqual({
+                contractVersion, preview, expectedDigest: preview.digest, confirmed: true
+            })
+
+            const bridge = {
+                getRecordCreationCatalog: vi.fn().mockResolvedValue(catalog),
+                previewRecordCreation: vi.fn().mockResolvedValue(preview),
+                commitRecordCreation: vi.fn().mockResolvedValue(result),
+                exportRecordCreationDraft: vi.fn().mockResolvedValue(exported)
+            }
+            vi.stubGlobal('window', { tlc: bridge })
+            const desktop = createDataClient('desktop')
+            await expect(desktop.getRecordCreationCatalog('account-contoso')).resolves.toEqual(catalog)
+            await expect(desktop.previewRecordCreation('draft', draft)).resolves.toEqual(preview)
+            await expect(desktop.commitRecordCreation(preview)).resolves.toEqual(result)
+            await expect(desktop.exportRecordCreationDraft(preview)).resolves.toEqual(exported)
+            expect(bridge.commitRecordCreation).toHaveBeenCalledWith({ contractVersion, preview, expectedDigest: preview.digest, confirmed: true })
+        } finally {
+            vi.unstubAllGlobals()
+            store.close()
+        }
+    })
+
     it('uses the account-curation and Deal Team removal routes', async () => {
         const account = { id: 'account-2', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003', provenance: 'manual', visibility: 'visible' }
         const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {

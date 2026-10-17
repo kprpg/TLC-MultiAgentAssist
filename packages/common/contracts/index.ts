@@ -1,15 +1,16 @@
 import { z } from 'zod'
 import { workflowAgentCapabilityValues } from './workflows.js'
 import { seDomainSchema } from '../configuration/se-domains.js'
+import { contractVersion } from './version.js'
 
+export { contractVersion } from './version.js'
 export * from './mcp.js'
 export * from './portfolio.js'
 export * from './workflows.js'
 export * from './meeting.js'
 export * from './voice.js'
 export * from './seller-dashboard.js'
-
-export const contractVersion = '1.1' as const
+export * from './record-creation.js'
 
 export const dataModeSchema = z.enum(['sample', 'live'])
 export const sourceStateSchema = z.enum([

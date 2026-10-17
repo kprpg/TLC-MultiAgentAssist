@@ -271,6 +271,11 @@ button.secondary:focus-visible,
 
 .account-management-header {
     justify-content: space-between;
+    flex-wrap: wrap;
+}
+
+.account-management-header>div {
+    flex-wrap: wrap;
 }
 
 .account-management-header h3 {

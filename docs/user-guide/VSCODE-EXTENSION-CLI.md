@@ -69,7 +69,8 @@ set them via environment variables at startup.
 | Variable / setting | Values | Effect |
 | --- | --- | --- |
 | `TLC_MODE` / `tlc.mode` | `sample` (default) · `live` | Sanitized data with no network, or real MSX OData + Dataverse MCP. |
-| `TLC_DATA_STORE` / `tlc.dataStore` | `fixture` · `sqlite` | Sample data store (in-memory or persistent SQLite). Sample mode only. |
+| `TLC_DATA_STORE` / `tlc.dataStore` | `fixture` · `sqlite` | Sample data store (in-memory fixtures or file-backed SQLite in extension storage). Sample mode only. |
+| `TLC_DATA_STORE_PATH` | Local file path | Optional override for the SQLite file in Sample mode. Desktop and Web use separate default files. |
 | `TLC_MEETING_EXTRACTOR` / `tlc.meetingExtractor` | `rules` · `foundry` | Offline rules or a Foundry model for meeting-transcript extraction. |
 | `TLC_MEETING_MODEL` / `tlc.meetingModel` | model id | Foundry model when the extractor is `foundry` (default `gpt-6.1-sol`). |
 
@@ -86,6 +87,13 @@ Host** window loaded directly from your working tree (not the installed `.vsix`)
 | Run TLC Assist Extension (SQLite + Foundry extraction) | adds `TLC_MEETING_EXTRACTOR=foundry`, `TLC_MEETING_MODEL=gpt-6.1-sol` |
 | Run TLC Assist Extension (Live MSX/Dataverse) | `TLC_MODE=live` |
 
+The SQLite test-store launch uses the extension's persistent storage directory
+by default. In **New**, importing CSV prepares editable rows; **Validate &
+review** followed by **Submit to SQLite** inserts them into that store. A new
+VS Code session with the same extension profile can reopen the records. An
+installed VSIX needs rebuilding/reinstalling and a reload to pick up code
+changes; Live mode still cannot create MSX Opportunities or Milestones.
+
 For live mode, sign in to VS Code with the authorized Microsoft account before launching. That sign-in
 provides delegated tokens for MSX and Microsoft Foundry. After changing extension code, re-run the
 launch (or rebuild) and **Developer: Reload Window** in
@@ -99,6 +107,41 @@ Open Assist**). Switch modes at runtime from the Command Palette — **TLC: Use 
 (MSX/Dataverse)** or **TLC: Use Sample Data** — or set `tlc.mode` in **Settings** (search
 "tlc"). The status bar shows `TLC Assist: Live` or `Sample`. (**TLC: Test Live Connection**
 only tests connectivity; it does not switch.)
+
+### Manage tracked customers
+
+Use **TLC: Add Customer Account** to find a customer by name or TPID. Use **TLC: Remove
+Customer Account** from the Command Palette or Portfolio toolbar to choose a tracked
+customer and confirm removal. The account's context/inline action goes directly to
+its named confirmation. The workbench exposes the same action beside Add customer
+in Portfolio and Discovery, plus a selected-account shortcut.
+
+Removal affects only this app/profile's active working portfolio, Discovery, search,
+New account selectors, and future Plays. It does not delete MSX/Dataverse records or
+change team membership, saved runs, or the official Seller Dashboard. To restore a
+removed customer, search through Add customer and choose **Add again**. No Show hidden
+working list is required. The old hide command ID remains a compatibility alias for
+removal; old unhide/toggle-hidden command IDs open the Add customer recovery flow and
+are no longer shown in ordinary menus.
+
+For CSV import with SQLite submission, set both values in the workspace's
+`.vscode/settings.json`:
+
+```json
+{
+  "tlc.mode": "sample",
+  "tlc.dataStore": "sqlite"
+}
+```
+
+Use a current VSIX and run **Developer: Reload Window** after reinstalling it. In **New**,
+select an Account and check that the save target is **SQLite sample store**. Import both
+CSVs, choose **Validate & load CSV**, then **Validate & review**. **Submit to SQLite**
+appears on the review screen, not the import screen. Fixture-only Sample mode and Live
+mode offer **Export draft** instead and do not write to SQLite.
+
+The [Opportunity and Milestone creation walkthrough](USER-GUIDE.md#new-opportunity-and-milestone-creation)
+includes form entry, ready-to-import CSV examples, expected records, and troubleshooting.
 
 > **F5 vs. installed:** the Extension Development Host reflects your working tree; the installed
 > `.vsix` is a snapshot that changes only when you re-run build/install. Avoid running both for

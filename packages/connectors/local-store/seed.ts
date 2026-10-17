@@ -28,6 +28,22 @@ export const TIMELINE: Readonly<Record<number, string>> = { 0: 'Immediate', 1: '
 export const PURCHASE_PROCESS: Readonly<Record<number, string>> = { 0: 'Individual', 1: 'Committee', 2: 'Unknown' }
 export const NEED: Readonly<Record<number, string>> = { 0: 'Must have', 1: 'Should have', 2: 'Good to have', 3: 'No need' }
 export const OPPORTUNITY_RATING: Readonly<Record<number, string>> = { 1: 'Hot', 2: 'Warm', 3: 'Cold' }
+export const OPPORTUNITY_INTENT: Readonly<Record<number, string>> = { 606820000: 'Billed', 606820001: 'Consumption' }
+export const MILESTONE_CATEGORY: Readonly<Record<number, string>> = {
+  861980000: 'POC/Pilot', 861980002: 'Production', 861980003: 'Deal Registration',
+  861980004: 'Dual Credit', 861980005: 'Other Adjustments', 861980006: 'Partner Reported ACR',
+  861980007: 'Credit Offer', 861980008: 'Optimization', 861980009: 'Intent (MW, BA, Sec)',
+  725300001: 'ISV/ Marketplace'
+}
+export const CUSTOMER_BUDGET_APPROVED: Readonly<Record<number, string>> = { 606820000: 'Yes', 606820001: 'No' }
+export const SOLUTION_AREA: Readonly<Record<number, string>> = {
+  394380000: 'Cloud and AI Platforms', 394380002: 'AI Business Solutions', 861980005: 'Security',
+  861980011: 'Microsoft Services', 861980012: 'Windows and Devices', 861980013: 'Unknown'
+}
+export const TECHNICAL_CAPABILITY: Readonly<Record<number, string>> = {
+  861980002: 'Azure AI and ML', 861980034: 'Commerce', 861980063: 'Cloud Security',
+  861980077: 'Cloud Scale Analytics', 861980072: 'Well Architected'
+}
 export const STAKEHOLDER_ROLE_OPTIONSET: Readonly<Record<number, string>> = {
   861980000: 'Executive Sponsor', 861980001: 'SLT Sponsor', 861980002: 'Technical Sponsor',
   861980003: 'Initiative / Deal Sponsor', 861980004: 'Local Exec Sponsor'
@@ -57,6 +73,22 @@ export const seedAccounts: readonly Row[] = [
     tpid: account.tpid ?? null,
     visibility: 'visible'
   }))
+]
+
+export const seedPriceLevels: readonly Row[] = [
+  { id: 'price-list-usd-standard', name: 'USD Standard Price List' }
+]
+
+export const seedCurrencies: readonly Row[] = [
+  { id: 'currency-usd', name: 'US Dollar', iso_code: 'USD' }
+]
+
+export const seedWorkloads: readonly Row[] = [
+  { id: 'workload-cloud-scale-analytics', name: 'Cloud Scale Analytics' },
+  { id: 'workload-azure-ai-ml', name: 'Azure AI and ML' },
+  { id: 'workload-commerce', name: 'Commerce' },
+  { id: 'workload-cloud-security', name: 'Cloud Security' },
+  { id: 'workload-well-architected', name: 'Well Architected' }
 ]
 
 const additionalOwnerNames = [...new Set([
@@ -236,6 +268,11 @@ export const seedOptionValues: readonly Row[] = [
   ...Object.entries(PURCHASE_PROCESS).map(([code, label]) => ({ option_set: 'purchaseprocess', code: Number(code), label })),
   ...Object.entries(NEED).map(([code, label]) => ({ option_set: 'need', code: Number(code), label })),
   ...Object.entries(OPPORTUNITY_RATING).map(([code, label]) => ({ option_set: 'opportunityratingcode', code: Number(code), label })),
+  ...Object.entries(OPPORTUNITY_INTENT).map(([code, label]) => ({ option_set: 'msp_opportunitytype', code: Number(code), label })),
+  ...Object.entries(MILESTONE_CATEGORY).map(([code, label]) => ({ option_set: 'msp_milestonecategory', code: Number(code), label })),
+  ...Object.entries(CUSTOMER_BUDGET_APPROVED).map(([code, label]) => ({ option_set: 'msp_customerbudgetapproved', code: Number(code), label })),
+  ...Object.entries(SOLUTION_AREA).map(([code, label]) => ({ option_set: 'msp_solutionarea', code: Number(code), label })),
+  ...Object.entries(TECHNICAL_CAPABILITY).map(([code, label]) => ({ option_set: 'msp_technicalcapability', code: Number(code), label })),
   ...Object.entries(STAKEHOLDER_ROLE_OPTIONSET).map(([code, label]) => ({ option_set: 'msp_roleoptionset', code: Number(code), label })),
   ...Object.entries(STAKEHOLDER_ROLE).map(([code, label]) => ({ option_set: 'msp_stakeholderrole', code: Number(code), label })),
   ...Object.entries(RELATIONSHIP_LEVEL).map(([code, label]) => ({ option_set: 'msp_relationshiplevel', code: Number(code), label }))
@@ -574,6 +611,9 @@ export const seedTranscriptSegments: readonly Row[] = [
 
 export interface LocalStoreSeed {
   accounts: readonly Row[]
+  priceLevels: readonly Row[]
+  currencies: readonly Row[]
+  workloads: readonly Row[]
   systemUsers: readonly Row[]
   opportunities: readonly Row[]
   milestones: readonly Row[]
@@ -591,7 +631,14 @@ export interface LocalStoreSeed {
 }
 
 export const defaultSeed: LocalStoreSeed = {
-  accounts: seedAccounts,
+  accounts: seedAccounts.map((row) => ({
+    ...row,
+    default_price_level_id: 'price-list-usd-standard',
+    default_currency_id: 'currency-usd'
+  })),
+  priceLevels: seedPriceLevels,
+  currencies: seedCurrencies,
+  workloads: seedWorkloads,
   systemUsers: seedSystemUsers,
   opportunities: seedOpportunities,
   milestones: seedMilestones,

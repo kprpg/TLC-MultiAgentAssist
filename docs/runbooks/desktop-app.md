@@ -78,7 +78,16 @@ $env:TLC_MSX_STATUS_HYGIENE_DUPLICATE = 'your_verified_integer_option_value'
 $env:TLC_MSX_ACCOUNT_TPID_FIELD = 'your_verified_account_tpid_logical_field_name'
 ```
 
-The app validates the field names and integer option values at startup. When `TLC_MSX_ACCOUNT_TPID_FIELD` is absent, name search remains available but TPID search is rejected explicitly. When another setting is absent, only the corresponding update is rejected; the app does not guess Dataverse metadata.
+The app validates field names and integer option values at startup. TPID lookup verifies
+`TLC_MSX_ACCOUNT_TPID_FIELD`, or the known `msp_mstopparentid` default when no override is set,
+against readable String metadata before use. A missing/incompatible field or authorization
+failure is explicit; name-only searches do not require TPID metadata. When another update
+setting is absent, only that update is rejected; the app does not guess option codes.
+
+Live Account Discovery tries exact and substring names before using the provisioned,
+synchronized Dataverse account-name index for typo suggestions. It preserves explicit
+candidate selection, exact string TPIDs, and the 25-result limit. See
+[Account Discovery implementation and validation](../Account-Discovery-Portfolio-Feasibility.md).
 
 Desktop account additions and Hide/Unhide preferences are partitioned by the immutable signed-in user ID and stored in `portfolio-preferences.json` under Electron's per-user application-data directory. The file contains account IDs and visibility preferences only; it does not contain access tokens or credentials.
 
@@ -145,6 +154,18 @@ npm run desktop:dev
 
 Stop development mode with `Ctrl+C` in the terminal that started it.
 
+### Sample SQLite creation
+
+Set `TLC_DATA_MODE=sample` and `TLC_DATA_STORE=sqlite` before launching the
+Desktop app to enable **New > Validate & review > Submit to SQLite** for
+Opportunities and Milestones, including CSV imports. The default SQLite file
+is `sample.sqlite` in Electron's user-data directory, so records remain after
+an app restart. `TLC_DATA_STORE_PATH` overrides that file when set. The local
+installed/portable demo launchers use the separate
+`%LOCALAPPDATA%\TLC MultiAgent Assist\desktop-demo-sample.sqlite` file.
+Default fixture mode remains in-memory and draft-only; Live mode cannot create
+MSX Opportunities or Milestones.
+
 ## Build without launching
 
 ```powershell
@@ -190,6 +211,22 @@ The compose handoff uses a `mailto:` URI, so very long responses cannot be trans
 Use `Export` to choose a destination and save the response as a formatted Word `.docx` document. Cancelling the save dialog does not write a file.
 
 ## Troubleshooting
+
+### Cache access errors when Live and Sample run together
+
+Live and Sample use separate persistent Chromium sessions so they can run side by side
+without locking each other's disk or GPU caches. Live keeps its existing browser profile;
+Sample uses `sample-session` inside Electron's user-data directory. Configuration,
+portfolio preferences, and SQLite database locations are unchanged.
+
+Sample browser preferences (such as theme and blade widths) start fresh once when moving
+from an older build, then persist in the separate session. No database reset or cache
+deletion is required. For the portable demo launcher, run `npm run desktop:package`,
+close the older demo windows, then launch the refreshed ZIP with
+`docs/demo-launchers/Launch-ReleaseDesktopDemo.ps1`. Installed copies need the new installer.
+
+Lines beginning with `[performance]` and reporting `"outcome":"success"` are normal
+timing diagnostics, not startup errors.
 
 ### Electron does not open
 

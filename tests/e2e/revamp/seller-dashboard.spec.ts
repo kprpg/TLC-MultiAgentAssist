@@ -107,7 +107,7 @@ test('Seller Dashboard Web keeps panes isolated and supports report filters, que
     await page.getByRole('button', { name: 'Accounts', exact: true }).click()
     await expect(page.getByRole('region', { name: 'Accounts blade' })).toBeVisible()
     await page.setViewportSize({ width: 420, height: 1000 })
-    await page.getByRole('button', { name: 'Open Dashboard', exact: true }).click()
+    await page.getByRole('button', { name: 'Open Dashboards', exact: true }).click()
     await page.getByRole('tab', { name: 'Seller Dashboard', exact: true }).click()
     await expectDashboard(page)
     await page.getByRole('tab', { name: 'U2C Progress', exact: true }).click()

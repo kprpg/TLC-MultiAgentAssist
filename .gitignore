@@ -32,3 +32,8 @@ docs/Dataverse*.md
 docs/Opportunity-Milestone-Creation-Implementation-Plan.md
 docs/architecture/Opportunity-Milestone-Creation-Design.md
 docs/research/MSX-Opportunity-Milestone-Metadata.md
+docs/Account-Discovery-Portfolio-Feasibility.md
+config/account-discovery.cases.local.json
+/docs/TEAMs/Teams-UI-TLC-Assist-Architecture.md
+/docs/TEAMs/Teams-UI-TLC-Assist-Design.md
+/docs/TEAMs/Teams-UI-TLC-Assist-Implementation-Plan.md

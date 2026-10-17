@@ -80,7 +80,7 @@ button {
 
 .app-shell {
     display: grid;
-    grid-template-rows: 44px minmax(0, 1fr);
+    grid-template-rows: 44px 38px minmax(0, 1fr);
     width: 100%;
     height: 100%;
 }
@@ -93,6 +93,36 @@ button {
     padding: 0 10px;
     background: var(--cp-surface);
     border-bottom: 1px solid var(--cp-border);
+}
+
+.primary-tabs {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    overflow-x: auto;
+    padding: 0 12px;
+    background: var(--cp-surface);
+    border-bottom: 1px solid var(--cp-border);
+}
+
+.primary-tabs button {
+    flex: 0 0 auto;
+    padding: 0 12px;
+    color: var(--cp-accent);
+    background: transparent;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    cursor: pointer;
+}
+
+.primary-tabs button:hover,
+.primary-tabs button.active {
+    border-bottom-color: var(--cp-accent);
+}
+
+.primary-tabs button:focus-visible {
+    outline: 2px solid var(--cp-accent);
+    outline-offset: -2px;
 }
 
 .brand-mark {
@@ -385,6 +415,15 @@ body.resizing-blade .blade {
 .blade-header-actions {
     display: flex;
     align-items: center;
+}
+
+.opportunity-blade:not(.collapsed) .blade-header {
+    flex-wrap: wrap;
+}
+
+.opportunity-blade:not(.collapsed) .blade-header-actions {
+    justify-content: flex-end;
+    max-width: 100%;
 }
 
 .blade-header-actions button>span {
@@ -778,6 +817,10 @@ body.resizing-blade .blade {
 .milestone-item strong,
 .milestone-item small {
     display: block;
+}
+
+.fui-Tooltip__content {
+    pointer-events: none;
 }
 
 .account-button strong,
@@ -2370,7 +2413,7 @@ body.resizing-blade .blade {
         place-items: center;
     }
     .app-shell {
-        grid-template-rows: 48px minmax(0, 1fr) 58px;
+        grid-template-rows: 48px 38px minmax(0, 1fr) 58px;
     }
 
     .command-bar {

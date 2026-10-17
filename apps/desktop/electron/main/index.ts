@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
 import { AzureCliCredential } from '@azure/identity'
+import { mkdirSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
@@ -12,12 +13,14 @@ import {
 } from '../../../../packages/common/configuration/foundry-environment.js'
 import { FixtureMsxConnector, LiveMeetingCaptureConnector, LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../../packages/connectors/msx/index.js'
 import { createLocalStoreMsxConnector } from '../../../../packages/connectors/local-store/index.js'
+import { SampleRecordCreationCatalog } from '../../../../packages/connectors/local-store/sample-record-creation-catalog.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../../packages/connectors/foundry/index.js'
 import { createFoundryMeetingExtractor } from '../../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
 import { parseTranscriptContent } from '../../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
+import { RecordCreationService } from '../../../../packages/orchestrator/record-creation/service.js'
 import { createLivePlayWorkflowHost, createSampleWorkflowHost } from '../../../../packages/orchestrator/workflows/index.js'
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
 import { prepareFoundryEnvironmentFile } from './packaged-configuration.js'
@@ -28,6 +31,7 @@ import { showResponseSaveDialog } from './response-save-dialog.js'
 import { buildSampleAgentResponse } from './sample-agent-response.js'
 import { openConfigurationAndExit } from './startup-dialog.js'
 import { createWorkflowIpcHandlers } from './workflow-ipc.js'
+import { createRecordCreationIpcHandlers } from './record-creation-ipc.js'
 import { SharedVoiceInputHost } from '../../../../packages/orchestrator/voice-input.js'
 import { WindowsVoiceCaptureDriver } from '../../../../packages/connectors/common/windows-voice.js'
 import { createVoiceIpcHandler, voiceIpcChannel } from './voice-ipc.js'
@@ -44,6 +48,12 @@ const appIcon = resolve(desktopRoot, 'build/icon.png')
 const developmentUrl = process.env['VITE_DEV_SERVER_URL']
 const allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString()
 const dataMode = process.env['TLC_DATA_MODE'] === 'sample' ? 'sample' : 'live'
+// Concurrent Live and Sample processes must not lock the same Chromium caches.
+if (dataMode === 'sample') {
+  const sampleSessionDirectory = resolve(app.getPath('userData'), 'sample-session')
+  mkdirSync(sampleSessionDirectory, { recursive: true })
+  app.setPath('sessionData', sampleSessionDirectory)
+}
 const voiceHost = new SharedVoiceInputHost(new WindowsVoiceCaptureDriver(), () =>
   BrowserWindow.getAllWindows().some((window) => window.isVisible() && window.isFocused())
 )
@@ -115,9 +125,18 @@ const portfolioPreferenceStore = new JsonFilePortfolioPreferenceStore(
 const liveMsxConnector = dataMode === 'sample'
   ? undefined
   : new LiveMsxConnector(tokenProvider, fetch, undefined, reportPerformance, msxWriteMetadataFromEnvironment(process.env), portfolioPreferenceStore)
-// Sample mode uses the in-memory fixture by default, or the relational SQLite test store when TLC_DATA_STORE=sqlite.
-const localStoreMsxConnector = liveMsxConnector ? undefined : createLocalStoreMsxConnector()
+// Keep the opt-in SQLite sample store across Desktop restarts; fixture mode remains in memory.
+const localStoreMsxConnector = liveMsxConnector ? undefined : createLocalStoreMsxConnector({
+  ...process.env,
+  TLC_DATA_STORE_PATH: process.env['TLC_DATA_STORE_PATH']?.trim() || resolve(app.getPath('userData'), 'sample.sqlite')
+})
 const msxConnector = liveMsxConnector ?? localStoreMsxConnector ?? new FixtureMsxConnector()
+const creationWriter = localStoreMsxConnector?.createRecordCreationWriter()
+const recordCreation = new RecordCreationService(
+  msxConnector,
+  creationWriter ?? liveMsxConnector ?? new SampleRecordCreationCatalog(msxConnector),
+  creationWriter ? { writer: creationWriter } : {}
+)
 // Meeting capture: absent for the in-memory fixture; the SQLite test store implements it directly,
 // live wraps the delegated MSX connection (Graph transcript acquisition is not wired yet - paste/upload only).
 const meetingConnector = liveMsxConnector ? new LiveMeetingCaptureConnector(liveMsxConnector) : localStoreMsxConnector
@@ -162,7 +181,8 @@ const orchestrator = new ThinSliceOrchestrator(
   msxConnector,
   mcemConnector,
   taskAgents,
-  reportPerformance
+  reportPerformance,
+  recordCreation
 )
 const configurationRoot = app.isPackaged ? resolve(process.resourcesPath, 'config') : resolve(desktopRoot, '../../config')
 const [mcpRegistry, mcpPolicy, dataverseEntityMap] = await Promise.all([
@@ -240,6 +260,12 @@ function registerIpc(): void {
     return invokeVoice(request)
   })
   for (const [channel, handler] of Object.entries(createWorkflowIpcHandlers(workflowHost))) {
+    ipcMain.handle(channel, (event, request: unknown) => {
+      assertTrustedSender(event)
+      return handler(request)
+    })
+  }
+  for (const [channel, handler] of Object.entries(createRecordCreationIpcHandlers(orchestrator))) {
     ipcMain.handle(channel, (event, request: unknown) => {
       assertTrustedSender(event)
       return handler(request)

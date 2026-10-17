@@ -1,0 +1,49 @@
+.customer-management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.customer-remove-trigger {
+  color: var(--vscode-textLink-foreground, var(--cp-accent, #0f6cbd));
+}
+
+.customer-remove-trigger:hover {
+  color: var(--vscode-textLink-activeForeground, var(--cp-accent-hover, #115ea3));
+  background: var(--vscode-toolbar-hoverBackground, var(--colorNeutralBackground1Hover, #eff6fc));
+}
+
+.customer-remove-dialog {
+  border-color: var(--vscode-panel-border, var(--colorNeutralStroke1, #d1d1d1));
+  background: var(--vscode-editorWidget-background, var(--colorNeutralBackground1, #fff));
+  color: var(--vscode-foreground, var(--colorNeutralForeground1, #242424));
+}
+
+.customer-remove-dialog button,
+.customer-remove-select {
+  box-sizing: border-box;
+  min-height: 36px;
+  padding: 6px;
+  border: 1px solid var(--vscode-panel-border, var(--colorNeutralStroke1, #d1d1d1));
+  border-radius: 4px;
+  background: var(--vscode-input-background, var(--colorNeutralBackground1, #fff));
+  color: var(--vscode-input-foreground, var(--colorNeutralForeground1, #242424));
+  font: inherit;
+}
+
+.customer-remove-select {
+  width: 100%;
+  margin: 8px 0;
+}
+
+.customer-remove-dialog footer {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.customer-remove-dialog .customer-remove-confirm {
+  border-color: transparent;
+  background: var(--vscode-button-background, var(--colorBrandBackground, #0f6cbd));
+  color: var(--vscode-button-foreground, var(--colorNeutralForegroundOnBrand, #fff));
+}

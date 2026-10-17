@@ -14,7 +14,25 @@ CREATE TABLE account (
   name        TEXT NOT NULL,
   segment     TEXT,
   tpid        TEXT,
-  visibility  TEXT NOT NULL DEFAULT 'visible'
+  visibility  TEXT NOT NULL DEFAULT 'visible',
+  default_price_level_id TEXT REFERENCES price_level(id),
+  default_currency_id TEXT REFERENCES transaction_currency(id)
+);
+
+CREATE TABLE price_level (
+  id    TEXT PRIMARY KEY,
+  name  TEXT NOT NULL
+);
+
+CREATE TABLE transaction_currency (
+  id       TEXT PRIMARY KEY,
+  name     TEXT NOT NULL,
+  iso_code TEXT NOT NULL
+);
+
+CREATE TABLE workload (
+  id   TEXT PRIMARY KEY,
+  name TEXT NOT NULL
 );
 
 CREATE TABLE systemuser (
@@ -30,6 +48,9 @@ CREATE TABLE opportunity (
   account_id               TEXT NOT NULL REFERENCES account(id),
   name                     TEXT NOT NULL,
   owner_id                 TEXT REFERENCES systemuser(id),
+  price_level_id           TEXT REFERENCES price_level(id),
+  transaction_currency_id TEXT REFERENCES transaction_currency(id),
+  opportunity_intent_codes TEXT,
   recorded_stage           INTEGER NOT NULL,
   estimated_value          REAL NOT NULL DEFAULT 0,
   currency                 TEXT NOT NULL DEFAULT 'USD',
@@ -70,6 +91,10 @@ CREATE TABLE engagement_milestone (
   status            INTEGER NOT NULL,   -- On Track 861980000..Hygiene/Duplicate 861980006
   milestone_date    TEXT,
   owner_id          TEXT REFERENCES systemuser(id),
+  milestone_category INTEGER,
+  workload_id       TEXT REFERENCES workload(id),
+  parent_account_id TEXT REFERENCES account(id),
+  transaction_currency_id TEXT REFERENCES transaction_currency(id),
   commitment        INTEGER,            -- Uncommitted 861980000 / Committed 861980003
   monthly_use       REAL,
   risk_details      TEXT,
@@ -166,6 +191,25 @@ CREATE TABLE option_value (
   code       INTEGER NOT NULL,
   label      TEXT NOT NULL,
   PRIMARY KEY (option_set, code)
+);
+
+CREATE TABLE creation_batch (
+  batch_id          TEXT PRIMARY KEY,
+  digest            TEXT NOT NULL,
+  account_id        TEXT NOT NULL REFERENCES account(id),
+  created_by        TEXT NOT NULL REFERENCES systemuser(id),
+  result_json       TEXT NOT NULL,
+  created_at        TEXT NOT NULL
+);
+
+CREATE TABLE creation_batch_item (
+  batch_id          TEXT NOT NULL REFERENCES creation_batch(batch_id),
+  client_key        TEXT NOT NULL,
+  kind              TEXT NOT NULL,
+  ordinal           INTEGER NOT NULL,
+  record_id         TEXT,
+  parent_record_id  TEXT,
+  PRIMARY KEY (batch_id, kind, client_key)
 );
 
 -- Test aids (not in MSX) ---------------------------------------------------

@@ -12,8 +12,8 @@ const opportunity = {
 }
 
 describe('opportunity contract', () => {
-  it('uses contract v1.1 and accepts multiple Opportunity Intent labels', () => {
-    expect(contractVersion).toBe('1.1')
+  it('uses contract v1.2 and accepts multiple Opportunity Intent labels', () => {
+    expect(contractVersion).toBe('1.2')
     expect(opportunitySchema.parse({
       ...opportunity,
       opportunityIntent: ['Billed', 'Consumption']

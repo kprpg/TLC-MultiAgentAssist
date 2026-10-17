@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, createMilestoneActivityRequestSchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, meetingTypeSchema, milestoneUpdateSchema, opportunityUpdateSchema, scopeRefSchema, seDomainSchema } from '../../../packages/common/index.js'
+import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, createMilestoneActivityRequestSchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, meetingTypeSchema, milestoneUpdateSchema, opportunityUpdateSchema, recordCreationCatalogRequestSchema, recordCreationPreviewRequestSchema, recordCreationCommitRequestSchema, scopeRefSchema, seDomainSchema } from '../../../packages/common/index.js'
 import { voiceRequestSchema } from '../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema } from '../../../packages/common/contracts/seller-dashboard.js'
 
@@ -25,6 +25,10 @@ export const bridgeMethodSchema = z.enum([
     'addAccount',
     'setAccountVisibility',
     'listOpportunities',
+    'getRecordCreationCatalog',
+    'previewRecordCreation',
+    'commitRecordCreation',
+    'exportRecordCreationDraft',
     'discoverOpportunities',
     'joinDealTeam',
     'leaveDealTeam',
@@ -70,6 +74,10 @@ export const bridgeParamSchemas = {
         visibility: accountVisibilitySchema
     }).strict(),
     listOpportunities: z.object({ accountId: z.string().min(1).max(200) }).strict(),
+    getRecordCreationCatalog: recordCreationCatalogRequestSchema,
+    previewRecordCreation: recordCreationPreviewRequestSchema,
+    commitRecordCreation: recordCreationCommitRequestSchema,
+    exportRecordCreationDraft: recordCreationCommitRequestSchema,
     discoverOpportunities: z.object({ domain: seDomainSchema }).strict(),
     joinDealTeam: z.object({ opportunityId: z.string().min(1).max(200) }).strict(),
     leaveDealTeam: z.object({ opportunityId: z.string().min(1).max(200) }).strict(),

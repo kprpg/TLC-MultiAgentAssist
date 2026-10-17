@@ -24,6 +24,51 @@ Every surface runs in one of two modes:
 
 See [Documentation](#documentation) for the full user guide, FAQ, and runbooks.
 
+### Account Discovery
+
+Use **Add customer** to find an accessible existing MSX account by exact/partial name,
+typo-aware suggestions, or exact TPID, then explicitly add or unhide the intended account
+in your own Portfolio. The dialog shows its Sample/Live source; Sample never searches
+real customers. TPID metadata and indexed-search capability are verified, and a TPID may
+identify several accounts. Account addition does not join any team; use Discovery for
+separate opportunity/milestone membership actions. See
+[Account Discovery implementation and validation](docs/Account-Discovery-Portfolio-Feasibility.md).
+
+### Opportunity and Milestone creation
+
+In each surface, open **New** (immediately before **Discover**), choose **Opportunity**,
+**Multiple Opportunities**, or **Milestone**, and select an Account. A Milestone for an existing
+Opportunity uses an authorized parent from that Account; new Opportunities can include child
+Milestones. Multiple Opportunities support repeated forms, an editable grid, and paired CSV import;
+existing-parent Milestones support repeated forms, an editable grid, and Milestone CSV import.
+Import validates and loads an editable draft; **it does not insert records**. Whether using a form
+or CSV, select **Validate & review**, check the Account, target, fields, and mutation count, then
+select **Submit to SQLite** to insert the batch. **Export draft** only downloads files.
+Child Milestones inherit the selected Opportunity's currency.
+
+Creation writes are available **only in the sanitized SQLite sample store**: set
+`TLC_DATA_MODE=sample` and `TLC_DATA_STORE=sqlite` for Desktop, or
+`TLC_WEB_MODE=sample` and `TLC_DATA_STORE=sqlite` for the hosted Web app. For VS Code,
+select sample mode and set `tlc.dataStore` to `sqlite`. Ordinary fixture-only sample mode and live
+mode can export a draft instead; **live MSX Opportunity/Milestone creation is disabled**. The
+standalone static Web preview needs a hosted API and cannot save or export drafts. Estimated close
+date is required for SQLite creation. A batch is all-or-nothing and is limited to 50 mutations
+(two per new Opportunity, including its creator Deal Team row, plus one per Milestone).
+Selected SQLite sample mode is file-backed on Desktop (the app's local user-data directory)
+and VS Code (extension storage), so submitted records survive restarts. Both Desktop demo
+launchers use `%LOCALAPPDATA%\TLC MultiAgent Assist\desktop-demo-sample.sqlite`; the local
+Web demo launcher uses a **separate** `web-demo-sample.sqlite` in that directory for Sample
+Web at `http://127.0.0.1:8080`. The three stores do not synchronize records. For a
+non-demo Web host, set `TLC_DATA_STORE_PATH` to a file to persist SQLite records; without
+that path its SQLite sample store is in-memory. `TLC_DATA_STORE_PATH` also overrides the
+Desktop/VS Code sample store path when set explicitly. Live Web on port 8081 only exports
+drafts. Close previous Web demo consoles before relaunching; occupied ports are rejected.
+
+See the [Opportunity and Milestone creation walkthrough](docs/user-guide/USER-GUIDE.md#new-opportunity-and-milestone-creation)
+for per-surface setup, forms, CSV import, review/submission, storage locations, and missing
+Submit-button troubleshooting. The [sanitized CSV/JSON examples](tests/fixtures/record-creation/README.md)
+are ready to import.
+
 ## VS Code extension
 
 Requires **VS Code or VS Code Insiders 1.90.0 or later**. The extension is self-contained (no Node.js, npm, or native binaries), embeds its own MCP registry and tool policy, and starts in sample mode.
@@ -46,7 +91,7 @@ Two independent toggles, set in **Settings** (search "tlc") or via the F5 launch
 
 Switch at runtime from the Command Palette: **TLC: Use Live Data (MSX/Dataverse)** or **TLC: Use Sample Data**. The status bar flips between `TLC Assist: Live` and `Sample`. (**TLC: Test Live Connection** only tests connectivity; it does not switch.)
 
-- **SQLite test store** — a relational database (accounts, opportunities, milestones, stakeholders, meetings/transcripts) whose injected values persist for the session, ideal for exercising writes and meeting capture offline. Set `tlc.dataStore` = `sqlite`, or press **F5** and pick **Run TLC Assist Extension (SQLite test store)**.
+- **SQLite test store** — a file-backed relational database (accounts, opportunities, milestones, stakeholders, meetings/transcripts) whose submitted records survive VS Code restarts, ideal for exercising writes and meeting capture offline. Set `tlc.dataStore` = `sqlite`, or press **F5** and pick **Run TLC Assist Extension (SQLite test store)**. The default fixture data store remains in-memory and draft-only for creation.
 - **Live mode** — sign into VS Code with your corporate Microsoft account. The extension uses that Microsoft authentication provider for both delegated MSX access and Foundry agents. Then run **TLC: Use Live Data (MSX/Dataverse)** or set `tlc.mode` = `live`. If a delegated token cannot be acquired, the extension shows an error and stays on sample — check **Output → TLC Assist**.
 - **Foundry meeting extraction** — set `tlc.meetingExtractor` = `foundry` (optional `tlc.meetingModel`, default `gpt-6.1-sol`) to extract transcript signals with a deployed Foundry model instead of the offline rules. Uses VS Code's Microsoft sign-in; no API key is stored.
 
@@ -167,6 +212,7 @@ The `ext-v*` tag must match the extension `version` in `apps/vscode-extension/pa
 
 - [Technology stack](TechStack.md)
 - [End-user guide](docs/user-guide/USER-GUIDE.md)
+- [Account Discovery: implementation and validation](docs/Account-Discovery-Portfolio-Feasibility.md)
 - [Voice search: usage, offline engines, and tests](docs/user-guide/VOICE-SEARCH.md)
 - [Frequently asked questions](docs/FAQ.md)
 - [VS Code extension install (end user)](docs/user-guide/VSCODE-EXTENSION-INSTALL.md)

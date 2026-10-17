@@ -5,7 +5,8 @@ Sanitized, deterministic inputs for the Opportunity and Engagement Milestone cre
 - [single-opportunity-multiple-milestones](./single-opportunity-multiple-milestones/)
 - [multiple-opportunities-multiple-milestones](./multiple-opportunities-multiple-milestones/)
 
-These are input fixtures only. They do not write to MSX and contain no real customer data.
+These fixtures contain no real customer data and never write to MSX. The contract, SQLite,
+orchestrator, CSV, and three-surface tests use them to verify preview and atomic sample creation.
 
 ## File layout
 
@@ -47,14 +48,34 @@ The JSON and CSV files in a scenario describe the same records.
 | Price list | `price-list-usd-standard` | USD Standard Price List |
 | Currency | `currency-usd` | US Dollar |
 | Owner | `user-avery` | Avery Johnson |
-| Owner | `user-morgan` | Morgan Lee |
+| Owner | `user-morgan` | Morgan Diaz |
 | Workload | `workload-cloud-scale-analytics` | Cloud Scale Analytics |
 | Workload | `workload-azure-ai-ml` | Azure AI and ML |
 | Workload | `workload-commerce` | Commerce |
 | Workload | `workload-cloud-security` | Cloud Security |
 | Workload | `workload-well-architected` | Well Architected |
 
-Future SQLite seeds should use these IDs or update the fixtures and seed together.
+The SQLite seed uses these IDs. Keep it and the fixtures in sync when changing reference data.
+
+## Trying the paired CSV inputs
+
+In the **New** tab of a SQLite-backed sample Desktop, VS Code extension, or hosted Web session,
+select **Multiple Opportunities**, choose the Account named in the scenario, then **Import CSV**. Select the
+scenario's `opportunities.csv` and `milestones.csv`, then select **Validate & load CSV**.
+This only validates and populates the editable draft; it does not write to SQLite. Select
+**Validate & review**, verify the complete batch, and then **Submit to SQLite** to insert it
+atomically. The `input.json` file is the equivalent nested contract input used by tests.
+For a Milestone-only batch, select an existing parent in **New > Milestone** and import a Milestone
+CSV without the `parentOpportunityKey` column. The VS Code sample fixture mode and live mode
+export drafts instead of persisting records.
+
+In VS Code, set both `tlc.mode` to `sample` and `tlc.dataStore` to `sqlite`; install the current
+VSIX and run **Developer: Reload Window** if the installed extension is older than the source.
+Verify **Save target > SQLite sample store** before reviewing. The **Submit to SQLite** button
+appears on the review screen, not the CSV import screen.
+
+See the [creation walkthrough](../../../docs/user-guide/USER-GUIDE.md#new-opportunity-and-milestone-creation)
+for form entry, CSV steps, expected records, persistence, and troubleshooting on each surface.
 
 ## Scenario expectations
 
@@ -71,4 +92,3 @@ Future SQLite seeds should use these IDs or update the fixtures and seed togethe
 - Opportunities: 3
 - Milestones: 6 (two under each Opportunity)
 - Expected atomic mutations when each creator Deal Team membership is included: 12
-

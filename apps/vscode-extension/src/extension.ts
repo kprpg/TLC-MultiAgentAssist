@@ -1,10 +1,12 @@
 import * as vscode from 'vscode'
+import { resolve } from 'node:path'
 import { createLocalStoreDataProvider, createSampleDataProvider, type ExtensionDataProvider } from './data-provider.js'
 import { configuredFoundryTenantId, createLiveDataProvider } from './live-provider.js'
 import { WorkbenchPanel } from './webview-controller.js'
 import { acquireDelegatedToken, createVsCodeTokenCredential } from './authentication.js'
 import { ConnectionTreeProvider, PlaysTreeProvider, PortfolioTreeProvider, type PortfolioNode } from './tree/trees.js'
 import { McpHttpClient } from '../../../packages/connectors/mcp/index.js'
+import { createRemoveCustomerAction } from './customer-removal.js'
 
 function readMode(): 'sample' | 'live' {
     return vscode.workspace.getConfiguration('tlc').get<'sample' | 'live'>('mode', 'sample')
@@ -116,7 +118,7 @@ async function testMcpEndpoint(output: vscode.OutputChannel, mcpUrl: string, tok
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-    // Sample data source: the in-memory fixtures, or the relational SQLite test store when
+    // Sample data source: the in-memory fixtures, or the persistent SQLite test store when
     // `tlc.dataStore` is `sqlite` (or TLC_DATA_STORE=sqlite). Live mode is unaffected.
     const useLocalStore = (): boolean =>
         vscode.workspace.getConfiguration('tlc').get<'fixture' | 'sqlite'>('dataStore', 'fixture') === 'sqlite'
@@ -139,10 +141,13 @@ export function activate(context: vscode.ExtensionContext): void {
         syncMeetingExtractionEnv()
         if (useLocalStore()) {
             try {
-                return createLocalStoreDataProvider(foundryCredential)
+                return createLocalStoreDataProvider({
+                    foundryCredential,
+                    storePath: process.env['TLC_DATA_STORE_PATH']?.trim() || resolve(context.globalStorageUri.fsPath, 'sample.sqlite')
+                })
             } catch (error) {
-                // node:sqlite may be unavailable on older VS Code runtimes — fall back to fixtures.
-                void vscode.window.showWarningMessage(`TLC Assist could not open the SQLite test store (${error instanceof Error ? error.message : String(error)}). Using in-memory sample data.`)
+                // Older VS Code runtimes may lack node:sqlite; make the no-write fallback explicit.
+                void vscode.window.showWarningMessage(`TLC Assist could not open the SQLite test store (${error instanceof Error ? error.message : String(error)}). Using in-memory fixtures; record creation is draft-only until SQLite is available.`)
             }
         }
         return createSampleDataProvider()
@@ -181,6 +186,7 @@ export function activate(context: vscode.ExtensionContext): void {
         portfolioTree.refresh()
         playsTree.refresh()
     }
+    context.subscriptions.push(WorkbenchPanel.onDidChangePortfolio(refreshAll))
 
     const refreshWorkbench = (): void => {
         if (!WorkbenchPanel.isOpen) return
@@ -190,9 +196,9 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const addCustomer = async (): Promise<void> => {
         const matchBy = await vscode.window.showQuickPick([
-            { label: 'Account name', value: 'name' as const, description: 'Search by partial customer name' },
+            { label: 'Account name', value: 'name' as const, description: 'Search by exact, partial, or close customer name' },
             { label: 'TPID', value: 'tpid' as const, description: 'Search by exact TPID' }
-        ], { title: 'Add customer account', placeHolder: 'Choose a search method' })
+        ], { title: 'Add customer account', placeHolder: provider.mode === 'sample' ? 'Sample data only - choose a search method' : 'Live MSX - choose a search method' })
         if (!matchBy) return
         const query = await vscode.window.showInputBox({
             title: `Add customer by ${matchBy.label}`,
@@ -208,9 +214,16 @@ export function activate(context: vscode.ExtensionContext): void {
             }
             const picked = await vscode.window.showQuickPick(candidates.map((candidate) => ({
                 label: candidate.name,
-                description: [candidate.tpid ? `TPID ${candidate.tpid}` : undefined, candidate.segment, candidate.state === 'visible' ? 'Already added' : candidate.state === 'hidden' ? 'Hidden' : 'Available'].filter(Boolean).join(' - '),
+                description: [candidate.tpid ? `TPID ${candidate.tpid}` : undefined, candidate.segment, candidate.state === 'visible' ? 'Already added' : candidate.state === 'hidden' ? 'Add again' : 'Available'].filter(Boolean).join(' - '),
                 candidate
-            })), { title: 'Select a customer account', placeHolder: 'Choose the account to add or unhide' })
+            })), {
+                title: 'Select a customer account',
+                placeHolder: candidates.length >= 25
+                    ? 'Showing up to 25 results - refine your search if needed'
+                    : matchBy.value === 'tpid' && candidates.length > 1
+                        ? 'Multiple accounts share this TPID - choose the intended account'
+                        : 'Choose the intended account to add or add again'
+            })
             if (!picked) return
             if (picked.candidate.state === 'visible') {
                 void vscode.window.showInformationMessage(`${picked.candidate.name} is already in your Portfolio.`)
@@ -226,24 +239,27 @@ export function activate(context: vscode.ExtensionContext): void {
         }
     }
 
-    const setCustomerVisibility = async (node: PortfolioNode | undefined, visibility: 'visible' | 'hidden'): Promise<void> => {
-        if (!node || node.kind !== 'account') return
-        if (visibility === 'hidden') {
-            const confirmed = await vscode.window.showWarningMessage(
-                `Hide ${node.label?.toString() ?? 'this customer'} from Portfolio, Discovery, Plays, and downstream analysis? Deal Team membership will not be changed.`,
-                { modal: true },
-                'Hide customer'
-            )
-            if (confirmed !== 'Hide customer') return
-        }
-        try {
-            await provider.setAccountVisibility(node.recordId, visibility)
+    const removeCustomer = createRemoveCustomerAction({
+        getProvider,
+        ui: {
+            chooseAccount: async (accounts) => (await vscode.window.showQuickPick(accounts.map((account) => ({
+                label: account.name,
+                description: [account.tpid ? `TPID ${account.tpid}` : undefined, account.segment].filter(Boolean).join(' - '),
+                accountId: account.id
+            })), { title: 'Remove customer account', placeHolder: 'Choose a tracked customer to remove from this TLC portfolio' }))?.accountId,
+            confirmRemoval: async (account) => (await vscode.window.showWarningMessage(
+                `Remove ${account.name}${account.tpid ? ` (TPID ${account.tpid})` : ''} from this TLC portfolio?`,
+                { modal: true, detail: "This affects this app/profile's Portfolio, Discovery, search, New account selectors, and future Plays only. MSX/Dataverse records and team membership will not change. Saved Play runs and the official Seller Dashboard are unchanged. Use Add customer to add it again." },
+                'Remove customer'
+            )) === 'Remove customer',
+            showInformation: (message) => { void vscode.window.showInformationMessage(message) },
+            showError: (message) => { void vscode.window.showErrorMessage(message) }
+        },
+        onRemoved: () => {
             refreshAll()
             refreshWorkbench()
-        } catch (error) {
-            void vscode.window.showErrorMessage(`Could not ${visibility === 'hidden' ? 'hide' : 'unhide'} customer: ${error instanceof Error ? error.message : String(error)}`)
         }
-    }
+    })
 
     const swapProvider = (next: ExtensionDataProvider): void => {
         const previous = provider
@@ -303,12 +319,10 @@ export function activate(context: vscode.ExtensionContext): void {
             void vscode.window.setStatusBarMessage('TLC Assist: data refreshed', 2000)
         }),
         vscode.commands.registerCommand('tlc.addCustomer', () => addCustomer()),
-        vscode.commands.registerCommand('tlc.toggleHiddenCustomers', () => {
-            const showing = portfolioTree.toggleHidden()
-            void vscode.window.setStatusBarMessage(`TLC Assist: hidden customers ${showing ? 'shown' : 'hidden'}`, 2000)
-        }),
-        vscode.commands.registerCommand('tlc.hideCustomer', (node?: PortfolioNode) => setCustomerVisibility(node, 'hidden')),
-        vscode.commands.registerCommand('tlc.unhideCustomer', (node?: PortfolioNode) => setCustomerVisibility(node, 'visible')),
+        vscode.commands.registerCommand('tlc.removeCustomer', (node?: PortfolioNode) => removeCustomer(node?.kind === 'account' ? node.recordId : undefined)),
+        vscode.commands.registerCommand('tlc.hideCustomer', (node?: PortfolioNode) => removeCustomer(node?.kind === 'account' ? node.recordId : undefined)),
+        vscode.commands.registerCommand('tlc.toggleHiddenCustomers', () => addCustomer()),
+        vscode.commands.registerCommand('tlc.unhideCustomer', () => addCustomer()),
         vscode.commands.registerCommand('tlc.runPlay', (arg?: { workflowId?: string }) => {
             const panel = WorkbenchPanel.createOrShow(context.extensionUri, getProvider)
             if (arg?.workflowId) panel.runPlay(arg.workflowId)

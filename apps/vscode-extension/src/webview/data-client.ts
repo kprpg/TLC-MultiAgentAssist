@@ -1,6 +1,18 @@
 import { request } from './bridge.js'
 import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest } from '../../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema, type SellerDashboardRequest } from '../../../../packages/common/contracts/seller-dashboard.js'
+import {
+    recordCreationCatalogSchema,
+    recordCreationPreviewSchema,
+    recordCreationPreviewRequestSchema,
+    recordCreationCommitRequestSchema,
+    recordCreationResultSchema,
+    recordCreationDraftResultSchema,
+    type RecordCreationDraft,
+    type RecordCreationPreview,
+    type RecordCreationPreviewRequest
+} from '../../../../packages/common/contracts/record-creation.js'
+import { contractVersion } from '../../../../packages/common/contracts/version.js'
 import type {
     AccountView,
     AccountCandidateView,
@@ -47,6 +59,18 @@ export const dataClient = {
     addAccount: (accountId: string) => request<AccountView>('addAccount', { accountId }),
     setAccountVisibility: (accountId: string, visibility: 'visible' | 'hidden') => request<AccountView>('setAccountVisibility', { accountId, visibility }),
     listOpportunities: (accountId: string) => request<OpportunityView[]>('listOpportunities', { accountId }),
+    getRecordCreationCatalog: async (accountId: string) => recordCreationCatalogSchema.parse(
+        await request('getRecordCreationCatalog', { contractVersion, accountId })
+    ),
+    previewRecordCreation: async (target: RecordCreationPreviewRequest['target'], draft: RecordCreationDraft) =>
+        recordCreationPreviewSchema.parse(await request('previewRecordCreation',
+            recordCreationPreviewRequestSchema.parse({ contractVersion, target, draft }))),
+    commitRecordCreation: async (preview: RecordCreationPreview) =>
+        recordCreationResultSchema.parse(await request('commitRecordCreation',
+            recordCreationCommitRequestSchema.parse({ contractVersion, preview, expectedDigest: preview.digest, confirmed: true }))),
+    exportRecordCreationDraft: async (preview: RecordCreationPreview) =>
+        recordCreationDraftResultSchema.parse(await request('exportRecordCreationDraft',
+            recordCreationCommitRequestSchema.parse({ contractVersion, preview, expectedDigest: preview.digest, confirmed: true }))),
     discoverOpportunities: (domain: SeDomainView) => request<DiscoverableOpportunityView[]>('discoverOpportunities', { domain }),
     joinDealTeam: (opportunityId: string) => request<DealTeamJoinResultView>('joinDealTeam', { opportunityId }),
     leaveDealTeam: (opportunityId: string) => request<DealTeamLeaveResultView>('leaveDealTeam', { opportunityId }),

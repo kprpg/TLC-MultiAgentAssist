@@ -22,6 +22,13 @@ import {
     milestoneUpdateSchema,
     opportunitySchema,
     opportunityUpdateSchema,
+    recordCreationCatalogSchema,
+    recordCreationCatalogRequestSchema,
+    recordCreationPreviewSchema,
+    recordCreationPreviewRequestSchema,
+    recordCreationCommitRequestSchema,
+    recordCreationResultSchema,
+    recordCreationDraftResultSchema,
     workflowDefinitionSchema,
     workflowGuidanceHandoffSchema,
     workflowRunSchema,
@@ -59,7 +66,14 @@ import {
     type MilestoneTeamLeaveResult,
     type MilestoneUpdate,
     type Opportunity,
-    type OpportunityUpdate
+    type OpportunityUpdate,
+    type RecordCreationCatalog,
+    type RecordCreationDraft,
+    type RecordCreationPreview,
+    type RecordCreationPreviewRequest,
+    type RecordCreationResult,
+    type RecordCreationDraftResult,
+    type RecordCreationCommitRequest
 } from '../../../../packages/common/contracts/index.js'
 import type { SeDomainId } from '../../../../packages/common/configuration/se-domains.js'
 import {
@@ -81,6 +95,7 @@ import { withSampleOpportunityIntents } from '../../../../packages/common/fixtur
 import { samplePortfolioDiscoveryOpportunities } from '../../../../packages/common/fixtures/sample-discovery.js'
 
 export interface RevampDataClient {
+    getDataMode(): Promise<'sample' | 'live'>
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     readonly mode: 'desktop' | 'web-live' | 'web-sample'
@@ -91,6 +106,10 @@ export interface RevampDataClient {
     addAccount(accountId: string): Promise<Account>
     setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
     listOpportunities(accountId: string): Promise<Opportunity[]>
+    getRecordCreationCatalog(accountId: string): Promise<RecordCreationCatalog>
+    previewRecordCreation(target: RecordCreationPreviewRequest['target'], draft: RecordCreationDraft): Promise<RecordCreationPreview>
+    commitRecordCreation(preview: RecordCreationPreview): Promise<RecordCreationResult>
+    exportRecordCreationDraft(preview: RecordCreationPreview): Promise<RecordCreationDraftResult>
     discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
     joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
     leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult>
@@ -164,6 +183,7 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
     )
     return {
         mode,
+        getDataMode: async () => mode === 'web-live' ? 'live' : 'sample',
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(await apiRequest(fetcher, '/api/seller-dashboard', {
             method: 'POST', body: JSON.stringify(sellerDashboardRequestSchema.parse(request))
         })),
@@ -180,6 +200,20 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
         addAccount: async (accountId) => accountSchema.parse(await apiRequest(fetcher, '/api/accounts', { method: 'POST', body: JSON.stringify({ accountId }) })),
         setAccountVisibility: async (accountId, visibility) => accountSchema.parse(await apiRequest(fetcher, `/api/accounts/${encodeURIComponent(accountId)}/visibility`, { method: 'PATCH', body: JSON.stringify({ visibility }) })),
         listOpportunities: async (accountId) => opportunitySchema.array().parse(await apiRequest(fetcher, `/api/accounts/${encodeURIComponent(accountId)}/opportunities`)),
+        getRecordCreationCatalog: async (accountId) => recordCreationCatalogSchema.parse(await apiRequest(fetcher,
+            `/api/record-creation/catalog?accountId=${encodeURIComponent(accountId)}`)),
+        previewRecordCreation: async (target, draft) => recordCreationPreviewSchema.parse(await apiRequest(fetcher,
+            '/api/record-creation/preview',
+            { method: 'POST', body: JSON.stringify(recordCreationPreviewRequestSchema.parse({ contractVersion, target, draft })) }
+        )),
+        commitRecordCreation: async (preview) => recordCreationResultSchema.parse(await apiRequest(fetcher,
+            '/api/record-creation/commit',
+            { method: 'POST', body: JSON.stringify(recordCreationCommitRequestSchema.parse({ contractVersion, preview, expectedDigest: preview.digest, confirmed: true })) }
+        )),
+        exportRecordCreationDraft: async (preview) => recordCreationDraftResultSchema.parse(await apiRequest(fetcher,
+            '/api/record-creation/draft',
+            { method: 'POST', body: JSON.stringify(recordCreationCommitRequestSchema.parse({ contractVersion, preview, expectedDigest: preview.digest, confirmed: true })) }
+        )),
         discoverOpportunities: async (domain) => discoverableOpportunitySchema.array().parse(await apiRequest(fetcher, `/api/discover/${encodeURIComponent(domain)}`)),
         joinDealTeam: async (opportunityId) => dealTeamJoinResultSchema.parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/deal-team`, { method: 'POST', body: JSON.stringify({}) })),
         leaveDealTeam: async (opportunityId) => dealTeamLeaveResultSchema.parse(await apiRequest(fetcher, `/api/opportunities/${encodeURIComponent(opportunityId)}/deal-team`, { method: 'DELETE', body: JSON.stringify({}) })),
@@ -265,6 +299,10 @@ interface DesktopBridge {
     addAccount(accountId: string): Promise<Account>
     setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
     listOpportunities(accountId: string): Promise<Opportunity[]>
+    getRecordCreationCatalog(request: { contractVersion: typeof contractVersion; accountId: string }): Promise<RecordCreationCatalog>
+    previewRecordCreation(request: RecordCreationPreviewRequest): Promise<RecordCreationPreview>
+    commitRecordCreation(request: RecordCreationCommitRequest): Promise<RecordCreationResult>
+    exportRecordCreationDraft(request: RecordCreationCommitRequest): Promise<RecordCreationDraftResult>
     discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
     joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
     leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult>
@@ -455,8 +493,12 @@ function buildWebEvaluation(opportunity: Opportunity, opportunityMilestones: rea
 }
 
 function webClient(): RevampDataClient {
+    const unavailable = (): never => {
+        throw new Error('Record creation needs the hosted Web app or Desktop. The standalone preview does not save records.')
+    }
     return {
         mode: 'web-sample',
+        getDataMode: async () => 'sample',
         invokeSellerDashboard: async (request) => {
             sellerDashboardRequestSchema.parse(request)
             return createSampleSellerDashboard()
@@ -495,6 +537,10 @@ function webClient(): RevampDataClient {
         },
         listOpportunities: async (accountId) => structuredClone(opportunities.filter((item) =>
             item.accountId === accountId && dealTeamOpportunityIds.has(item.id) && !hiddenAccountIds.has(accountId))),
+        getRecordCreationCatalog: async () => unavailable(),
+        previewRecordCreation: async () => unavailable(),
+        commitRecordCreation: async () => unavailable(),
+        exportRecordCreationDraft: async () => unavailable(),
         discoverOpportunities: async (domain) => {
             const visibleAccountIds = new Set(sampleAccountRows().map((account) => account.id))
             return structuredClone(discoverableOpportunities
@@ -645,6 +691,7 @@ function webClient(): RevampDataClient {
 function desktopClient(bridge: DesktopBridge): RevampDataClient {
     return {
         mode: 'desktop',
+        getDataMode: async () => (await bridge.getDataStatus()).mode,
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(
             await bridge.invokeSellerDashboard(sellerDashboardRequestSchema.parse(request))
         ),
@@ -656,6 +703,18 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         addAccount: (accountId) => bridge.addAccount(accountId),
         setAccountVisibility: (accountId, visibility) => bridge.setAccountVisibility(accountId, visibility),
         listOpportunities: (accountId) => bridge.listOpportunities(accountId),
+        getRecordCreationCatalog: async (accountId) => recordCreationCatalogSchema.parse(await bridge.getRecordCreationCatalog(
+            recordCreationCatalogRequestSchema.parse({ contractVersion, accountId })
+        )),
+        previewRecordCreation: async (target, draft) => recordCreationPreviewSchema.parse(await bridge.previewRecordCreation(
+            recordCreationPreviewRequestSchema.parse({ contractVersion, target, draft })
+        )),
+        commitRecordCreation: async (preview) => recordCreationResultSchema.parse(await bridge.commitRecordCreation(
+            recordCreationCommitRequestSchema.parse({ contractVersion, preview, expectedDigest: preview.digest, confirmed: true })
+        )),
+        exportRecordCreationDraft: async (preview) => recordCreationDraftResultSchema.parse(await bridge.exportRecordCreationDraft(
+            recordCreationCommitRequestSchema.parse({ contractVersion, preview, expectedDigest: preview.digest, confirmed: true })
+        )),
         discoverOpportunities: (domain) => bridge.discoverOpportunities(domain),
         joinDealTeam: (opportunityId) => bridge.joinDealTeam(opportunityId),
         leaveDealTeam: (opportunityId) => bridge.leaveDealTeam(opportunityId),

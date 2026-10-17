@@ -31,6 +31,13 @@ import {
     milestoneUpdateSchema,
     opportunitySchema,
     opportunityUpdateSchema,
+    contractVersion,
+    recordCreationCatalogSchema,
+    recordCreationPreviewRequestSchema,
+    recordCreationPreviewSchema,
+    recordCreationCommitRequestSchema,
+    recordCreationResultSchema,
+    recordCreationDraftResultSchema,
     seDomainSchema,
     type Account,
     type AccountCandidate,
@@ -60,6 +67,13 @@ import {
     type MilestoneUpdate,
     type Opportunity,
     type OpportunityUpdate,
+    type RecordCreationCatalog,
+    type RecordCreationCatalogRequest,
+    type RecordCreationPreview,
+    type RecordCreationPreviewRequest,
+    type RecordCreationCommitRequest,
+    type RecordCreationResult,
+    type RecordCreationDraftResult,
     type SeDomainId
 } from '../../../packages/common/index.js'
 import { createOutlookDraftMessage } from '../../desktop/electron/main/outlook-compose.js'
@@ -67,6 +81,7 @@ import { createResponseDocumentBuffer } from '../../desktop/electron/main/respon
 import { invokeWorkflowHost, type WorkflowHost, type WorkflowHostOperation } from '../../../packages/orchestrator/workflows/index.js'
 import { createBrowserOnlyVoiceHost, type SharedVoiceInputHost } from '../../../packages/orchestrator/voice-input.js'
 import type { SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
+import { RecordCreationError } from '../../../packages/orchestrator/record-creation/service.js'
 
 const accountIdSchema = z.string().min(1).max(200)
 const maximumBodyBytes = 1_048_576
@@ -77,6 +92,10 @@ export interface WebRuntime {
     addAccount(accountId: string): Promise<Account>
     setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
     listOpportunities(accountId: string): Promise<Opportunity[]>
+    getRecordCreationCatalog(request: RecordCreationCatalogRequest): Promise<RecordCreationCatalog>
+    previewRecordCreation(request: RecordCreationPreviewRequest): Promise<RecordCreationPreview>
+    commitRecordCreation(request: RecordCreationCommitRequest): Promise<RecordCreationResult>
+    exportRecordCreationDraft(request: RecordCreationCommitRequest): Promise<RecordCreationDraftResult>
     discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
     joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
     leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult>
@@ -144,6 +163,29 @@ export function buildWebApiHandler(options: WebApiOptions) {
             if (request.method === 'GET' && url.pathname === '/api/me') {
                 sendJson(response, 200, { email: authentication.userEmail })
                 return true
+            }
+            if (request.method === 'GET' && url.pathname === '/api/record-creation/catalog') {
+                const accountId = accountIdSchema.parse(url.searchParams.get('accountId'))
+                sendJson(response, 200, recordCreationCatalogSchema.parse(await (await options.createRuntime(authentication)).getRecordCreationCatalog({ contractVersion, accountId })))
+                return true
+            }
+            if (request.method === 'POST' && url.pathname.startsWith('/api/record-creation/')) {
+                const runtime = await options.createRuntime(authentication)
+                const operation = url.pathname.slice('/api/record-creation/'.length)
+                if (operation === 'preview') {
+                    const input = recordCreationPreviewRequestSchema.parse(await readJsonBody(request))
+                    sendJson(response, 200, recordCreationPreviewSchema.parse(await runtime.previewRecordCreation(input)))
+                    return true
+                }
+                if (operation === 'commit' || operation === 'draft') {
+                    const input = recordCreationCommitRequestSchema.parse(await readJsonBody(request))
+                    if (operation === 'commit') {
+                        sendJson(response, 200, recordCreationResultSchema.parse(await runtime.commitRecordCreation(input)))
+                    } else {
+                        sendJson(response, 200, recordCreationDraftResultSchema.parse(await runtime.exportRecordCreationDraft(input)))
+                    }
+                    return true
+                }
             }
             if (request.method === 'POST' && url.pathname === '/api/seller-dashboard' && options.resolveSellerDashboardHost) {
                 const host = await options.resolveSellerDashboardHost(authentication)
@@ -374,12 +416,22 @@ export function buildWebApiHandler(options: WebApiOptions) {
             sendJson(response, 404, { error: 'The requested API route was not found.', correlationId })
             return true
         } catch (error) {
-            const statusCode = error instanceof HttpError ? error.statusCode : error instanceof ZodError ? 400 : 500
+            const statusCode = error instanceof HttpError
+                ? error.statusCode
+                : error instanceof ZodError
+                    ? 400
+                    : error instanceof RecordCreationError
+                        ? error.code === 'target-disabled' ? 403 : error.code === 'parent-unavailable' ? 404 : 409
+                        : 500
             options.onError?.(error, correlationId)
             const message = statusCode === 500
                 ? 'The server could not complete the request.'
                 : error instanceof Error ? error.message : 'The request is invalid.'
-            sendJson(response, statusCode, { error: message, correlationId })
+            sendJson(response, statusCode, {
+                error: message,
+                ...(error instanceof RecordCreationError ? { code: error.code } : {}),
+                correlationId
+            })
             return true
         }
     }

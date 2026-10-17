@@ -7,6 +7,7 @@ import manifest from '../../../apps/vscode-extension/package.json' with { type: 
 const actions = [
   ['tlc.refresh', 'TLC: Refresh Data', 'refresh'],
   ['tlc.addCustomer', 'TLC: Add Customer Account', 'add'],
+  ['tlc.removeCustomer', 'TLC: Remove Customer Account', 'remove'],
   ['tlc.toggleHiddenCustomers', 'TLC: Toggle Hidden Customers', 'eye'],
   ['tlc.hideCustomer', 'Hide Customer', 'eye-hidden'],
   ['tlc.unhideCustomer', 'Unhide Customer', 'eye']
@@ -23,7 +24,7 @@ describe('native VS Code action icons', () => {
   })
 
   it.each(['light', 'dark'] as const)('ships blue, renderable icons for the %s theme', async (theme) => {
-    for (const icon of ['refresh', 'add', 'eye', 'eye-hidden']) {
+    for (const icon of ['refresh', 'add', 'remove', 'eye', 'eye-hidden']) {
       const svg = await readFile(resolve('apps', 'vscode-extension', 'media', 'actions', `${icon}-${theme}.svg`))
       expect(svg.toString()).toContain(theme === 'light' ? '#006ab1' : '#b3ddff')
       expect(svg.toString()).not.toMatch(/<script|<image|href=|url\(/i)

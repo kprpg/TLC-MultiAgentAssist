@@ -8,9 +8,11 @@ import { createHostedRuntimeFactory, createHostedWorkflowHostResolver, createWeb
 import { createSampleWorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import { FixtureMsxConnector } from '../../../packages/connectors/msx/index.js'
 import { createLocalStoreMsxConnector } from '../../../packages/connectors/local-store/index.js'
+import { SampleRecordCreationCatalog } from '../../../packages/connectors/local-store/sample-record-creation-catalog.js'
 import type { MsxConnector } from '../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
+import { RecordCreationService } from '../../../packages/orchestrator/record-creation/service.js'
 import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import type { AgentCapability } from '../../../packages/common/index.js'
 
@@ -24,13 +26,20 @@ const localStoreMsx = mode === 'sample' ? createLocalStoreMsxConnector() : undef
 const sampleMsx: MsxConnector | undefined = mode === 'sample'
     ? (localStoreMsx ?? new FixtureMsxConnector())
     : undefined
+const creationWriter = localStoreMsx?.createRecordCreationWriter()
 const meetingUnavailableMessage = 'Meeting capture requires the SQLite test store (sample data) or a live Graph connection.'
 const sampleRuntime = sampleMsx
     ? Object.assign(
         new ThinSliceOrchestrator(
             sampleMsx,
             new LocalPdfMcemGuidanceConnector(resolve('docs/knowledge/MCEM Overview.pdf')),
-            createSampleTaskAgents()
+            createSampleTaskAgents(),
+            undefined,
+            new RecordCreationService(
+                sampleMsx,
+                creationWriter ?? new SampleRecordCreationCatalog(sampleMsx),
+                creationWriter ? { writer: creationWriter } : {}
+            )
         ),
         localStoreMsx
             ? {

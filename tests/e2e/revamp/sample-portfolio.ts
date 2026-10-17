@@ -32,6 +32,11 @@ export async function expectCompleteSamplePortfolio(page: Page): Promise<void> {
     await expect(workbench.locator('.criterion-row')).not.toHaveCount(0)
   }
 
+  const blade = await page.getByRole('region', { name: 'Opportunities blade' }).boundingBox()
+  const actions = await page.getByRole('region', { name: 'Opportunities blade' }).locator('.blade-header-actions').boundingBox()
+  if (!blade || !actions) throw new Error('The Opportunity header or its actions are not visible.')
+  expect(actions.x + actions.width).toBeLessThanOrEqual(blade.x + blade.width + 1)
+
   const collapse = page.getByRole('button', { name: 'Collapse Guidance pane' })
   await expect(collapse).toBeVisible()
   await collapse.click()

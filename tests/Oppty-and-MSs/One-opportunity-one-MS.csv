@@ -1,0 +1,2 @@
+clientOpportunityKey,name,opportunityIntent,estimatedValue,priceListId,priceListLabel,currencyId,currencyLabel,ownerId,ownerLabel,estimatedCloseDate,need,solutionArea,technicalCapability
+opportunity-2,Sample-Oppty-Data Center Migration,Consumption,1000000,price-list-usd-standard,USD Standard Price List,currency-usd,US Dollar,user-girish,Girish Pillai,2027-11-30,Customer's DC lease expires in Dec 2027 and need to exit the DC before that date.,Cloud and AI Platforms,Commerce

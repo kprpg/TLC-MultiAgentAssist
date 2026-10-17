@@ -2,6 +2,7 @@ import type { Account, AccountCandidate, AccountListOptions, AccountSearchReques
 
 export * from './portfolio-preferences.js'
 export * from './milestone-membership.js'
+export * from './record-creation.js'
 
 export interface CriterionObservation {
   criterionId: string

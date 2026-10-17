@@ -1,12 +1,17 @@
+import { createHash } from 'node:crypto'
+import { accountSearchLimit, assertAccountNameIndex, fuzzyAccountName, indexedAccountIds, parseAccountSearchPage } from './account-search.js'
 import {
   accountSearchRequestSchema,
   createMilestoneActivityRequestSchema,
+  contractVersion,
   customerCommitmentSchema,
   getSeDomainDefinition,
   measurePerformance,
   milestoneStatusSchema,
   milestoneUpdateSchema,
   opportunityUpdateSchema,
+  recordCreationCatalogSchema,
+  recordCreationMaxMutations,
   type Account,
   type AccountCandidate,
   type AccountListOptions,
@@ -26,6 +31,8 @@ import {
   type MilestoneUpdate,
   type Opportunity,
   type OpportunityUpdate,
+  type ChoiceRef,
+  type RecordCreationCatalog,
   type PerformanceReporter,
   type SeDomainId
 } from '../../common/index.js'
@@ -313,6 +320,9 @@ export class LiveMsxConnector implements MsxConnector {
   private currentUserIdPromise: Promise<string> | undefined
   private dealTeamBindingsPromise: Promise<{ userNavigationProperty: string; opportunityNavigationProperty: string }> | undefined
   private milestoneTeamTemplateIdPromise: Promise<string> | undefined
+  private accountTpidField: string | undefined
+  private accountTpidMetadataPromise: Promise<string> | undefined
+  private accountNameIndexPromise: Promise<void> | undefined
 
   constructor(
     private readonly tokenProvider: MsxAccessTokenProvider,
@@ -326,6 +336,10 @@ export class LiveMsxConnector implements MsxConnector {
     if (writeMetadata.riskDetailsField && !/^[A-Za-z][A-Za-z0-9_]*$/.test(writeMetadata.riskDetailsField)) {
       throw new Error('The MSX risk details logical field name is invalid.')
     }
+    if (writeMetadata.accountTpidField && !navigationPropertyPattern.test(writeMetadata.accountTpidField)) {
+      throw new Error('TLC_MSX_ACCOUNT_TPID_FIELD must be a valid Dataverse identifier.')
+    }
+    this.accountTpidField = writeMetadata.accountTpidField
   }
 
   async listAccounts(options: AccountListOptions = {}): Promise<Account[]> {
@@ -333,21 +347,88 @@ export class LiveMsxConnector implements MsxConnector {
     return structuredClone(portfolio.accounts.filter((account) => options.includeHidden || account.visibility !== 'hidden'))
   }
 
+  async getCatalog(accountId: string): Promise<RecordCreationCatalog> {
+    const account = (await this.listAccounts()).find((item) => item.id === accountId)
+    if (!account) throw new Error('The selected Account is unavailable or hidden in MSX.')
+    const userId = await this.getCurrentUserId()
+    const [user, priceRows, currencyRows, workloadRows, opportunities, intent, category, status, commitment, customerBudgetApproved, solutionArea, technicalCapability] = await Promise.all([
+      this.requestJson<{ fullname: string }>(`systemusers(${userId})?$select=fullname`),
+      this.requestAll<{ pricelevelid: string; name: string }>('pricelevels', { '$select': 'pricelevelid,name', '$orderby': 'name asc' }),
+      this.requestAll<{ transactioncurrencyid: string; currencyname: string; isocurrencycode: string }>(
+        'transactioncurrencies', { '$select': 'transactioncurrencyid,currencyname,isocurrencycode', '$orderby': 'currencyname asc' }
+      ),
+      this.requestAll<{ msp_workloadid: string; msp_name: string }>('msp_workloads', {
+        '$select': 'msp_workloadid,msp_name', '$orderby': 'msp_name asc'
+      }),
+      this.listOpportunities(accountId),
+      this.getCreationChoiceValues('opportunity', 'msp_opportunitytype', 'MultiSelectPicklistAttributeMetadata'),
+      this.getCreationChoiceValues('msp_engagementmilestone', 'msp_milestonecategory', 'PicklistAttributeMetadata'),
+      this.getCreationChoiceValues('msp_engagementmilestone', 'msp_milestonestatus', 'PicklistAttributeMetadata'),
+      this.getCreationChoiceValues('msp_engagementmilestone', 'msp_commitmentrecommendation', 'PicklistAttributeMetadata'),
+      this.getCreationChoiceValues('msp_engagementmilestone', 'msp_customerbudgetapproved', 'PicklistAttributeMetadata'),
+      this.getCreationChoiceValues('opportunity', 'msp_solutionarea', 'PicklistAttributeMetadata'),
+      this.getCreationChoiceValues('opportunity', 'msp_technicalcapability', 'PicklistAttributeMetadata')
+    ])
+    if (!user.fullname?.trim()) throw new Error('The current MSX user name is unavailable.')
+    const data = {
+      account: { id: account.id, label: account.name },
+      opportunities: opportunities.map((item) => ({ id: item.id, label: item.name })),
+      priceLists: priceRows.map((row) => ({ id: row.pricelevelid, label: row.name })),
+      currencies: currencyRows.map((row) => ({ id: row.transactioncurrencyid, label: row.currencyname, isoCode: row.isocurrencycode })),
+      workloads: workloadRows.map((row) => ({ id: row.msp_workloadid, label: row.msp_name })),
+      owners: [{ id: userId, label: user.fullname }],
+      defaults: { owner: { id: userId, label: user.fullname } },
+      choices: { intent, category, status, commitment, customerBudgetApproved, solutionArea, technicalCapability }
+    }
+    return recordCreationCatalogSchema.parse({
+      contractVersion,
+      target: 'draft',
+      revision: createHash('sha256').update(JSON.stringify(data)).digest('hex'),
+      ...data,
+      maxMutations: recordCreationMaxMutations
+    })
+  }
+
+  private async getCreationChoiceValues(
+    entity: 'opportunity' | 'msp_engagementmilestone',
+    field: string,
+    metadataType: 'PicklistAttributeMetadata' | 'MultiSelectPicklistAttributeMetadata'
+  ): Promise<ChoiceRef[]> {
+    const path = `EntityDefinitions(LogicalName='${entity}')/Attributes(LogicalName='${field}')/Microsoft.Dynamics.CRM.${metadataType}`
+    const url = new URL(path, this.baseUrl)
+    url.searchParams.set('$expand', 'OptionSet')
+    const metadata = await this.requestJson<{
+      OptionSet?: {
+        Options?: Array<{
+          Value?: number
+          Label?: {
+            LocalizedLabels?: Array<{ LanguageCode?: number; Label?: string }>
+            UserLocalizedLabel?: { Label?: string }
+          }
+        }>
+      }
+    }>(url)
+    if (!metadata.OptionSet?.Options) throw new Error(`MSX choice metadata is unavailable for ${field}.`)
+    return metadata.OptionSet.Options.map((option) => {
+      const label = option.Label?.LocalizedLabels?.find((item) => item.LanguageCode === 1033)?.Label
+        ?? option.Label?.UserLocalizedLabel?.Label
+      if (typeof option.Value !== 'number' || !label?.trim()) {
+        throw new Error(`MSX choice metadata is incomplete for ${field}.`)
+      }
+      return { value: option.Value, label: label.trim() }
+    }).sort((left, right) => left.value - right.value)
+  }
+
   async searchAccounts(input: AccountSearchRequest): Promise<AccountCandidate[]> {
     const request = accountSearchRequestSchema.parse(input)
     const escapedQuery = escapeODataStringLiteral(request.query)
-    const tpidField = this.writeMetadata.accountTpidField
-    if (request.matchBy === 'tpid' && !tpidField) {
-      throw new Error('TPID search requires TLC_MSX_ACCOUNT_TPID_FIELD to contain the verified account TPID logical field.')
-    }
-    const rows = await measurePerformance('msx.search-accounts', this.performanceReporter, () => this.requestAll<AccountRow>('accounts', {
-      '$select': ['accountid', 'name', tpidField].filter(isPresent).join(','),
-      '$filter': request.matchBy === 'name'
-        ? `statecode eq 0 and contains(name,'${escapedQuery}')`
-        : `statecode eq 0 and ${tpidField} eq '${escapedQuery}'`,
-      '$orderby': 'name asc',
-      '$top': '25'
-    }))
+    const tpidField = request.matchBy === 'tpid' ? await this.resolveAccountTpidField() : this.accountTpidField
+    const select = ['accountid', 'name', tpidField].filter(isPresent).join(',')
+    const rows = await measurePerformance('msx.search-accounts', this.performanceReporter, () =>
+      request.matchBy === 'name'
+        ? this.searchAccountNames(request.query, select)
+        : this.requestAccountCandidates(`statecode eq 0 and ${tpidField} eq '${escapedQuery}'`, select))
+    if (rows.length === 0) return []
     const portfolio = await this.getPortfolio()
     const existingById = new Map(portfolio.accounts.map((account) => [account.id, account]))
     return rows.map((row) => {
@@ -359,18 +440,106 @@ export class LiveMsxConnector implements MsxConnector {
     })
   }
 
+  private async requestAccountCandidates(filter: string, select: string): Promise<AccountRow[]> {
+    const url = new URL('accounts', this.baseUrl)
+    for (const [name, value] of Object.entries({
+      '$select': select, '$filter': filter, '$orderby': 'name asc', '$top': String(accountSearchLimit)
+    })) url.searchParams.set(name, value)
+    const rows: AccountRow[] = []
+    let next: URL | undefined = url
+    while (next && rows.length < accountSearchLimit) {
+      const page = parseAccountSearchPage(await this.requestJson<unknown>(next))
+      rows.push(...page.value.slice(0, accountSearchLimit - rows.length))
+      next = page['@odata.nextLink'] ? new URL(page['@odata.nextLink']) : undefined
+    }
+    return rows
+  }
+
+  private async searchAccountNames(query: string, select: string): Promise<AccountRow[]> {
+    const escaped = escapeODataStringLiteral(query)
+    const exact = await this.requestAccountCandidates(`statecode eq 0 and name eq '${escaped}'`, select)
+    if (exact.length > 0) return exact
+    const partial = await this.requestAccountCandidates(`statecode eq 0 and contains(name,'${escaped}')`, select)
+    if (partial.length > 0) return partial
+
+    this.accountNameIndexPromise ??= this.requestJson<unknown>('searchstatus()')
+      .then(assertAccountNameIndex)
+      .catch((error: unknown) => {
+        this.accountNameIndexPromise = undefined
+        throw error
+      })
+    await this.accountNameIndexPromise
+    const response = await this.postReturningEntity<unknown>('searchquery', {
+      search: fuzzyAccountName(query),
+      entities: JSON.stringify([{ name: 'account', selectcolumns: ['name'], searchcolumns: ['name'], filter: 'statecode eq 0' }]),
+      top: accountSearchLimit,
+      options: JSON.stringify({ querytype: 'lucene', searchmode: 'all', besteffortsearchenabled: 'false' })
+    }, 'search')
+    const ids = indexedAccountIds(response)
+    if (ids.length === 0) return []
+    const page = parseAccountSearchPage({ value: await this.requestByIds<AccountRow>(
+      'accounts', 'accountid', ids, `${select},statecode`
+    ) })
+    return page.value
+      .filter((row) => row.statecode === 0 && ids.includes(row.accountid.toLowerCase()))
+      .sort((left, right) => ids.indexOf(left.accountid.toLowerCase()) - ids.indexOf(right.accountid.toLowerCase()))
+  }
+
+  private resolveAccountTpidField(): Promise<string> {
+    this.accountTpidMetadataPromise ??= this.verifyAccountTpidField().catch((error: unknown) => {
+      this.accountTpidMetadataPromise = undefined
+      throw error
+    })
+    return this.accountTpidMetadataPromise
+  }
+
+  private async verifyAccountTpidField(): Promise<string> {
+    const field = this.writeMetadata.accountTpidField ?? 'msp_mstopparentid'
+    const url = new URL(`EntityDefinitions(LogicalName='account')/Attributes(LogicalName='${field}')`, this.baseUrl)
+    url.searchParams.set('$select', 'LogicalName,AttributeType,IsValidForRead')
+    let metadata: { LogicalName?: unknown; AttributeType?: unknown; IsValidForRead?: unknown }
+    try {
+      metadata = await this.requestJson(url)
+    } catch (error) {
+      if (error instanceof MsxRequestError && error.status === 404) {
+        throw new Error('TPID lookup is unavailable. Set TLC_MSX_ACCOUNT_TPID_FIELD to the verified readable String field for this MSX environment.', { cause: error })
+      }
+      throw error
+    }
+    if (metadata.LogicalName !== field || metadata.AttributeType !== 'String' || metadata.IsValidForRead !== true) {
+      throw new Error('The TPID field must be a verified readable String attribute. Check TLC_MSX_ACCOUNT_TPID_FIELD.')
+    }
+    this.accountTpidField = field
+    return field
+  }
+
   async addAccount(accountId: string): Promise<Account> {
     this.assertAccountId(accountId)
     const rows = await this.requestByIds<AccountRow>(
       'accounts',
       'accountid',
       [accountId],
-      ['accountid', 'name', this.writeMetadata.accountTpidField].filter(isPresent).join(',')
+      ['accountid', 'name', this.accountTpidField].filter(isPresent).join(',')
     )
-    if (rows.length !== 1) throw new Error('The selected account is unavailable or inactive in MSX.')
-    await this.preferenceStore.addAccount(await this.getCurrentUserId(), accountId)
-    this.portfolioPromise = undefined
-    const account = (await this.getPortfolio()).accounts.find((candidate) => candidate.id === accountId)
+    const row = rows[0]
+    if (rows.length !== 1 || !row) throw new Error('The selected account is unavailable or inactive in MSX.')
+    const preferences = await this.preferenceStore.addAccount(await this.getCurrentUserId(), accountId)
+    const updated = this.getPortfolio().then((portfolio) => {
+      const teamAccountIds = new Set(portfolio.accounts
+        .filter((account) => account.provenance === 'deal-team' || account.provenance === 'both')
+        .map((account) => account.id))
+      const account = this.mapAccount(row, preferences, teamAccountIds)
+      return {
+        ...portfolio,
+        accounts: [...portfolio.accounts.filter((item) => item.id !== accountId), account]
+          .sort((left, right) => left.name.localeCompare(right.name))
+      }
+    }).catch((error: unknown) => {
+      this.portfolioPromise = undefined
+      throw error
+    })
+    this.portfolioPromise = updated
+    const account = (await updated).accounts.find((candidate) => candidate.id === accountId)
     if (!account) throw new Error('The account preference was saved but the account could not be reloaded.')
     return structuredClone(account)
   }
@@ -381,7 +550,7 @@ export class LiveMsxConnector implements MsxConnector {
       'accounts',
       'accountid',
       [accountId],
-      ['accountid', 'name', this.writeMetadata.accountTpidField].filter(isPresent).join(',')
+      ['accountid', 'name', this.accountTpidField].filter(isPresent).join(',')
     )
     const row = rows[0]
     if (!row) throw new Error('The selected account is unavailable or inactive in MSX.')
@@ -968,7 +1137,7 @@ export class LiveMsxConnector implements MsxConnector {
       'accounts',
       'accountid',
       accountIds,
-      ['accountid', 'name', this.writeMetadata.accountTpidField].filter(isPresent).join(',')
+      ['accountid', 'name', this.accountTpidField].filter(isPresent).join(',')
     ))
     const accounts = accountRows
       .map((row) => this.mapAccount(row, preferences, new Set(dealTeamAccountIds)))
@@ -989,7 +1158,7 @@ export class LiveMsxConnector implements MsxConnector {
   ): Account {
     const manual = preferences.manualAccountIds.includes(row.accountid)
     const dealTeam = dealTeamAccountIds.has(row.accountid)
-    const tpidField = this.writeMetadata.accountTpidField
+    const tpidField = this.accountTpidField
     const tpid = tpidField && typeof row[tpidField] === 'string' ? row[tpidField].trim() : undefined
     return {
       id: row.accountid,
@@ -1121,8 +1290,8 @@ export class LiveMsxConnector implements MsxConnector {
     }
   }
 
-  /** POSTs and returns the created row (via `Prefer: return=representation`). */
-  private async postReturningEntity<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  /** searchquery is a read-only POST action; other callers create records. */
+  private async postReturningEntity<T>(path: string, body: Record<string, unknown>, operation: 'create' | 'search' = 'create'): Promise<T> {
     const url = new URL(path, this.baseUrl)
     this.assertTrustedUrl(url)
     const accessToken = await this.tokenProvider.getAccessToken()
@@ -1137,7 +1306,8 @@ export class LiveMsxConnector implements MsxConnector {
       body: JSON.stringify(body)
     })
     if (!response.ok) {
-      throw new MsxRequestError(`MSX create failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status)
+      const detail = operation === 'search' ? '' : await serviceErrorDetail(response)
+      throw new MsxRequestError(`MSX ${operation} failed with status ${response.status}${detail}.`, response.status)
     }
     return await response.json() as T
   }
