@@ -291,11 +291,23 @@ describe('MCEM Coach thin slice', () => {
     const target = infra.find((item) => !item.onDealTeam)
     expect(target).toBeDefined()
     if (!target) throw new Error('No unjoined infrastructure opportunity was found.')
+    const target = infra.find((item) => !item.onDealTeam)!
+    expect(target).toBeDefined()
+    expect((await orchestrator.listOpportunities(target.accountId)).some((item) => item.id === target.id)).toBe(false)
+
     const join = await orchestrator.joinDealTeam(target.id)
     expect(join).toEqual({ opportunityId: target.id, onDealTeam: true, alreadyMember: false })
 
     const portfolio = await orchestrator.listOpportunities(target.accountId)
     expect(portfolio.some((item) => item.id === target.id)).toBe(true)
+    expect(await orchestrator.discoverOpportunities('infra')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: target.id, onDealTeam: true })
+    ]))
+    await expect(orchestrator.joinDealTeam(target.id)).resolves.toEqual({
+      opportunityId: target.id,
+      onDealTeam: true,
+      alreadyMember: true
+    })
   })
 
   it('rejects an unknown discovery domain and a blank deal-team id', async () => {
