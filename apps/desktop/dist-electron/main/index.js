@@ -1,8 +1,9 @@
 import { createRequire } from "node:module";
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
+import { mkdirSync } from "node:fs";
 import { access, copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
@@ -1200,6 +1201,241 @@ var sellerDashboardRequestSchema = z.discriminatedUnion("operation", [z.object({
 	confirmed: z.literal(true),
 	asOf: date$1.optional()
 }).strict()]);
+//#endregion
+//#region packages/common/contracts/record-creation.ts
+var clientKeySchema = z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
+var dateSchema = z.string().date();
+var textSchema = z.string().trim().min(1).max(200);
+var choiceRefSchema = z.object({
+	value: z.number().int(),
+	label: textSchema
+}).strict();
+var lookupRefSchema = z.object({
+	id: z.string().trim().min(1).max(200),
+	label: textSchema
+}).strict();
+var currencyRefSchema = lookupRefSchema.extend({ isoCode: z.string().length(3) });
+var recordCreationTargetSchema = z.enum([
+	"sqlite",
+	"draft",
+	"live-msx"
+]);
+var milestoneCreateInputSchema = z.object({
+	clientMilestoneKey: clientKeySchema,
+	name: z.string().trim().min(1).max(100),
+	category: choiceRefSchema,
+	milestoneDate: dateSchema,
+	workload: lookupRefSchema,
+	owner: lookupRefSchema.optional(),
+	status: choiceRefSchema.optional(),
+	commitment: choiceRefSchema.optional(),
+	estimatedMonthlyUsage: z.number().finite().nonnegative().max(922337203685477).optional(),
+	comments: z.string().max(35e3).optional(),
+	riskDetails: z.string().trim().max(2e3).optional(),
+	customerBudgetApproved: choiceRefSchema.optional()
+}).strict().superRefine((item, context) => {
+	if ((item.status?.value === 861980001 || item.status?.value === 861980002) && !item.riskDetails) context.addIssue({
+		code: "custom",
+		path: ["riskDetails"],
+		message: "Risk/Blocker Details are required for At Risk or Blocked milestones."
+	});
+});
+var opportunityCreateInputSchema = z.object({
+	clientOpportunityKey: clientKeySchema,
+	name: z.string().trim().min(1).max(200),
+	intent: z.array(choiceRefSchema).min(1).max(2).refine((items) => new Set(items.map((item) => item.value)).size === items.length, "Opportunity Intent choices must not repeat."),
+	estimatedValue: z.number().finite().nonnegative().max(0xe8d4a51000),
+	priceList: lookupRefSchema.optional(),
+	currency: lookupRefSchema.optional(),
+	owner: lookupRefSchema.optional(),
+	estimatedCloseDate: dateSchema,
+	need: z.string().max(2e3).optional(),
+	solutionArea: choiceRefSchema.optional(),
+	technicalCapability: choiceRefSchema.optional()
+}).strict();
+var opportunityBundleSchema = z.object({
+	opportunity: opportunityCreateInputSchema,
+	milestones: z.array(milestoneCreateInputSchema).max(50)
+}).strict();
+var opportunityBatchDraftSchema = z.object({
+	kind: z.literal("opportunity-batch"),
+	account: lookupRefSchema,
+	opportunities: z.array(opportunityBundleSchema).min(1).max(50)
+}).strict();
+var existingOpportunityMilestoneBatchDraftSchema = z.object({
+	kind: z.literal("existing-opportunity-milestone-batch"),
+	account: lookupRefSchema,
+	opportunity: lookupRefSchema,
+	milestones: z.array(milestoneCreateInputSchema).min(1).max(50)
+}).strict();
+var recordCreationDraftSchema = z.discriminatedUnion("kind", [opportunityBatchDraftSchema, existingOpportunityMilestoneBatchDraftSchema]).superRefine((draft, context) => {
+	const opportunityKeys = /* @__PURE__ */ new Set();
+	const milestoneKeys = /* @__PURE__ */ new Set();
+	const bundles = draft.kind === "opportunity-batch" ? draft.opportunities.map((bundle, index) => ({
+		key: bundle.opportunity.clientOpportunityKey,
+		milestones: bundle.milestones,
+		index
+	})) : [{
+		key: draft.opportunity.id,
+		milestones: draft.milestones,
+		index: 0
+	}];
+	for (const { key, milestones, index } of bundles) {
+		if (draft.kind === "opportunity-batch" && opportunityKeys.has(key)) context.addIssue({
+			code: "custom",
+			path: [
+				"opportunities",
+				index,
+				"opportunity",
+				"clientOpportunityKey"
+			],
+			message: "Opportunity keys must be unique."
+		});
+		opportunityKeys.add(key);
+		for (const [milestoneIndex, milestone] of milestones.entries()) {
+			if (milestoneKeys.has(milestone.clientMilestoneKey)) context.addIssue({
+				code: "custom",
+				path: draft.kind === "opportunity-batch" ? [
+					"opportunities",
+					index,
+					"milestones",
+					milestoneIndex
+				] : ["milestones", milestoneIndex],
+				message: "Milestone keys must be unique."
+			});
+			milestoneKeys.add(milestone.clientMilestoneKey);
+		}
+	}
+});
+var creationChoicesSchema = z.object({
+	intent: z.array(choiceRefSchema),
+	category: z.array(choiceRefSchema),
+	status: z.array(choiceRefSchema),
+	commitment: z.array(choiceRefSchema),
+	customerBudgetApproved: z.array(choiceRefSchema),
+	solutionArea: z.array(choiceRefSchema),
+	technicalCapability: z.array(choiceRefSchema)
+}).strict();
+var recordCreationCatalogSchema = z.object({
+	contractVersion: z.literal("1.2"),
+	target: z.enum(["sqlite", "draft"]),
+	revision: z.string().min(1),
+	account: lookupRefSchema,
+	opportunities: z.array(lookupRefSchema.extend({ currency: currencyRefSchema.optional() })),
+	priceLists: z.array(lookupRefSchema),
+	currencies: z.array(currencyRefSchema),
+	workloads: z.array(lookupRefSchema),
+	owners: z.array(lookupRefSchema),
+	defaults: z.object({
+		owner: lookupRefSchema,
+		priceList: lookupRefSchema.optional(),
+		currency: currencyRefSchema.optional()
+	}).strict(),
+	choices: creationChoicesSchema,
+	maxMutations: z.number().int().positive().max(999)
+}).strict();
+var recordCreationCatalogRequestSchema = z.object({
+	contractVersion: z.literal("1.2"),
+	accountId: z.string().trim().min(1).max(200)
+}).strict();
+var recordCreationPreviewRequestSchema = z.object({
+	contractVersion: z.literal("1.2"),
+	target: recordCreationTargetSchema,
+	draft: recordCreationDraftSchema
+}).strict();
+var recordCreationPreviewSchema = z.object({
+	contractVersion: z.literal("1.2"),
+	batchId: z.string().min(1),
+	digest: z.string().regex(/^[a-f0-9]{64}$/),
+	target: z.enum(["sqlite", "draft"]),
+	catalogRevision: z.string().min(1),
+	normalizedDraft: recordCreationDraftSchema,
+	mutationCount: z.number().int().positive(),
+	warnings: z.array(z.string().min(1)),
+	expiresAt: z.string().datetime()
+}).strict();
+var recordCreationCommitRequestSchema = z.object({
+	contractVersion: z.literal("1.2"),
+	preview: recordCreationPreviewSchema,
+	expectedDigest: z.string().regex(/^[a-f0-9]{64}$/),
+	confirmed: z.literal(true)
+}).strict();
+var recordCreationItemResultSchema = z.object({
+	clientKey: z.string().min(1),
+	kind: z.enum([
+		"opportunity",
+		"milestone",
+		"deal-team"
+	]),
+	recordId: z.string().min(1).optional(),
+	parentRecordId: z.string().min(1).optional()
+}).strict();
+var recordCreationResultSchema = z.object({
+	contractVersion: z.literal("1.2"),
+	batchId: z.string().min(1),
+	target: z.enum(["sqlite", "draft"]),
+	state: z.enum([
+		"committed",
+		"drafted",
+		"rolled-back",
+		"reconciled"
+	]),
+	created: z.array(recordCreationItemResultSchema),
+	audit: z.object({
+		correlationId: z.string().min(1),
+		opportunityCount: z.number().int().nonnegative(),
+		milestoneCount: z.number().int().nonnegative(),
+		committedAt: z.string().datetime().optional()
+	}).strict(),
+	message: z.string().min(1)
+}).strict().superRefine((result, context) => {
+	if (result.target === "draft") {
+		if (result.state !== "drafted" || result.created.length > 0 || result.audit.committedAt) context.addIssue({
+			code: "custom",
+			path: ["state"],
+			message: "Drafts cannot claim committed records or a commit time."
+		});
+	} else if (result.state === "drafted") context.addIssue({
+		code: "custom",
+		path: ["state"],
+		message: "A SQLite result cannot be a draft."
+	});
+	if (result.state === "committed") {
+		const count = (kind) => result.created.filter((item) => item.kind === kind).length;
+		if (!result.audit.committedAt || count("opportunity") !== result.audit.opportunityCount || count("deal-team") !== result.audit.opportunityCount || count("milestone") !== result.audit.milestoneCount) context.addIssue({
+			code: "custom",
+			path: ["created"],
+			message: "A commit receipt must match its created-record counts and commit time."
+		});
+	}
+});
+var recordCreationDraftResultSchema = z.object({
+	contractVersion: z.literal("1.2"),
+	result: recordCreationResultSchema,
+	files: z.array(z.object({
+		name: z.string().min(1),
+		content: z.string(),
+		mimeType: z.string().min(1)
+	}).strict()).min(1)
+}).strict();
+z.object({
+	code: z.enum([
+		"validation-failed",
+		"parent-unavailable",
+		"reference-unavailable",
+		"catalog-changed",
+		"stale-preview",
+		"batch-too-large",
+		"target-disabled",
+		"already-committed",
+		"transaction-failed",
+		"ambiguous-outcome"
+	]),
+	message: z.string().min(1),
+	path: z.array(z.union([z.string(), z.number()])).optional()
+}).strict();
+//#endregion
+//#region packages/common/contracts/index.ts
 var dataModeSchema = z.enum(["sample", "live"]);
 var sourceStateSchema = z.enum([
 	"sample",
@@ -1374,7 +1610,7 @@ var discoverableOpportunitySchema = opportunitySchema.extend({
 	onDealTeam: z.boolean()
 });
 var mcemStageTransitionRequestSchema = z.object({
-	contractVersion: z.literal("1.1"),
+	contractVersion: z.literal("1.2"),
 	accountId: z.string().min(1),
 	opportunityId: z.string().min(1),
 	targetStage: z.number().int().min(1).max(5),
@@ -1444,21 +1680,21 @@ var recommendationSchema = z.object({
 	});
 });
 var mcemRequestSchema = z.object({
-	contractVersion: z.literal("1.1"),
+	contractVersion: z.literal("1.2"),
 	accountId: z.string().min(1),
 	opportunityId: z.string().min(1),
 	prompt: z.string().min(3).max(1e3)
 });
 var agentCapabilitySchema = z.enum(workflowAgentCapabilityValues);
 var agentTaskRequestSchema = z.object({
-	contractVersion: z.literal("1.1"),
+	contractVersion: z.literal("1.2"),
 	capability: agentCapabilitySchema,
 	accountId: z.string().min(1),
 	opportunityId: z.string().min(1),
 	prompt: z.string().min(3).max(1e3)
 });
 z.object({
-	contractVersion: z.literal("1.1"),
+	contractVersion: z.literal("1.2"),
 	correlationId: z.string().uuid(),
 	capability: agentCapabilitySchema,
 	agentVersion: z.string().min(1),
@@ -1473,7 +1709,7 @@ z.object({
 	sourceHealth: z.array(sourceHealthSchema).min(1)
 });
 var emailComposeRequestSchema = z.object({
-	contractVersion: z.literal("1.1"),
+	contractVersion: z.literal("1.2"),
 	recipients: z.array(z.string().email()).min(1).max(20),
 	subject: z.string().trim().min(1).max(255),
 	responseTitle: z.string().trim().min(1).max(255),
@@ -1481,7 +1717,7 @@ var emailComposeRequestSchema = z.object({
 }).strict();
 z.object({ state: z.literal("opened") }).strict();
 var exportResponseRequestSchema = z.object({
-	contractVersion: z.literal("1.1"),
+	contractVersion: z.literal("1.2"),
 	responseTitle: z.string().trim().min(1).max(255),
 	responseMarkdown: z.string().min(1).max(2e5),
 	generatedAt: z.string().datetime()
@@ -1491,7 +1727,7 @@ z.discriminatedUnion("state", [z.object({
 	filePath: z.string().min(1)
 }).strict(), z.object({ state: z.literal("cancelled") }).strict()]);
 var mcemResponseSchema = z.object({
-	contractVersion: z.literal("1.1"),
+	contractVersion: z.literal("1.2"),
 	correlationId: z.string().uuid(),
 	capability: z.literal("mcem-coach"),
 	agentVersion: z.string().min(1),
@@ -2599,6 +2835,60 @@ function withSampleOpportunityIntents(opportunities) {
 		opportunityIntent: [...sampleIntents[index % sampleIntents.length]]
 	}));
 }
+var accountRowSchema = z.object({
+	accountid: z.guid(),
+	name: z.string().trim().min(1),
+	statecode: z.number().int().optional()
+}).catchall(z.unknown());
+var accountPageSchema = z.object({
+	value: z.array(accountRowSchema),
+	"@odata.nextLink": z.string().optional()
+});
+var searchEnvelopeSchema = z.object({ response: z.string() });
+var searchResultsSchema = z.object({
+	Error: z.null().optional(),
+	Value: z.array(z.object({
+		Id: z.guid(),
+		EntityName: z.literal("account")
+	})).max(25)
+});
+var searchStatusSchema = z.object({ value: z.object({
+	status: z.string(),
+	entitystatusresults: z.array(z.object({
+		entitylogicalname: z.string(),
+		entitystatus: z.string(),
+		searchableindexedfieldinfomap: z.record(z.string(), z.unknown())
+	}))
+}) });
+function searchPayload(input) {
+	const envelope = searchEnvelopeSchema.safeParse(input);
+	if (!envelope.success) throw new Error("MSX close-name search returned an invalid response envelope.");
+	try {
+		return JSON.parse(envelope.data.response);
+	} catch (error) {
+		throw new Error("MSX close-name search returned an invalid JSON response.", { cause: error });
+	}
+}
+function parseAccountSearchPage(input) {
+	const result = accountPageSchema.safeParse(input);
+	if (!result.success) throw new Error("MSX account search returned an invalid account response.");
+	return result.data;
+}
+function indexedAccountIds(input) {
+	const result = searchResultsSchema.safeParse(searchPayload(input));
+	if (!result.success) throw new Error("MSX close-name search returned an invalid or unsuccessful response.");
+	return [...new Set(result.data.Value.map((row) => row.Id.toLowerCase()))];
+}
+function assertAccountNameIndex(input) {
+	const result = searchStatusSchema.safeParse(searchPayload(input));
+	const account = result.success ? result.data.value.entitystatusresults.find((row) => row.entitylogicalname === "account") : void 0;
+	if (!result.success || result.data.value.status !== "provisioned" || account?.entitystatus !== "EntitySyncComplete" || !Object.hasOwn(account.searchableindexedfieldinfomap, "name")) throw new Error("MSX close-name search is unavailable. Account-name indexing must be enabled and synchronized; try a shorter exact name or TPID.");
+}
+function fuzzyAccountName(query) {
+	const words = query.normalize("NFKC").replace(/['\u2019]s\b/gi, "").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+	if (words.length === 0 || words.length > 16) throw new Error("Enter an account name containing letters or numbers and no more than 16 words.");
+	return words.map((word) => word.length >= 4 ? `${word}~1` : word).join(" ");
+}
 //#endregion
 //#region packages/connectors/common/portfolio-preferences.ts
 var preferencesSchema = z.object({
@@ -2868,6 +3158,9 @@ var LiveMsxConnector = class {
 	currentUserIdPromise;
 	dealTeamBindingsPromise;
 	milestoneTeamTemplateIdPromise;
+	accountTpidField;
+	accountTpidMetadataPromise;
+	accountNameIndexPromise;
 	constructor(tokenProvider, fetchImplementation = fetch, baseUrl = defaultBaseUrl, performanceReporter, writeMetadata = {}, preferenceStore = new MemoryPortfolioPreferenceStore()) {
 		this.tokenProvider = tokenProvider;
 		this.fetchImplementation = fetchImplementation;
@@ -2876,26 +3169,115 @@ var LiveMsxConnector = class {
 		this.preferenceStore = preferenceStore;
 		this.baseUrl = new URL(baseUrl);
 		if (writeMetadata.riskDetailsField && !/^[A-Za-z][A-Za-z0-9_]*$/.test(writeMetadata.riskDetailsField)) throw new Error("The MSX risk details logical field name is invalid.");
+		if (writeMetadata.accountTpidField && !navigationPropertyPattern.test(writeMetadata.accountTpidField)) throw new Error("TLC_MSX_ACCOUNT_TPID_FIELD must be a valid Dataverse identifier.");
+		this.accountTpidField = writeMetadata.accountTpidField;
 	}
 	async listAccounts(options = {}) {
 		const portfolio = await this.getPortfolio();
 		return structuredClone(portfolio.accounts.filter((account) => options.includeHidden || account.visibility !== "hidden"));
 	}
+	async getCatalog(accountId) {
+		const account = (await this.listAccounts()).find((item) => item.id === accountId);
+		if (!account) throw new Error("The selected Account is unavailable or hidden in MSX.");
+		const userId = await this.getCurrentUserId();
+		const [user, priceRows, currencyRows, workloadRows, opportunities, intent, category, status, commitment, customerBudgetApproved, solutionArea, technicalCapability] = await Promise.all([
+			this.requestJson(`systemusers(${userId})?$select=fullname`),
+			this.requestAll("pricelevels", {
+				"$select": "pricelevelid,name",
+				"$orderby": "name asc"
+			}),
+			this.requestAll("transactioncurrencies", {
+				"$select": "transactioncurrencyid,currencyname,isocurrencycode",
+				"$orderby": "currencyname asc"
+			}),
+			this.requestAll("msp_workloads", {
+				"$select": "msp_workloadid,msp_name",
+				"$orderby": "msp_name asc"
+			}),
+			this.listOpportunities(accountId),
+			this.getCreationChoiceValues("opportunity", "msp_opportunitytype", "MultiSelectPicklistAttributeMetadata"),
+			this.getCreationChoiceValues("msp_engagementmilestone", "msp_milestonecategory", "PicklistAttributeMetadata"),
+			this.getCreationChoiceValues("msp_engagementmilestone", "msp_milestonestatus", "PicklistAttributeMetadata"),
+			this.getCreationChoiceValues("msp_engagementmilestone", "msp_commitmentrecommendation", "PicklistAttributeMetadata"),
+			this.getCreationChoiceValues("msp_engagementmilestone", "msp_customerbudgetapproved", "PicklistAttributeMetadata"),
+			this.getCreationChoiceValues("opportunity", "msp_solutionarea", "PicklistAttributeMetadata"),
+			this.getCreationChoiceValues("opportunity", "msp_technicalcapability", "PicklistAttributeMetadata")
+		]);
+		if (!user.fullname?.trim()) throw new Error("The current MSX user name is unavailable.");
+		const data = {
+			account: {
+				id: account.id,
+				label: account.name
+			},
+			opportunities: opportunities.map((item) => ({
+				id: item.id,
+				label: item.name
+			})),
+			priceLists: priceRows.map((row) => ({
+				id: row.pricelevelid,
+				label: row.name
+			})),
+			currencies: currencyRows.map((row) => ({
+				id: row.transactioncurrencyid,
+				label: row.currencyname,
+				isoCode: row.isocurrencycode
+			})),
+			workloads: workloadRows.map((row) => ({
+				id: row.msp_workloadid,
+				label: row.msp_name
+			})),
+			owners: [{
+				id: userId,
+				label: user.fullname
+			}],
+			defaults: { owner: {
+				id: userId,
+				label: user.fullname
+			} },
+			choices: {
+				intent,
+				category,
+				status,
+				commitment,
+				customerBudgetApproved,
+				solutionArea,
+				technicalCapability
+			}
+		};
+		return recordCreationCatalogSchema.parse({
+			contractVersion: "1.2",
+			target: "draft",
+			revision: createHash("sha256").update(JSON.stringify(data)).digest("hex"),
+			...data,
+			maxMutations: 50
+		});
+	}
+	async getCreationChoiceValues(entity, field, metadataType) {
+		const path = `EntityDefinitions(LogicalName='${entity}')/Attributes(LogicalName='${field}')/Microsoft.Dynamics.CRM.${metadataType}`;
+		const url = new URL(path, this.baseUrl);
+		url.searchParams.set("$expand", "OptionSet");
+		const metadata = await this.requestJson(url);
+		if (!metadata.OptionSet?.Options) throw new Error(`MSX choice metadata is unavailable for ${field}.`);
+		return metadata.OptionSet.Options.map((option) => {
+			const label = option.Label?.LocalizedLabels?.find((item) => item.LanguageCode === 1033)?.Label ?? option.Label?.UserLocalizedLabel?.Label;
+			if (typeof option.Value !== "number" || !label?.trim()) throw new Error(`MSX choice metadata is incomplete for ${field}.`);
+			return {
+				value: option.Value,
+				label: label.trim()
+			};
+		}).sort((left, right) => left.value - right.value);
+	}
 	async searchAccounts(input) {
 		const request = accountSearchRequestSchema.parse(input);
 		const escapedQuery = escapeODataStringLiteral(request.query);
-		const tpidField = this.writeMetadata.accountTpidField;
-		if (request.matchBy === "tpid" && !tpidField) throw new Error("TPID search requires TLC_MSX_ACCOUNT_TPID_FIELD to contain the verified account TPID logical field.");
-		const rows = await measurePerformance("msx.search-accounts", this.performanceReporter, () => this.requestAll("accounts", {
-			"$select": [
-				"accountid",
-				"name",
-				tpidField
-			].filter(isPresent).join(","),
-			"$filter": request.matchBy === "name" ? `statecode eq 0 and contains(name,'${escapedQuery}')` : `statecode eq 0 and ${tpidField} eq '${escapedQuery}'`,
-			"$orderby": "name asc",
-			"$top": "25"
-		}));
+		const tpidField = request.matchBy === "tpid" ? await this.resolveAccountTpidField() : this.accountTpidField;
+		const select = [
+			"accountid",
+			"name",
+			tpidField
+		].filter(isPresent).join(",");
+		const rows = await measurePerformance("msx.search-accounts", this.performanceReporter, () => request.matchBy === "name" ? this.searchAccountNames(request.query, select) : this.requestAccountCandidates(`statecode eq 0 and ${tpidField} eq '${escapedQuery}'`, select));
+		if (rows.length === 0) return [];
 		const portfolio = await this.getPortfolio();
 		const existingById = new Map(portfolio.accounts.map((account) => [account.id, account]));
 		return rows.map((row) => {
@@ -2906,16 +3288,97 @@ var LiveMsxConnector = class {
 			};
 		});
 	}
+	async requestAccountCandidates(filter, select) {
+		const url = new URL("accounts", this.baseUrl);
+		for (const [name, value] of Object.entries({
+			"$select": select,
+			"$filter": filter,
+			"$orderby": "name asc",
+			"$top": String(25)
+		})) url.searchParams.set(name, value);
+		const rows = [];
+		let next = url;
+		while (next && rows.length < 25) {
+			const page = parseAccountSearchPage(await this.requestJson(next));
+			rows.push(...page.value.slice(0, 25 - rows.length));
+			next = page["@odata.nextLink"] ? new URL(page["@odata.nextLink"]) : void 0;
+		}
+		return rows;
+	}
+	async searchAccountNames(query, select) {
+		const escaped = escapeODataStringLiteral(query);
+		const exact = await this.requestAccountCandidates(`statecode eq 0 and name eq '${escaped}'`, select);
+		if (exact.length > 0) return exact;
+		const partial = await this.requestAccountCandidates(`statecode eq 0 and contains(name,'${escaped}')`, select);
+		if (partial.length > 0) return partial;
+		this.accountNameIndexPromise ??= this.requestJson("searchstatus()").then(assertAccountNameIndex).catch((error) => {
+			this.accountNameIndexPromise = void 0;
+			throw error;
+		});
+		await this.accountNameIndexPromise;
+		const ids = indexedAccountIds(await this.postReturningEntity("searchquery", {
+			search: fuzzyAccountName(query),
+			entities: JSON.stringify([{
+				name: "account",
+				selectcolumns: ["name"],
+				searchcolumns: ["name"],
+				filter: "statecode eq 0"
+			}]),
+			top: 25,
+			options: JSON.stringify({
+				querytype: "lucene",
+				searchmode: "all",
+				besteffortsearchenabled: "false"
+			})
+		}, "search"));
+		if (ids.length === 0) return [];
+		return parseAccountSearchPage({ value: await this.requestByIds("accounts", "accountid", ids, `${select},statecode`) }).value.filter((row) => row.statecode === 0 && ids.includes(row.accountid.toLowerCase())).sort((left, right) => ids.indexOf(left.accountid.toLowerCase()) - ids.indexOf(right.accountid.toLowerCase()));
+	}
+	resolveAccountTpidField() {
+		this.accountTpidMetadataPromise ??= this.verifyAccountTpidField().catch((error) => {
+			this.accountTpidMetadataPromise = void 0;
+			throw error;
+		});
+		return this.accountTpidMetadataPromise;
+	}
+	async verifyAccountTpidField() {
+		const field = this.writeMetadata.accountTpidField ?? "msp_mstopparentid";
+		const url = new URL(`EntityDefinitions(LogicalName='account')/Attributes(LogicalName='${field}')`, this.baseUrl);
+		url.searchParams.set("$select", "LogicalName,AttributeType,IsValidForRead");
+		let metadata;
+		try {
+			metadata = await this.requestJson(url);
+		} catch (error) {
+			if (error instanceof MsxRequestError && error.status === 404) throw new Error("TPID lookup is unavailable. Set TLC_MSX_ACCOUNT_TPID_FIELD to the verified readable String field for this MSX environment.", { cause: error });
+			throw error;
+		}
+		if (metadata.LogicalName !== field || metadata.AttributeType !== "String" || metadata.IsValidForRead !== true) throw new Error("The TPID field must be a verified readable String attribute. Check TLC_MSX_ACCOUNT_TPID_FIELD.");
+		this.accountTpidField = field;
+		return field;
+	}
 	async addAccount(accountId) {
 		this.assertAccountId(accountId);
-		if ((await this.requestByIds("accounts", "accountid", [accountId], [
+		const rows = await this.requestByIds("accounts", "accountid", [accountId], [
 			"accountid",
 			"name",
-			this.writeMetadata.accountTpidField
-		].filter(isPresent).join(","))).length !== 1) throw new Error("The selected account is unavailable or inactive in MSX.");
-		await this.preferenceStore.addAccount(await this.getCurrentUserId(), accountId);
-		this.portfolioPromise = void 0;
-		const account = (await this.getPortfolio()).accounts.find((candidate) => candidate.id === accountId);
+			this.accountTpidField
+		].filter(isPresent).join(","));
+		const row = rows[0];
+		if (rows.length !== 1 || !row) throw new Error("The selected account is unavailable or inactive in MSX.");
+		const preferences = await this.preferenceStore.addAccount(await this.getCurrentUserId(), accountId);
+		const updated = this.getPortfolio().then((portfolio) => {
+			const teamAccountIds = new Set(portfolio.accounts.filter((account) => account.provenance === "deal-team" || account.provenance === "both").map((account) => account.id));
+			const account = this.mapAccount(row, preferences, teamAccountIds);
+			return {
+				...portfolio,
+				accounts: [...portfolio.accounts.filter((item) => item.id !== accountId), account].sort((left, right) => left.name.localeCompare(right.name))
+			};
+		}).catch((error) => {
+			this.portfolioPromise = void 0;
+			throw error;
+		});
+		this.portfolioPromise = updated;
+		const account = (await updated).accounts.find((candidate) => candidate.id === accountId);
 		if (!account) throw new Error("The account preference was saved but the account could not be reloaded.");
 		return structuredClone(account);
 	}
@@ -2924,7 +3387,7 @@ var LiveMsxConnector = class {
 		const row = (await this.requestByIds("accounts", "accountid", [accountId], [
 			"accountid",
 			"name",
-			this.writeMetadata.accountTpidField
+			this.accountTpidField
 		].filter(isPresent).join(",")))[0];
 		if (!row) throw new Error("The selected account is unavailable or inactive in MSX.");
 		const userId = await this.getCurrentUserId();
@@ -3435,7 +3898,7 @@ var LiveMsxConnector = class {
 		const accounts = (await measurePerformance("msx.accounts", this.performanceReporter, () => this.requestByIds("accounts", "accountid", accountIds, [
 			"accountid",
 			"name",
-			this.writeMetadata.accountTpidField
+			this.accountTpidField
 		].filter(isPresent).join(",")))).map((row) => this.mapAccount(row, preferences, new Set(dealTeamAccountIds))).sort((left, right) => left.name.localeCompare(right.name));
 		const visibleAccountIds = new Set(accounts.filter((account) => account.visibility !== "hidden").map((account) => account.id));
 		return {
@@ -3451,7 +3914,7 @@ var LiveMsxConnector = class {
 	}, dealTeamAccountIds = /* @__PURE__ */ new Set()) {
 		const manual = preferences.manualAccountIds.includes(row.accountid);
 		const dealTeam = dealTeamAccountIds.has(row.accountid);
-		const tpidField = this.writeMetadata.accountTpidField;
+		const tpidField = this.accountTpidField;
 		const tpid = tpidField && typeof row[tpidField] === "string" ? row[tpidField].trim() : void 0;
 		return {
 			id: row.accountid,
@@ -3552,8 +4015,8 @@ var LiveMsxConnector = class {
 		});
 		if (!response.ok) throw new MsxRequestError(`MSX create failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status);
 	}
-	/** POSTs and returns the created row (via `Prefer: return=representation`). */
-	async postReturningEntity(path, body) {
+	/** searchquery is a read-only POST action; other callers create records. */
+	async postReturningEntity(path, body, operation = "create") {
 		const url = new URL(path, this.baseUrl);
 		this.assertTrustedUrl(url);
 		const accessToken = await this.tokenProvider.getAccessToken();
@@ -3567,7 +4030,10 @@ var LiveMsxConnector = class {
 			},
 			body: JSON.stringify(body)
 		});
-		if (!response.ok) throw new MsxRequestError(`MSX create failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status);
+		if (!response.ok) {
+			const detail = operation === "search" ? "" : await serviceErrorDetail(response);
+			throw new MsxRequestError(`MSX ${operation} failed with status ${response.status}${detail}.`, response.status);
+		}
 		return await response.json();
 	}
 	async delete(path) {
@@ -5474,7 +5940,25 @@ CREATE TABLE account (
   name        TEXT NOT NULL,
   segment     TEXT,
   tpid        TEXT,
-  visibility  TEXT NOT NULL DEFAULT 'visible'
+  visibility  TEXT NOT NULL DEFAULT 'visible',
+  default_price_level_id TEXT REFERENCES price_level(id),
+  default_currency_id TEXT REFERENCES transaction_currency(id)
+);
+
+CREATE TABLE price_level (
+  id    TEXT PRIMARY KEY,
+  name  TEXT NOT NULL
+);
+
+CREATE TABLE transaction_currency (
+  id       TEXT PRIMARY KEY,
+  name     TEXT NOT NULL,
+  iso_code TEXT NOT NULL
+);
+
+CREATE TABLE workload (
+  id   TEXT PRIMARY KEY,
+  name TEXT NOT NULL
 );
 
 CREATE TABLE systemuser (
@@ -5490,6 +5974,9 @@ CREATE TABLE opportunity (
   account_id               TEXT NOT NULL REFERENCES account(id),
   name                     TEXT NOT NULL,
   owner_id                 TEXT REFERENCES systemuser(id),
+  price_level_id           TEXT REFERENCES price_level(id),
+  transaction_currency_id TEXT REFERENCES transaction_currency(id),
+  opportunity_intent_codes TEXT,
   recorded_stage           INTEGER NOT NULL,
   estimated_value          REAL NOT NULL DEFAULT 0,
   currency                 TEXT NOT NULL DEFAULT 'USD',
@@ -5530,6 +6017,10 @@ CREATE TABLE engagement_milestone (
   status            INTEGER NOT NULL,   -- On Track 861980000..Hygiene/Duplicate 861980006
   milestone_date    TEXT,
   owner_id          TEXT REFERENCES systemuser(id),
+  milestone_category INTEGER,
+  workload_id       TEXT REFERENCES workload(id),
+  parent_account_id TEXT REFERENCES account(id),
+  transaction_currency_id TEXT REFERENCES transaction_currency(id),
   commitment        INTEGER,            -- Uncommitted 861980000 / Committed 861980003
   monthly_use       REAL,
   risk_details      TEXT,
@@ -5628,6 +6119,25 @@ CREATE TABLE option_value (
   PRIMARY KEY (option_set, code)
 );
 
+CREATE TABLE creation_batch (
+  batch_id          TEXT PRIMARY KEY,
+  digest            TEXT NOT NULL,
+  account_id        TEXT NOT NULL REFERENCES account(id),
+  created_by        TEXT NOT NULL REFERENCES systemuser(id),
+  result_json       TEXT NOT NULL,
+  created_at        TEXT NOT NULL
+);
+
+CREATE TABLE creation_batch_item (
+  batch_id          TEXT NOT NULL REFERENCES creation_batch(batch_id),
+  client_key        TEXT NOT NULL,
+  kind              TEXT NOT NULL,
+  ordinal           INTEGER NOT NULL,
+  record_id         TEXT,
+  parent_record_id  TEXT,
+  PRIMARY KEY (batch_id, kind, client_key)
+);
+
 -- Test aids (not in MSX) ---------------------------------------------------
 CREATE TABLE comment_entry (
   id         TEXT PRIMARY KEY,
@@ -5719,6 +6229,41 @@ var OPPORTUNITY_RATING = {
 	2: "Warm",
 	3: "Cold"
 };
+var OPPORTUNITY_INTENT = {
+	60682e4: "Billed",
+	606820001: "Consumption"
+};
+var MILESTONE_CATEGORY = {
+	86198e4: "POC/Pilot",
+	861980002: "Production",
+	861980003: "Deal Registration",
+	861980004: "Dual Credit",
+	861980005: "Other Adjustments",
+	861980006: "Partner Reported ACR",
+	861980007: "Credit Offer",
+	861980008: "Optimization",
+	861980009: "Intent (MW, BA, Sec)",
+	725300001: "ISV/ Marketplace"
+};
+var CUSTOMER_BUDGET_APPROVED = {
+	60682e4: "Yes",
+	606820001: "No"
+};
+var SOLUTION_AREA = {
+	39438e4: "Cloud and AI Platforms",
+	394380002: "AI Business Solutions",
+	861980005: "Security",
+	861980011: "Microsoft Services",
+	861980012: "Windows and Devices",
+	861980013: "Unknown"
+};
+var TECHNICAL_CAPABILITY = {
+	861980002: "Azure AI and ML",
+	861980034: "Commerce",
+	861980063: "Cloud Security",
+	861980077: "Cloud Scale Analytics",
+	861980072: "Well Architected"
+};
 var STAKEHOLDER_ROLE_OPTIONSET = {
 	86198e4: "Executive Sponsor",
 	861980001: "SLT Sponsor",
@@ -5784,6 +6329,37 @@ var seedAccounts = [
 		tpid: account.tpid ?? null,
 		visibility: "visible"
 	}))
+];
+var seedPriceLevels = [{
+	id: "price-list-usd-standard",
+	name: "USD Standard Price List"
+}];
+var seedCurrencies = [{
+	id: "currency-usd",
+	name: "US Dollar",
+	iso_code: "USD"
+}];
+var seedWorkloads = [
+	{
+		id: "workload-cloud-scale-analytics",
+		name: "Cloud Scale Analytics"
+	},
+	{
+		id: "workload-azure-ai-ml",
+		name: "Azure AI and ML"
+	},
+	{
+		id: "workload-commerce",
+		name: "Commerce"
+	},
+	{
+		id: "workload-cloud-security",
+		name: "Cloud Security"
+	},
+	{
+		id: "workload-well-architected",
+		name: "Well Architected"
+	}
 ];
 var additionalOwnerNames = [...new Set([...additionalSampleOpportunities.map((opportunity) => opportunity.owner), ...additionalSampleMilestones.map((milestone) => milestone.owner)].filter((owner) => owner !== void 0))];
 function additionalOwnerId(owner) {
@@ -6730,6 +7306,31 @@ var seedOptionValues = [
 		code: Number(code),
 		label
 	})),
+	...Object.entries(OPPORTUNITY_INTENT).map(([code, label]) => ({
+		option_set: "msp_opportunitytype",
+		code: Number(code),
+		label
+	})),
+	...Object.entries(MILESTONE_CATEGORY).map(([code, label]) => ({
+		option_set: "msp_milestonecategory",
+		code: Number(code),
+		label
+	})),
+	...Object.entries(CUSTOMER_BUDGET_APPROVED).map(([code, label]) => ({
+		option_set: "msp_customerbudgetapproved",
+		code: Number(code),
+		label
+	})),
+	...Object.entries(SOLUTION_AREA).map(([code, label]) => ({
+		option_set: "msp_solutionarea",
+		code: Number(code),
+		label
+	})),
+	...Object.entries(TECHNICAL_CAPABILITY).map(([code, label]) => ({
+		option_set: "msp_technicalcapability",
+		code: Number(code),
+		label
+	})),
 	...Object.entries(STAKEHOLDER_ROLE_OPTIONSET).map(([code, label]) => ({
 		option_set: "msp_roleoptionset",
 		code: Number(code),
@@ -7170,8 +7771,118 @@ var comprehensiveMeetingVariations = [
 		internalSegments: ["Internal note: Oracle is competing through the existing identity platform.", "Commitment confirmed for the Security posture discovery milestone. Risk is that legacy directory cleanup may miss the target date."]
 	}
 ];
+/** Seeded meeting transcripts linked to activities, with diarized segments as evidence units. */
+var seedTranscripts = [
+	{
+		id: "tr-grid-customer",
+		opportunity_id: "opp-grid-modernization",
+		activity_id: "act-grid-review",
+		meeting_type: "customer",
+		title: "Executive architecture review",
+		source: "teams",
+		occurred_at: "2026-10-12T15:00:00.000Z"
+	},
+	{
+		id: "tr-cloud-security",
+		opportunity_id: "opp-cloud-security-readiness",
+		activity_id: "act-cs-discovery",
+		meeting_type: "customer",
+		title: "Cloud security discovery call",
+		source: "teams",
+		occurred_at: "2026-09-15T15:00:00.000Z"
+	},
+	...comprehensiveMeetingVariations.map((variation) => ({
+		id: variation.id,
+		opportunity_id: "opp-cloud-security-readiness",
+		activity_id: "act-cs-discovery",
+		meeting_type: "customer",
+		title: variation.title,
+		source: variation.source,
+		occurred_at: variation.occurredAt
+	}))
+];
+var seedTranscriptSegments = [
+	{
+		id: "seg-grid-1",
+		transcript_id: "tr-grid-customer",
+		start_ms: 12e3,
+		end_ms: 24e3,
+		speaker: "Priya Nair",
+		speaker_role: "customer",
+		text: "Our board approved the budget; we can commit around 4 million this fiscal year."
+	},
+	{
+		id: "seg-grid-2",
+		transcript_id: "tr-grid-customer",
+		start_ms: 48e3,
+		end_ms: 61e3,
+		speaker: "Daniel Reyes",
+		speaker_role: "customer",
+		text: "The decision will go through our architecture committee, and we want to decide this quarter."
+	},
+	{
+		id: "seg-grid-3",
+		transcript_id: "tr-grid-customer",
+		start_ms: 83e3,
+		end_ms: 95e3,
+		speaker: "Avery Johnson",
+		speaker_role: "internal",
+		text: "We are competing against AWS here, so the proof of value needs to land next week."
+	},
+	{
+		id: "seg-cs-1",
+		transcript_id: "tr-cloud-security",
+		start_ms: 15e3,
+		end_ms: 3e4,
+		speaker: "Priya Nair",
+		speaker_role: "customer",
+		text: "We have sign-off to spend about 900 thousand this quarter to get our cloud security posture right."
+	},
+	{
+		id: "seg-cs-2",
+		transcript_id: "tr-cloud-security",
+		start_ms: 54e3,
+		end_ms: 7e4,
+		speaker: "Daniel Reyes",
+		speaker_role: "customer",
+		text: "Our security steering committee makes the final call, and honestly this is a must-have for us this year."
+	},
+	{
+		id: "seg-cs-3",
+		transcript_id: "tr-cloud-security",
+		start_ms: 95e3,
+		end_ms: 112e3,
+		speaker: "Girish Pillai",
+		speaker_role: "internal",
+		text: "Let us schedule a threat-protection proof of value; note that Palo Alto is also in the evaluation."
+	},
+	...comprehensiveMeetingVariations.flatMap((variation) => [...variation.customerSegments.map((text, index) => ({
+		id: `seg-${variation.id.slice(3)}-customer-${index + 1}`,
+		transcript_id: variation.id,
+		start_ms: index * 3e4,
+		end_ms: index * 3e4 + 25e3,
+		speaker: variation.customerSpeaker,
+		speaker_role: "customer",
+		text
+	})), ...variation.internalSegments.map((text, index) => ({
+		id: `seg-${variation.id.slice(3)}-internal-${index + 1}`,
+		transcript_id: variation.id,
+		start_ms: (variation.customerSegments.length + index) * 3e4,
+		end_ms: (variation.customerSegments.length + index) * 3e4 + 25e3,
+		speaker: variation.internalSpeaker,
+		speaker_role: "internal",
+		text
+	}))])
+];
 var defaultSeed = {
-	accounts: seedAccounts,
+	accounts: seedAccounts.map((row) => ({
+		...row,
+		default_price_level_id: "price-list-usd-standard",
+		default_currency_id: "currency-usd"
+	})),
+	priceLevels: seedPriceLevels,
+	currencies: seedCurrencies,
+	workloads: seedWorkloads,
 	systemUsers: seedSystemUsers,
 	opportunities: seedOpportunities,
 	milestones: seedMilestones,
@@ -7184,109 +7895,52 @@ var defaultSeed = {
 	optionValues: seedOptionValues,
 	discoverable: seedDiscoverable,
 	activities: seedActivities,
-	transcripts: [
-		{
-			id: "tr-grid-customer",
-			opportunity_id: "opp-grid-modernization",
-			activity_id: "act-grid-review",
-			meeting_type: "customer",
-			title: "Executive architecture review",
-			source: "teams",
-			occurred_at: "2026-10-12T15:00:00.000Z"
-		},
-		{
-			id: "tr-cloud-security",
-			opportunity_id: "opp-cloud-security-readiness",
-			activity_id: "act-cs-discovery",
-			meeting_type: "customer",
-			title: "Cloud security discovery call",
-			source: "teams",
-			occurred_at: "2026-09-15T15:00:00.000Z"
-		},
-		...comprehensiveMeetingVariations.map((variation) => ({
-			id: variation.id,
-			opportunity_id: "opp-cloud-security-readiness",
-			activity_id: "act-cs-discovery",
-			meeting_type: "customer",
-			title: variation.title,
-			source: variation.source,
-			occurred_at: variation.occurredAt
-		}))
-	],
-	transcriptSegments: [
-		{
-			id: "seg-grid-1",
-			transcript_id: "tr-grid-customer",
-			start_ms: 12e3,
-			end_ms: 24e3,
-			speaker: "Priya Nair",
-			speaker_role: "customer",
-			text: "Our board approved the budget; we can commit around 4 million this fiscal year."
-		},
-		{
-			id: "seg-grid-2",
-			transcript_id: "tr-grid-customer",
-			start_ms: 48e3,
-			end_ms: 61e3,
-			speaker: "Daniel Reyes",
-			speaker_role: "customer",
-			text: "The decision will go through our architecture committee, and we want to decide this quarter."
-		},
-		{
-			id: "seg-grid-3",
-			transcript_id: "tr-grid-customer",
-			start_ms: 83e3,
-			end_ms: 95e3,
-			speaker: "Avery Johnson",
-			speaker_role: "internal",
-			text: "We are competing against AWS here, so the proof of value needs to land next week."
-		},
-		{
-			id: "seg-cs-1",
-			transcript_id: "tr-cloud-security",
-			start_ms: 15e3,
-			end_ms: 3e4,
-			speaker: "Priya Nair",
-			speaker_role: "customer",
-			text: "We have sign-off to spend about 900 thousand this quarter to get our cloud security posture right."
-		},
-		{
-			id: "seg-cs-2",
-			transcript_id: "tr-cloud-security",
-			start_ms: 54e3,
-			end_ms: 7e4,
-			speaker: "Daniel Reyes",
-			speaker_role: "customer",
-			text: "Our security steering committee makes the final call, and honestly this is a must-have for us this year."
-		},
-		{
-			id: "seg-cs-3",
-			transcript_id: "tr-cloud-security",
-			start_ms: 95e3,
-			end_ms: 112e3,
-			speaker: "Girish Pillai",
-			speaker_role: "internal",
-			text: "Let us schedule a threat-protection proof of value; note that Palo Alto is also in the evaluation."
-		},
-		...comprehensiveMeetingVariations.flatMap((variation) => [...variation.customerSegments.map((text, index) => ({
-			id: `seg-${variation.id.slice(3)}-customer-${index + 1}`,
-			transcript_id: variation.id,
-			start_ms: index * 3e4,
-			end_ms: index * 3e4 + 25e3,
-			speaker: variation.customerSpeaker,
-			speaker_role: "customer",
-			text
-		})), ...variation.internalSegments.map((text, index) => ({
-			id: `seg-${variation.id.slice(3)}-internal-${index + 1}`,
-			transcript_id: variation.id,
-			start_ms: (variation.customerSegments.length + index) * 3e4,
-			end_ms: (variation.customerSegments.length + index) * 3e4 + 25e3,
-			speaker: variation.internalSpeaker,
-			speaker_role: "internal",
-			text
-		}))])
-	]
+	transcripts: seedTranscripts,
+	transcriptSegments: seedTranscriptSegments
 };
+//#endregion
+//#region packages/connectors/local-store/migrations.ts
+var migrateLocalStoreV1 = `
+CREATE TABLE IF NOT EXISTS price_level (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS transaction_currency (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  iso_code TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workload (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL
+);
+ALTER TABLE account ADD COLUMN default_price_level_id TEXT REFERENCES price_level(id);
+ALTER TABLE account ADD COLUMN default_currency_id TEXT REFERENCES transaction_currency(id);
+ALTER TABLE opportunity ADD COLUMN price_level_id TEXT REFERENCES price_level(id);
+ALTER TABLE opportunity ADD COLUMN transaction_currency_id TEXT REFERENCES transaction_currency(id);
+ALTER TABLE opportunity ADD COLUMN opportunity_intent_codes TEXT;
+ALTER TABLE engagement_milestone ADD COLUMN milestone_category INTEGER;
+ALTER TABLE engagement_milestone ADD COLUMN workload_id TEXT REFERENCES workload(id);
+ALTER TABLE engagement_milestone ADD COLUMN parent_account_id TEXT REFERENCES account(id);
+ALTER TABLE engagement_milestone ADD COLUMN transaction_currency_id TEXT REFERENCES transaction_currency(id);
+CREATE TABLE creation_batch (
+  batch_id TEXT PRIMARY KEY,
+  digest TEXT NOT NULL,
+  account_id TEXT NOT NULL REFERENCES account(id),
+  created_by TEXT NOT NULL REFERENCES systemuser(id),
+  result_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE creation_batch_item (
+  batch_id TEXT NOT NULL REFERENCES creation_batch(batch_id),
+  client_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  record_id TEXT,
+  parent_record_id TEXT,
+  PRIMARY KEY (batch_id, kind, client_key)
+);
+`;
 //#endregion
 //#region packages/connectors/local-store/local-store.ts
 var requireModule = createRequire(import.meta.url);
@@ -7301,11 +7955,43 @@ var LocalStore = class {
 	constructor(options = {}) {
 		const { DatabaseSync } = requireModule("node:sqlite");
 		this.db = new DatabaseSync(options.path ?? ":memory:");
-		this.db.exec(LOCAL_STORE_SCHEMA);
-		this.load(options.seed ?? defaultSeed);
+		try {
+			this.db.exec("PRAGMA foreign_keys = ON");
+			const version = Number(this.db.prepare("PRAGMA user_version").get()?.["user_version"]);
+			if (version > 1) throw new Error(`The SQLite test store has an unsupported newer schema (v${version}).`);
+			if (!this.db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'account'").get()) {
+				this.db.exec("BEGIN IMMEDIATE");
+				try {
+					this.db.exec(LOCAL_STORE_SCHEMA);
+					this.load(options.seed ?? defaultSeed);
+					this.db.exec(`PRAGMA user_version = 1`);
+					this.db.exec("COMMIT");
+				} catch (error) {
+					this.db.exec("ROLLBACK");
+					throw error;
+				}
+			} else if (version === 0) {
+				this.db.exec("BEGIN IMMEDIATE");
+				try {
+					this.db.exec(migrateLocalStoreV1);
+					this.loadCreationReferences();
+					this.db.exec(`PRAGMA user_version = 1`);
+					this.db.exec("COMMIT");
+				} catch (error) {
+					this.db.exec("ROLLBACK");
+					throw error;
+				}
+			}
+		} catch (error) {
+			this.db.close();
+			throw error;
+		}
 	}
 	load(seed) {
 		const tables = [
+			["price_level", seed.priceLevels],
+			["transaction_currency", seed.currencies],
+			["workload", seed.workloads],
 			["account", seed.accounts],
 			["systemuser", seed.systemUsers],
 			["competitor", seed.competitors],
@@ -7323,6 +8009,17 @@ var LocalStore = class {
 			["option_value", seed.optionValues]
 		];
 		for (const [table, rows] of tables) for (const row of rows) this.insert(table, row);
+	}
+	loadCreationReferences() {
+		for (const [table, rows] of [
+			["price_level", seedPriceLevels],
+			["transaction_currency", seedCurrencies],
+			["workload", seedWorkloads],
+			["option_value", seedOptionValues]
+		]) for (const row of rows) {
+			const columns = Object.keys(row);
+			this.db.prepare(`INSERT OR IGNORE INTO ${table} (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`).run(...columns.map((column) => row[column]));
+		}
 	}
 	insert(table, row) {
 		const columns = Object.keys(row);
@@ -7344,6 +8041,206 @@ var LocalStore = class {
 	}
 	close() {
 		this.db.close();
+	}
+};
+//#endregion
+//#region packages/connectors/local-store/record-creation.ts
+function reference$1(row) {
+	return {
+		id: String(row["id"]),
+		label: String(row["name"])
+	};
+}
+function selectReference(value, fallback, choices, name) {
+	const selected = value ?? fallback;
+	const current = choices.find((item) => item.id === selected?.id);
+	if (!current || current.label !== selected?.label) throw new Error(`${name} is unavailable or has changed.`);
+	return current;
+}
+function selectChoice(value, choices, name) {
+	const current = choices.find((item) => item.value === value.value);
+	if (!current || current.label !== value.label) throw new Error(`${name} is unavailable or has changed.`);
+	return current;
+}
+var LocalStoreRecordCreation = class {
+	store;
+	currentUserId;
+	constructor(store, currentUserId) {
+		this.store = store;
+		this.currentUserId = currentUserId;
+	}
+	getCatalog(accountId) {
+		const account = this.store.get("SELECT * FROM account WHERE id = ? AND visibility = ?", accountId, "visible");
+		if (!account) throw new Error("The selected Account is unavailable or hidden.");
+		const ownerRow = this.store.get("SELECT id, fullname AS name FROM systemuser WHERE id = ?", this.currentUserId);
+		if (!ownerRow) throw new Error("The signed-in user is unavailable in the SQLite test store.");
+		const priceLists = this.store.all("SELECT id, name FROM price_level ORDER BY name").map(reference$1);
+		const currencies = this.store.all("SELECT id, name, iso_code FROM transaction_currency ORDER BY name").map((row) => ({
+			...reference$1(row),
+			isoCode: String(row["iso_code"])
+		}));
+		const workloads = this.store.all("SELECT id, name FROM workload ORDER BY name").map(reference$1);
+		const owners = this.store.all("SELECT id, fullname AS name FROM systemuser ORDER BY fullname").map(reference$1);
+		const options = this.store.all("SELECT option_set, code, label FROM option_value ORDER BY option_set, code");
+		const choices = {
+			intent: this.choiceValues(options, "msp_opportunitytype"),
+			category: this.choiceValues(options, "msp_milestonecategory"),
+			status: this.choiceValues(options, "msp_milestonestatus"),
+			commitment: this.choiceValues(options, "msp_commitmentrecommendation"),
+			customerBudgetApproved: this.choiceValues(options, "msp_customerbudgetapproved"),
+			solutionArea: this.choiceValues(options, "msp_solutionarea"),
+			technicalCapability: this.choiceValues(options, "msp_technicalcapability")
+		};
+		const defaultPriceList = priceLists.find((item) => item.id === account["default_price_level_id"]);
+		const defaultCurrency = currencies.find((item) => item.id === account["default_currency_id"]);
+		const opportunities = this.store.all(`SELECT o.id, o.name, o.currency, o.transaction_currency_id FROM opportunity o WHERE o.account_id = ? AND (
+        EXISTS (SELECT 1 FROM opportunity_dealteam dt WHERE dt.opportunity_id = o.id AND dt.systemuser_id = ?)
+        OR EXISTS (SELECT 1 FROM milestone_team_member mt WHERE mt.opportunity_id = o.id AND mt.systemuser_id = ?)
+      ) ORDER BY o.name`, accountId, this.currentUserId, this.currentUserId).map((row) => {
+			const matches = row["transaction_currency_id"] ? currencies.filter((item) => item.id === row["transaction_currency_id"]) : currencies.filter((item) => item.isoCode === row["currency"]);
+			const currency = matches.length === 1 && matches[0]?.isoCode === row["currency"] ? matches[0] : void 0;
+			return {
+				...reference$1(row),
+				...currency ? { currency } : {}
+			};
+		});
+		const data = {
+			account: {
+				id: accountId,
+				label: String(account["name"])
+			},
+			opportunities,
+			priceLists,
+			currencies,
+			workloads,
+			owners,
+			defaults: {
+				owner: {
+					id: this.currentUserId,
+					label: String(ownerRow["name"])
+				},
+				...defaultPriceList ? { priceList: defaultPriceList } : {},
+				...defaultCurrency ? { currency: defaultCurrency } : {}
+			},
+			choices
+		};
+		const revision = createHash("sha256").update(JSON.stringify(data)).digest("hex");
+		return recordCreationCatalogSchema.parse({
+			contractVersion: "1.2",
+			target: "sqlite",
+			revision,
+			...data,
+			maxMutations: 50
+		});
+	}
+	getReceipt(batchId, digest) {
+		const saved = this.store.get("SELECT digest, created_by, result_json FROM creation_batch WHERE batch_id = ?", batchId);
+		if (!saved) return void 0;
+		if (saved["digest"] !== digest || saved["created_by"] !== this.currentUserId) throw new Error("This creation batch was already committed with different content or by another user.");
+		return recordCreationResultSchema.parse(JSON.parse(String(saved["result_json"])));
+	}
+	async commit(input, batchId, digest) {
+		const draft = recordCreationDraftSchema.parse(input);
+		if (!batchId.trim() || !/^[a-f0-9]{64}$/.test(digest)) throw new Error("A valid batch ID and preview digest are required.");
+		this.store.exec("BEGIN IMMEDIATE");
+		try {
+			const receipt = this.getReceipt(batchId, digest);
+			if (receipt) {
+				this.store.exec("COMMIT");
+				return receipt;
+			}
+			const catalog = this.getCatalog(draft.account.id);
+			if (catalog.account.label !== draft.account.label) throw new Error("The selected Account has changed.");
+			const opportunityCount = draft.kind === "opportunity-batch" ? draft.opportunities.length : 0;
+			const milestoneCount = draft.kind === "opportunity-batch" ? draft.opportunities.reduce((count, bundle) => count + bundle.milestones.length, 0) : draft.milestones.length;
+			if (opportunityCount * 2 + milestoneCount > catalog.maxMutations) throw new Error("The creation batch exceeds the allowed number of mutations.");
+			const created = [];
+			if (draft.kind === "opportunity-batch") for (const bundle of draft.opportunities) {
+				const inputOpportunity = bundle.opportunity;
+				const priceList = selectReference(inputOpportunity.priceList, catalog.defaults.priceList, catalog.priceLists, "Price List");
+				const currency = selectReference(inputOpportunity.currency, catalog.defaults.currency, catalog.currencies, "Currency");
+				const currencyIsoCode = catalog.currencies.find((item) => item.id === currency.id).isoCode;
+				const owner = selectReference(inputOpportunity.owner, catalog.defaults.owner, catalog.owners, "Owner");
+				const intent = inputOpportunity.intent.map((choice) => selectChoice(choice, catalog.choices.intent, "Opportunity Intent"));
+				const solutionArea = inputOpportunity.solutionArea ? selectChoice(inputOpportunity.solutionArea, catalog.choices.solutionArea, "Solution Area") : void 0;
+				const technicalCapability = inputOpportunity.technicalCapability ? selectChoice(inputOpportunity.technicalCapability, catalog.choices.technicalCapability, "Technical Capability") : void 0;
+				const opportunityId = `opp-${randomUUID()}`;
+				this.store.run(`INSERT INTO opportunity
+              (id, account_id, name, owner_id, price_level_id, transaction_currency_id, opportunity_intent_codes,
+               recorded_stage, estimated_value, currency, estimated_close_date, description, solution_area, technical_capability)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`, opportunityId, catalog.account.id, inputOpportunity.name, owner.id, priceList.id, currency.id, intent.map((choice) => choice.value).join(","), inputOpportunity.estimatedValue, currencyIsoCode, inputOpportunity.estimatedCloseDate, inputOpportunity.need ?? null, solutionArea?.label ?? null, technicalCapability?.label ?? null);
+				created.push({
+					kind: "opportunity",
+					clientKey: inputOpportunity.clientOpportunityKey,
+					recordId: opportunityId
+				});
+				this.store.run("INSERT INTO opportunity_dealteam (opportunity_id, systemuser_id) VALUES (?, ?)", opportunityId, this.currentUserId);
+				created.push({
+					kind: "deal-team",
+					clientKey: inputOpportunity.clientOpportunityKey,
+					parentRecordId: opportunityId
+				});
+				for (const milestone of bundle.milestones) created.push(this.insertMilestone(milestone, opportunityId, catalog, currency.id));
+			}
+			else {
+				const parent = this.store.get(`SELECT o.id, o.name, o.account_id, o.currency, o.transaction_currency_id FROM opportunity o WHERE o.id = ? AND o.account_id = ? AND (
+             EXISTS (SELECT 1 FROM opportunity_dealteam dt WHERE dt.opportunity_id = o.id AND dt.systemuser_id = ?)
+             OR EXISTS (SELECT 1 FROM milestone_team_member mt WHERE mt.opportunity_id = o.id AND mt.systemuser_id = ?)
+           )`, draft.opportunity.id, draft.account.id, this.currentUserId, this.currentUserId);
+				if (!parent || parent["name"] !== draft.opportunity.label) throw new Error("The parent Opportunity is unavailable or does not belong to this Account.");
+				const currency = catalog.opportunities.find((item) => item.id === draft.opportunity.id)?.currency;
+				if (!currency || currency.isoCode !== parent["currency"] || parent["transaction_currency_id"] && currency.id !== parent["transaction_currency_id"]) throw new Error("The parent Opportunity currency is unavailable or has changed.");
+				for (const milestone of draft.milestones) created.push(this.insertMilestone(milestone, draft.opportunity.id, catalog, currency.id));
+			}
+			const result = recordCreationResultSchema.parse({
+				contractVersion: "1.2",
+				batchId,
+				target: "sqlite",
+				state: "committed",
+				created,
+				audit: {
+					correlationId: batchId,
+					opportunityCount,
+					milestoneCount,
+					committedAt: (/* @__PURE__ */ new Date()).toISOString()
+				},
+				message: "All reviewed records were created in the SQLite sample store."
+			});
+			this.store.run("INSERT INTO creation_batch (batch_id, digest, account_id, created_by, result_json, created_at) VALUES (?, ?, ?, ?, ?, ?)", batchId, digest, catalog.account.id, this.currentUserId, JSON.stringify(result), result.audit.committedAt);
+			for (const [ordinal, item] of result.created.entries()) this.store.run("INSERT INTO creation_batch_item (batch_id, client_key, kind, ordinal, record_id, parent_record_id) VALUES (?, ?, ?, ?, ?, ?)", batchId, item.clientKey, item.kind, ordinal, item.recordId ?? null, item.parentRecordId ?? null);
+			this.store.exec("COMMIT");
+			return result;
+		} catch (error) {
+			this.store.exec("ROLLBACK");
+			throw error;
+		}
+	}
+	choiceValues(rows, optionSet) {
+		return rows.filter((row) => row["option_set"] === optionSet).map((row) => ({
+			value: Number(row["code"]),
+			label: String(row["label"])
+		}));
+	}
+	insertMilestone(milestone, opportunityId, catalog, currencyId) {
+		const category = selectChoice(milestone.category, catalog.choices.category, "Milestone Category");
+		const status = milestone.status ? selectChoice(milestone.status, catalog.choices.status, "Milestone Status") : catalog.choices.status.find((choice) => choice.value === 86198e4);
+		if (!status) throw new Error("An On Track milestone status is unavailable in the SQLite catalog.");
+		const commitment = milestone.commitment ? selectChoice(milestone.commitment, catalog.choices.commitment, "Customer Commitment") : void 0;
+		const budget = milestone.customerBudgetApproved ? selectChoice(milestone.customerBudgetApproved, catalog.choices.customerBudgetApproved, "Customer Budget Approved") : void 0;
+		const workload = selectReference(milestone.workload, void 0, catalog.workloads, "Workload");
+		const owner = selectReference(milestone.owner, catalog.defaults.owner, catalog.owners, "Owner");
+		const id = `ms-${randomUUID()}`;
+		this.store.run(`INSERT INTO engagement_milestone
+        (id, opportunity_id, name, status, milestone_date, owner_id, milestone_category, workload_id,
+         parent_account_id, transaction_currency_id, commitment, monthly_use, risk_details,
+         forecast_comments, customer_budget_approved)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, opportunityId, milestone.name, status.value, milestone.milestoneDate, owner.id, category.value, workload.id, catalog.account.id, currencyId, commitment?.value ?? null, milestone.estimatedMonthlyUsage ?? null, milestone.riskDetails ?? null, milestone.comments ?? null, budget?.value ?? null);
+		return {
+			kind: "milestone",
+			clientKey: milestone.clientMilestoneKey,
+			recordId: id,
+			parentRecordId: opportunityId
+		};
 	}
 };
 //#endregion
@@ -7381,6 +8278,9 @@ var LocalStoreMsxConnector = class {
 		this.store = store;
 		this.currentUserId = currentUserId;
 	}
+	createRecordCreationWriter() {
+		return new LocalStoreRecordCreation(this.store, this.currentUserId);
+	}
 	ownerName(ownerId) {
 		const id = str(ownerId);
 		if (!id) return void 0;
@@ -7415,6 +8315,7 @@ var LocalStoreMsxConnector = class {
 	toOpportunity(row) {
 		const owner = this.ownerName(row["owner_id"]);
 		const comments = str(row["description"]);
+		const intent = (str(row["opportunity_intent_codes"])?.split(",") ?? []).map((code) => str(this.store.get("SELECT label FROM option_value WHERE option_set = ? AND code = ?", "msp_opportunitytype", Number(code))?.["label"])).filter((value) => value !== void 0);
 		return opportunitySchema.parse({
 			id: String(row["id"]),
 			accountId: String(row["account_id"]),
@@ -7423,6 +8324,7 @@ var LocalStoreMsxConnector = class {
 			value: num(row["estimated_value"]) ?? 0,
 			currency: str(row["currency"]) ?? "USD",
 			closeDate: String(row["estimated_close_date"]),
+			...intent.length ? { opportunityIntent: intent } : {},
 			...owner ? { owner } : {},
 			...comments ? { comments } : {}
 		});
@@ -8040,6 +8942,82 @@ function createLocalStoreMsxConnector(environment = process.env) {
 	const path = environment["TLC_DATA_STORE_PATH"]?.trim();
 	return new LocalStoreMsxConnector(new LocalStore(path ? { path } : {}));
 }
+//#endregion
+//#region packages/connectors/local-store/sample-record-creation-catalog.ts
+function reference(row) {
+	return {
+		id: String(row["id"]),
+		label: String(row["name"])
+	};
+}
+function choices(optionSet) {
+	return defaultSeed.optionValues.filter((row) => row["option_set"] === optionSet).map((row) => ({
+		value: Number(row["code"]),
+		label: String(row["label"])
+	})).sort((left, right) => left.value - right.value);
+}
+var SampleRecordCreationCatalog = class {
+	msx;
+	constructor(msx) {
+		this.msx = msx;
+	}
+	async getCatalog(accountId) {
+		const account = (await this.msx.listAccounts()).find((item) => item.id === accountId && item.visibility !== "hidden");
+		if (!account) throw new Error("The selected Account is unavailable or hidden.");
+		const owner = defaultSeed.systemUsers.find((item) => item["id"] === SAMPLE_USER_ID);
+		if (!owner) throw new Error("The sample creator is not seeded.");
+		const priceLists = defaultSeed.priceLevels.map(reference);
+		const currencies = defaultSeed.currencies.map((row) => ({
+			...reference(row),
+			isoCode: String(row["iso_code"])
+		}));
+		const data = {
+			account: {
+				id: account.id,
+				label: account.name
+			},
+			opportunities: (await this.msx.listOpportunities(account.id)).map((item) => {
+				const matching = currencies.filter((currency) => currency.isoCode === item.currency);
+				return {
+					id: item.id,
+					label: item.name,
+					...matching.length === 1 ? { currency: matching[0] } : {}
+				};
+			}),
+			priceLists,
+			currencies,
+			workloads: defaultSeed.workloads.map(reference),
+			owners: defaultSeed.systemUsers.map((row) => ({
+				id: String(row["id"]),
+				label: String(row["fullname"])
+			})),
+			defaults: {
+				owner: {
+					id: SAMPLE_USER_ID,
+					label: String(owner["fullname"])
+				},
+				priceList: priceLists[0],
+				currency: currencies[0]
+			},
+			choices: {
+				intent: choices("msp_opportunitytype"),
+				category: choices("msp_milestonecategory"),
+				status: choices("msp_milestonestatus"),
+				commitment: choices("msp_commitmentrecommendation"),
+				customerBudgetApproved: choices("msp_customerbudgetapproved"),
+				solutionArea: choices("msp_solutionarea"),
+				technicalCapability: choices("msp_technicalcapability")
+			}
+		};
+		return recordCreationCatalogSchema.parse({
+			contractVersion: "1.2",
+			target: "draft",
+			revision: createHash("sha256").update(JSON.stringify(data)).digest("hex"),
+			...data,
+			maxMutations: 50
+		});
+	}
+};
 //#endregion
 //#region packages/connectors/sharepoint/local-pdf.ts
 var stageCriteria = {
@@ -8791,7 +9769,7 @@ function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
 	const baseSummary = evidenceBasedStage > context.opportunity.recordedStage ? `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the completed exit criteria support progression to Stage ${evidenceBasedStage}.` : evidenceBasedStage === context.opportunity.recordedStage ? `The available evidence supports recorded Stage ${context.opportunity.recordedStage}.` : `The opportunity is recorded at Stage ${context.opportunity.recordedStage}, while the available evidence supports Stage ${evidenceBasedStage}.`;
 	const summary = milestoneSummary.headline ? `${baseSummary} ${milestoneSummary.headline}` : baseSummary;
 	return mcemResponseSchema.parse({
-		contractVersion: "1.1",
+		contractVersion: "1.2",
 		correlationId,
 		capability: "mcem-coach",
 		agentVersion: mcemCoachVersion,
@@ -8829,6 +9807,332 @@ function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
 		sourceHealth: [context.sourceHealth, guidance.sourceHealth]
 	});
 }
+//#endregion
+//#region packages/orchestrator/record-creation/digest.ts
+var signingKey = randomBytes(32);
+function creationPreviewDigest(input) {
+	return createHmac("sha256", signingKey).update(JSON.stringify(input)).digest("hex");
+}
+//#endregion
+//#region packages/orchestrator/record-creation/export.ts
+function csvCell(value) {
+	const raw = String(value ?? "");
+	const firstContent = [...raw].find((character) => character.charCodeAt(0) > 31 && !/\s/.test(character));
+	const safe = firstContent && "=+-@".includes(firstContent) ? `'${raw}` : raw;
+	return /[",\r\n]/.test(safe) ? `"${safe.replaceAll("\"", "\"\"")}"` : safe;
+}
+function csv(rows) {
+	return `${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
+}
+function reviewText(value) {
+	return value.replaceAll("\\", "\\\\").replace(/[<>*_[\]`|]/g, "\\$&").replace(/\r?\n/g, " ");
+}
+var opportunityHeaders = [
+	"clientOpportunityKey",
+	"name",
+	"opportunityIntent",
+	"estimatedValue",
+	"priceListId",
+	"priceListLabel",
+	"currencyId",
+	"currencyLabel",
+	"ownerId",
+	"ownerLabel",
+	"estimatedCloseDate",
+	"need",
+	"solutionArea",
+	"technicalCapability"
+];
+var milestoneHeaders = [
+	"clientMilestoneKey",
+	"parentOpportunityKey",
+	"name",
+	"milestoneCategory",
+	"milestoneDate",
+	"workloadId",
+	"workloadLabel",
+	"ownerId",
+	"ownerLabel",
+	"milestoneStatus",
+	"customerCommitment",
+	"estimatedMonthlyUsage",
+	"comments",
+	"riskDetails",
+	"customerBudgetApproved"
+];
+function milestoneRow(milestone, parentKey) {
+	return [
+		milestone.clientMilestoneKey,
+		parentKey,
+		milestone.name,
+		milestone.category.label,
+		milestone.milestoneDate,
+		milestone.workload.id,
+		milestone.workload.label,
+		milestone.owner?.id,
+		milestone.owner?.label,
+		milestone.status?.label,
+		milestone.commitment?.label,
+		milestone.estimatedMonthlyUsage,
+		milestone.comments,
+		milestone.riskDetails,
+		milestone.customerBudgetApproved?.label
+	];
+}
+function creationCsvFiles(draft) {
+	const opportunityRows = draft.kind === "opportunity-batch" ? draft.opportunities.map(({ opportunity }) => [
+		opportunity.clientOpportunityKey,
+		opportunity.name,
+		opportunity.intent.map((choice) => choice.label).join("|"),
+		opportunity.estimatedValue,
+		opportunity.priceList?.id,
+		opportunity.priceList?.label,
+		opportunity.currency?.id,
+		opportunity.currency?.label,
+		opportunity.owner?.id,
+		opportunity.owner?.label,
+		opportunity.estimatedCloseDate,
+		opportunity.need,
+		opportunity.solutionArea?.label,
+		opportunity.technicalCapability?.label
+	]) : [];
+	const milestoneRows = draft.kind === "opportunity-batch" ? draft.opportunities.flatMap(({ opportunity, milestones }) => milestones.map((milestone) => milestoneRow(milestone, opportunity.clientOpportunityKey))) : draft.milestones.map((milestone) => milestoneRow(milestone, draft.opportunity.id));
+	return [...opportunityRows.length > 0 ? [{
+		name: "opportunities.csv",
+		content: csv([opportunityHeaders, ...opportunityRows]),
+		mimeType: "text/csv"
+	}] : [], ...milestoneRows.length > 0 ? [{
+		name: "milestones.csv",
+		content: csv([milestoneHeaders, ...milestoneRows]),
+		mimeType: "text/csv"
+	}] : []];
+}
+function exportCreationDraft(preview) {
+	const draft = preview.normalizedDraft;
+	const opportunityCount = draft.kind === "opportunity-batch" ? draft.opportunities.length : 0;
+	const milestoneCount = draft.kind === "opportunity-batch" ? draft.opportunities.reduce((total, item) => total + item.milestones.length, 0) : draft.milestones.length;
+	const result = recordCreationResultSchema.parse({
+		contractVersion: "1.2",
+		batchId: preview.batchId,
+		target: "draft",
+		state: "drafted",
+		created: [],
+		audit: {
+			correlationId: preview.batchId,
+			opportunityCount,
+			milestoneCount
+		},
+		message: "Draft created. No Opportunity or Milestone was written to MSX."
+	});
+	const names = draft.kind === "opportunity-batch" ? draft.opportunities.map((item) => item.opportunity.name) : [draft.opportunity.label];
+	const review = [
+		"# Record creation draft",
+		"",
+		`Account: ${reviewText(draft.account.label)}`,
+		`Opportunities to create: ${opportunityCount}`,
+		`Milestones to create: ${milestoneCount}`,
+		"",
+		...names.map((name) => `- ${reviewText(name)}`),
+		"",
+		"**No Opportunity or Milestone was written to MSX.**",
+		""
+	].join("\n");
+	return recordCreationDraftResultSchema.parse({
+		contractVersion: "1.2",
+		result,
+		files: [
+			{
+				name: "creation-manifest.json",
+				content: `${JSON.stringify(draft, null, 2)}\n`,
+				mimeType: "application/json"
+			},
+			{
+				name: "creation-review.md",
+				content: review,
+				mimeType: "text/markdown"
+			},
+			...creationCsvFiles(draft)
+		]
+	});
+}
+//#endregion
+//#region packages/orchestrator/record-creation/service.ts
+var RecordCreationError = class extends Error {
+	code;
+	constructor(code, message) {
+		super(message);
+		this.code = code;
+		this.name = "RecordCreationError";
+	}
+};
+function requireReference(submitted, fallback, options, label) {
+	const requested = submitted ?? fallback;
+	const found = options.find((item) => item.id === requested?.id);
+	if (!found || found.label !== requested?.label) throw new RecordCreationError("reference-unavailable", `${label} is unavailable or has changed. Choose a current value.`);
+	return {
+		id: found.id,
+		label: found.label
+	};
+}
+function requireChoice(selected, choices, label) {
+	const found = choices.find((choice) => choice.value === selected.value);
+	if (!found || found.label !== selected.label) throw new RecordCreationError("reference-unavailable", `${label} is unavailable or has changed. Choose a current value.`);
+	return found;
+}
+var RecordCreationService = class {
+	msx;
+	catalogProvider;
+	writer;
+	now;
+	constructor(msx, catalogProvider, options = {}) {
+		this.msx = msx;
+		this.catalogProvider = catalogProvider;
+		this.writer = options.writer;
+		this.now = options.now ?? (() => /* @__PURE__ */ new Date());
+	}
+	async getCatalog(input) {
+		const request = recordCreationCatalogRequestSchema.parse(input);
+		const account = (await this.msx.listAccounts()).find((item) => item.id === request.accountId);
+		if (!account || account.visibility === "hidden") throw new RecordCreationError("parent-unavailable", "The selected Account is unavailable or hidden.");
+		const catalog = await this.catalogProvider.getCatalog(request.accountId);
+		if (account.name !== catalog.account.label) throw new RecordCreationError("catalog-changed", "The Account name changed. Refresh the creation catalog.");
+		return {
+			...catalog,
+			target: this.writer ? "sqlite" : "draft"
+		};
+	}
+	async preview(input) {
+		const request = recordCreationPreviewRequestSchema.parse(input);
+		if (request.target === "live-msx") throw new RecordCreationError("target-disabled", "Live MSX record creation is disabled. Use a draft or the SQLite sample store.");
+		if (request.target === "sqlite" && !this.writer) throw new RecordCreationError("target-disabled", "SQLite record creation is unavailable in this mode. Export a draft instead.");
+		const catalog = await this.getCatalog({
+			contractVersion: "1.2",
+			accountId: request.draft.account.id
+		});
+		const normalizedDraft = await this.normalizeDraft(request.draft, catalog);
+		if (request.target === "sqlite" && normalizedDraft.kind === "existing-opportunity-milestone-batch" && !catalog.opportunities.find((item) => item.id === normalizedDraft.opportunity.id)?.currency) throw new RecordCreationError("reference-unavailable", "The parent Opportunity currency is unavailable. Choose an Opportunity with a resolved currency.");
+		const mutationCount = this.countMutations(normalizedDraft);
+		if (mutationCount > catalog.maxMutations) throw new RecordCreationError("batch-too-large", `The batch has ${mutationCount} mutations; this mode allows ${catalog.maxMutations}.`);
+		const batchId = randomUUID();
+		const warnings = request.target === "draft" ? ["Draft only. No records will be written to MSX or SQLite."] : [];
+		const expiresAt = new Date(this.now().getTime() + 9e5).toISOString();
+		return recordCreationPreviewSchema.parse({
+			contractVersion: "1.2",
+			batchId,
+			digest: creationPreviewDigest({
+				batchId,
+				target: request.target,
+				catalogRevision: catalog.revision,
+				userId: catalog.defaults.owner.id,
+				normalizedDraft,
+				mutationCount,
+				warnings,
+				expiresAt
+			}),
+			target: request.target,
+			catalogRevision: catalog.revision,
+			normalizedDraft,
+			mutationCount,
+			warnings,
+			expiresAt
+		});
+	}
+	async commit(input) {
+		const request = recordCreationCommitRequestSchema.parse(input);
+		const { preview } = request;
+		if (preview.target !== "sqlite" || !this.writer) throw new RecordCreationError("target-disabled", "This preview is a draft; export it instead of committing.");
+		const catalog = await this.validatePreview(request);
+		const receipt = await this.writer.getReceipt(preview.batchId, preview.digest);
+		if (receipt) return receipt;
+		await this.validateCurrentCatalog(preview, catalog);
+		return this.writer.commit(preview.normalizedDraft, preview.batchId, preview.digest);
+	}
+	async exportDraft(input) {
+		const request = recordCreationCommitRequestSchema.parse(input);
+		if (request.preview.target !== "draft") throw new RecordCreationError("target-disabled", "Only a reviewed draft can be exported.");
+		const catalog = await this.validatePreview(request);
+		await this.validateCurrentCatalog(request.preview, catalog);
+		return exportCreationDraft(request.preview);
+	}
+	async validatePreview(request) {
+		const { preview } = request;
+		if (preview.digest !== request.expectedDigest) throw new RecordCreationError("stale-preview", "The reviewed preview digest changed. Preview the batch again.");
+		if (this.now().getTime() >= Date.parse(preview.expiresAt)) throw new RecordCreationError("stale-preview", "The reviewed preview expired. Preview the batch again.");
+		const catalog = await this.getCatalog({
+			contractVersion: "1.2",
+			accountId: preview.normalizedDraft.account.id
+		});
+		if (creationPreviewDigest({
+			batchId: preview.batchId,
+			target: preview.target,
+			catalogRevision: preview.catalogRevision,
+			userId: catalog.defaults.owner.id,
+			normalizedDraft: preview.normalizedDraft,
+			mutationCount: preview.mutationCount,
+			warnings: preview.warnings,
+			expiresAt: preview.expiresAt
+		}) !== preview.digest) throw new RecordCreationError("stale-preview", "The reviewed preview was changed. Preview the batch again.");
+		return catalog;
+	}
+	async validateCurrentCatalog(preview, catalog) {
+		if (catalog.revision !== preview.catalogRevision) throw new RecordCreationError("catalog-changed", "The creation catalog changed. Preview the batch again.");
+		if (this.countMutations(preview.normalizedDraft) !== preview.mutationCount || preview.mutationCount > catalog.maxMutations) throw new RecordCreationError("stale-preview", "The reviewed mutation count changed. Preview the batch again.");
+		const draft = preview.normalizedDraft;
+		if (preview.target === "sqlite" && draft.kind === "existing-opportunity-milestone-batch" && !catalog.opportunities.find((item) => item.id === draft.opportunity.id)?.currency) throw new RecordCreationError("reference-unavailable", "The parent Opportunity currency is unavailable. Preview the batch again.");
+		const normalized = await this.normalizeDraft(preview.normalizedDraft, catalog);
+		if (JSON.stringify(normalized) !== JSON.stringify(preview.normalizedDraft)) throw new RecordCreationError("catalog-changed", "A reference or parent changed. Preview the batch again.");
+	}
+	countMutations(draft) {
+		return draft.kind === "opportunity-batch" ? draft.opportunities.reduce((total, bundle) => total + 2 + bundle.milestones.length, 0) : draft.milestones.length;
+	}
+	async normalizeDraft(input, catalog) {
+		const draft = recordCreationDraftSchema.parse(input);
+		if (draft.account.id !== catalog.account.id || draft.account.label !== catalog.account.label) throw new RecordCreationError("parent-unavailable", "The selected Account does not match the current catalog.");
+		const normalizeChild = (value) => ({
+			...value,
+			category: requireChoice(value.category, catalog.choices.category, "Milestone Category"),
+			workload: requireReference(value.workload, void 0, catalog.workloads, "Workload"),
+			owner: requireReference(value.owner, catalog.defaults.owner, catalog.owners, "Owner"),
+			status: value.status ? requireChoice(value.status, catalog.choices.status, "Milestone Status") : requireChoice({
+				value: 86198e4,
+				label: "On Track"
+			}, catalog.choices.status, "Milestone Status"),
+			...value.commitment ? { commitment: requireChoice(value.commitment, catalog.choices.commitment, "Customer Commitment") } : {},
+			...value.customerBudgetApproved ? { customerBudgetApproved: requireChoice(value.customerBudgetApproved, catalog.choices.customerBudgetApproved, "Customer Budget Approved") } : {}
+		});
+		if (draft.kind === "existing-opportunity-milestone-batch") {
+			const parent = (await this.msx.listOpportunities(draft.account.id)).find((item) => item.id === draft.opportunity.id);
+			const authorized = catalog.opportunities.find((item) => item.id === draft.opportunity.id);
+			if (!parent || parent.name !== draft.opportunity.label || authorized?.label !== parent.name) throw new RecordCreationError("parent-unavailable", "The parent Opportunity is unavailable or does not belong to this Account.");
+			if (authorized.currency && authorized.currency.isoCode !== parent.currency) throw new RecordCreationError("catalog-changed", "The parent Opportunity currency has changed. Refresh the creation catalog.");
+			return recordCreationDraftSchema.parse({
+				...draft,
+				account: catalog.account,
+				opportunity: {
+					id: parent.id,
+					label: parent.name
+				},
+				milestones: draft.milestones.map(normalizeChild)
+			});
+		}
+		return recordCreationDraftSchema.parse({
+			...draft,
+			account: catalog.account,
+			opportunities: draft.opportunities.map(({ opportunity, milestones }) => ({
+				opportunity: {
+					...opportunity,
+					intent: opportunity.intent.map((choice) => requireChoice(choice, catalog.choices.intent, "Opportunity Intent")),
+					priceList: requireReference(opportunity.priceList, catalog.defaults.priceList, catalog.priceLists, "Price List"),
+					currency: requireReference(opportunity.currency, catalog.defaults.currency, catalog.currencies, "Currency"),
+					owner: requireReference(opportunity.owner, catalog.defaults.owner, catalog.owners, "Owner"),
+					...opportunity.solutionArea ? { solutionArea: requireChoice(opportunity.solutionArea, catalog.choices.solutionArea, "Solution Area") } : {},
+					...opportunity.technicalCapability ? { technicalCapability: requireChoice(opportunity.technicalCapability, catalog.choices.technicalCapability, "Technical Capability") } : {}
+				},
+				milestones: milestones.map(normalizeChild)
+			}))
+		});
+	}
+};
 //#endregion
 //#region packages/orchestrator/policies/mcp-tool-authorization.ts
 var McpToolAuthorizationError = class extends Error {
@@ -11355,11 +12659,29 @@ var ThinSliceOrchestrator = class {
 	mcem;
 	taskAgents;
 	performanceReporter;
-	constructor(msx, mcem, taskAgents = {}, performanceReporter) {
+	recordCreation;
+	constructor(msx, mcem, taskAgents = {}, performanceReporter, recordCreation) {
 		this.msx = msx;
 		this.mcem = mcem;
 		this.taskAgents = taskAgents;
 		this.performanceReporter = performanceReporter;
+		this.recordCreation = recordCreation;
+	}
+	getRecordCreationCatalog(request) {
+		return this.requireRecordCreation().getCatalog(request);
+	}
+	previewRecordCreation(request) {
+		return this.requireRecordCreation().preview(request);
+	}
+	commitRecordCreation(request) {
+		return this.requireRecordCreation().commit(request);
+	}
+	exportRecordCreationDraft(request) {
+		return this.requireRecordCreation().exportDraft(request);
+	}
+	requireRecordCreation() {
+		if (!this.recordCreation) throw new RecordCreationError("target-disabled", "Record creation is unavailable in this mode.");
+		return this.recordCreation;
 	}
 	listAccounts(options) {
 		return this.msx.listAccounts(accountListOptionsSchema.parse(options ?? {}));
@@ -11483,7 +12805,7 @@ var ThinSliceOrchestrator = class {
 		].includes(source.state));
 		const responseContent = addMsxOpportunityLink(content.trim(), opportunityContext.opportunity.id);
 		return {
-			contractVersion: "1.1",
+			contractVersion: "1.2",
 			correlationId: randomUUID(),
 			capability: request.capability,
 			agentVersion: configuredAgent.version,
@@ -12123,6 +13445,22 @@ var workflowIpcChannels = {
 };
 function createWorkflowIpcHandlers(host) {
 	return Object.fromEntries(Object.entries(workflowIpcChannels).map(([operation, channel]) => [channel, (request) => invokeWorkflowHost(host, operation, request)]));
+}
+//#endregion
+//#region apps/desktop/electron/main/record-creation-ipc.ts
+var recordCreationIpcChannels = {
+	catalog: "tlc:get-record-creation-catalog",
+	preview: "tlc:preview-record-creation",
+	commit: "tlc:commit-record-creation",
+	draft: "tlc:export-record-creation-draft"
+};
+function createRecordCreationIpcHandlers(orchestrator) {
+	return {
+		[recordCreationIpcChannels.catalog]: async (input) => recordCreationCatalogSchema.parse(await orchestrator.getRecordCreationCatalog(recordCreationCatalogRequestSchema.parse(input))),
+		[recordCreationIpcChannels.preview]: async (input) => recordCreationPreviewSchema.parse(await orchestrator.previewRecordCreation(recordCreationPreviewRequestSchema.parse(input))),
+		[recordCreationIpcChannels.commit]: async (input) => recordCreationResultSchema.parse(await orchestrator.commitRecordCreation(recordCreationCommitRequestSchema.parse(input))),
+		[recordCreationIpcChannels.draft]: async (input) => recordCreationDraftResultSchema.parse(await orchestrator.exportRecordCreationDraft(recordCreationCommitRequestSchema.parse(input)))
+	};
 }
 //#endregion
 //#region packages/orchestrator/voice-input.ts
@@ -13493,6 +14831,11 @@ var appIcon = resolve(desktopRoot, "build/icon.png");
 var developmentUrl = process.env["VITE_DEV_SERVER_URL"];
 var allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString();
 var dataMode = process.env["TLC_DATA_MODE"] === "sample" ? "sample" : "live";
+if (dataMode === "sample") {
+	const sampleSessionDirectory = resolve(app.getPath("userData"), "sample-session");
+	mkdirSync(sampleSessionDirectory, { recursive: true });
+	app.setPath("sessionData", sampleSessionDirectory);
+}
 var voiceHost = new SharedVoiceInputHost(new WindowsVoiceCaptureDriver(), () => BrowserWindow.getAllWindows().some((window) => window.isVisible() && window.isFocused()));
 var preparedEnvironment = app.isPackaged || dataMode === "live" ? await prepareFoundryEnvironmentFile({
 	isPackaged: app.isPackaged,
@@ -13535,8 +14878,13 @@ var reportPerformance = (event) => {
 var mcemConnector = new LocalPdfMcemGuidanceConnector(app.isPackaged ? resolve(process.resourcesPath, "docs/knowledge/MCEM Overview.pdf") : resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
 var portfolioPreferenceStore = new JsonFilePortfolioPreferenceStore(resolve(app.getPath("userData"), "portfolio-preferences.json"));
 var liveMsxConnector = dataMode === "sample" ? void 0 : new LiveMsxConnector(tokenProvider, fetch, void 0, reportPerformance, msxWriteMetadataFromEnvironment(process.env), portfolioPreferenceStore);
-var localStoreMsxConnector = liveMsxConnector ? void 0 : createLocalStoreMsxConnector();
+var localStoreMsxConnector = liveMsxConnector ? void 0 : createLocalStoreMsxConnector({
+	...process.env,
+	TLC_DATA_STORE_PATH: process.env["TLC_DATA_STORE_PATH"]?.trim() || resolve(app.getPath("userData"), "sample.sqlite")
+});
 var msxConnector = liveMsxConnector ?? localStoreMsxConnector ?? new FixtureMsxConnector();
+var creationWriter = localStoreMsxConnector?.createRecordCreationWriter();
+var recordCreation = new RecordCreationService(msxConnector, creationWriter ?? liveMsxConnector ?? new SampleRecordCreationCatalog(msxConnector), creationWriter ? { writer: creationWriter } : {});
 var meetingConnector = liveMsxConnector ? new LiveMeetingCaptureConnector(liveMsxConnector) : localStoreMsxConnector;
 var foundryOpenAIClient = runtimeEnvironment ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry) : void 0;
 /** Foundry model-backed meeting-signal extractor when TLC_MEETING_EXTRACTOR=foundry; else the deterministic offline extractor. */
@@ -13571,7 +14919,7 @@ var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object
 			openAIClient: foundryOpenAIClient
 		})
 	}];
-})), reportPerformance);
+})), reportPerformance, recordCreation);
 var configurationRoot = app.isPackaged ? resolve(process.resourcesPath, "config") : resolve(desktopRoot, "../../config");
 var [mcpRegistry, mcpPolicy, dataverseEntityMap] = await Promise.all([
 	loadMcpServerRegistry(resolve(configurationRoot, "mcp.servers.json")),
@@ -13644,6 +14992,10 @@ function registerIpc() {
 		return invokeVoice(request);
 	});
 	for (const [channel, handler] of Object.entries(createWorkflowIpcHandlers(workflowHost))) ipcMain.handle(channel, (event, request) => {
+		assertTrustedSender(event);
+		return handler(request);
+	});
+	for (const [channel, handler] of Object.entries(createRecordCreationIpcHandlers(orchestrator))) ipcMain.handle(channel, (event, request) => {
 		assertTrustedSender(event);
 		return handler(request);
 	});

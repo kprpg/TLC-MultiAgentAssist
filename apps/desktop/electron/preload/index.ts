@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { Account, AccountCandidate, AccountListOptions, AccountSearchRequest, AccountVisibility, AgentTaskRequest, AgentTaskResponse, AuthStatus, CreateMilestoneActivityRequest, DealTeamJoinResult, DealTeamLeaveResult, DesktopDataStatus, DiscoverableOpportunity, EmailComposeRequest, EmailComposeResult, ExportResponseRequest, ExportResponseResult, McemRequest, McemResponse, McemStageTransitionRequest, McemStageTransitionResult, MeetingChangeSetApproval, MeetingChangeSetProposal, MeetingChangeSetResult, MeetingTranscript, MeetingTranscriptSummary, MeetingType, Milestone, MilestoneActivity, MilestoneTeamJoinResult, MilestoneTeamLeaveResult, MilestoneUpdate, Opportunity, OpportunityUpdate, SeDomainId } from '../../../../packages/common/index.js'
+import type { Account, AccountCandidate, AccountListOptions, AccountSearchRequest, AccountVisibility, AgentTaskRequest, AgentTaskResponse, AuthStatus, CreateMilestoneActivityRequest, DealTeamJoinResult, DealTeamLeaveResult, DesktopDataStatus, DiscoverableOpportunity, EmailComposeRequest, EmailComposeResult, ExportResponseRequest, ExportResponseResult, McemRequest, McemResponse, McemStageTransitionRequest, McemStageTransitionResult, MeetingChangeSetApproval, MeetingChangeSetProposal, MeetingChangeSetResult, MeetingTranscript, MeetingTranscriptSummary, MeetingType, Milestone, MilestoneActivity, MilestoneTeamJoinResult, MilestoneTeamLeaveResult, MilestoneUpdate, Opportunity, OpportunityUpdate, RecordCreationCatalog, RecordCreationCatalogRequest, RecordCreationPreview, RecordCreationPreviewRequest, RecordCreationCommitRequest, RecordCreationResult, RecordCreationDraftResult, SeDomainId } from '../../../../packages/common/index.js'
 import type { WorkflowHostOperation } from '../../../../packages/orchestrator/workflows/index.js'
 import type { VoiceRequest, VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 import type { SellerDashboardRequest, SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
@@ -15,6 +15,10 @@ export interface TlcDesktopApi {
   addAccount(accountId: string): Promise<Account>
   setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
   listOpportunities(accountId: string): Promise<Opportunity[]>
+  getRecordCreationCatalog(request: RecordCreationCatalogRequest): Promise<RecordCreationCatalog>
+  previewRecordCreation(request: RecordCreationPreviewRequest): Promise<RecordCreationPreview>
+  commitRecordCreation(request: RecordCreationCommitRequest): Promise<RecordCreationResult>
+  exportRecordCreationDraft(request: RecordCreationCommitRequest): Promise<RecordCreationDraftResult>
   discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
   joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
   leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult>
@@ -50,6 +54,10 @@ const api: TlcDesktopApi = {
   addAccount: (accountId) => ipcRenderer.invoke('tlc:add-account', accountId),
   setAccountVisibility: (accountId, visibility) => ipcRenderer.invoke('tlc:set-account-visibility', accountId, visibility),
   listOpportunities: (accountId) => ipcRenderer.invoke('tlc:list-opportunities', accountId),
+  getRecordCreationCatalog: (request) => ipcRenderer.invoke('tlc:get-record-creation-catalog', request),
+  previewRecordCreation: (request) => ipcRenderer.invoke('tlc:preview-record-creation', request),
+  commitRecordCreation: (request) => ipcRenderer.invoke('tlc:commit-record-creation', request),
+  exportRecordCreationDraft: (request) => ipcRenderer.invoke('tlc:export-record-creation-draft', request),
   discoverOpportunities: (domain) => ipcRenderer.invoke('tlc:discover-opportunities', domain),
   joinDealTeam: (opportunityId) => ipcRenderer.invoke('tlc:join-deal-team', opportunityId),
   leaveDealTeam: (opportunityId) => ipcRenderer.invoke('tlc:leave-deal-team', opportunityId),

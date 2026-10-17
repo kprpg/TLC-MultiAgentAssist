@@ -156,6 +156,21 @@ The current browser-safe shared UI modules in `apps/shared` include `portfolio-s
 
 `add-customer.tsx` and `add-customer.css` provide the shared customer search/add dialog for both Portfolio and Discovery across Desktop, Web, and the VS Code webview. They use the existing host account-search and preference operations without importing Node-backed contracts into the webview.
 
+`remove-customer.tsx` and `remove-customer.css` provide the shared tracked-customer
+chooser, named confirmation, and contextual removal shortcut across those same UIs.
+Removal reuses the existing account-visibility operation; Add customer's **Add again**
+restores a removed account. The extension's `customer-removal.ts` owns the testable
+native chooser/confirmation action and identifies successful bridge mutations for
+tree refresh. Its focused webview `use-portfolio-refresh.ts` coordinates account
+changes with search invalidation. These are presentation/refresh concerns, not a new
+backend contract, delete endpoint, or cross-app preference service.
+
+The [Account Discovery implementation notes](./Account-Discovery-Portfolio-Feasibility.md)
+record the tested lookup/curation behavior. `packages/connectors/msx/account-search.ts`
+validates external search responses and builds bounded literal typo queries; the shared
+live connector owns metadata verification, delegated read-back and account preferences.
+No host-specific orchestration or new wire shape is introduced.
+
 Seller Dashboard uses shared `seller-dashboard.tsx`, `seller-dashboard-sections.tsx`,
 `seller-dashboard-table.tsx`, `seller-dashboard-analysis.ts`, and feature-scoped
 `seller-dashboard.css` in `apps/shared`. Its browser-safe, independently versioned
@@ -189,6 +204,15 @@ equivalent component. Both call the same shared connectors/extractor
 Electron IPC (`apps/desktop/electron/main/index.ts`), the webview bridge
 (`apps/vscode-extension/src/host-router.ts`), and Web HTTP routes
 (`apps/web/src/app.ts`/`runtime.ts`/`server.ts`).
+
+Opportunity/Milestone creation uses the browser-safe `apps/shared/record-creation/`
+workspace, forms, grid, CSV helpers, and preview across all three surfaces.
+`packages/common/contracts/record-creation.ts` defines its strict wire shapes;
+`packages/orchestrator/record-creation/` owns catalog validation, signed review,
+policy, and draft export. The SQLite schema, migration, catalog, atomic writer,
+and receipts live in `packages/connectors/local-store/`. `packages/connectors/msx/live.ts`
+exposes read-only creation catalog queries, not a live writer. Electron IPC, Web
+HTTP, and the VS Code bridge marshal these same orchestrator operations.
 
 ```text
 Renderer UI

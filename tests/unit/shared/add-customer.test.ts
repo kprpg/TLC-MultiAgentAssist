@@ -4,6 +4,18 @@ import { describe, expect, it, vi } from 'vitest'
 import { AddCustomerButton, type CustomerSearchClient } from '../../../apps/shared/add-customer.js'
 
 describe('AddCustomerButton', () => {
+  it.each(['sample', 'live'] as const)('explains the %s search source without starting a lookup', (dataMode) => {
+    const client: CustomerSearchClient = {
+      searchAccounts: vi.fn(async () => []),
+      addAccount: vi.fn(),
+      setAccountVisibility: vi.fn()
+    }
+    const markup = renderToStaticMarkup(createElement(AddCustomerButton, { client, dataMode, onAdded: vi.fn() }))
+    expect(markup).toContain(dataMode === 'sample' ? 'Sample data only' : 'Live MSX')
+    expect(markup).toContain('Choose the intended account')
+    expect(client.searchAccounts).not.toHaveBeenCalled()
+  })
+
   it('renders an accessible search dialog without requiring a portfolio or requesting data', () => {
     const client: CustomerSearchClient = {
       searchAccounts: vi.fn(async () => []),

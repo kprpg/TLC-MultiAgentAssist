@@ -11,6 +11,7 @@ import type { ExtensionDataProvider } from './data-provider.js'
 import { SharedVoiceInputHost } from '../../../packages/orchestrator/voice-input.js'
 import { WindowsVoiceCaptureDriver } from '../../../packages/connectors/common/windows-voice.js'
 import { routeVoiceBridgeMessage } from './voice-bridge.js'
+import { isSuccessfulCustomerMutation } from './customer-removal.js'
 
 function nonce(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
@@ -22,6 +23,8 @@ function nonce(): string {
 /** Owns the single editor-area workbench webview and its validated message bridge. */
 export class WorkbenchPanel {
     private static current: WorkbenchPanel | undefined
+    private static readonly portfolioChanges = new vscode.EventEmitter<void>()
+    static readonly onDidChangePortfolio = WorkbenchPanel.portfolioChanges.event
     private readonly disposables: vscode.Disposable[] = []
     private ready = false
     private readonly voiceHost: SharedVoiceInputHost
@@ -124,6 +127,7 @@ export class WorkbenchPanel {
         }
         const response = await routeBridgeMessage(this.getProvider(), message)
         void this.panel.webview.postMessage(response)
+        if (isSuccessfulCustomerMutation(message, response)) WorkbenchPanel.portfolioChanges.fire()
     }
 
     private async handleOpenEvidence(message: unknown): Promise<void> {

@@ -3,6 +3,114 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
+async function mockCustomerLookup(page: Page, lookup: () => Promise<unknown>): Promise<string[]> {
+    const mutations: string[] = []
+    await page.route('**/', async (route) => {
+        const response = await route.fetch()
+        await route.fulfill({ response, body: (await response.text()).replace('<head>', '<head><meta name="tlc-data-mode" content="sample">') })
+    })
+    await page.route('**/api/**', async (route) => {
+        const request = route.request()
+        const path = new URL(request.url()).pathname
+        if (path === '/api/me') await route.fulfill({ json: { email: 'sample@example.test' } })
+        else if (path === '/api/account-candidates') await route.fulfill({ json: await lookup() })
+        else if (path === '/api/accounts' && request.method() === 'POST') {
+            mutations.push(request.postDataJSON().accountId)
+            await route.fulfill({ json: { id: request.postDataJSON().accountId, name: 'Northwind Health', segment: 'Enterprise' } })
+        } else if (request.method() === 'GET') await route.fulfill({ json: [] })
+        else await route.fulfill({ status: 500, json: { error: 'Unexpected mutation in the customer lookup test.' } })
+    })
+    return mutations
+}
+
+test('requires explicit selection among accounts sharing a TPID', async ({ page }) => {
+    const mutations = await mockCustomerLookup(page, async () => [
+        { id: 'account-health', name: 'Northwind Health', segment: 'Enterprise', tpid: '1000003', state: 'not-added' },
+        { id: 'account-research', name: 'Northwind Research', segment: 'Enterprise', tpid: '1000003', state: 'not-added' }
+    ])
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Add customer', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add customer account' })
+    await expect(dialog).toContainText('Sample data only')
+    await dialog.getByRole('button', { name: 'TPID', exact: true }).click()
+    await dialog.getByRole('textbox', { name: 'TPID', exact: true }).fill('1000003')
+    await dialog.getByRole('button', { name: 'Search', exact: true }).click()
+    await expect(dialog).toContainText('multiple accounts')
+    expect(mutations).toEqual([])
+    await dialog.locator('.customer-search-candidate').filter({ hasText: 'Northwind Research' })
+        .getByRole('button', { name: 'Add account', exact: true }).click()
+    await expect(dialog).not.toBeVisible()
+    expect(mutations).toEqual(['account-research'])
+})
+
+test('labels close-name suggestions without automatically adding an account', async ({ page }) => {
+    const mutations = await mockCustomerLookup(page, async () => [
+        { id: 'account-health', name: 'Northwind Health', segment: 'Enterprise', state: 'not-added' }
+    ])
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Add customer', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add customer account' })
+    await dialog.getByRole('textbox', { name: 'Account name', exact: true }).fill('Nortwind Helth')
+    await dialog.getByRole('button', { name: 'Search', exact: true }).click()
+    await expect(dialog).toContainText('Suggested match')
+    await expect(dialog.getByRole('button', { name: 'Add account', exact: true })).toBeVisible()
+    expect(mutations).toEqual([])
+})
+
+test('keeps an already added account read-only in the chooser', async ({ page }) => {
+    const mutations = await mockCustomerLookup(page, async () => [
+        { id: 'account-health', name: 'Northwind Health', segment: 'Enterprise', state: 'visible' }
+    ])
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Add customer', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add customer account' })
+    await dialog.getByRole('textbox', { name: 'Account name', exact: true }).fill('Northwind')
+    await dialog.getByRole('button', { name: 'Search', exact: true }).click()
+    await expect(dialog.getByRole('button', { name: 'Already added', exact: true })).toBeDisabled()
+    expect(mutations).toEqual([])
+})
+
+test('explains the result limit without choosing a customer automatically', async ({ page }) => {
+    const mutations = await mockCustomerLookup(page, async () => Array.from({ length: 25 }, (_, index) => ({
+        id: `account-${index}`, name: `Northwind ${index}`, segment: 'Enterprise', state: 'not-added'
+    })))
+    await page.goto('/')
+    await page.getByRole('button', { name: 'Add customer', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add customer account' })
+    await dialog.getByRole('textbox', { name: 'Account name', exact: true }).fill('Northwind')
+    await dialog.getByRole('button', { name: 'Search', exact: true }).click()
+    await expect(dialog).toContainText('Showing up to 25 results')
+    await expect(dialog.locator('.customer-search-candidate')).toHaveCount(25)
+    expect(mutations).toEqual([])
+})
+
+test('ignores a stale lookup after closing and reopening the dialog', async ({ page }) => {
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => { release = resolve })
+    await mockCustomerLookup(page, async () => {
+        await pending
+        return [{ id: 'account-health', name: 'Northwind Health', segment: 'Enterprise', state: 'not-added' }]
+    })
+    try {
+        await page.goto('/')
+        const trigger = page.getByRole('button', { name: 'Add customer', exact: true })
+        await trigger.click()
+        const dialog = page.getByRole('dialog', { name: 'Add customer account' })
+        await dialog.getByRole('textbox', { name: 'Account name', exact: true }).fill('Northwind')
+        const response = page.waitForResponse((item) => new URL(item.url()).pathname === '/api/account-candidates')
+        await dialog.getByRole('button', { name: 'Search', exact: true }).click()
+        await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+        await trigger.click()
+        release()
+        await (await response).finished()
+        await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())))
+        await expect(dialog.getByRole('textbox', { name: 'Account name', exact: true })).toHaveValue('')
+        await expect(dialog.locator('.customer-search-candidate')).toHaveCount(0)
+    } finally {
+        release()
+    }
+})
+
 async function addMissingCustomer(page: Page, host: 'desktop' | 'web' | 'vscode'): Promise<void> {
     await page.setViewportSize({ width: 1600, height: 900 })
     const portfolioAdd = page.getByRole('button', { name: 'Add customer', exact: true })
@@ -115,7 +223,7 @@ for (const state of ['not-added', 'hidden'] as const) {
         await expect(dialog.getByRole('alert')).toHaveText('Customer search is temporarily unavailable.')
         await expect(dialog.getByText('No matching customer accounts were found.')).toHaveCount(0)
         await dialog.getByRole('button', { name: 'Search', exact: true }).click()
-        const add = dialog.getByRole('button', { name: state === 'hidden' ? 'Unhide' : 'Add account', exact: true })
+        const add = dialog.getByRole('button', { name: state === 'hidden' ? 'Add again' : 'Add account', exact: true })
         await add.click()
         await expect(dialog.getByRole('alert')).toHaveText('Customer preference could not be saved.')
         await expect(dialog).toBeVisible()

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { routeBridgeMessage } from '../../apps/vscode-extension/src/host-router.js'
 import { createSampleDataProvider } from '../../apps/vscode-extension/src/data-provider.js'
+import { contractVersion, type RecordCreationCatalog, type RecordCreationPreview } from '../../packages/common/index.js'
 
 describe('vscode-extension bridge router contract', () => {
     const provider = createSampleDataProvider()
@@ -14,6 +15,52 @@ describe('vscode-extension bridge router contract', () => {
         const response = await routeBridgeMessage(provider, { kind: 'request', id: 'r2', method: 'listAccounts' })
         expect(response.ok).toBe(true)
         if (response.ok) expect(Array.isArray(response.result)).toBe(true)
+    })
+
+    it('validates a reviewed draft through the VS Code creation bridge without saving records', async () => {
+        const catalogResponse = await routeBridgeMessage(provider, {
+            kind: 'request', id: 'c1', method: 'getRecordCreationCatalog', params: { contractVersion, accountId: 'account-contoso' }
+        })
+        expect(catalogResponse).toMatchObject({ ok: true, result: { target: 'draft', account: { id: 'account-contoso' } } })
+        if (!catalogResponse.ok) return
+        const catalog = catalogResponse.result as RecordCreationCatalog
+        const request = {
+            contractVersion,
+            target: 'draft',
+            draft: {
+                kind: 'opportunity-batch',
+                account: catalog.account,
+                opportunities: [{
+                    opportunity: {
+                        clientOpportunityKey: 'bridge-test',
+                        name: 'Synthetic bridge opportunity',
+                        intent: [catalog.choices.intent[0]],
+                        estimatedValue: 125_000,
+                        estimatedCloseDate: '2027-05-31'
+                    },
+                    milestones: []
+                }]
+            }
+        }
+        const previewResponse = await routeBridgeMessage(provider, {
+            kind: 'request', id: 'c2', method: 'previewRecordCreation', params: request
+        })
+        expect(previewResponse).toMatchObject({ ok: true, result: { target: 'draft', mutationCount: 2 } })
+        if (!previewResponse.ok) return
+        const preview = previewResponse.result as RecordCreationPreview
+        const draft = await routeBridgeMessage(provider, {
+            kind: 'request', id: 'c3', method: 'exportRecordCreationDraft',
+            params: { contractVersion, preview, expectedDigest: preview.digest, confirmed: true }
+        })
+        expect(draft).toMatchObject({ ok: true, result: { result: { state: 'drafted', created: [] } } })
+        const invalid = await routeBridgeMessage(provider, {
+            kind: 'request', id: 'c4', method: 'previewRecordCreation', params: { ...request, arbitraryField: 'x' }
+        })
+        expect(invalid).toMatchObject({ ok: false })
+        const disabled = await routeBridgeMessage(provider, {
+            kind: 'request', id: 'c5', method: 'previewRecordCreation', params: { ...request, target: 'live-msx' }
+        })
+        expect(disabled).toMatchObject({ ok: false })
     })
 
     it('validates params and returns a request_failed error for bad ids', async () => {

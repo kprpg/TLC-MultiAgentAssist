@@ -30,6 +30,15 @@ export function PortfolioSearch({ onSelect, contextKey = '' }: {
 
     useEffect(() => () => { requestId.current += 1 }, [])
 
+    useEffect(() => {
+        requestId.current++
+        setQuery('')
+        setAccounts([])
+        setOpportunities([])
+        setLoading(false)
+        setError('')
+    }, [contextKey])
+
     async function refreshPortfolio() {
         const id = ++requestId.current
         setLoading(true)

@@ -5,6 +5,7 @@ import { loadFoundryEnvironmentFromEnvironment } from '../../../packages/common/
 import { LiveMeetingCaptureConnector, LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
+import { RecordCreationService } from '../../../packages/orchestrator/record-creation/service.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../packages/connectors/foundry/index.js'
 import { createFoundryMeetingExtractor } from '../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
 import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
@@ -75,7 +76,7 @@ export async function createHostedRuntimeFactory(options: HostedRuntimeOptions =
     return ({ accessToken }: AuthenticatedRequest): WebRuntime => {
         const msx = new LiveMsxConnector({ getAccessToken: async () => accessToken }, fetch, undefined, undefined, msxWriteMetadataFromEnvironment(environment), portfolioPreferenceStore)
         const meetingConnector = new LiveMeetingCaptureConnector(msx)
-        return Object.assign(new ThinSliceOrchestrator(msx, guidance, taskAgents), {
+        return Object.assign(new ThinSliceOrchestrator(msx, guidance, taskAgents, undefined, new RecordCreationService(msx, msx)), {
             listMeetingTranscripts: () => meetingConnector.listMeetingTranscripts(),
             getMeetingTranscript: async () => (await meetingConnector.getMeetingTranscript()) ?? null,
             proposeMeetingChangeSet: (request: { opportunityId: string; transcriptId?: string; rawTranscript?: { content: string; format?: 'vtt' | 'text'; meetingType?: 'customer' | 'internal' } }) => {

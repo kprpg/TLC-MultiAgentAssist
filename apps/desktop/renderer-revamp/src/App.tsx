@@ -17,8 +17,6 @@ import {
   Dismiss20Regular,
   DataBarVertical20Regular,
   Home20Regular,
-  Eye20Regular,
-  EyeOff20Regular,
   Info20Regular,
   Lightbulb20Regular,
   List20Regular,
@@ -54,11 +52,13 @@ import type { PortfolioSearchResult } from '../../../shared/portfolio-search.js'
 import { PortfolioSearch } from './portfolio-search.js'
 import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
+import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
-import { AddCustomerButton } from '../../../shared/add-customer.js'
+import { AddCustomerButton, type CustomerAccount } from '../../../shared/add-customer.js'
+import { RemoveCustomerButton } from '../../../shared/remove-customer.js'
 
 type Shell = 'desktop' | 'web'
-type WorkspaceView = 'accounts' | 'workflows' | 'discover' | 'dashboard'
+type WorkspaceView = 'accounts' | 'workflows' | 'discover' | 'dashboard' | 'new'
 type CenterTab = 'msx' | 'guidance' | 'stages'
 type Blade = 'accounts' | 'opportunities' | 'actions'
 type SearchResult = PortfolioSearchResult<Account, Opportunity>
@@ -247,8 +247,6 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [expandedDiscoverId, setExpandedDiscoverId] = useState<string | null>(null)
   const [discoverMilestones, setDiscoverMilestones] = useState<Record<string, Milestone[]>>({})
   const [discoverMilestonesLoadingId, setDiscoverMilestonesLoadingId] = useState<string | null>(null)
-  const [accountMutationId, setAccountMutationId] = useState<string | null>(null)
-  const [showHiddenAccounts, setShowHiddenAccounts] = useState(false)
   const [exiting, setExiting] = useState(false)
   const [milestoneEdit, setMilestoneEdit] = useState<MilestoneEdit | null>(null)
   const [opportunityCommentsOpen, setOpportunityCommentsOpen] = useState(false)
@@ -286,6 +284,9 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const boardDragRef = useRef<BoardDrag | null>(null)
   const boardViewportRef = useRef<HTMLDivElement | null>(null)
   const milestonePanelRef = useRef<HTMLDivElement | null>(null)
+  const accountRequest = useRef(0)
+  const detailRequest = useRef(0)
+  const discoveryRequest = useRef(0)
   const sortedOpportunities = sortOpportunities(opportunities, opportunitySort, opportunitySortDirection)
   const sortedMilestones = sortMilestones(filterVisibleMilestones(milestones), milestoneSort, milestoneSortDirection)
   const visibleDiscoverResults = sortDiscoveryOpportunities(filterDiscoveryOpportunities(discoverResults, discoverFilters), discoverSort)
@@ -481,15 +482,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   }
 
   useEffect(() => {
-    void client.listAccounts().then(async (items) => {
-      setAccounts(items)
-      setLoading(false)
-      const portfolio = await Promise.all(items.map((item) => client.listOpportunities(item.id)))
-      setSearchOpportunities(portfolio.flat())
-    }).catch(handleError).finally(() => {
-      setLoading(false)
-      setSearchLoading(false)
-    })
+    void refreshAccounts()
+    return () => {
+      accountRequest.current++
+      detailRequest.current++
+      discoveryRequest.current++
+    }
   }, [client])
 
   useEffect(() => {
@@ -508,6 +506,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
   async function saveMilestoneEdit() {
     if (!opportunity || !milestoneEdit) return
+    const request = detailRequest.current
     const { milestoneId, field, value } = milestoneEdit
     let update: MilestoneUpdate
     switch (field) {
@@ -521,29 +520,32 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setError('')
     try {
       const saved = await client.updateMilestone(opportunity.id, milestoneId, update)
+      if (request !== detailRequest.current) return
       setMilestones((current) => current.map((item) => item.id === saved.id ? saved : item))
       setMilestoneEdit(null)
     } catch (cause) {
-      handleError(cause)
+      if (request === detailRequest.current) handleError(cause)
     } finally {
-      setSavingEdit(false)
+      if (request === detailRequest.current) setSavingEdit(false)
     }
   }
 
   async function saveOpportunityComments() {
     if (!opportunity) return
+    const request = detailRequest.current
     setSavingEdit(true)
     setError('')
     try {
       const saved = await client.updateOpportunity(opportunity.id, { comments: opportunityComments })
+      if (request !== detailRequest.current) return
       setOpportunity(saved)
       setOpportunities((current) => current.map((item) => item.id === saved.id ? saved : item))
       setSearchOpportunities((current) => current.map((item) => item.id === saved.id ? saved : item))
       setOpportunityCommentsOpen(false)
     } catch (cause) {
-      handleError(cause)
+      if (request === detailRequest.current) handleError(cause)
     } finally {
-      setSavingEdit(false)
+      if (request === detailRequest.current) setSavingEdit(false)
     }
   }
 
@@ -568,8 +570,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   }
 
   async function selectAccount(nextAccount: Account) {
+    const request = ++detailRequest.current
     setError('')
     setAccount(nextAccount)
+    setOpportunities([])
     setOpportunity(null)
     setExpandedOpportunityId(null)
     setMilestones([])
@@ -578,20 +582,22 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setLoading(true)
     setMobileBlade('opportunities')
     try {
-      setOpportunities(await client.listOpportunities(nextAccount.id))
+      const items = await client.listOpportunities(nextAccount.id)
+      if (request === detailRequest.current) setOpportunities(items)
     } catch (cause) {
-      handleError(cause)
+      if (request === detailRequest.current) handleError(cause)
     } finally {
-      setLoading(false)
+      if (request === detailRequest.current) setLoading(false)
     }
   }
 
-  async function selectOpportunity(nextOpportunity: Opportunity, nextAccount = account) {
+  async function selectOpportunity(nextOpportunity: Opportunity, nextAccount = account, refreshedOpportunities?: Opportunity[]) {
     if (!nextAccount) return
+    const request = ++detailRequest.current
     setError('')
     if (account?.id !== nextAccount.id) {
       setAccount(nextAccount)
-      setOpportunities(searchOpportunities.filter((item) => item.accountId === nextAccount.id))
+      setOpportunities(refreshedOpportunities ?? searchOpportunities.filter((item) => item.accountId === nextAccount.id))
     }
     setOpportunity(nextOpportunity)
     setExpandedOpportunityId(nextOpportunity.id)
@@ -608,13 +614,14 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         client.runMcemCoach(nextAccount.id, nextOpportunity.id),
         client.listMilestones(nextOpportunity.id)
       ])
+      if (request !== detailRequest.current) return
       if (resultOutcome.status === 'fulfilled') setResult(resultOutcome.value)
       if (milestonesOutcome.status === 'fulfilled') setMilestones(milestonesOutcome.value)
       if (resultOutcome.status === 'rejected' && milestonesOutcome.status === 'rejected') handleError(resultOutcome.reason)
       else if (resultOutcome.status === 'rejected') setError(`MCEM guidance is unavailable: ${resultOutcome.reason instanceof Error ? resultOutcome.reason.message : String(resultOutcome.reason)}`)
       else if (milestonesOutcome.status === 'rejected') setError(`Milestones are unavailable: ${milestonesOutcome.reason instanceof Error ? milestonesOutcome.reason.message : String(milestonesOutcome.reason)}`)
     } finally {
-      setLoading(false)
+      if (request === detailRequest.current) setLoading(false)
     }
   }
 
@@ -638,6 +645,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
   async function loadStageBoard(boardOpportunities = opportunities) {
     if (!account) return
+    const request = detailRequest.current
     setCenterTab('stages')
     setBoardSelectedOpportunityId(opportunity?.id ?? null)
     setMobileBlade('center')
@@ -645,11 +653,11 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setError('')
     try {
       const evaluations = await Promise.all(boardOpportunities.map(async (item) => [item.id, await client.runMcemCoach(account.id, item.id)] as const))
-      setBoardEvaluations(Object.fromEntries(evaluations))
+      if (request === detailRequest.current) setBoardEvaluations(Object.fromEntries(evaluations))
     } catch (cause) {
-      handleError(cause)
+      if (request === detailRequest.current) handleError(cause)
     } finally {
-      setBoardLoading(false)
+      if (request === detailRequest.current) setBoardLoading(false)
     }
   }
 
@@ -669,19 +677,22 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
   async function proposeStageMove(item: Opportunity, targetStage: number) {
     if (!account || Math.abs(targetStage - item.recordedStage) !== 1) return
+    const request = detailRequest.current
     setError('')
     try {
       const evaluation = await client.runMcemCoach(account.id, item.id)
+      if (request !== detailRequest.current) return
       setBoardEvaluations((current) => ({ ...current, [item.id]: evaluation }))
       setStageMoveReason('')
       setPendingStageMove({ opportunity: item, targetStage, evaluation })
     } catch (cause) {
-      handleError(cause)
+      if (request === detailRequest.current) handleError(cause)
     }
   }
 
   async function confirmStageMove() {
     if (!account || !pendingStageMove) return
+    const request = detailRequest.current
     const requiresReason = pendingStageMove.targetStage < pendingStageMove.opportunity.recordedStage
       || pendingStageMove.evaluation.criteria.some((criterion) => criterion.status !== 'met')
     if (requiresReason && stageMoveReason.trim().length < 10) return
@@ -689,6 +700,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setError('')
     try {
       const transition = await client.transitionOpportunityStage(account.id, pendingStageMove.opportunity.id, pendingStageMove.targetStage, stageMoveReason.trim() || undefined)
+      if (request !== detailRequest.current) return
       const updatedOpportunities = opportunities.map((item) => item.id === transition.opportunity.id ? transition.opportunity : item)
       setOpportunities(updatedOpportunities)
       if (opportunity?.id === transition.opportunity.id) setOpportunity(transition.opportunity)
@@ -696,9 +708,9 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       setBoardEvaluations((current) => { const next = { ...current }; delete next[transition.opportunity.id]; return next })
       void loadStageBoard(updatedOpportunities)
     } catch (cause) {
-      handleError(cause)
+      if (request === detailRequest.current) handleError(cause)
     } finally {
-      setStageMoveSaving(false)
+      if (request === detailRequest.current) setStageMoveSaving(false)
     }
   }
 
@@ -706,6 +718,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     if (!account || !opportunity) return
     const prompt = selectedPrompt.trim()
     if (prompt.length < 3) return
+    const request = detailRequest.current
     setCapability(selectedCapability)
     setTaskPrompt(selectedPrompt)
     setAgentResult(null)
@@ -714,11 +727,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setShareStatus('ready')
     setShareMessage('')
     try {
-      setAgentResult(await client.runAgentTask(selectedCapability, account.id, opportunity.id, prompt))
+      const response = await client.runAgentTask(selectedCapability, account.id, opportunity.id, prompt)
+      if (request === detailRequest.current) setAgentResult(response)
     } catch (cause) {
-      handleError(cause)
+      if (request === detailRequest.current) handleError(cause)
     } finally {
-      setAgentLoading(false)
+      if (request === detailRequest.current) setAgentLoading(false)
     }
   }
 
@@ -774,35 +788,43 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     }
   }
 
-  async function refreshAccounts(includeHidden = showHiddenAccounts) {
+  async function refreshAccounts(failureContext = '') {
+    const request = ++accountRequest.current
     setError('')
     setLoading(true)
     setSearchLoading(true)
     try {
-      const items = await client.listAccounts({ includeHidden })
+      const items = (await client.listAccounts()).filter((item) => item.visibility !== 'hidden')
       const portfolio = await Promise.all(items.map((item) => client.listOpportunities(item.id)))
+      if (request !== accountRequest.current) return
       setAccounts(items)
       setSearchOpportunities(portfolio.flat())
     } catch (cause) {
-      handleError(cause)
+      if (request === accountRequest.current) {
+        setError(`${failureContext}${cause instanceof Error ? cause.message : 'The portfolio could not be refreshed.'}`)
+      }
     } finally {
-      setLoading(false)
-      setSearchLoading(false)
+      if (request === accountRequest.current) {
+        setLoading(false)
+        setSearchLoading(false)
+      }
     }
   }
 
   async function loadDiscover(domain: SeDomainId) {
+    const request = ++discoveryRequest.current
     setError('')
     setDiscoverDomain(domain)
     setDiscoverLoading(true)
     try {
       const items = await client.discoverOpportunities(domain)
+      if (request !== discoveryRequest.current) return
       setDiscoverResults(items)
       setDiscoverLoadedDomain(domain)
     } catch (cause) {
-      handleError(cause)
+      if (request === discoveryRequest.current) handleError(cause)
     } finally {
-      setDiscoverLoading(false)
+      if (request === discoveryRequest.current) setDiscoverLoading(false)
     }
   }
 
@@ -843,7 +865,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     try {
       await client.joinMilestoneTeam(milestone.opportunityId, milestone.id)
       setMilestones((current) => current.map((item) => item.id === milestone.id ? { ...item, onMilestoneTeam: true } : item))
-      await refreshAccounts(showHiddenAccounts)
+      await refreshAccounts()
     } catch (cause) {
       handleError(cause)
     } finally {
@@ -857,7 +879,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     try {
       await client.leaveMilestoneTeam(milestone.opportunityId, milestone.id)
       setMilestones((current) => current.map((item) => item.id === milestone.id ? { ...item, onMilestoneTeam: false } : item))
-      await refreshAccounts(showHiddenAccounts)
+      await refreshAccounts()
     } finally {
       setMilestoneTeamBusyId(null)
     }
@@ -870,15 +892,16 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     }
     setExpandedDiscoverId(opportunityId)
     if (discoverMilestones[opportunityId]) return
+    const request = discoveryRequest.current
     setError('')
     setDiscoverMilestonesLoadingId(opportunityId)
     try {
       const items = await client.listDiscoverableMilestones(opportunityId)
-      setDiscoverMilestones((current) => ({ ...current, [opportunityId]: items }))
+      if (request === discoveryRequest.current) setDiscoverMilestones((current) => ({ ...current, [opportunityId]: items }))
     } catch (cause) {
-      handleError(cause)
+      if (request === discoveryRequest.current) handleError(cause)
     } finally {
-      setDiscoverMilestonesLoadingId(null)
+      if (request === discoveryRequest.current) setDiscoverMilestonesLoadingId(null)
     }
   }
 
@@ -892,7 +915,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         ...current,
         [opportunityId]: (current[opportunityId] ?? []).map((item) => item.id === milestone.id ? { ...item, onMilestoneTeam: joining } : item)
       }))
-      await refreshAccounts(showHiddenAccounts)
+      await refreshAccounts()
     } catch (cause) {
       if (!joining) throw cause
       handleError(cause)
@@ -919,22 +942,25 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   }
 
   async function openMilestoneActivities(milestone: Milestone) {
+    const request = detailRequest.current
     setActivitiesMilestone(milestone)
     setActivityForm(emptyActivityForm)
     setActivities([])
     setActivitiesLoading(true)
     setError('')
     try {
-      setActivities(await client.listMilestoneActivities(milestone.opportunityId, milestone.id))
+      const items = await client.listMilestoneActivities(milestone.opportunityId, milestone.id)
+      if (request === detailRequest.current) setActivities(items)
     } catch (cause) {
-      handleError(cause)
+      if (request === detailRequest.current) handleError(cause)
     } finally {
-      setActivitiesLoading(false)
+      if (request === detailRequest.current) setActivitiesLoading(false)
     }
   }
 
   async function createMilestoneActivity() {
     if (!activitiesMilestone || activityForm.subject.trim().length === 0) return
+    const request = detailRequest.current
     setSavingActivity(true)
     setError('')
     try {
@@ -947,63 +973,71 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         ...(duration !== undefined && Number.isFinite(duration) ? { durationMinutes: duration } : {}),
         ...(activityForm.description.trim() ? { description: activityForm.description.trim() } : {})
       })
+      if (request !== detailRequest.current) return
       setActivities((current) => [created, ...current])
       setActivityForm(emptyActivityForm)
     } catch (cause) {
-      handleError(cause)
+      if (request === detailRequest.current) handleError(cause)
     } finally {
-      setSavingActivity(false)
+      if (request === detailRequest.current) setSavingActivity(false)
     }
   }
 
   async function customerAdded() {
-    await refreshAccounts(showHiddenAccounts)
+    await refreshAccounts()
     setDiscoverFilters({ include: [], exclude: [] })
     setWorkspaceView('discover')
     await loadDiscover(discoverDomain)
   }
 
-  async function setAccountVisibility(item: Account, visibility: 'visible' | 'hidden') {
-      if (visibility === 'hidden' && !window.confirm(`Hide "${item.name}" from TLC Portfolio, Discovery, Plays, and downstream analysis? Deal Team membership will not be changed.`)) return
-      setError('')
-      setAccountMutationId(item.id)
-      try {
-        await client.setAccountVisibility(item.id, visibility)
-        if (visibility === 'hidden' && account?.id === item.id) {
-          closeOpportunities()
-        }
-        await refreshAccounts(showHiddenAccounts)
-        setDiscoverLoadedDomain(null)
-      } catch (cause) {
-        handleError(cause)
-      } finally {
-        setAccountMutationId(null)
-      }
+  async function customerRemoved(removed: CustomerAccount) {
+    accountRequest.current++
+    discoveryRequest.current++
+    const removedOpportunityIds = new Set([...searchOpportunities, ...discoverResults, ...opportunities]
+      .filter((item) => item.accountId === removed.id).map((item) => item.id))
+    setAccounts((current) => current.filter((item) => item.id !== removed.id))
+    setSearchOpportunities((current) => current.filter((item) => item.accountId !== removed.id))
+    setDiscoverResults((current) => current.filter((item) => item.accountId !== removed.id))
+    setDiscoverFilters((current) => ({
+      include: current.include.filter((item) => item.id !== removed.id),
+      exclude: current.exclude.filter((item) => item.id !== removed.id)
+    }))
+    setDiscoverMilestones((current) => Object.fromEntries(Object.entries(current).filter(([id]) => !removedOpportunityIds.has(id))))
+    if (expandedDiscoverId && removedOpportunityIds.has(expandedDiscoverId)) setExpandedDiscoverId(null)
+    setPendingMembershipRemoval((current) => current && removedOpportunityIds.has(current.opportunityId) ? null : current)
+    setDiscoverMilestonesLoadingId(null)
+    setDiscoverLoading(false)
+    setDiscoverLoadedDomain(null)
+    if (account?.id === removed.id) {
+      closeOpportunities()
+      setWorkflowScopeKind('portfolio')
     }
-
-  async function toggleHiddenAccounts() {
-    const next = !showHiddenAccounts
-    setShowHiddenAccounts(next)
-    await refreshAccounts(next)
+    await Promise.all([
+      refreshAccounts('Customer removed, but TLC could not refresh the portfolio. '),
+      ...(workspaceView === 'discover' ? [loadDiscover(discoverDomain)] : [])
+    ])
   }
 
   async function refreshOpportunities() {
     if (!account) return
+    const request = detailRequest.current
     setError('')
     setLoading(true)
     try {
       const items = await client.listOpportunities(account.id)
+      if (request !== detailRequest.current) return
       setOpportunities(items)
       setSearchOpportunities((current) => [...current.filter((item) => item.accountId !== account.id), ...items])
     } catch (cause) {
-      handleError(cause)
+      if (request === detailRequest.current) handleError(cause)
     } finally {
-      setLoading(false)
+      if (request === detailRequest.current) setLoading(false)
     }
   }
 
   async function refreshOpportunityContext() {
     if (!account || !opportunity) return
+    const request = detailRequest.current
     setError('')
     setLoading(true)
     try {
@@ -1011,22 +1045,25 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         client.runMcemCoach(account.id, opportunity.id),
         client.listMilestones(opportunity.id)
       ])
+      if (request !== detailRequest.current) return
       if (resultOutcome.status === 'fulfilled') setResult(resultOutcome.value)
       if (milestonesOutcome.status === 'fulfilled') setMilestones(milestonesOutcome.value)
       if (resultOutcome.status === 'rejected' && milestonesOutcome.status === 'rejected') handleError(resultOutcome.reason)
       else if (resultOutcome.status === 'rejected') setError(`MCEM guidance is unavailable: ${resultOutcome.reason instanceof Error ? resultOutcome.reason.message : String(resultOutcome.reason)}`)
       else if (milestonesOutcome.status === 'rejected') setError(`Milestones are unavailable: ${milestonesOutcome.reason instanceof Error ? milestonesOutcome.reason.message : String(milestonesOutcome.reason)}`)
       if (centerTab === 'guidance' && taskPrompt.trim().length >= 3) {
-        setAgentResult(await client.runAgentTask(capability, account.id, opportunity.id, taskPrompt.trim()))
+        const response = await client.runAgentTask(capability, account.id, opportunity.id, taskPrompt.trim())
+        if (request === detailRequest.current) setAgentResult(response)
       }
     } catch (cause) {
-      handleError(cause)
+      if (request === detailRequest.current) handleError(cause)
     } finally {
-      setLoading(false)
+      if (request === detailRequest.current) setLoading(false)
     }
   }
 
   function closeOpportunities() {
+    detailRequest.current++
     setAccount(null)
     setOpportunities([])
     setOpportunity(null)
@@ -1034,6 +1071,29 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setMilestones([])
     setResult(null)
     setAgentResult(null)
+    setAgentLoading(false)
+    setTaskPrompt('')
+    setMilestoneEdit(null)
+    setOpportunityCommentsOpen(false)
+    setOpportunityComments('')
+    setSavingEdit(false)
+    setActivitiesMilestone(null)
+    setActivities([])
+    setActivitiesLoading(false)
+    setSavingActivity(false)
+    setBoardEvaluations({})
+    setBoardLoading(false)
+    setBoardSelectedOpportunityId(null)
+    setPendingStageMove(null)
+    setStageMoveReason('')
+    setStageMoveSaving(false)
+    setDraggedOpportunity(null)
+    setDragTargetStage(null)
+    boardDragRef.current = null
+    setEmailDialogOpen(false)
+    setEmailSubject('')
+    setShareMessage('')
+    setLoading(false)
     setActionsOpen(false)
     setMobileBlade('accounts')
   }
@@ -1080,6 +1140,14 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       </div>
     </header>
 
+    <nav className="primary-tabs" aria-label="Primary tabs">
+      <button type="button" className={workspaceView === 'new' ? 'active' : ''} onClick={() => setWorkspaceView('new')}>New</button>
+      <button type="button" className={workspaceView === 'discover' ? 'active' : ''} onClick={() => setWorkspaceView('discover')}>Discover</button>
+      <button type="button" className={workspaceView === 'accounts' ? 'active' : ''} onClick={() => setWorkspaceView('accounts')}>Portfolio</button>
+      <button type="button" className={workspaceView === 'workflows' ? 'active' : ''} onClick={() => setWorkspaceView('workflows')}>Plays</button>
+      <button type="button" className={workspaceView === 'dashboard' ? 'active' : ''} onClick={() => setWorkspaceView('dashboard')}>Dashboard</button>
+    </nav>
+
     <main className="workspace">
       <nav className="icon-rail" aria-label="Primary navigation">
         <button className={`rail-button ${workspaceView === 'accounts' ? 'active' : ''}`} title="Home" aria-label="Home" onClick={() => setWorkspaceView('accounts')}><Home20Regular /></button>
@@ -1091,27 +1159,41 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         <button className={`rail-button ${workspaceView === 'dashboard' ? 'active' : ''}`} title="Dashboards" aria-label="Dashboards" onClick={() => setWorkspaceView('dashboard')}><DataBarVertical20Regular /></button>
       </nav>
 
+      {workspaceView === 'new' && <NewWorkspace client={client} onCommitted={async (accountId, opportunityId) => {
+        const updatedAccounts = await client.listAccounts()
+        const createdAccount = updatedAccounts.find((item) => item.id === accountId)
+        if (!createdAccount) throw new Error('The created Account is no longer available in Portfolio.')
+        setAccounts(updatedAccounts)
+        setWorkspaceView('accounts')
+        await selectAccount(createdAccount)
+        const refreshedOpportunities = await client.listOpportunities(accountId)
+        const created = refreshedOpportunities.find((item) => item.id === opportunityId)
+        if (!created) throw new Error('The created Opportunity could not be found in Portfolio.')
+        await selectOpportunity(created, createdAccount, refreshedOpportunities)
+        setSearchOpportunities((current) => [
+          ...current.filter((item) => item.accountId !== accountId),
+          ...refreshedOpportunities
+        ])
+      }} />}
       {workspaceView === 'dashboard' && <DashboardWorkspace invokeSellerDashboard={client.invokeSellerDashboard} />}
 
       {workspaceView === 'accounts' && <>
       <section className={`blade account-blade ${collapsed.has('accounts') ? 'collapsed' : ''} ${mobileBlade === 'accounts' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('accounts') ? undefined : bladeWidths.accounts }} aria-label="Accounts blade">
         <BladeHeader title="Accounts" subtitle={`${accounts.length} customer accounts`} collapsed={collapsed.has('accounts')} refreshing={loading || searchLoading} actions={<>
           <AddCustomerButton client={client} onAdded={customerAdded} className="icon-button"><Add20Regular /></AddCustomerButton>
-          <Tooltip content={showHiddenAccounts ? 'Hide hidden customers' : 'Show hidden customers'} relationship="label">
-            <Button appearance="subtle" className="icon-button" icon={showHiddenAccounts ? <EyeOff20Regular /> : <Eye20Regular />} onClick={() => void toggleHiddenAccounts()} aria-pressed={showHiddenAccounts} aria-label={showHiddenAccounts ? 'Hide hidden customers' : 'Show hidden customers'} />
-          </Tooltip>
+          <RemoveCustomerButton client={client} onRemoved={customerRemoved} className="icon-button"><Subtract20Regular /></RemoveCustomerButton>
         </>} onRefresh={() => void refreshAccounts()} onToggle={() => toggleBlade('accounts')} />
         {!collapsed.has('accounts') && <div className="blade-body">
+          {!opportunity && error && <MessageBar intent="error" role="alert">{error}</MessageBar>}
           <p className="blade-intro">Choose an account to open its active opportunities.</p>
           <div className="account-list">
-            {accounts.map((item) => <div key={item.id} className={`account-row ${item.visibility === 'hidden' ? 'hidden' : ''}`}>
-              <button className={`account-button ${account?.id === item.id ? 'selected' : ''}`} disabled={item.visibility === 'hidden'} onClick={() => void selectAccount(item)}>
-                <span><strong>{item.name}</strong><small>{item.segment}{item.provenance ? ` · ${item.provenance === 'deal-team' ? 'Deal Team' : item.provenance === 'manual' ? 'Added' : 'Deal Team + Added'}` : ''}{item.visibility === 'hidden' ? ' · Hidden' : ''}</small></span>
+            {!loading && accounts.length === 0 && <p role="status">No customer accounts in this portfolio. Use Add customer to get started.</p>}
+            {accounts.map((item) => <div key={item.id} className="account-row">
+              <button className={`account-button ${account?.id === item.id ? 'selected' : ''}`} onClick={() => void selectAccount(item)}>
+                <span><strong>{item.name}</strong><small>{item.segment}{item.provenance ? ` · ${item.provenance === 'deal-team' ? 'Deal Team' : item.provenance === 'manual' ? 'Added' : 'Deal Team + Added'}` : ''}</small></span>
                 <ChevronRight20Regular />
               </button>
-              <Button appearance="subtle" className="text-action" size="small" disabled={accountMutationId === item.id} onClick={() => void setAccountVisibility(item, item.visibility === 'hidden' ? 'visible' : 'hidden')}>
-                {item.visibility === 'hidden' ? 'Unhide' : 'Hide'}
-              </Button>
+              <RemoveCustomerButton client={client} account={item} onRemoved={customerRemoved} />
             </div>)}
           </div>
         </div>}
@@ -1327,7 +1409,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
             <button role="tab" aria-selected={centerTab === 'stages'} onClick={() => void loadStageBoard()}>MCEM Stage Management</button>
           </div>
           {loading && <div className="loading-state">Loading grounded context…</div>}
-          {error && <div className="error-state">{error}</div>}
+          {error && <div className="error-state" role="alert">{error}</div>}
           {!loading && result && centerTab === 'msx' && <div className="workbench-content">
             <section className={`stage-band ${status ?? ''}`}>
               <div><span>Recorded in MSX</span><strong>Stage {result.recordedStage}</strong></div>
@@ -1615,7 +1697,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       {workspaceView === 'discover' && <section className="workflow-launcher discover-launcher" aria-label="Discover opportunities">
         <header className="workflow-launcher-header">
           <div><p className="eyebrow">DEAL TEAM DISCOVERY</p><h1>Discover opportunities</h1><p>Review all active opportunities for visible accounts and add or remove yourself from the Deal Team — or expand an opportunity to join a milestone team without joining the Deal Team. Deal Team or milestone-team membership brings an opportunity into Portfolio.</p></div>
-          <AddCustomerButton client={client} onAdded={customerAdded} />
+          <div className="customer-management-actions">
+            <AddCustomerButton client={client} onAdded={customerAdded} />
+            <RemoveCustomerButton client={client} onRemoved={customerRemoved} />
+          </div>
         </header>
 
         <div className="workflow-toolbar discover-toolbar">

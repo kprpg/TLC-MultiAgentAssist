@@ -123,6 +123,8 @@ Optional settings:
 | `PORT`                              | HTTP listener port                       | `8080`                                        |
 | `HOST`                              | HTTP listener address                    | `127.0.0.1` locally; `0.0.0.0` in App Service |
 | `TLC_WEB_MODE`                      | `sample`, `azure-cli`, or `easy-auth`    | `sample` locally; `easy-auth` in App Service  |
+| `TLC_DATA_STORE`                    | Sample data store (`fixture` or `sqlite`) | Fixture sample data unless `sqlite` is selected |
+| `TLC_DATA_STORE_PATH`               | File-backed Sample SQLite database       | In-memory when unset; local demo launcher supplies a path |
 | `TLC_WEB_STATIC_ROOT`               | Built renderer directory                 | `apps/desktop/dist/revamp`                    |
 | `TLC_FOUNDRY_ENV_BASE64`            | Base64-encoded hosted Foundry JSON       | unset                                         |
 | `TLC_FOUNDRY_ENV_FILE`              | Foundry environment JSON                 | `config/foundry.environment.json`             |
@@ -131,11 +133,17 @@ Optional settings:
 | `TLC_MSX_RISK_DETAILS_FIELD`        | Verified Risk/Blocker logical field name | unset; corresponding update is rejected       |
 | `TLC_MSX_STATUS_LOST_TO_COMPETITOR` | Verified integer option value            | unset; corresponding update is rejected       |
 | `TLC_MSX_STATUS_HYGIENE_DUPLICATE`  | Verified integer option value            | unset; corresponding update is rejected       |
-| `TLC_MSX_ACCOUNT_TPID_FIELD`         | Verified account TPID logical field name | unset; TPID search is rejected                 |
+| `TLC_MSX_ACCOUNT_TPID_FIELD`         | Optional tenant TPID logical-field override | verifies known `msp_mstopparentid` when unset |
 | `TLC_PORTFOLIO_PREFERENCES_PATH`     | Durable account-preference JSON path     | `.tlc/portfolio-preferences.json`              |
 | `AZURE_CLIENT_ID`                   | User-assigned managed identity client ID | unset                                         |
 
-The host validates the optional MSX field names and option values at startup and never guesses Dataverse metadata. Supply these settings in the local process environment or App Service application settings only after confirming the values for the target tenant. Name-based account search remains available when the TPID field is unset.
+The host validates optional MSX field names and option values at startup. TPID lookup
+verifies the override or the known default against readable String metadata before use;
+unknown/incompatible fields and authorization errors remain explicit. Supply tenant
+overrides in the process environment or App Service settings only after verification.
+Name-based account search remains independent of TPID metadata. Close-name fallback
+requires provisioned, synchronized Dataverse account-name indexing and uses the same
+delegated connector as Desktop and VS Code; it never creates an MSX account.
 
 `TLC_PORTFOLIO_PREFERENCES_PATH` must point to durable writable storage in hosted environments. Preferences are partitioned by the immutable authenticated user ID and contain manually added and hidden account IDs only. They do not replace or modify MSX Deal Team records. In a scaled-out App Service deployment, mount the same durable path for every instance or replace the JSON store with an approved shared persistence implementation before enabling multi-instance writes.
 

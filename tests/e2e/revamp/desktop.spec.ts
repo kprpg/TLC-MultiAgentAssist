@@ -1,11 +1,370 @@
 import { expect, test, _electron as electron } from '@playwright/test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { LocalStore } from '../../../packages/connectors/local-store/index.js'
 import { workflowDefinitions, workflowOutput, workflowRun } from './workflow-fixtures.js'
 import { expectCompleteSamplePortfolio } from './sample-portfolio.js'
 import { expectOpportunityAndMilestoneRemoval } from './membership-removal.js'
 import { expectOpportunitiesToFillCollapsedWorkspace } from './opportunities-layout.js'
+
+test('opens a dedicated New pane before Discover in Desktop', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-new-tab-'))
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_UI_MODE: '' }
+    })
+
+    try {
+        const window = await app.firstWindow()
+        await window.setViewportSize({ width: 1600, height: 900 })
+        const tabs = window.getByRole('navigation', { name: 'Primary tabs' })
+        await expect(tabs.getByRole('button')).toHaveText(['New', 'Discover', 'Portfolio', 'Plays', 'Dashboard'])
+        await tabs.getByRole('button', { name: 'New' }).click()
+        const pane = window.getByRole('region', { name: 'New record creation' })
+        await expect(pane).toBeVisible()
+        await expect(pane.getByRole('button', { name: 'Opportunity', exact: true })).toBeVisible()
+        await expect(pane.getByRole('button', { name: 'Multiple Opportunities' })).toBeVisible()
+        await expect(pane.getByRole('button', { name: 'Milestone', exact: true })).toBeVisible()
+        const tabBox = await tabs.boundingBox()
+        const paneBox = await pane.boundingBox()
+        expect(paneBox!.y).toBeGreaterThanOrEqual(tabBox!.y + tabBox!.height)
+        await pane.getByRole('button', { name: 'Multiple Opportunities' }).click()
+        await pane.getByRole('combobox', { name: 'Account' }).selectOption('account-contoso')
+        await pane.getByRole('group', { name: 'Entry mode' }).getByRole('button', { name: 'Grid' }).click()
+        const grid = pane.locator('.new-record-grid')
+        await grid.getByRole('row').nth(1).getByRole('button', { name: 'Duplicate Opportunity' }).click()
+        await expect(grid.locator('tbody tr')).toHaveCount(2)
+        await grid.getByRole('row').nth(2).getByRole('button', { name: 'Remove Opportunity' }).click()
+        await expect(grid.locator('tbody tr')).toHaveCount(1)
+        await pane.getByRole('group', { name: 'Entry mode' }).getByRole('button', { name: 'Import CSV' }).click()
+        await expect(pane.getByRole('button', { name: 'Validate & review', exact: true })).toBeDisabled()
+        await window.setViewportSize({ width: 420, height: 844 })
+        expect((await window.locator('main.workspace').boundingBox())!.height).toBeGreaterThan(500)
+        await expect(pane).toBeVisible()
+    } finally {
+        await app.close()
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
+test('creates an Opportunity and child Milestone from New in SQLite Desktop', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-create-records-'))
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_DATA_STORE: 'sqlite', TLC_UI_MODE: '' }
+    })
+
+    try {
+        const window = await app.firstWindow()
+        await window.setViewportSize({ width: 1600, height: 900 })
+        await window.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'New' }).click()
+        const pane = window.getByRole('region', { name: 'New record creation' })
+        await pane.getByRole('button', { name: 'Opportunity', exact: true }).click()
+        await pane.getByRole('combobox', { name: 'Account' }).selectOption('account-contoso')
+        await expect(pane.locator('.new-record-target strong')).toHaveText('SQLite sample store')
+        await expect(pane.getByRole('button', { name: 'Validate & review' })).toBeVisible()
+        await pane.getByRole('button', { name: 'Validate & review', exact: true }).click()
+        await expect(pane.getByLabel('Opportunity name')).toBeFocused()
+        await expect(pane.getByRole('alert').getByRole('link', { name: 'Opportunity name' })).toBeVisible()
+        await pane.getByLabel('Opportunity name').fill('New grid observability opportunity')
+        await pane.getByRole('listbox', { name: 'Opportunity Intent' }).selectOption('606820001')
+        await pane.getByLabel('Estimated value').fill('1450000')
+        await pane.getByLabel('Estimated close date').fill('2027-06-30')
+        await pane.getByRole('button', { name: 'Add Milestone' }).click()
+        await pane.getByLabel('Milestone name').fill('Telemetry production pilot')
+        await pane.getByLabel('Milestone category').selectOption('861980000')
+        await pane.getByLabel('Milestone estimated date').fill('2027-02-15')
+        await pane.getByLabel('Workload').selectOption('workload-cloud-scale-analytics')
+
+        await pane.getByRole('button', { name: 'Validate & review', exact: true }).click()
+        await expect(pane.getByRole('heading', { name: 'Review record creation' })).toBeVisible()
+        await expect(pane).toContainText('New grid observability opportunity')
+        await expect(pane).toContainText('Telemetry production pilot')
+        await expect(pane.locator('.new-record-review')).toHaveAttribute('aria-live', 'polite')
+        await expect(pane.getByText('USD Standard Price List')).toBeVisible()
+        await expect(pane.getByText('US Dollar (USD)')).toHaveCount(2)
+        await expect(pane.getByText('2027-06-30')).toBeVisible()
+        await expect(pane.getByText('Cloud Scale Analytics')).toBeVisible()
+        await expect(pane.getByRole('button', { name: 'Submit to SQLite' })).toBeVisible()
+        await pane.getByRole('button', { name: 'Edit' }).click()
+        await expect(pane.getByRole('button', { name: 'Validate & review', exact: true })).toBeFocused()
+        await pane.getByRole('button', { name: 'Validate & review', exact: true }).click()
+        await pane.getByRole('button', { name: 'Submit to SQLite' }).click()
+        await expect(pane.getByRole('status')).toContainText('created in the SQLite sample store')
+        await pane.getByRole('button', { name: 'View in Portfolio' }).click()
+        const opportunities = window.getByRole('table', { name: 'Contoso Energy opportunities' })
+        await expect(opportunities).toContainText('New grid observability opportunity')
+        await expect(opportunities.getByRole('button', { name: /^New grid observability opportunity/ })).toHaveAttribute('aria-expanded', 'true')
+        await expect(window.getByRole('region', { name: 'New grid observability opportunity milestones' })).toContainText('Telemetry production pilot')
+    } finally {
+        await app.close()
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
+test('reopens a submitted Opportunity and Milestone from the default Desktop SQLite file', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-default-sqlite-'))
+    const environment = {
+        ...process.env,
+        TLC_DATA_MODE: 'sample',
+        TLC_DATA_STORE: 'sqlite',
+        TLC_DATA_STORE_PATH: '',
+        TLC_UI_MODE: ''
+    }
+    try {
+        const firstApp = await electron.launch({
+            args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+            env: environment
+        })
+        try {
+            const window = await firstApp.firstWindow()
+            await window.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'New' }).click()
+            const pane = window.getByRole('region', { name: 'New record creation' })
+            await pane.getByRole('button', { name: 'Opportunity', exact: true }).click()
+            await pane.getByRole('combobox', { name: 'Account' }).selectOption('account-contoso')
+            await expect(pane.locator('.new-record-target strong')).toHaveText('SQLite sample store')
+            await pane.getByLabel('Opportunity name').fill('Reopened Desktop opportunity')
+            await pane.getByRole('listbox', { name: 'Opportunity Intent' }).selectOption('606820001')
+            await pane.getByLabel('Estimated value').fill('125000')
+            await pane.getByLabel('Estimated close date').fill('2027-06-30')
+            await pane.getByRole('button', { name: 'Add Milestone' }).click()
+            await pane.getByLabel('Milestone name').fill('Reopened Desktop milestone')
+            await pane.getByLabel('Milestone category').selectOption('861980000')
+            await pane.getByLabel('Milestone estimated date').fill('2027-02-15')
+            await pane.getByLabel('Workload').selectOption('workload-cloud-scale-analytics')
+            await pane.getByRole('button', { name: 'Validate & review' }).click()
+            await pane.getByRole('button', { name: 'Submit to SQLite' }).click()
+            await expect(pane.getByRole('status')).toContainText('created in the SQLite sample store')
+        } finally {
+            await firstApp.close()
+        }
+        const storePath = join(userDataDirectory, 'sample.sqlite')
+        const persisted = new LocalStore({ path: storePath })
+        try {
+            const opportunity = persisted.get('SELECT id FROM opportunity WHERE name = ?', 'Reopened Desktop opportunity')
+            expect(opportunity?.['id']).toBeTruthy()
+            expect(persisted.get('SELECT opportunity_id FROM engagement_milestone WHERE name = ?', 'Reopened Desktop milestone')?.['opportunity_id'])
+                .toBe(opportunity?.['id'])
+            expect(Number(persisted.get('SELECT COUNT(*) AS total FROM creation_batch')?.['total'])).toBe(1)
+        } finally {
+            persisted.close()
+        }
+        const reopenedApp = await electron.launch({
+            args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+            env: environment
+        })
+        try {
+            const window = await reopenedApp.firstWindow()
+            await window.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
+            const table = window.getByRole('table', { name: 'Contoso Energy opportunities' })
+            await expect(table).toContainText('Reopened Desktop opportunity')
+            await table.getByRole('button', { name: /^Reopened Desktop opportunity / }).click()
+            await expect(window.getByRole('region', { name: 'Reopened Desktop opportunity milestones' }))
+                .toContainText('Reopened Desktop milestone')
+        } finally {
+            await reopenedApp.close()
+        }
+    } finally {
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
+test('exports a reviewed no-write draft from Desktop New', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-new-draft-'))
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_DATA_STORE: 'sqlite', TLC_UI_MODE: '' }
+    })
+    try {
+        const window = await app.firstWindow()
+        await window.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'New' }).click()
+        const pane = window.getByRole('region', { name: 'New record creation' })
+        await pane.getByRole('button', { name: 'Opportunity', exact: true }).click()
+        await pane.getByRole('combobox', { name: 'Account' }).selectOption('account-contoso')
+        await pane.getByRole('combobox', { name: 'Save target' }).selectOption('draft')
+        await expect(pane.locator('.new-record-target strong')).toHaveText('Draft only - MSX creation is disabled')
+        await pane.getByLabel('Opportunity name').fill('Desktop draft only')
+        await pane.getByRole('listbox', { name: 'Opportunity Intent' }).selectOption('606820001')
+        await pane.getByLabel('Estimated value').fill('120000')
+        await pane.getByLabel('Estimated close date').fill('2027-06-30')
+        await pane.getByRole('button', { name: 'Validate & review', exact: true }).click()
+        await expect(pane).toContainText('Draft only. No records will be written to MSX or SQLite.')
+        await expect(pane.getByRole('button', { name: 'Submit to SQLite' })).toHaveCount(0)
+        await pane.getByRole('button', { name: 'Export draft' }).click()
+        await expect(pane.getByRole('status')).toContainText('No Opportunity or Milestone was written to MSX.')
+        await expect(pane.getByRole('button', { name: 'Download creation-manifest.json' })).toBeVisible()
+        await expect(pane.getByRole('button', { name: 'Download opportunities.csv' })).toBeVisible()
+    } finally {
+        await app.close()
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
+test('creates a Milestone under an existing Opportunity in SQLite Desktop', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-create-existing-milestone-'))
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_DATA_STORE: 'sqlite', TLC_UI_MODE: '' }
+    })
+
+    try {
+        const window = await app.firstWindow()
+        await window.setViewportSize({ width: 1600, height: 900 })
+        await window.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'New' }).click()
+        const pane = window.getByRole('region', { name: 'New record creation' })
+        await pane.getByRole('button', { name: 'Milestone', exact: true }).click()
+        await pane.getByRole('combobox', { name: 'Account' }).selectOption('account-contoso')
+        await pane.getByRole('combobox', { name: 'Parent Opportunity' }).selectOption('opp-grid-modernization')
+        await pane.getByLabel('Milestone name').fill('New customer adoption milestone')
+        await pane.getByLabel('Milestone category').selectOption('861980002')
+        await pane.getByLabel('Milestone estimated date').fill('2027-02-15')
+        await pane.getByLabel('Workload').selectOption('workload-cloud-scale-analytics')
+        await pane.getByRole('button', { name: 'Validate & review', exact: true }).click()
+        await expect(pane).toContainText('1 planned mutation')
+        await pane.getByRole('button', { name: 'Submit to SQLite' }).click()
+        await expect(pane.getByRole('status')).toContainText('created in the SQLite sample store')
+        await expect(pane).toContainText('0 Opportunities, 1 Milestones')
+        await pane.getByRole('button', { name: 'View in Portfolio' }).click()
+        await expect(window.getByRole('region', { name: 'Grid operations modernization milestones' })).toContainText('New customer adoption milestone')
+    } finally {
+        await app.close()
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
+test('imports a Milestone CSV and submits under the selected parent in Desktop', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-milestone-csv-'))
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_DATA_STORE: 'sqlite', TLC_UI_MODE: '' }
+    })
+    try {
+        const window = await app.firstWindow()
+        await window.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'New' }).click()
+        const pane = window.getByRole('region', { name: 'New record creation' })
+        await pane.getByRole('button', { name: 'Milestone', exact: true }).click()
+        await pane.getByRole('combobox', { name: 'Account' }).selectOption('account-contoso')
+        await pane.getByRole('combobox', { name: 'Parent Opportunity' }).selectOption('opp-grid-modernization')
+        await pane.getByRole('group', { name: 'Entry mode' }).getByRole('button', { name: 'Import CSV' }).click()
+        await expect(pane.getByText('All rows use the selected parent.', { exact: false })).toBeVisible()
+        const csv = await readFile(resolve('tests', 'fixtures', 'record-creation', 'single-opportunity-multiple-milestones', 'milestones.csv'), 'utf8')
+        const withoutParent = csv.split(/\r?\n/).map((line) => line.replace(/^([^,]*),[^,]*,/, '$1,')).join('\n')
+        await pane.locator('.new-record-import input[type="file"]').setInputFiles({
+            name: 'existing-parent-milestones.csv', mimeType: 'text/csv', buffer: Buffer.from(withoutParent)
+        })
+        await pane.getByRole('button', { name: 'Validate & load CSV' }).click()
+        await expect(pane.getByLabel('Milestone name')).toHaveCount(3)
+        await pane.getByRole('button', { name: 'Validate & review' }).click()
+        await expect(pane).toContainText('3 planned mutations')
+        await pane.getByRole('button', { name: 'Submit to SQLite' }).click()
+        await expect(pane).toContainText('0 Opportunities, 3 Milestones')
+        await pane.getByRole('button', { name: 'View in Portfolio' }).click()
+        const milestones = window.getByRole('region', { name: 'Grid operations modernization milestones' })
+        await expect(milestones).toContainText('Grid telemetry pilot')
+        await expect(milestones).toContainText('Production telemetry rollout')
+        await expect(milestones).toContainText('Telemetry cost optimization')
+    } finally {
+        await app.close()
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
+test('creates two existing-parent Milestones after editing Form and Grid in Desktop', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-milestone-grid-'))
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_DATA_STORE: 'sqlite', TLC_UI_MODE: '' }
+    })
+    try {
+        const window = await app.firstWindow()
+        await window.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'New' }).click()
+        const pane = window.getByRole('region', { name: 'New record creation' })
+        await pane.getByRole('button', { name: 'Milestone', exact: true }).click()
+        await pane.getByRole('combobox', { name: 'Account' }).selectOption('account-contoso')
+        await pane.getByRole('combobox', { name: 'Parent Opportunity' }).selectOption('opp-grid-modernization')
+        await pane.getByLabel('Milestone name').fill('Desktop Grid pilot')
+        await pane.getByLabel('Milestone category').selectOption('861980000')
+        await pane.getByLabel('Milestone estimated date').fill('2027-02-15')
+        await pane.getByLabel('Workload').selectOption('workload-cloud-scale-analytics')
+        await pane.getByLabel('Milestone comments').fill('Retain optional details across Grid.')
+        await pane.getByRole('group', { name: 'Entry mode' }).getByRole('button', { name: 'Grid' }).click()
+        const grid = pane.getByRole('table', { name: 'Milestone entry grid' })
+        await expect(grid.locator('tbody tr')).toHaveCount(1)
+        await pane.getByRole('button', { name: 'Add Milestone' }).click()
+        const second = grid.getByRole('row').nth(2)
+        await second.getByLabel('Milestone name').fill('Desktop production milestone')
+        await second.getByLabel('Milestone category').selectOption('861980002')
+        await second.getByLabel('Milestone estimated date').fill('2027-04-15')
+        await second.getByLabel('Workload').selectOption('workload-cloud-scale-analytics')
+        await pane.getByRole('group', { name: 'Entry mode' }).getByRole('button', { name: 'Form' }).click()
+        await expect(pane.getByLabel('Milestone comments').first()).toHaveValue('Retain optional details across Grid.')
+        await expect(pane.getByLabel('Milestone name').nth(1)).toHaveValue('Desktop production milestone')
+        await pane.getByRole('button', { name: 'Validate & review', exact: true }).click()
+        await expect(pane).toContainText('2 planned mutations')
+        await pane.getByRole('button', { name: 'Submit to SQLite' }).click()
+        await expect(pane).toContainText('0 Opportunities, 2 Milestones')
+        await pane.getByRole('button', { name: 'View in Portfolio' }).click()
+        const milestones = window.getByRole('region', { name: 'Grid operations modernization milestones' })
+        await expect(milestones).toContainText('Desktop Grid pilot')
+        await expect(milestones).toContainText('Desktop production milestone')
+    } finally {
+        await app.close()
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
+test('reviews the parent Opportunity currency for an existing Milestone in Desktop', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-parent-currency-'))
+    const storePath = join(userDataDirectory, 'portfolio.sqlite')
+    const seeded = new LocalStore({ path: storePath })
+    try {
+        seeded.run('INSERT INTO transaction_currency (id, name, iso_code) VALUES (?, ?, ?)', 'currency-eur', 'Euro', 'EUR')
+        seeded.run('UPDATE opportunity SET currency = ?, transaction_currency_id = ? WHERE id = ?',
+            'EUR', 'currency-eur', 'opp-grid-modernization')
+    } finally {
+        seeded.close()
+    }
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: {
+            ...process.env, TLC_DATA_MODE: 'sample', TLC_DATA_STORE: 'sqlite', TLC_DATA_STORE_PATH: storePath, TLC_UI_MODE: ''
+        }
+    })
+    try {
+        const window = await app.firstWindow()
+        await window.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'New' }).click()
+        const pane = window.getByRole('region', { name: 'New record creation' })
+        await pane.getByRole('button', { name: 'Milestone', exact: true }).click()
+        await pane.getByRole('combobox', { name: 'Account' }).selectOption('account-contoso')
+        await pane.getByRole('combobox', { name: 'Parent Opportunity' }).selectOption('opp-grid-modernization')
+        await pane.getByLabel('Milestone name').fill('Euro desktop pilot')
+        await pane.getByLabel('Milestone category').selectOption('861980000')
+        await pane.getByLabel('Milestone estimated date').fill('2027-02-15')
+        await pane.getByLabel('Workload').selectOption('workload-cloud-scale-analytics')
+        await pane.getByRole('button', { name: 'Validate & review', exact: true }).click()
+        await expect(pane.getByRole('region', { name: 'Milestone Euro desktop pilot' }).getByText('Euro (EUR)')).toBeVisible()
+        await pane.getByRole('button', { name: 'Submit to SQLite' }).click()
+        await expect(pane.getByRole('status')).toContainText('created in the SQLite sample store')
+        const during = new LocalStore({ path: storePath })
+        try {
+            expect(during.get('SELECT transaction_currency_id FROM engagement_milestone WHERE name = ?', 'Euro desktop pilot')?.['transaction_currency_id'])
+                .toBe('currency-eur')
+        } finally {
+            during.close()
+        }
+    } finally {
+        await app.close()
+        const verified = new LocalStore({ path: storePath })
+        try {
+            expect(verified.get('SELECT transaction_currency_id FROM engagement_milestone WHERE name = ?', 'Euro desktop pilot')?.['transaction_currency_id'])
+                .toBe('currency-eur')
+        } finally {
+            verified.close()
+            await rm(userDataDirectory, { recursive: true, force: true })
+        }
+    }
+})
 
 test('shows all eight sample customers with opportunity, milestone, and evidence data in Desktop', async () => {
     const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-sample-portfolio-'))
@@ -83,15 +442,13 @@ test('curates customer accounts through the Desktop IPC bridge', async () => {
         await window.locator('.account-button').filter({ hasText: 'Northwind Health' }).click()
         await expect(window.locator('.opportunity-table-wrap .record-table')).toContainText('Clinical data platform modernization')
 
-        window.once('dialog', (confirmation) => confirmation.accept())
-        await window.locator('.account-row').filter({ hasText: 'Northwind Health' }).locator('button').filter({ hasText: /^Hide$/ }).click()
+        await window.locator('.account-row').filter({ hasText: 'Northwind Health' }).getByRole('button', { name: 'Remove this customer', exact: true }).click()
+        await window.getByRole('dialog', { name: 'Remove customer account' }).getByRole('button', { name: 'Remove customer', exact: true }).click()
         await expect(window.locator('.account-row').filter({ hasText: 'Northwind Health' })).toHaveCount(0)
-        await window.locator('button[aria-label="Show hidden customers"]').click()
-        const hiddenRow = window.locator('.account-row').filter({ hasText: 'Northwind Health' })
-        await expect(hiddenRow).toContainText('Hidden')
-        await expect(hiddenRow).toHaveCSS('opacity', '1')
-        await expect(hiddenRow.locator('button').filter({ hasText: /^Unhide$/ })).toHaveCSS('color', 'rgb(15, 108, 189)')
-        await hiddenRow.locator('button').filter({ hasText: 'Unhide' }).click()
+        await window.getByRole('button', { name: 'Add customer', exact: true }).click()
+        await dialog.getByRole('textbox', { name: 'Account name', exact: true }).fill('Northwind')
+        await dialog.getByRole('button', { name: 'Search', exact: true }).click()
+        await dialog.getByRole('button', { name: 'Add again', exact: true }).click()
     } finally {
         await app.close()
         await rm(userDataDirectory, { recursive: true, force: true })

@@ -36,7 +36,14 @@ import {
   type OpportunityUpdate,
   type SeDomainId,
   measurePerformance,
-  type PerformanceReporter
+  type PerformanceReporter,
+  type RecordCreationCatalog,
+  type RecordCreationCatalogRequest,
+  type RecordCreationPreview,
+  type RecordCreationPreviewRequest,
+  type RecordCreationCommitRequest,
+  type RecordCreationDraftResult,
+  type RecordCreationResult
 } from '../common/index.js'
 import { evaluateMcemProgress } from '../agents/mcem-coach/index.js'
 import type {
@@ -45,6 +52,7 @@ import type {
   OpportunityContext,
   StageGuidance
 } from '../connectors/common/index.js'
+import { RecordCreationService, RecordCreationError } from './record-creation/service.js'
 
 export interface McemAgentContext {
   request: McemRequest
@@ -78,8 +86,30 @@ export class ThinSliceOrchestrator {
     private readonly msx: MsxConnector,
     private readonly mcem: McemGuidanceConnector,
     private readonly taskAgents: TaskAgentRegistry = {},
-    private readonly performanceReporter?: PerformanceReporter
+    private readonly performanceReporter?: PerformanceReporter,
+    private readonly recordCreation?: RecordCreationService
   ) { }
+
+  getRecordCreationCatalog(request: RecordCreationCatalogRequest): Promise<RecordCreationCatalog> {
+    return this.requireRecordCreation().getCatalog(request)
+  }
+
+  previewRecordCreation(request: RecordCreationPreviewRequest): Promise<RecordCreationPreview> {
+    return this.requireRecordCreation().preview(request)
+  }
+
+  commitRecordCreation(request: RecordCreationCommitRequest): Promise<RecordCreationResult> {
+    return this.requireRecordCreation().commit(request)
+  }
+
+  exportRecordCreationDraft(request: RecordCreationCommitRequest): Promise<RecordCreationDraftResult> {
+    return this.requireRecordCreation().exportDraft(request)
+  }
+
+  private requireRecordCreation(): RecordCreationService {
+    if (!this.recordCreation) throw new RecordCreationError('target-disabled', 'Record creation is unavailable in this mode.')
+    return this.recordCreation
+  }
 
   listAccounts(options?: AccountListOptions): Promise<Account[]> {
     return this.msx.listAccounts(accountListOptionsSchema.parse(options ?? {}))

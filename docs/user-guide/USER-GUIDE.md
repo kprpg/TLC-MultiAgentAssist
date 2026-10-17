@@ -16,7 +16,7 @@ All screenshots come from the sanitized sample dataset shipped with the product.
 **[Part 1 — VS Code Shell Extension](#vs-code-shell-extension)**
 
 - [Install and open in VS Code](#install-and-open-in-vs-code)
-  - [The Discover, Portfolio, and Plays tabs](#the-discover-portfolio-and-plays-tabs)
+  - [The New, Discover, Portfolio, Plays, and Dashboard tabs](#the-new-discover-portfolio-plays-and-dashboard-tabs)
   - [Run the extension in sample mode](#run-the-extension-in-sample-mode)
 - [The VS Code experience](#the-vs-code-experience)
 
@@ -24,6 +24,12 @@ All screenshots come from the sanitized sample dataset shipped with the product.
 
 - [Install and launch the desktop app](#install-and-launch-the-desktop-app)
 - [Run the desktop app with sample data](#run-the-desktop-app-with-sample-data)
+- [New Opportunity and Milestone creation](#new-opportunity-and-milestone-creation)
+  - [Enable SQLite saving](#enable-sqlite-saving)
+  - [Create an Opportunity with child Milestones](#create-an-opportunity-with-child-milestones)
+  - [Import multiple Opportunities and Milestones from CSV](#import-multiple-opportunities-and-milestones-from-csv)
+  - [Add Milestones to an existing Opportunity](#add-milestones-to-an-existing-opportunity)
+  - [When Submit to SQLite is missing](#when-submit-to-sqlite-is-missing)
 1. [The workspace at a glance](#2-the-workspace-at-a-glance)
 2. [Accounts blade — curating and selecting accounts](#3-accounts-blade--curating-and-selecting-accounts)
 3. [Opportunities blade — reviewing your book of work](#4-opportunities-blade--reviewing-your-book-of-work)
@@ -65,7 +71,7 @@ Two independent toggles control where data comes from:
 | Toggle | Setting | Values |
 | --- | --- | --- |
 | **Mode** | `tlc.mode` | `sample` (sanitized, offline) · `live` (MSX OData + Dataverse MCP) |
-| **Sample data store** | `tlc.dataStore` | `fixture` (in-memory) · `sqlite` (relational SQLite test store; injected values persist for the session). Applies only in sample mode. |
+| **Sample data store** | `tlc.dataStore` | `fixture` (in-memory) · `sqlite` (file-backed SQLite test store; submitted records survive VS Code restarts). Applies only in sample mode. |
 
 - **Switch sample ⇄ live at runtime** from the Command Palette (`Ctrl+Shift+P`): **TLC: Use Live Data (MSX/Dataverse)** or **TLC: Use Sample Data**. The status bar flips between `TLC Assist: Live` and `Sample`, and the panes reload.
 - **TLC: Test Live Connection** only *verifies* connectivity to Dataverse — it does **not** switch the data source. Use **Use Live Data** to actually switch.
@@ -74,10 +80,20 @@ Two independent toggles control where data comes from:
 
 > **Developing with F5?** The repo includes Extension Development Host launch configs — **Run TLC Assist Extension** (fixtures), **(SQLite test store)**, and **(Live MSX/Dataverse)** — that set the startup data source. After rebuilding the extension, run **Developer: Reload Window** in the Extension Development Host (or relaunch) so the new build loads before switching modes.
 
-### The Discover, Portfolio, and Plays tabs
+In Sample SQLite, **New** supports Opportunity and Milestone forms and CSV import.
+**Validate & load CSV** only fills the draft; choose **Validate & review** and
+then **Submit to SQLite** to save it. The file is under the extension's local
+storage (or at the explicitly configured `TLC_DATA_STORE_PATH`); it is separate
+from Desktop and Web Sample files. Fixture and Live modes only export drafts
+and never create live MSX Opportunities or Milestones.
+See [New Opportunity and Milestone creation](#new-opportunity-and-milestone-creation)
+for the complete form, CSV import, review, and submission walkthrough.
 
-The TLC Assist view is organized into four tabs:
+### The New, Discover, Portfolio, Plays, and Dashboard tabs
 
+The TLC Assist view is organized into these tabs:
+
+- **New** — prepare Opportunities and Milestones using forms, grids, or CSV import, then review and submit to the SQLite sample store or export a no-write draft.
 - **Discover** — browse Solution Engineer domains and join or leave opportunity Deal Teams.
 - **Portfolio** — your accounts, opportunities, milestones, MSX evidence, and the four guidance agents, with **Email** and **Word** export on every agent response.
 - **Plays** — the operational Plays catalog in the left rail (ordered by workflow number) and the Operational Queue of results. Each queue item can be dispatched to an agent — for example **Send to Pursuit** or **Send to Risk & Play** — and the returned response can be exported with **Email** or **Word**, just like Portfolio guidance.
@@ -151,6 +167,165 @@ $env:TLC_DATA_MODE = 'sample'
 
 Sample mode loads bundled sanitized data and opens the workspace directly without displaying a login dialog.
 
+## New Opportunity and Milestone creation
+
+The **New** tab, immediately before **Discover**, provides the same creation flow in Desktop,
+the VS Code extension, and the hosted Web app. It creates records only in the sanitized
+SQLite sample store. **Live MSX Opportunity and Milestone creation is disabled.**
+
+| Creation type | Use it for | Entry options |
+| --- | --- | --- |
+| **Opportunity** | One new Opportunity for the selected Account, with optional child Milestones. | Form and **Add Milestone**. |
+| **Multiple Opportunities** | Several new Opportunities for one Account, each with its own child Milestones. | Repeated forms, **Grid**, or **Import CSV**. |
+| **Milestone** | One or more new Milestones under an existing authorized Opportunity in the selected Account. | Repeated forms, **Grid**, or Milestone CSV import. |
+
+### Enable SQLite saving
+
+**Sample mode alone is not enough: select the SQLite sample data store as well.** After
+choosing an Account in **New**, verify that **Save target** is **SQLite sample store**.
+Choosing **Draft only** deliberately disables database submission.
+
+| Surface | Required settings | Where submitted records are kept |
+| --- | --- | --- |
+| **VS Code / VS Code Insiders** | `tlc.mode = sample` and `tlc.dataStore = sqlite`. | `sample.sqlite` in that editor profile's extension storage. |
+| **Desktop** | `TLC_DATA_MODE=sample` and `TLC_DATA_STORE=sqlite` before launch. | `sample.sqlite` in Electron's per-user application-data directory. |
+| **Hosted Web** | `TLC_WEB_MODE=sample` and `TLC_DATA_STORE=sqlite` before starting the host. | Set `TLC_DATA_STORE_PATH` to a writable file for persistence; without it, the non-demo host uses an in-memory SQLite store. |
+
+For the extension, merge these settings into the workspace's `.vscode/settings.json`:
+
+```json
+{
+  "tlc.mode": "sample",
+  "tlc.dataStore": "sqlite"
+}
+```
+
+Install the current VSIX, then run **Developer: Reload Window**. Stable VS Code and
+VS Code Insiders are separate installations; update and reload whichever editor you use.
+For an F5 development session, choose **Run TLC Assist Extension (SQLite test store)**.
+See the [extension build and install guide](VSCODE-EXTENSION-CLI.md).
+
+For source builds, run `npm run desktop:start:sqlite` or `npm run web:start:sqlite` from
+the repository root. For the portable Desktop demo, run:
+
+```powershell
+& .\docs\demo-launchers\Launch-ReleaseDesktopDemo.ps1
+```
+
+The [portable demo launcher](../demo-launchers/Launch-ReleaseDesktopDemo.ps1) starts both
+Live and Sample windows; use the **Sample** window for creation. It prints the SQLite
+file path and, unless overridden, saves to
+`%LOCALAPPDATA%\TLC MultiAgent Assist\desktop-demo-sample.sqlite`. The installed Desktop
+demo launcher uses that same file. The local Web demo uses a separate
+`web-demo-sample.sqlite` file. `TLC_DATA_STORE_PATH` can explicitly override the store path.
+
+**Desktop, VS Code, and Web sample databases do not synchronize.** Submitted records
+survive restarts when you reopen the same file-backed store. Look in the same surface
+and editor profile where you submitted them.
+
+### Create an Opportunity with child Milestones
+
+1. Open **New > Opportunity**, choose the **Account**, and verify the SQLite save target.
+2. Enter **Opportunity name**, **Opportunity Intent**, **Estimated value**, and
+   **Estimated close date**. Confirm the **Price List**, **Currency**, and **Owner**;
+   defaults come from the selected Account's creation catalog. Add **Need**,
+   **Solution Area**, or **Technical Capability** when useful.
+3. Select **Add Milestone** for each child. Enter **Milestone name**, **Milestone category**,
+   **Milestone estimated date**, and **Workload**. Set the owner, status, commitment,
+   estimated monthly usage, budget approval, and comments as needed. **At Risk** and
+   **Blocked** statuses require **Risk/Blocker details**. Child Milestones inherit the
+   Opportunity's currency.
+4. Select **Validate & review**. Check the Account, save target, Opportunity and child
+   fields, dates, currency, and planned mutation count. Use **Edit** to make corrections,
+   then validate again.
+5. Select **Submit to SQLite** on the review screen. After the success message, select
+   **View in Portfolio** to open the created Opportunity and its Milestones.
+
+For several Opportunities under the same Account, choose **Multiple Opportunities**.
+Use **Add Opportunity** in the form or grid, or **Duplicate Opportunity** in the grid,
+then edit each row and its child Milestones. **Edit details** returns from the grid
+to the complete forms. Review and submit the entire batch together.
+
+### Import multiple Opportunities and Milestones from CSV
+
+The importer uses separate Opportunity and Milestone files, not a combined CSV. Try the
+sanitized Fabrikam Retail example:
+
+- [opportunities.csv](../../tests/fixtures/record-creation/multiple-opportunities-multiple-milestones/opportunities.csv)
+- [milestones.csv](../../tests/fixtures/record-creation/multiple-opportunities-multiple-milestones/milestones.csv)
+
+1. Open **New > Multiple Opportunities** and select **Fabrikam Retail**.
+2. Check that **Save target** is **SQLite sample store**, then choose **Import CSV**.
+3. Select the linked files in **Opportunities CSV** and **Milestones CSV**.
+4. Select **Validate & load CSV**. The imported Opportunities appear in the editable grid;
+   use **Edit details** to inspect their child Milestones. **No records have been saved yet.**
+5. Select **Validate & review** and inspect the complete batch.
+6. Select **Submit to SQLite**, wait for the success message, then **View in Portfolio**.
+
+This sample creates:
+
+| Opportunity | Child Milestones |
+| --- | --- |
+| AI-assisted retail service | Retail service AI pilot; Retail service AI production. |
+| Unified commerce modernization | Commerce target design; Commerce production launch. |
+| Retail cloud security modernization | Cloud security baseline; Cloud security rollout. |
+
+Expected result: **3 Opportunities, 6 Milestones, and 3 creator Deal Team memberships**.
+The review shows **12 planned mutations**.
+
+For your own files:
+
+- Select the Account in the UI; it is not a CSV column.
+- Give each Opportunity a unique `clientOpportunityKey` and each Milestone a unique
+  `clientMilestoneKey`. Each Milestone's `parentOpportunityKey` must match its new parent's
+  `clientOpportunityKey`. These are import correlation keys, not Dataverse record IDs.
+- Use ISO dates (`YYYY-MM-DD`) and plain numbers without currency symbols or thousands
+  separators. Use `|` for multiple Opportunity Intent labels, such as `Billed|Consumption`.
+- Preserve the template headers and use lookup IDs and exact choice labels available in
+  the current catalog. Use standard CSV quoting for cells containing commas.
+- The Milestone CSV is optional for an Opportunity-only batch. For the example above,
+  choose both files to include the children.
+
+The [CSV/JSON fixture reference](../../tests/fixtures/record-creation/README.md) also
+includes a Contoso Energy example with one Opportunity and several child Milestones.
+To import that pair, use **Multiple Opportunities** even though it contains one parent.
+
+### Add Milestones to an existing Opportunity
+
+1. Open **New > Milestone**, select the **Account**, and choose a **Parent Opportunity**
+   from its authorized catalog.
+2. Fill the Milestone form and use **Add Milestone** for more children, or choose **Grid**.
+3. For CSV entry, choose **Import CSV** and select only a Milestone file. Omit the
+   `parentOpportunityKey` column: every imported row uses the selected existing parent.
+   Do not select an Opportunity CSV or use a new-parent correlation key in this flow.
+4. Select **Validate & load CSV** if importing, then **Validate & review > Submit to SQLite**.
+
+The existing parent is not copied or recreated. Its currency is inherited by the new
+Milestones; an unresolved parent currency must be corrected before SQLite submission.
+
+### Validation and save behavior
+
+- Importing or editing only prepares a draft. **Validate & review** also does not write.
+  The explicit **Submit to SQLite** confirmation is the save operation.
+- A batch is all-or-nothing. Validation or submission errors must be corrected; a failed
+  batch is not partially inserted.
+- The limit is **50 mutations per batch**: two per new Opportunity (the Opportunity plus
+  its creator Deal Team membership), plus one per Milestone. For an existing parent,
+  each new Milestone counts as one mutation.
+- If a preview expires or the catalog changes, return to editing and validate again
+  before submitting.
+- **Export draft** downloads draft files only. It never inserts records into SQLite or MSX.
+
+### When Submit to SQLite is missing
+
+| What you see | What to do |
+| --- | --- |
+| Only **Validate & load CSV** on the import screen. | Load the files, then select **Validate & review**. **Submit to SQLite** is on the review screen. |
+| **Export draft**, or **Draft only - MSX creation is disabled**. | Check both Sample mode and the SQLite data-store setting. If available, change **Save target** from **Draft only** to **SQLite sample store** and validate again. |
+| Desktop can submit, but the extension cannot. | Set both extension settings above; the extension does not inherit Desktop's mode or database. Install the current VSIX in the correct editor and run **Developer: Reload Window**. |
+| A warning says SQLite could not open and in-memory fixtures are being used. | Resolve the reported SQLite/runtime or writable-path error. The fallback is draft-only; it has not saved the batch. Older editors without `node:sqlite` need an updated VS Code runtime. |
+| A standalone static Web preview has no save operation. | Use the hosted Web app with its API in Sample + SQLite mode; the static preview cannot save or export drafts. |
+
 ## 2. The workspace at a glance
 
 The workspace is organized into vertical *blades*:
@@ -180,7 +355,17 @@ Select an account either from the left blade or from the large hero cards in the
 
 Select **Add customer** in **Discover opportunities** or in the Accounts/Portfolio header, choose **Account name** or **TPID**, search, and then select **Add account**. The same search dialog is available in Desktop, Web, and the VS Code workbench, including when your account list is empty. Search looks for active customers you can access in MSX, not just customers where you already belong to a Deal Team. A manually added account appears immediately even when it has no Deal Team opportunities.
 
-After adding or unhiding a customer from Discovery, the opportunity list refreshes and customer filters are cleared so the new customer's opportunities are not excluded by an older filter. Choose the relevant Solution Engineer domain to see its matching opportunities. Adding a customer does not grant MSX permissions or automatically join any team. Search and add errors appear inside the dialog; an empty search result is shown only after a successful search. Live TPID search requires the verified account TPID field to be configured by your administrator; name search does not require that setting.
+After adding or restoring a customer from Discovery, the opportunity list refreshes and customer filters are cleared so the new customer's opportunities are not excluded by an older filter. Choose the relevant Solution Engineer domain to see its matching opportunities. Adding a customer does not grant MSX permissions or automatically join any team. Search and add errors appear inside the dialog; an empty search result is shown only after a successful search. Live TPID search verifies the known MSX TPID field automatically; an administrator can override it for another tenant.
+
+**Search source and suggestions:** The dialog identifies **Sample data only** or **Live MSX**.
+Sample/SQLite mode never probes real customers. Live name lookup tries an exact name, a
+substring, then typo-aware indexed suggestions when direct matching finds nothing. A
+**Suggested match** must be verified before adding; an unavailable search index is reported,
+not presented as a successful no-match. Results are limited to 25; refine a broad query.
+A TPID may return several related accounts, so choose the intended account rather than the
+first result. An account already in your Portfolio shows disabled **Already added**.
+Closing a lookup ignores its late response. No search automatically adds an account or joins
+a team. See the [implementation and validation notes](../Account-Discovery-Portfolio-Feasibility.md).
 
 Adding an account does **not** add all of its opportunities to your Portfolio. Open **Discover opportunities**, choose the appropriate Solution Engineer domain, and use **Add me** or **Remove me** to maintain your actual opportunity-level Deal Team memberships. You can also **expand an opportunity in Discovery** (the chevron beside its name) to list its milestones and use the **+ / −** toggle to join a milestone team without joining the Deal Team — joining a milestone brings that opportunity into your Portfolio.
 
@@ -215,17 +400,21 @@ Joining a milestone team brings the parent opportunity into your Portfolio even 
 
 Each milestone can carry **Activities** (Tasks), mirroring the MSX milestone **Activities** tab. On the desktop and web UIs, open the milestone's **Actions** menu and choose **Activities**; in the VS Code webview, select **Activities** beside the milestone. The panel lists existing tasks and offers a **New task** form (Subject, Task Category, Due, Priority, Duration, Description). The task owner defaults to you, and the task is linked to the milestone (its **Regarding** record). In live mode this creates a Task in MSX; in sample mode it is kept in the local sample store.
 
-### 3.2 Hiding and unhiding an account
+### 3.2 Removing and restoring a customer account
 
-Select **Hide** beside an account to exclude that customer and its opportunities, milestones, Plays, agents, and downstream analysis from TLC Assist. Hiding is a TLC preference and does not remove any MSX Deal Team membership.
+Select **Remove customer** beside **Add customer** in the Accounts/Portfolio header or Discovery, choose a tracked customer, and confirm the dialog naming that customer. The desktop Accounts header uses a minus icon. You can also select **Remove** on an account row, or **Remove** for the selected account in the VS Code workbench, to go directly to that customer's confirmation. **Cancel** or Escape before submission leaves everything unchanged; errors are shown explicitly and duplicate submissions are disabled.
 
-Select **Show hidden customers** in the Accounts blade header to display hidden rows, then select **Unhide** to restore an account and its eligible Deal Team opportunities.
+Removal excludes the customer from active Portfolio, Discovery and its customer filters, portfolio search, New account selectors, and future Plays. Selected opportunities, milestones, and guidance are cleared so removed customer details do not remain in the working view. This is a reversible TLC preference for this app/profile, **not deletion from MSX/Dataverse** and **not Remove me**: source records, Deal Team membership, and milestone-team membership are unchanged. Saved Play runs, historical outputs, exported documents, and the official Seller Dashboard are not changed.
 
-Across the desktop, web, and VS Code UIs, action labels and toggle controls such as **Hide**, **Unhide**, sorting, filtering, and **Comments** use the theme's accent/link color (blue in the default themes) to distinguish them from customer and opportunity data. Removal actions such as **Remove me** use red, while disabled controls are muted. Hover and keyboard-focus indicators identify clickable controls without changing their behavior.
+To restore a customer, select **Add customer**, search by name or TPID, then select **Add again**. Its eligible existing opportunities return without rejoining a team. Removed customers are not listed through a Show hidden control in ordinary working views. The last customer can be removed safely; the empty portfolio still offers Add customer.
+
+Desktop, Web, and VS Code provide the same behavior but do not synchronize their tracked portfolios. Existing live and file-backed SQLite visibility preferences survive reload/reopen in the same app/profile; in-memory sample sessions retain their existing reset behavior.
+
+Across the desktop, web, and VS Code UIs, portfolio controls such as **Add customer**, **Remove customer**, sorting, filtering, and **Comments** use the theme's accent/link color (blue in the default themes) to distinguish them from customer and opportunity data. Membership-removal actions such as **Remove me** use red, while disabled controls are muted. Hover and keyboard-focus indicators identify clickable controls.
 
 In the VS Code webview Portfolio, category and section headings — for example **Accounts**, **Opportunities**, **Milestones**, and **Next Best Actions**, plus panel eyebrows such as **ROLE BASED** and **MCEM Coach** — use a distinct teal heading color. This keeps the structural labels visually separate from both the customer/opportunity data (default text) and the blue interactive controls.
 
-In VS Code's native Portfolio toolbar, **TLC: Refresh Data**, **TLC: Add Customer Account**, and **TLC: Toggle Hidden Customers** use blue icons. Inline **Hide/Unhide Customer** actions also use blue eye icons. In this workspace, native hover text uses a high-contrast blue-on-dark palette; TLC webview popups use the same palette with semibold text. VS Code continues to control the native tooltip font, and customer and opportunity tree labels remain data text.
+In VS Code's native Portfolio toolbar, **TLC: Refresh Data**, **TLC: Add Customer Account**, and **TLC: Remove Customer Account** use blue icons. The inline Remove action uses a minus icon. The Remove command is also available from the account context menu and Command Palette; without an account context it asks you to choose a tracked customer first. In this workspace, native hover text uses a high-contrast blue-on-dark palette; TLC webview popups use the same palette with semibold text. VS Code continues to control the native tooltip font, and customer and opportunity tree labels remain data text.
 
 ### 3.3 Filtering and sorting Discovery
 

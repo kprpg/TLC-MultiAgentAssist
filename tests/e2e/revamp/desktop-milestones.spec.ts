@@ -48,9 +48,6 @@ test('adds and removes the signed-in user on a milestone team via the +/- toggle
     try {
         const window = await app.firstWindow()
         await window.setViewportSize({ width: 1400, height: 768 })
-        // Accept the leave-confirmation dialog so the "-" path proceeds.
-        window.on('dialog', (dialog) => void dialog.accept())
-
         const accountsBlade = window.getByRole('region', { name: 'Accounts blade' })
         await accountsBlade.getByRole('button', { name: /Contoso Energy/ }).click()
 
@@ -67,8 +64,14 @@ test('adds and removes the signed-in user on a milestone team via the +/- toggle
 
         // Toggle membership and confirm the independent state flips, then restore it.
         await toggle.click()
+        if (initiallyPressed === 'true') {
+            await window.getByRole('dialog', { name: 'Remove from milestone team' }).getByRole('button', { name: 'Remove membership' }).click()
+        }
         await expect(toggle).toHaveAttribute('aria-pressed', flipped)
         await toggle.click()
+        if (initiallyPressed !== 'true') {
+            await window.getByRole('dialog', { name: 'Remove from milestone team' }).getByRole('button', { name: 'Remove membership' }).click()
+        }
         await expect(toggle).toHaveAttribute('aria-pressed', initiallyPressed ?? 'false')
 
         // The opportunity stays in the portfolio throughout because Deal Team membership is unchanged.
@@ -127,11 +130,13 @@ test('expands a discovered opportunity and joins a milestone team without joinin
         await window.setViewportSize({ width: 1400, height: 900 })
 
         await window.locator('.rail-button[title="Discover opportunities"]').click()
-        // Load a domain that has discoverable opportunities, then expand the first one.
+        // Use an opportunity that is not already on the Deal Team.
         await window.locator('.discover-launcher .scope-switcher button').first().click()
         const discoverTable = window.getByRole('table', { name: 'Discovered opportunities' })
         await expect(discoverTable).toBeVisible()
-        await discoverTable.getByRole('button', { name: /^Show milestones for / }).first().click()
+        const discoveredRow = discoverTable.getByRole('row').filter({ hasText: 'Hybrid networking modernization' })
+        await expect(discoveredRow.getByRole('button', { name: 'Add me' })).toBeVisible()
+        await discoveredRow.getByRole('button', { name: 'Show milestones for Hybrid networking modernization' }).click()
 
         const milestonesRow = window.locator('.discover-milestones-row')
         const toggle = milestonesRow.getByRole('button', { name: /the team for Customer outcome validation/ }).first()
@@ -141,7 +146,6 @@ test('expands a discovered opportunity and joins a milestone team without joinin
         // Joining a milestone team for a never-joined opportunity flips the toggle and does not join the Deal Team.
         await toggle.click()
         await expect(toggle).toHaveAttribute('aria-pressed', 'true')
-        const discoveredRow = discoverTable.getByRole('row').filter({ has: window.locator('.discover-expand[aria-expanded="true"]') })
         await expect(discoveredRow.getByRole('button', { name: 'Add me' })).toBeVisible()
     } finally {
         await app.close().catch(() => undefined)

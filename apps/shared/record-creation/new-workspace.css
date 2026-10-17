@@ -1,0 +1,246 @@
+.new-record-workspace {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 24px;
+    color: var(--cp-text, var(--vscode-foreground));
+    background: var(--cp-bg, var(--vscode-editor-background));
+}
+
+.new-record-content {
+    max-width: 860px;
+    margin: 0 auto;
+}
+
+.new-record-content h1 {
+    margin: 0 0 8px;
+    font-size: 22px;
+}
+
+.new-record-types {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    margin-top: 20px;
+}
+
+.new-record-type {
+    display: grid;
+    gap: 8px;
+    padding: 18px;
+    text-align: left;
+    color: inherit;
+    background: var(--cp-surface, var(--vscode-editorWidget-background));
+    border: 1px solid var(--cp-border, var(--vscode-panel-border));
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.new-record-type:hover,
+.new-record-type.selected {
+    border-color: var(--cp-accent, var(--vscode-focusBorder));
+}
+
+.new-record-type:focus-visible {
+    outline: 2px solid var(--cp-accent, var(--vscode-focusBorder));
+    outline-offset: 2px;
+}
+
+.new-record-type span {
+    color: var(--cp-text-muted, var(--vscode-descriptionForeground));
+}
+
+.new-record-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 12px;
+}
+
+.new-record-context {
+    margin-top: 22px;
+}
+
+.new-record-fields label,
+.new-record-import label,
+.new-record-target-select {
+    display: grid;
+    gap: 5px;
+    color: var(--cp-text, var(--vscode-foreground));
+}
+
+.new-record-fields input,
+.new-record-fields select,
+.new-record-fields textarea,
+.new-record-import input,
+.new-record-target-select select,
+.new-record-grid input,
+.new-record-grid select {
+    box-sizing: border-box;
+    min-width: 0;
+    width: 100%;
+    padding: 6px 8px;
+    color: inherit;
+    background: var(--cp-surface, var(--vscode-input-background));
+    border: 1px solid var(--cp-border, var(--vscode-input-border, var(--vscode-panel-border)));
+    border-radius: 4px;
+}
+
+.new-record-fields select[multiple] {
+    min-height: 64px;
+}
+
+.new-record-fields textarea {
+    min-height: 52px;
+    resize: vertical;
+}
+
+.new-record-wide {
+    grid-column: 1 / -1;
+}
+
+.new-record-row,
+.new-record-review,
+.new-record-import {
+    min-width: 0;
+    margin: 16px 0;
+    padding: 16px;
+    background: var(--cp-surface, var(--vscode-editorWidget-background));
+    border: 1px solid var(--cp-border, var(--vscode-panel-border));
+    border-radius: 6px;
+}
+
+.new-record-row legend {
+    padding: 0 6px;
+    font-weight: 700;
+}
+
+.new-record-row .new-record-row {
+    margin-left: 12px;
+    border-left: 3px solid var(--cp-accent, var(--vscode-focusBorder));
+}
+
+.new-record-actions,
+.new-record-mode {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.new-record-workspace button:not(.new-record-type) {
+    padding: 6px 10px;
+    color: var(--cp-accent, var(--vscode-textLink-foreground));
+    background: var(--cp-surface, var(--vscode-button-secondaryBackground));
+    border: 1px solid var(--cp-border-strong, var(--vscode-panel-border));
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.new-record-workspace button:not(.new-record-type):disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.new-record-workspace button:not(.new-record-type):focus-visible,
+.new-record-fields :is(input, select, textarea):focus-visible {
+    outline: 2px solid var(--cp-accent, var(--vscode-focusBorder));
+    outline-offset: 2px;
+}
+
+.new-record-mode button[aria-pressed="true"] {
+    border-color: var(--cp-accent, var(--vscode-focusBorder));
+    font-weight: 700;
+}
+
+.new-record-target {
+    margin-top: 14px;
+}
+
+.new-record-target-select {
+    max-width: 250px;
+}
+
+.new-record-error {
+    padding: 8px;
+    color: var(--cp-danger, var(--vscode-errorForeground));
+    border: 1px solid currentColor;
+    overflow-wrap: anywhere;
+}
+
+.new-record-remove {
+    margin-top: 8px;
+}
+
+.new-record-review-item {
+    margin-top: 16px;
+    padding-top: 8px;
+    border-top: 1px solid var(--cp-border, var(--vscode-panel-border));
+}
+
+.new-record-review-item h3,
+.new-record-review-item h4 {
+    margin: 8px 0;
+}
+
+.new-record-review-item .new-record-review-item {
+    margin-left: 12px;
+    padding-left: 12px;
+    border-top: 0;
+    border-left: 3px solid var(--cp-accent, var(--vscode-focusBorder));
+}
+
+.new-record-review-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 8px 16px;
+}
+
+.new-record-review-details div {
+    overflow-wrap: anywhere;
+}
+
+.new-record-review-details dt {
+    color: var(--cp-text-muted, var(--vscode-descriptionForeground));
+}
+
+.new-record-review-details dd {
+    margin: 0;
+}
+
+.new-record-grid-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.new-record-grid {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+}
+
+.new-record-grid th,
+.new-record-grid td {
+    padding: 8px;
+    border-bottom: 1px solid var(--cp-border, var(--vscode-panel-border));
+}
+
+.new-record-grid td:last-child button + button {
+    margin-left: 6px;
+}
+
+.new-record-import {
+    display: grid;
+    gap: 12px;
+}
+
+@media (max-width: 600px) {
+    .new-record-workspace {
+        padding: 12px;
+    }
+
+    .new-record-fields,
+    .new-record-types {
+        grid-template-columns: 1fr;
+    }
+}

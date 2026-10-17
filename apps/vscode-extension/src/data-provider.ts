@@ -26,6 +26,13 @@ import {
     type MilestoneUpdate,
     type Opportunity,
     type OpportunityUpdate,
+    type RecordCreationCatalog,
+    type RecordCreationCatalogRequest,
+    type RecordCreationPreview,
+    type RecordCreationPreviewRequest,
+    type RecordCreationCommitRequest,
+    type RecordCreationResult,
+    type RecordCreationDraftResult,
     type ScopeRef,
     type SeDomainId,
     type WorkflowDefinition,
@@ -33,6 +40,8 @@ import {
     type WorkflowRun
 } from '../../../packages/common/index.js'
 import type { TokenCredential } from '@azure/core-auth'
+import { mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 import {
     createSampleWorkflowHost,
     type WorkflowHost,
@@ -41,6 +50,8 @@ import {
 import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
 import { createSellerDashboardHost, type SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 import { LocalStore, LocalStoreMsxConnector } from '../../../packages/connectors/local-store/index.js'
+import { SampleRecordCreationCatalog } from '../../../packages/connectors/local-store/sample-record-creation-catalog.js'
+import { RecordCreationService } from '../../../packages/orchestrator/record-creation/service.js'
 import { ExtensionMcemGuidanceConnector } from './mcem-guidance.js'
 import { buildLiveDataProvider, buildLiveTaskAgents } from './live-provider-core.js'
 import { buildFoundryMeetingExtractor } from './live-provider.js'
@@ -86,6 +97,10 @@ export interface ExtensionDataProvider {
     addAccount(accountId: string): Promise<Account>
     setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
     listOpportunities(accountId: string): Promise<Opportunity[]>
+    getRecordCreationCatalog(request: RecordCreationCatalogRequest): Promise<RecordCreationCatalog>
+    previewRecordCreation(request: RecordCreationPreviewRequest): Promise<RecordCreationPreview>
+    commitRecordCreation(request: RecordCreationCommitRequest): Promise<RecordCreationResult>
+    exportRecordCreationDraft(request: RecordCreationCommitRequest): Promise<RecordCreationDraftResult>
     discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]>
     joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult>
     leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult>
@@ -123,11 +138,18 @@ function opportunityForOrThrow(opportunityId: string): Opportunity {
  * Local SQLite test-store provider (sample/test data). Portfolio, discovery, writes, MCEM
  * evaluation, and agent guidance flow through the shared orchestrator over the relational
  * {@link LocalStoreMsxConnector}; selected when `TLC_DATA_STORE=sqlite` or the `tlc.dataStore`
- * setting is `sqlite`. No network calls are made.
+ * setting is `sqlite`. Pass `storePath` for file-backed records that survive
+ * extension-host restarts; the no-path form remains isolated for tests.
  */
-export function createLocalStoreDataProvider(foundryCredential?: TokenCredential): ExtensionDataProvider {
-    const connector = new LocalStoreMsxConnector(new LocalStore())
-    const orchestrator = new ThinSliceOrchestrator(connector, new ExtensionMcemGuidanceConnector(), buildLiveTaskAgents())
+export function createLocalStoreDataProvider(options: { foundryCredential?: TokenCredential; storePath?: string } = {}): ExtensionDataProvider {
+    const { foundryCredential, storePath } = options
+    if (storePath !== undefined && !storePath.trim()) throw new Error('The SQLite sample store path cannot be blank.')
+    if (storePath) mkdirSync(dirname(storePath), { recursive: true })
+    const store = new LocalStore(storePath ? { path: storePath } : {})
+    const connector = new LocalStoreMsxConnector(store)
+    const writer = connector.createRecordCreationWriter()
+    const creation = new RecordCreationService(connector, writer, { writer })
+    const orchestrator = new ThinSliceOrchestrator(connector, new ExtensionMcemGuidanceConnector(), buildLiveTaskAgents(), undefined, creation)
     const host: WorkflowHost = createSampleWorkflowHost(async () => {
         const accounts = await connector.listAccounts()
         const opportunities = (await Promise.all(accounts.map((candidate) => connector.listOpportunities(candidate.id)))).flat()
@@ -137,7 +159,7 @@ export function createLocalStoreDataProvider(foundryCredential?: TokenCredential
         }
     })
     const meetingExtractor = buildFoundryMeetingExtractor(process.env, foundryCredential)
-    return buildLiveDataProvider({ orchestrator, host, account: 'sample.user@example.com', meetingConnector: connector, ...(meetingExtractor ? { meetingExtractor } : {}), dispose: async () => { /* in-memory store */ } }, 'sample')
+    return buildLiveDataProvider({ orchestrator, host, account: 'sample.user@example.com', meetingConnector: connector, ...(meetingExtractor ? { meetingExtractor } : {}), dispose: async () => { store.close() } }, 'sample')
 }
 
 /**
@@ -146,6 +168,11 @@ export function createLocalStoreDataProvider(foundryCredential?: TokenCredential
  * milestone, and agent data on top.
  */
 export function createSampleDataProvider(): ExtensionDataProvider {
+    const sampleMsx = {
+        listAccounts: async (options?: AccountListOptions) => listSampleAccounts(options),
+        listOpportunities: async (accountId: string) => listSampleOpportunities(accountId)
+    }
+    const creation = new RecordCreationService(sampleMsx, new SampleRecordCreationCatalog(sampleMsx))
     const host: WorkflowHost = createSampleWorkflowHost(async () => {
         const accounts = listSampleAccounts()
         const opportunities = (await Promise.all(accounts.map((candidate) => listSampleOpportunities(candidate.id)))).flat()
@@ -163,6 +190,10 @@ export function createSampleDataProvider(): ExtensionDataProvider {
         addAccount: async (accountId) => addSampleAccount(accountId),
         setAccountVisibility: async (accountId, visibility) => setSampleAccountVisibility(accountId, visibility),
         listOpportunities: async (accountId) => listSampleOpportunities(accountId),
+        getRecordCreationCatalog: (request) => creation.getCatalog(request),
+        previewRecordCreation: (request) => creation.preview(request),
+        commitRecordCreation: (request) => creation.commit(request),
+        exportRecordCreationDraft: (request) => creation.exportDraft(request),
         discoverOpportunities: async (domain) => discoverSampleOpportunities(domain),
         joinDealTeam: async (opportunityId) => joinSampleDealTeam(opportunityId),
         leaveDealTeam: async (opportunityId) => leaveSampleDealTeam(opportunityId),

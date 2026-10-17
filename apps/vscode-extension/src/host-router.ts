@@ -6,6 +6,12 @@ import {
     type ResponseEnvelope
 } from './message-contracts.js'
 import type { ExtensionDataProvider } from './data-provider.js'
+import {
+    recordCreationCatalogSchema,
+    recordCreationPreviewSchema,
+    recordCreationResultSchema,
+    recordCreationDraftResultSchema
+} from '../../../packages/common/index.js'
 
 function extractId(raw: unknown): string {
     if (raw && typeof raw === 'object' && 'id' in raw) {
@@ -62,6 +68,22 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
             case 'listOpportunities': {
                 const params = parseBridgeParams('listOpportunities', parsed.data.params)
                 return successResponse(id, await provider.listOpportunities(params.accountId))
+            }
+            case 'getRecordCreationCatalog': {
+                const params = parseBridgeParams('getRecordCreationCatalog', parsed.data.params)
+                return successResponse(id, recordCreationCatalogSchema.parse(await provider.getRecordCreationCatalog(params)))
+            }
+            case 'previewRecordCreation': {
+                const params = parseBridgeParams('previewRecordCreation', parsed.data.params)
+                return successResponse(id, recordCreationPreviewSchema.parse(await provider.previewRecordCreation(params)))
+            }
+            case 'commitRecordCreation': {
+                const params = parseBridgeParams('commitRecordCreation', parsed.data.params)
+                return successResponse(id, recordCreationResultSchema.parse(await provider.commitRecordCreation(params)))
+            }
+            case 'exportRecordCreationDraft': {
+                const params = parseBridgeParams('exportRecordCreationDraft', parsed.data.params)
+                return successResponse(id, recordCreationDraftResultSchema.parse(await provider.exportRecordCreationDraft(params)))
             }
             case 'discoverOpportunities': {
                 const params = parseBridgeParams('discoverOpportunities', parsed.data.params)

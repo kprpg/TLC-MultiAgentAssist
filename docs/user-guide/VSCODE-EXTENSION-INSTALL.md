@@ -88,7 +88,9 @@ The extension starts in **sample** mode (sanitized fixtures, no network calls).
    acquired, the extension shows an error and stays on sample — check **Output → TLC Assist**.
 
 > **Sample data store:** in sample mode, `tlc.dataStore` selects `fixture` (in-memory) or
-> `sqlite` (a relational SQLite test store whose injected values persist for the session).
+> `sqlite` (a file-backed relational SQLite test store under the extension's
+> storage directory; submitted records survive a VS Code restart). SQLite is
+> separate from the Desktop and Web demo stores. `fixture` remains in-memory.
 
 See the extension [README](../../apps/vscode-extension/README.md) for the full list of
 settings and behaviors.

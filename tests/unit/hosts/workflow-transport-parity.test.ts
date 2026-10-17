@@ -32,7 +32,9 @@ const authenticationHeaders = {
 function runtimeStub(): WebRuntime {
     return {
         listAccounts: vi.fn(), searchAccounts: vi.fn(), addAccount: vi.fn(), setAccountVisibility: vi.fn(),
-        listOpportunities: vi.fn(), listMilestones: vi.fn(), listDiscoverableMilestones: vi.fn(), listMilestoneActivities: vi.fn(), createMilestoneActivity: vi.fn(),
+        listOpportunities: vi.fn(), getRecordCreationCatalog: vi.fn(), previewRecordCreation: vi.fn(),
+        commitRecordCreation: vi.fn(), exportRecordCreationDraft: vi.fn(),
+        listMilestones: vi.fn(), listDiscoverableMilestones: vi.fn(), listMilestoneActivities: vi.fn(), createMilestoneActivity: vi.fn(),
         discoverOpportunities: vi.fn(), joinDealTeam: vi.fn(), leaveDealTeam: vi.fn(),
         joinMilestoneTeam: vi.fn(), leaveMilestoneTeam: vi.fn(),
         updateMilestone: vi.fn(), updateOpportunity: vi.fn(), transitionOpportunityStage: vi.fn(),

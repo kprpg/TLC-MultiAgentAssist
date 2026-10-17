@@ -55,17 +55,12 @@ export class PortfolioNode extends vscode.TreeItem {
 /** Portfolio view: lazy Accounts -> Opportunities navigation. */
 export class PortfolioTreeProvider extends RefreshEmitter implements vscode.TreeDataProvider<PortfolioNode>, Refreshable {
     private readonly opportunityCache = new Map<string, PortfolioNode[]>()
-    private showHidden = false
+    private revision = 0
 
     constructor(private readonly provider: () => ExtensionDataProvider) { super() }
 
-    toggleHidden(): boolean {
-        this.showHidden = !this.showHidden
-        this.refresh()
-        return this.showHidden
-    }
-
     override refresh(): void {
+        this.revision++
         this.opportunityCache.clear()
         super.refresh()
     }
@@ -74,8 +69,11 @@ export class PortfolioTreeProvider extends RefreshEmitter implements vscode.Tree
 
     async getChildren(element?: PortfolioNode): Promise<PortfolioNode[]> {
         const provider = this.provider()
+        const revision = this.revision
         if (!element) {
-            const accounts = await provider.listAccounts({ includeHidden: this.showHidden })
+            const accounts = (await provider.listAccounts()).filter((account) => account.visibility !== 'hidden')
+            if (revision !== this.revision) return this.getChildren()
+            if (accounts.length === 0) return [new PortfolioNode('empty', 'empty-portfolio', 'No customer accounts - use Add customer', vscode.TreeItemCollapsibleState.None)]
             return accounts.map((account) => new PortfolioNode(
                 'account',
                 account.id,
@@ -90,6 +88,7 @@ export class PortfolioTreeProvider extends RefreshEmitter implements vscode.Tree
             const cached = this.opportunityCache.get(element.recordId)
             if (cached) return cached
             const opportunities = await provider.listOpportunities(element.recordId)
+            if (revision !== this.revision) return this.getChildren(element)
             const nodes = opportunities.map((opportunity) => new PortfolioNode('opportunity', opportunity.id, opportunity.name, vscode.TreeItemCollapsibleState.None, element.recordId))
             if (nodes.length === 0) {
                 nodes.push(new PortfolioNode('empty', `${element.recordId}:empty`, 'No Deal Team opportunities - use Discovery', vscode.TreeItemCollapsibleState.None, element.recordId))

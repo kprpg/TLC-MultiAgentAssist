@@ -10,6 +10,7 @@ import {
   JsonFilePortfolioPreferenceStore,
   MemoryPortfolioPreferenceStore
 } from '../../packages/connectors/common/index.js'
+import { LocalStore, LocalStoreMsxConnector } from '../../packages/connectors/local-store/index.js'
 
 const temporaryDirectories: string[] = []
 
@@ -30,7 +31,11 @@ describe('portfolio account curation', () => {
       let body: unknown
       if (url.pathname.endsWith('/WhoAmI')) body = { UserId: 'user-with-no-memberships' }
       else if (url.pathname.endsWith('/msp_dealteams')) body = { value: [] }
-      else if (url.pathname.endsWith('/accounts')) body = { value: [{ accountid: accountId, name: 'Northwind Health' }] }
+      else if (url.pathname.endsWith('/accounts')) body = {
+        value: url.searchParams.get('$filter') === "statecode eq 0 and name eq 'Northwind'"
+          ? []
+          : [{ accountid: accountId, name: 'Northwind Health' }]
+      }
       else if (url.pathname.endsWith('/opportunities')) {
         expect(url.searchParams.get('$filter')).toContain(`_parentaccountid_value eq ${accountId}`)
         body = { value: [{ opportunityid: opportunityId, _parentaccountid_value: accountId, name: 'Clinical data platform modernization' }] }
@@ -58,6 +63,19 @@ describe('portfolio account curation', () => {
       expect.objectContaining({ id: opportunityId, accountId, accountName: 'Northwind Health', onDealTeam: false })
     ])
     await expect(reloaded.listOpportunities(accountId)).resolves.toEqual([])
+
+    await reloaded.setAccountVisibility(accountId, 'hidden')
+    const removedReload = new LiveMsxConnector({ getAccessToken: async () => 'test-token' }, request, undefined, undefined, {}, store)
+    await expect(removedReload.listAccounts()).resolves.toEqual([])
+    await expect(removedReload.discoverOpportunities('data')).resolves.toEqual([])
+    await expect(removedReload.searchAccounts({ query: 'Northwind', matchBy: 'name' })).resolves.toEqual([
+      expect.objectContaining({ id: accountId, state: 'hidden' })
+    ])
+    await removedReload.setAccountVisibility(accountId, 'visible')
+    await expect(removedReload.listAccounts()).resolves.toEqual([
+      expect.objectContaining({ id: accountId, provenance: 'manual', visibility: 'visible' })
+    ])
+    await expect(removedReload.listOpportunities(accountId)).resolves.toEqual([])
   })
 
   it('keeps a manually added account as an empty tree node until Deal Team membership changes', async () => {
@@ -122,6 +140,32 @@ describe('portfolio account curation', () => {
     await connector.setAccountVisibility('account-contoso', 'visible')
     expect((await connector.listAccounts()).map((account) => account.id)).toContain('account-contoso')
     await expect(connector.listOpportunities('account-contoso')).resolves.toEqual(before)
+  })
+
+  it('persists SQLite removal across reopen without deleting the account or its memberships', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'tlc-removal-store-'))
+    temporaryDirectories.push(directory)
+    const path = join(directory, 'portfolio.sqlite')
+    let store = new LocalStore({ path })
+    try {
+      const connector = new LocalStoreMsxConnector(store)
+      const before = await connector.listOpportunities('account-contoso')
+      const dealTeams = store.get('SELECT COUNT(*) AS count FROM opportunity_dealteam')?.['count']
+      const milestoneTeams = store.get('SELECT COUNT(*) AS count FROM milestone_team_member')?.['count']
+      await connector.setAccountVisibility('account-contoso', 'hidden')
+      store.close()
+      store = new LocalStore({ path })
+      const reloaded = new LocalStoreMsxConnector(store)
+      expect((await reloaded.listAccounts()).some((account) => account.id === 'account-contoso')).toBe(false)
+      await expect(reloaded.listOpportunities('account-contoso')).resolves.toEqual([])
+      expect(store.get('SELECT name FROM account WHERE id = ?', 'account-contoso')?.['name']).toBe('Contoso Energy')
+      expect(store.get('SELECT COUNT(*) AS count FROM opportunity_dealteam')?.['count']).toBe(dealTeams)
+      expect(store.get('SELECT COUNT(*) AS count FROM milestone_team_member')?.['count']).toBe(milestoneTeams)
+      await reloaded.setAccountVisibility('account-contoso', 'visible')
+      await expect(reloaded.listOpportunities('account-contoso')).resolves.toEqual(before)
+    } finally {
+      store.close()
+    }
   })
 })
 

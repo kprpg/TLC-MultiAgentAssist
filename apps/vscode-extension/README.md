@@ -12,19 +12,20 @@ host.
 - **Activity Bar** container with Connection, Portfolio, and Plays views.
 - **Workbench** webview (editor area) for portfolio work, MCEM stage review, four agent
   capabilities, and deterministic plays.
-- **Account curation**: add a customer by name or TPID, show or hide customer nodes, and
-  keep empty manually added accounts available for Discovery.
+- **Account curation**: add a customer by name or TPID, remove a tracked customer with
+  named confirmation beside Add customer or from the selected account, and restore it
+  through Add customer > Add again. Empty manually added accounts remain available for Discovery.
 - **Discovery**: review all active opportunities for visible accounts by Solution
   Engineer domain and use **Add me** or **Remove me** for the real Deal Team membership.
   Azure-portal-style customer filter chips support inclusion and exclusion with
   searchable multi-select choices. Select **Account**, **Stage**, or **Action** to
   toggle ascending/descending sorting, just as in the desktop and web apps. These
   filters affect only the Discovery view, not account visibility or membership.
-- **Action styling**: Hide/Unhide, Show hidden, Comments, sorting, and filter controls
+- **Action styling**: Add/Remove customer, Comments, sorting, and filter controls
   use the theme's accent/link color; customer and opportunity names remain data text.
   Removal actions retain their warning color and disabled controls remain muted.
-  The native **TLC: Refresh Data**, **TLC: Add Customer Account**, and **TLC: Toggle
-  Hidden Customers** toolbar commands, plus inline **Hide/Unhide Customer** actions,
+  The native **TLC: Refresh Data**, **TLC: Add Customer Account**, and **TLC: Remove
+  Customer Account** toolbar commands, plus the inline **Remove Customer Account** action,
   use blue light/dark SVG icons. This workspace gives native hover widgets a
   high-contrast blue-on-dark palette, and TLC webview popups reuse that palette with
   semibold text. VS Code continues to own the native tooltip font.
@@ -35,8 +36,12 @@ Visible active opportunities where the signed-in user is a current Deal Team mem
 or belongs to a milestone team enter Portfolio, milestones, agents, and Plays.
 Discovery's **On deal team** label uses only actual Deal Team membership; a milestone-only
 opportunity offers **Add me** even though it remains in Portfolio. Adding an account
-alone never expands that downstream working set. Hide/Unhide is a TLC-only preference
-and does not change MSX Deal Team membership.
+alone never expands that downstream working set. Remove customer is a reversible
+TLC-only preference: it clears the account from active Portfolio, Discovery, search,
+New selectors, and future Plays, without deleting source records or changing Deal
+Team or milestone-team membership. Saved runs and the official Seller Dashboard are
+unchanged. Preferences stay local to the current app/profile rather than syncing
+between Desktop, Web, and VS Code. Native tree and workbench views refresh together.
 
 In live mode, configure `TLC_MSX_ACCOUNT_TPID_FIELD` with the tenant-verified logical
 field name to enable TPID search. Name search remains available without it. Account

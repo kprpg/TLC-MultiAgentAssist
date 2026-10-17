@@ -44,6 +44,7 @@ import {
 } from '../../agents/meeting-signal-extractor/src/index.js'
 import { randomUUID } from 'node:crypto'
 import { LocalStore } from './local-store.js'
+import { LocalStoreRecordCreation } from './record-creation.js'
 import {
   ACTIVITY_STATUS,
   BUDGET_STATUS,
@@ -147,6 +148,10 @@ export class LocalStoreMsxConnector implements MsxConnector {
     private readonly currentUserId: string = SAMPLE_USER_ID
   ) {}
 
+  createRecordCreationWriter(): LocalStoreRecordCreation {
+    return new LocalStoreRecordCreation(this.store, this.currentUserId)
+  }
+
   private ownerName(ownerId: unknown): string | undefined {
     const id = str(ownerId)
     if (!id) return undefined
@@ -188,6 +193,11 @@ export class LocalStoreMsxConnector implements MsxConnector {
   private toOpportunity(row: Record<string, unknown>): Opportunity {
     const owner = this.ownerName(row['owner_id'])
     const comments = str(row['description'])
+    const intentCodes = str(row['opportunity_intent_codes'])?.split(',') ?? []
+    const intent = intentCodes.map((code) => str(this.store.get(
+      'SELECT label FROM option_value WHERE option_set = ? AND code = ?',
+      'msp_opportunitytype', Number(code)
+    )?.['label'])).filter((value): value is string => value !== undefined)
     return opportunitySchema.parse({
       id: String(row['id']),
       accountId: String(row['account_id']),
@@ -196,6 +206,7 @@ export class LocalStoreMsxConnector implements MsxConnector {
       value: num(row['estimated_value']) ?? 0,
       currency: str(row['currency']) ?? 'USD',
       closeDate: String(row['estimated_close_date']),
+      ...(intent.length ? { opportunityIntent: intent } : {}),
       ...(owner ? { owner } : {}),
       ...(comments ? { comments } : {})
     })

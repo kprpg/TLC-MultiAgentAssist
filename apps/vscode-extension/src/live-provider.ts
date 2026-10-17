@@ -11,6 +11,7 @@ import mcpToolPolicyJson from '../../../config/mcp.tool-policy.json' with { type
 import dataverseEntityMapJson from '../../../config/dataverse.entity-map.json' with { type: 'json' }
 import foundryEnvironmentJson from '../../../config/foundry.environment.json' with { type: 'json' }
 import { LiveMsxConnector, LiveMeetingCaptureConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
+import { RecordCreationService } from '../../../packages/orchestrator/record-creation/service.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../packages/connectors/foundry/index.js'
 import { createFoundryMeetingExtractor } from '../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
@@ -92,7 +93,7 @@ export function createLiveDataProvider(
         ? new LiveMsxConnector({ getAccessToken: getToken }, fetch, undefined, undefined, metadata, new JsonFilePortfolioPreferenceStore(preferenceFilePath))
         : new LiveMsxConnector({ getAccessToken: getToken }, fetch, undefined, undefined, metadata)
     const taskAgents = (useFoundryAgents ? buildFoundryTaskAgents(foundryCredential) : undefined) ?? buildLiveTaskAgents()
-    const orchestrator = new ThinSliceOrchestrator(msx, new ExtensionMcemGuidanceConnector(), taskAgents)
+    const orchestrator = new ThinSliceOrchestrator(msx, new ExtensionMcemGuidanceConnector(), taskAgents, undefined, new RecordCreationService(msx, msx))
     const meetingConnector = new LiveMeetingCaptureConnector(msx)
     const meetingExtractor = buildFoundryMeetingExtractor(process.env, foundryCredential)
 

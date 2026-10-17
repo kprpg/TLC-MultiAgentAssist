@@ -88,6 +88,15 @@
         }
       },
       {
+        "command": "tlc.removeCustomer",
+        "title": "TLC: Remove Customer Account",
+        "category": "TLC Assist",
+        "icon": {
+          "light": "media/actions/remove-light.svg",
+          "dark": "media/actions/remove-dark.svg"
+        }
+      },
+      {
         "command": "tlc.toggleHiddenCustomers",
         "title": "TLC: Toggle Hidden Customers",
         "category": "TLC Assist",
@@ -158,22 +167,22 @@
           "group": "navigation@1"
         },
         {
-          "command": "tlc.toggleHiddenCustomers",
+          "command": "tlc.removeCustomer",
           "when": "view == tlcPortfolio",
           "group": "navigation@2"
         }
       ],
       "view/item/context": [
         {
-          "command": "tlc.hideCustomer",
+          "command": "tlc.removeCustomer",
           "when": "view == tlcPortfolio && viewItem == accountVisible",
           "group": "inline"
-        },
-        {
-          "command": "tlc.unhideCustomer",
-          "when": "view == tlcPortfolio && viewItem == accountHidden",
-          "group": "inline"
         }
+      ],
+      "commandPalette": [
+        { "command": "tlc.hideCustomer", "when": "false" },
+        { "command": "tlc.unhideCustomer", "when": "false" },
+        { "command": "tlc.toggleHiddenCustomers", "when": "false" }
       ]
     },
     "configuration": {
@@ -195,7 +204,7 @@
             "sqlite"
           ],
           "default": "fixture",
-          "markdownDescription": "In `sample` mode, the data source. `fixture` uses the in-memory sample data. `sqlite` uses the relational SQLite test store (accounts, opportunities, milestones, stakeholders, meetings/transcripts) whose injected values persist for the session. No effect in `live` mode."
+          "markdownDescription": "In `sample` mode, the data source. `fixture` uses the in-memory sample data. `sqlite` uses a file-backed SQLite test store in the extension's local storage, so submitted Opportunities, Milestones, and other sample changes survive VS Code restarts. No effect in `live` mode; live Opportunity/Milestone creation remains disabled."
         },
         "tlc.meetingExtractor": {
           "type": "string",

@@ -6,7 +6,7 @@ interface BridgeRequest {
     kind: string
     id: string
     method: string
-    params?: { accountId?: string; opportunityId?: string; url?: string }
+    params?: { accountId?: string; opportunityId?: string; url?: string; draft?: unknown; preview?: unknown }
 }
 
 declare global {
@@ -36,12 +36,39 @@ const opportunities: OpportunityView[] = [
     { id: 'hidden-one', accountId: 'hidden', name: 'Hidden project', opportunityIntent: ['Billed'], recordedStage: 1, value: 400, currency: 'USD', closeDate: '2026-12-04' }
 ]
 
+const creationCatalog = {
+    contractVersion: '1.2',
+    target: 'draft',
+    revision: 'catalog-1',
+    account: { id: 'alpha', label: 'Alpha Corp' },
+    opportunities: [{ id: 'alpha-one', label: 'Alpha analysis', currency: { id: 'eur', label: 'Euro', isoCode: 'EUR' } }],
+    priceLists: [{ id: 'price-1', label: 'Standard price' }],
+    currencies: [{ id: 'usd', label: 'US Dollar', isoCode: 'USD' }, { id: 'eur', label: 'Euro', isoCode: 'EUR' }],
+    workloads: [{ id: 'workload-1', label: 'Cloud Scale Analytics' }],
+    owners: [{ id: 'user-1', label: 'Sample seller' }],
+    defaults: {
+        owner: { id: 'user-1', label: 'Sample seller' },
+        priceList: { id: 'price-1', label: 'Standard price' },
+        currency: { id: 'usd', label: 'US Dollar', isoCode: 'USD' }
+    },
+    choices: {
+        intent: [{ value: 606820000, label: 'Billed' }, { value: 606820001, label: 'Consumption' }],
+        category: [{ value: 861980000, label: 'POC/Pilot' }],
+        status: [{ value: 861980000, label: 'On Track' }],
+        commitment: [{ value: 861980000, label: 'Uncommitted' }],
+        customerBudgetApproved: [{ value: 606820000, label: 'Yes' }],
+        solutionArea: [{ value: 394380000, label: 'Cloud and AI Platforms' }],
+        technicalCapability: [{ value: 861980077, label: 'Cloud Scale Analytics' }]
+    },
+    maxMutations: 50
+}
+
 async function mountWebview(page: Page): Promise<void> {
     await page.route('**/', (route) => route.fulfill({
         contentType: 'text/html',
         body: '<!doctype html><html><head><style>:root{--vscode-editor-background:#fff;--vscode-foreground:#333;--vscode-font-family:"Segoe UI",sans-serif;--vscode-textLink-foreground:#006ab1;--vscode-panel-border:#d1d1d1}</style></head><body><div id="root" data-mode="sample"></div></body></html>'
     }))
-    await page.addInitScript(({ accounts, opportunities }) => {
+    await page.addInitScript(({ accounts, opportunities, creationCatalog }) => {
         const reply = (id: string, result: unknown) => window.postMessage({ kind: 'response', id, ok: true, result }, window.location.origin)
         window.portfolioTest = {
             accounts, requests: [], delayed: [], delayCoach: false, failAccounts: false, rejectEvidence: false,
@@ -68,6 +95,52 @@ async function mountWebview(page: Page): Promise<void> {
                     if (message.method === 'getCurrentUserEmail') result = 'sample@example.test'
                     else if (message.method === 'listAccounts') result = state.accounts
                     else if (message.method === 'listOpportunities') result = opportunities.filter((item) => item.accountId === message.params?.accountId)
+                    else if (message.method === 'getRecordCreationCatalog') result = creationCatalog
+                    else if (message.method === 'previewRecordCreation') {
+                        const draft = message.params?.draft as {
+                            kind: string
+                            opportunities?: Array<{ milestones: unknown[] }>
+                            milestones?: unknown[]
+                        }
+                        result = {
+                            contractVersion: '1.2',
+                            batchId: 'batch-vscode',
+                            digest: 'a'.repeat(64),
+                            target: 'draft',
+                            catalogRevision: creationCatalog.revision,
+                            normalizedDraft: draft,
+                            mutationCount: draft.kind === 'opportunity-batch'
+                                ? (draft.opportunities ?? []).reduce((total, item) => total + 2 + item.milestones.length, 0)
+                                : (draft.milestones ?? []).length,
+                            warnings: ['Draft only.'],
+                            expiresAt: '2027-12-31T00:00:00.000Z'
+                        }
+                    }
+                    else if (message.method === 'exportRecordCreationDraft') {
+                        const preview = message.params?.preview as {
+                            normalizedDraft: { kind: string; opportunities?: Array<{ milestones: unknown[] }>; milestones?: unknown[] }
+                        }
+                        const input = preview.normalizedDraft
+                        result = {
+                            contractVersion: '1.2',
+                            result: {
+                                contractVersion: '1.2',
+                                batchId: 'batch-vscode',
+                                target: 'draft',
+                                state: 'drafted',
+                                created: [],
+                                audit: {
+                                    correlationId: 'batch-vscode',
+                                    opportunityCount: input.kind === 'opportunity-batch' ? input.opportunities?.length ?? 0 : 0,
+                                    milestoneCount: input.kind === 'opportunity-batch'
+                                        ? input.opportunities?.reduce((total, item) => total + item.milestones.length, 0) ?? 0
+                                        : input.milestones?.length ?? 0
+                                },
+                                message: 'Draft created. No Opportunity or Milestone was written to MSX.'
+                            },
+                            files: [{ name: 'creation-manifest.json', content: '{}', mimeType: 'application/json' }]
+                        }
+                    }
                     else if (['listMilestones', 'discoverOpportunities', 'listWorkflowDefinitions', 'listWorkflowRuns'].includes(message.method)) result = []
                     else if (message.method === 'openEvidence') result = null
                     else if (message.method === 'runMcemCoach') {
@@ -97,12 +170,183 @@ async function mountWebview(page: Page): Promise<void> {
                 }
             })
         })
-    }, { accounts, opportunities })
+    }, { accounts, opportunities, creationCatalog })
     await page.goto('/')
     await page.addStyleTag({ path: resolve('apps', 'vscode-extension', 'dist', 'webview', 'webview.css') })
     await page.addScriptTag({ path: resolve('apps', 'vscode-extension', 'dist', 'webview', 'webview.js') })
     await expect(page.locator('#portfolio-details-panel').getByRole('heading', { name: 'Alpha analysis', exact: true })).toBeVisible()
 }
+
+test('opens a dedicated New pane before Discover in the VS Code webview', async ({ page }) => {
+    await mountWebview(page)
+    await expect(page.locator('.app-header .tabs button')).toHaveText(['New', 'Discover', 'Portfolio', 'Plays', 'Dashboards'])
+
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    const pane = page.getByRole('region', { name: 'New record creation' })
+    await expect(pane).toBeVisible()
+    await expect(pane.getByRole('button', { name: 'Opportunity', exact: true })).toBeVisible()
+    await expect(pane.getByRole('button', { name: 'Multiple Opportunities' })).toBeVisible()
+    await expect(pane.getByRole('button', { name: 'Milestone', exact: true })).toBeVisible()
+    const tabs = await page.locator('.app-header .tabs').boundingBox()
+    const content = await pane.boundingBox()
+    expect(content!.y).toBeGreaterThan(tabs!.y + tabs!.height)
+    await expect(page.locator('#portfolio-details-panel')).toHaveCount(0)
+})
+
+test('previews and exports a reviewed Opportunity draft in the VS Code New pane', async ({ page }) => {
+    await mountWebview(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    const pane = page.getByRole('region', { name: 'New record creation' })
+    await pane.getByRole('button', { name: 'Opportunity', exact: true }).click()
+    await pane.getByRole('combobox', { name: 'Account' }).selectOption('alpha')
+    await expect(pane.getByText('Draft only', { exact: false })).toBeVisible()
+    await expect(pane.getByRole('button', { name: 'Validate & review' })).toBeVisible()
+    await expect(pane.getByRole('button', { name: 'Submit to SQLite' })).toHaveCount(0)
+    await pane.getByRole('button', { name: 'Validate & review', exact: true }).click()
+    await expect(pane.getByLabel('Opportunity name')).toBeFocused()
+    await expect(pane.getByRole('alert').getByRole('link', { name: 'Opportunity name' })).toBeVisible()
+    await pane.getByLabel('Opportunity name').fill('Synthetic webview opportunity')
+    await pane.getByRole('listbox', { name: 'Opportunity Intent' }).selectOption('606820001')
+    await pane.getByLabel('Estimated value').fill('125000')
+    await pane.getByLabel('Estimated close date').fill('2027-05-31')
+    await pane.getByLabel('Need', { exact: true }).fill('Synthetic customer need')
+    await pane.getByRole('button', { name: 'Validate & review', exact: true }).click()
+    await expect(pane.getByRole('heading', { name: 'Review record creation' })).toBeVisible()
+    await expect(pane.locator('.new-record-review')).toHaveAttribute('aria-live', 'polite')
+    await expect(pane.getByText('Standard price')).toBeVisible()
+    await expect(pane.getByText('US Dollar (USD)')).toBeVisible()
+    await expect(pane.getByText('Synthetic customer need')).toBeVisible()
+    await expect(pane.getByText('2027-05-31')).toBeVisible()
+    await pane.getByRole('button', { name: 'Edit' }).click()
+    await expect(pane.getByRole('button', { name: 'Validate & review', exact: true })).toBeFocused()
+    await pane.getByRole('button', { name: 'Validate & review', exact: true }).click()
+    await pane.getByRole('button', { name: 'Export draft' }).click()
+    await expect(pane.getByRole('status')).toContainText('No Opportunity or Milestone was written to MSX.')
+    expect(await page.evaluate(() => window.portfolioTest.requests.some((request) => request.method === 'commitRecordCreation'))).toBe(false)
+})
+
+test('keeps an existing Opportunity fixed while drafting a child Milestone in VS Code', async ({ page }) => {
+    await mountWebview(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    const pane = page.getByRole('region', { name: 'New record creation' })
+    await pane.getByRole('button', { name: 'Milestone', exact: true }).click()
+    await pane.getByRole('combobox', { name: 'Account' }).selectOption('alpha')
+    await pane.getByRole('combobox', { name: 'Parent Opportunity' }).selectOption('alpha-one')
+    await pane.getByLabel('Milestone name').fill('Synthetic adoption milestone')
+    await pane.getByLabel('Milestone category').selectOption('861980000')
+    await pane.getByLabel('Milestone estimated date').fill('2027-02-15')
+    await pane.getByLabel('Workload').selectOption('workload-1')
+    await pane.getByRole('button', { name: 'Validate & review', exact: true }).click()
+    await expect(pane).toContainText('1 planned mutation')
+    await expect(pane).toContainText('Alpha analysis')
+    await expect(pane.getByRole('region', { name: 'Milestone Synthetic adoption milestone' }).getByText('Euro (EUR)')).toBeVisible()
+    await pane.getByRole('button', { name: 'Export draft' }).click()
+    await expect(pane.getByRole('status')).toContainText('No Opportunity or Milestone was written to MSX.')
+    const previewRequest = await page.evaluate(() => window.portfolioTest.requests.find((request) => request.method === 'previewRecordCreation'))
+    expect(previewRequest?.params?.draft).toMatchObject({
+        kind: 'existing-opportunity-milestone-batch',
+        opportunity: { id: 'alpha-one' },
+        milestones: [{ name: 'Synthetic adoption milestone' }]
+    })
+})
+
+test('imports existing-parent Milestones as a no-write draft in VS Code', async ({ page }) => {
+    await mountWebview(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    const pane = page.getByRole('region', { name: 'New record creation' })
+    await pane.getByRole('button', { name: 'Milestone', exact: true }).click()
+    await pane.getByRole('combobox', { name: 'Account' }).selectOption('alpha')
+    await pane.getByRole('combobox', { name: 'Parent Opportunity' }).selectOption('alpha-one')
+    await pane.getByRole('group', { name: 'Entry mode' }).getByRole('button', { name: 'Import CSV' }).click()
+    await expect(pane.getByText('All rows use the selected parent.', { exact: false })).toBeVisible()
+    await pane.locator('.new-record-import input[type="file"]').setInputFiles({
+        name: 'milestones.csv',
+        mimeType: 'text/csv',
+        buffer: Buffer.from('clientMilestoneKey,name,milestoneCategory,milestoneDate,workloadId\nms-webview-csv,Webview CSV pilot,POC/Pilot,2027-02-15,workload-1\n')
+    })
+    await pane.getByRole('button', { name: 'Validate & load CSV' }).click()
+    await expect(pane.getByLabel('Milestone name')).toHaveValue('Webview CSV pilot')
+    await pane.getByRole('button', { name: 'Validate & review' }).click()
+    await pane.getByRole('button', { name: 'Export draft' }).click()
+    await expect(pane.getByRole('status')).toContainText('No Opportunity or Milestone was written to MSX.')
+    const requests = await page.evaluate(() => window.portfolioTest.requests)
+    expect(requests.find((item) => item.method === 'previewRecordCreation')?.params?.draft).toMatchObject({
+        kind: 'existing-opportunity-milestone-batch',
+        opportunity: { id: 'alpha-one' },
+        milestones: [{ name: 'Webview CSV pilot' }]
+    })
+    expect(requests.some((item) => item.method === 'commitRecordCreation')).toBe(false)
+})
+
+test('previews an existing-parent Milestone grid without losing Form details in VS Code', async ({ page }) => {
+    await mountWebview(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    const pane = page.getByRole('region', { name: 'New record creation' })
+    await pane.getByRole('button', { name: 'Milestone', exact: true }).click()
+    await pane.getByRole('combobox', { name: 'Account' }).selectOption('alpha')
+    await pane.getByRole('combobox', { name: 'Parent Opportunity' }).selectOption('alpha-one')
+    await pane.getByLabel('Milestone name').fill('Webview grid pilot')
+    await pane.getByLabel('Milestone category').selectOption('861980000')
+    await pane.getByLabel('Milestone estimated date').fill('2027-02-15')
+    await pane.getByLabel('Workload').selectOption('workload-1')
+    await pane.getByLabel('Milestone comments').fill('Webview optional detail')
+    await pane.getByRole('group', { name: 'Entry mode' }).getByRole('button', { name: 'Grid' }).click()
+    const grid = pane.getByRole('table', { name: 'Milestone entry grid' })
+    await pane.getByRole('button', { name: 'Add Milestone' }).click()
+    await grid.getByRole('row').nth(2).getByLabel('Milestone name').fill('Webview grid rollout')
+    await grid.getByRole('row').nth(2).getByLabel('Milestone category').selectOption('861980000')
+    await grid.getByRole('row').nth(2).getByLabel('Milestone estimated date').fill('2027-04-15')
+    await grid.getByRole('row').nth(2).getByLabel('Workload').selectOption('workload-1')
+    await pane.getByRole('group', { name: 'Entry mode' }).getByRole('button', { name: 'Form' }).click()
+    await expect(pane.getByLabel('Milestone comments').first()).toHaveValue('Webview optional detail')
+    await pane.getByRole('button', { name: 'Validate & review', exact: true }).click()
+    await expect(pane).toContainText('2 planned mutations')
+    await pane.getByRole('button', { name: 'Export draft' }).click()
+    await expect(pane).toContainText('0 Opportunities, 2 Milestones')
+})
+
+test('keeps multiple Opportunity edits and child Milestones when switching Form and Grid in VS Code', async ({ page }) => {
+    await mountWebview(page)
+    await page.getByRole('button', { name: 'New', exact: true }).click()
+    const pane = page.getByRole('region', { name: 'New record creation' })
+    await pane.getByRole('button', { name: 'Multiple Opportunities' }).click()
+    await pane.getByRole('combobox', { name: 'Account' }).selectOption('alpha')
+    await expect(pane.getByText('Draft only - MSX creation is disabled')).toBeVisible()
+    await pane.getByLabel('Opportunity name').first().fill('Sample analytics expansion')
+    await pane.getByRole('listbox', { name: 'Opportunity Intent' }).first().selectOption('606820001')
+    await pane.getByLabel('Estimated value').first().fill('100000')
+    await pane.getByLabel('Estimated close date').first().fill('2027-03-31')
+    await pane.getByRole('button', { name: 'Add another Opportunity' }).click()
+    await pane.getByLabel('Opportunity name').nth(1).fill('Sample billed project')
+    await pane.getByRole('listbox', { name: 'Opportunity Intent' }).nth(1).selectOption('606820000')
+    await pane.getByLabel('Estimated value').nth(1).fill('250000')
+    await pane.getByLabel('Estimated close date').nth(1).fill('2027-05-31')
+    const secondOpportunity = pane.locator('.new-record-content > fieldset.new-record-row').nth(1)
+    await secondOpportunity.getByRole('button', { name: 'Add Milestone' }).click()
+    await secondOpportunity.getByLabel('Milestone name').fill('Sample pilot')
+    await secondOpportunity.getByLabel('Milestone category').selectOption('861980000')
+    await secondOpportunity.getByLabel('Milestone estimated date').fill('2027-04-15')
+    await secondOpportunity.getByLabel('Workload').selectOption('workload-1')
+    await pane.getByRole('group', { name: 'Entry mode' }).getByRole('button', { name: 'Grid' }).click()
+    await expect(pane.locator('.new-record-grid tbody tr')).toHaveCount(2)
+    const grid = pane.locator('.new-record-grid')
+    await grid.getByRole('row').nth(2).getByRole('button', { name: 'Duplicate Opportunity' }).click()
+    await expect(grid.locator('tbody tr')).toHaveCount(3)
+    await pane.getByRole('group', { name: 'Entry mode' }).getByRole('button', { name: 'Form' }).click()
+    await expect(pane.locator('.new-record-content > fieldset.new-record-row').nth(2).getByLabel('Milestone name')).toHaveValue('Sample pilot')
+    await pane.getByRole('group', { name: 'Entry mode' }).getByRole('button', { name: 'Grid' }).click()
+    await grid.getByRole('row').nth(3).getByRole('button', { name: 'Remove Opportunity' }).click()
+    await expect(grid.locator('tbody tr')).toHaveCount(2)
+    await pane.getByRole('group', { name: 'Entry mode' }).getByRole('button', { name: 'Form' }).click()
+    await expect(pane.getByLabel('Opportunity name').nth(1)).toHaveValue('Sample billed project')
+    await pane.getByRole('group', { name: 'Entry mode' }).getByRole('button', { name: 'Import CSV' }).click()
+    await expect(pane.getByRole('button', { name: 'Validate & review', exact: true })).toBeDisabled()
+    await pane.getByRole('group', { name: 'Entry mode' }).getByRole('button', { name: 'Form' }).click()
+    await pane.getByRole('button', { name: 'Validate & review', exact: true }).click()
+    await expect(pane).toContainText('5 planned mutations')
+    await pane.getByRole('button', { name: 'Export draft' }).click()
+    await expect(pane).toContainText('2 Opportunities, 1 Milestones')
+})
 
 test('searches across the portfolio from other tabs, restores panels, and supports keyboard selection', async ({ page }) => {
     const errors: Error[] = []

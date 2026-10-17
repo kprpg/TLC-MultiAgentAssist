@@ -25,9 +25,12 @@ import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportun
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
+import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
 import { workflowGuidanceCapability } from '../../../shared/workflow-guidance.js'
-import { AddCustomerButton, type CustomerSearchClient } from '../../../shared/add-customer.js'
+import { AddCustomerButton, type CustomerAccount, type CustomerSearchClient } from '../../../shared/add-customer.js'
+import { RemoveCustomerButton } from '../../../shared/remove-customer.js'
+import { usePortfolioRefresh } from './use-portfolio-refresh.js'
 import type {
     AccountView,
     AgentCapability,
@@ -49,7 +52,7 @@ import type {
     WorkflowResultCardView
 } from './view-types.js'
 
-type Tab = 'portfolio' | 'plays' | 'discover' | 'dashboard'
+type Tab = 'new' | 'portfolio' | 'plays' | 'discover' | 'dashboard'
 type Loadable<T> = { status: 'idle' | 'loading' | 'error' | 'ready'; data?: T; error?: string }
 
 const customerSearchClient: CustomerSearchClient = {
@@ -1264,11 +1267,13 @@ function StageBoard({ accountId, opportunities, onChanged, onNote }: { accountId
 
 type SubTab = 'overview' | 'guidance' | 'stages'
 
-function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpanded }: {
+function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpanded, dataMode, onPortfolioChanged }: {
+    dataMode: 'sample' | 'live'
     focus?: { accountId?: string | undefined; opportunityId?: string | undefined } | undefined
     accountsExpanded: boolean
     detailsExpanded: boolean
     actionsExpanded: boolean
+    onPortfolioChanged(removedAccountId?: string): void
 }): ReactElement {
     const [accounts, setAccounts] = useState<Loadable<AccountView[]>>({ status: 'idle' })
     const [accountId, setAccountId] = useState<string | undefined>(undefined)
@@ -1278,29 +1283,37 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
     const [mcem, setMcem] = useState<Loadable<McemView>>({ status: 'idle' })
     const [sub, setSub] = useState<SubTab>('overview')
     const [note, setNote] = useState<string | undefined>(undefined)
-    const [showHiddenAccounts, setShowHiddenAccounts] = useState(false)
-    const [accountBusy, setAccountBusy] = useState(false)
+    const accountRequestId = useRef(0)
     const opportunityRequestId = useRef(0)
     const mcemRequestId = useRef(0)
+    const milestoneRequestId = useRef(0)
 
-    const loadAccounts = useCallback(async (includeHidden: boolean) => {
-        setAccounts({ status: 'loading' })
+    const loadAccounts = useCallback(async (failureContext = '') => {
+        const requestId = ++accountRequestId.current
+        setAccounts((current) => ({ status: 'loading', ...(current.data ? { data: current.data } : {}) }))
         try {
-            const data = await dataClient.listAccounts(includeHidden)
+            const data = (await dataClient.listAccounts()).filter((item) => item.visibility !== 'hidden')
+            if (requestId !== accountRequestId.current) return
             setAccounts({ status: 'ready', data })
-            const visible = data.filter((item) => item.visibility !== 'hidden')
-            setAccountId((current) => current && visible.some((item) => item.id === current) ? current : visible[0]?.id)
+            setAccountId((current) => current && data.some((item) => item.id === current) ? current : data[0]?.id)
         } catch (error) {
-            setAccounts({ status: 'error', error: error instanceof Error ? error.message : 'Could not load accounts.' })
+            if (requestId === accountRequestId.current) {
+                setAccounts((current) => ({
+                    status: 'error',
+                    ...(current.data ? { data: current.data } : {}),
+                    error: `${failureContext}${error instanceof Error ? error.message : 'Could not load accounts.'}`
+                }))
+            }
         }
     }, [])
 
     useEffect(() => {
-        void loadAccounts(false)
+        void loadAccounts()
+        return () => { accountRequestId.current++ }
     }, [loadAccounts])
 
     useEffect(() => {
-        if (focus?.accountId && accounts.status === 'ready') {
+        if (focus?.accountId && accounts.status === 'ready' && accounts.data?.some((item) => item.id === focus.accountId)) {
             setAccountId(focus.accountId)
             setSub('overview')
         }
@@ -1308,7 +1321,13 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
 
     const loadOpportunities = useCallback((preferredId?: string) => {
         const requestId = ++opportunityRequestId.current
-        if (!accountId) return
+        setOpportunities([])
+        if (!accountId) {
+            setOpportunityId(undefined)
+            setMilestones([])
+            setMcem({ status: 'idle' })
+            return
+        }
         dataClient.listOpportunities(accountId).then((data) => {
             if (requestId !== opportunityRequestId.current) return
             setOpportunities(data)
@@ -1328,12 +1347,21 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
     }, [loadOpportunities, focus, accountId])
 
     useEffect(() => {
+        const requestId = ++milestoneRequestId.current
         mcemRequestId.current += 1
         setMcem({ status: 'idle' })
-        if (!opportunityId) { setMilestones([]); return }
-        dataClient.listMilestones(opportunityId).then(setMilestones).catch(() => setMilestones([]))
+        setMilestones([])
+        setCommentsFor(undefined)
+        setCommentsText('')
+        setSavingComments(false)
+        if (!opportunityId) return
+        dataClient.listMilestones(opportunityId).then((data) => {
+            if (requestId === milestoneRequestId.current) setMilestones(data)
+        }).catch((error: unknown) => {
+            if (requestId === milestoneRequestId.current) setNote(error instanceof Error ? error.message : 'Could not load milestones.')
+        })
         setNote(undefined)
-        return () => { mcemRequestId.current += 1 }
+        return () => { mcemRequestId.current += 1; milestoneRequestId.current++ }
     }, [accountId, opportunityId])
 
     const selectedOpportunity = useMemo(
@@ -1361,7 +1389,12 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
 
     const reloadMilestones = useCallback(() => {
         if (!opportunityId) return
-        dataClient.listMilestones(opportunityId).then(setMilestones).catch(() => { /* keep prior */ })
+        const requestId = ++milestoneRequestId.current
+        dataClient.listMilestones(opportunityId).then((data) => {
+            if (requestId === milestoneRequestId.current) setMilestones(data)
+        }).catch((error: unknown) => {
+            if (requestId === milestoneRequestId.current) setNote(error instanceof Error ? error.message : 'Could not refresh milestones.')
+        })
     }, [opportunityId])
 
     const [opportunitySort, setOpportunitySort] = useState<OpportunitySort>('closeDate')
@@ -1372,53 +1405,66 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
     const sortedOpportunities = sortOpportunities(opportunities, opportunitySort, opportunityDirection)
 
     const saveComments = useCallback(async (id: string) => {
+        const requestId = opportunityRequestId.current
         setSavingComments(true)
         try {
             await dataClient.updateOpportunity(id, commentsText)
+            if (requestId !== opportunityRequestId.current) return
             setNote('Opportunity comments saved.')
             setCommentsFor(undefined)
+            setSavingComments(false)
             loadOpportunities(id)
         } catch (error) {
-            setNote((error as Error).message)
+            if (requestId === opportunityRequestId.current) setNote(error instanceof Error ? error.message : 'Could not save comments.')
         } finally {
-            setSavingComments(false)
+            if (requestId === opportunityRequestId.current) setSavingComments(false)
         }
     }, [commentsText, loadOpportunities])
 
-    const changeAccountVisibility = useCallback(async (item: AccountView, visibility: 'visible' | 'hidden') => {
-        if (visibility === 'hidden' && !window.confirm(`Hide ${item.name} from Portfolio, Discovery, Plays, and downstream analysis? Deal Team membership will not change.`)) return
-        setAccountBusy(true)
-        setNote(undefined)
-        try {
-            await dataClient.setAccountVisibility(item.id, visibility)
-            await loadAccounts(showHiddenAccounts)
-            setNote(`${item.name} was ${visibility === 'hidden' ? 'hidden' : 'unhidden'}.`)
-        } catch (error) {
-            setNote(error instanceof Error ? error.message : 'Could not change account visibility.')
-        } finally {
-            setAccountBusy(false)
+    async function customerRemoved(removed: CustomerAccount) {
+        accountRequestId.current++
+        if (accountId === removed.id) {
+            opportunityRequestId.current++
+            milestoneRequestId.current++
+            mcemRequestId.current++
+            setAccountId(undefined)
+            setOpportunities([])
+            setOpportunityId(undefined)
+            setMilestones([])
+            setMcem({ status: 'idle' })
+            setCommentsFor(undefined)
+            setCommentsText('')
+            setSavingComments(false)
         }
-    }, [loadAccounts, showHiddenAccounts])
+        setAccounts((current) => current.data ? { ...current, data: current.data.filter((item) => item.id !== removed.id) } : current)
+        setNote('Customer removed from this TLC portfolio.')
+        onPortfolioChanged(removed.id)
+        await loadAccounts('Customer removed, but TLC could not refresh the portfolio. ')
+    }
 
-    if (accounts.status === 'loading' || accounts.status === 'idle') return <p className="muted">Loading portfolio...</p>
-    if (accounts.status === 'error') return <p className="error">Could not load accounts: {accounts.error}</p>
+    if ((accounts.status === 'loading' || accounts.status === 'idle') && !accounts.data) return <p className="muted">Loading portfolio...</p>
+    if (accounts.status === 'error' && !accounts.data) return <p className="error">Could not load accounts: {accounts.error}</p>
 
     return (
         <div className={portfolioLayoutClassName({ accountsExpanded, detailsExpanded, actionsExpanded })}>
             {accountsExpanded && <section id="portfolio-accounts-panel" className="pane">
                 <div className="account-management-header"><h3 className="section-heading">Accounts</h3><div>
-                    <AddCustomerButton client={customerSearchClient} onAdded={async (account) => {
-                        await loadAccounts(showHiddenAccounts)
+                    <AddCustomerButton client={customerSearchClient} dataMode={dataMode} onAdded={async (account) => {
+                        onPortfolioChanged()
+                        await loadAccounts()
                         setAccountId(account.id)
                         setNote(`${account.name} is now available in Portfolio and Discovery. Use Discovery to add its opportunities to your Deal Team working set.`)
                     }} />
-                    <button className="link" onClick={() => { const next = !showHiddenAccounts; setShowHiddenAccounts(next); void loadAccounts(next) }}>{showHiddenAccounts ? 'Hide hidden' : 'Show hidden'}</button>
+                    <RemoveCustomerButton client={dataClient} onRemoved={customerRemoved} />
                 </div></div>
-                <select value={accountId} onChange={(event) => setAccountId(event.target.value)}>
-                    {accounts.data?.filter((item) => item.visibility !== 'hidden').map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+                {accounts.status === 'loading' && <p role="status">Refreshing portfolio...</p>}
+                {accounts.status === 'error' && <p className="error" role="alert">{accounts.error}</p>}
+                <select aria-label="Customer account" value={accountId ?? ''} onChange={(event) => setAccountId(event.target.value)}>
+                    {!accounts.data?.length && <option value="">No customer accounts</option>}
+                    {accounts.data?.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
                 </select>
-                {showHiddenAccounts && <div className="hidden-account-list">{accounts.data?.filter((item) => item.visibility === 'hidden').map((item) => <div key={item.id}><span>{item.name} <small>Hidden</small></span><button className="link" disabled={accountBusy} onClick={() => void changeAccountVisibility(item, 'visible')}>Unhide</button></div>)}</div>}
-                {accountId && <button className="link" disabled={accountBusy} onClick={() => { const item = accounts.data?.find((candidate) => candidate.id === accountId); if (item) void changeAccountVisibility(item, 'hidden') }}>Hide selected customer</button>}
+                {!accounts.data?.length && <p role="status">No customer accounts in this portfolio. Use Add customer to get started.</p>}
+                {accounts.data?.filter((item) => item.id === accountId).map((item) => <RemoveCustomerButton key={item.id} client={dataClient} account={item} onRemoved={customerRemoved} />)}
                 <h3 className="section-heading">Opportunities</h3>
                 {opportunities.length === 0 && <p className="muted">No Deal Team opportunities. Use Discovery to add yourself to an active opportunity.</p>}
                 <div className="list-toolbar">
@@ -1569,7 +1615,10 @@ const SE_DOMAINS: ReadonlyArray<{ id: SeDomainView; label: string }> = [
 ]
 
 /** Discover tab: lists open opportunities for an SE domain with one-click deal-team join. */
-function DiscoverPanel(): ReactElement {
+function DiscoverPanel({ dataMode, onPortfolioChanged }: {
+    dataMode: 'sample' | 'live'
+    onPortfolioChanged(removedAccountId?: string): void
+}): ReactElement {
     const [domain, setDomain] = useState<SeDomainView>('infra')
     const [refreshVersion, setRefreshVersion] = useState(0)
     const [items, setItems] = useState<Loadable<DiscoverableOpportunityView[]>>({ status: 'idle' })
@@ -1582,6 +1631,7 @@ function DiscoverPanel(): ReactElement {
     const [discoverMilestones, setDiscoverMilestones] = useState<Record<string, MilestoneView[]>>({})
     const [milestonesLoadingId, setMilestonesLoadingId] = useState<string | undefined>(undefined)
     const [milestoneBusyId, setMilestoneBusyId] = useState<string | undefined>(undefined)
+    const requestId = useRef(0)
     const [pendingMembershipRemoval, setPendingMembershipRemoval] = useState<
         { kind: 'deal-team'; item: DiscoverableOpportunityView }
         | { kind: 'milestone-team'; opportunityId: string; milestone: MilestoneView }
@@ -1599,16 +1649,16 @@ function DiscoverPanel(): ReactElement {
         filterVisibleMilestones(discoverMilestones[opportunityId] ?? [])
 
     useEffect(() => {
-        let active = true
+        const version = ++requestId.current
         setItems({ status: 'loading' })
         Promise.all([dataClient.discoverOpportunities(domain), dataClient.listAccounts(false)])
             .then(([data, visibleAccounts]) => {
-                if (!active) return
+                if (version !== requestId.current) return
                 setItems({ status: 'ready', data })
                 setAccounts(visibleAccounts)
             })
-            .catch((error: unknown) => { if (active) setItems({ status: 'error', error: error instanceof Error ? error.message : 'Discovery failed.' }) })
-        return () => { active = false }
+            .catch((error: unknown) => { if (version === requestId.current) setItems({ status: 'error', error: error instanceof Error ? error.message : 'Discovery failed.' }) })
+        return () => { requestId.current++ }
     }, [domain, refreshVersion])
 
     const join = async (opportunityId: string): Promise<void> => {
@@ -1645,14 +1695,15 @@ function DiscoverPanel(): ReactElement {
         if (expandedId === opportunityId) { setExpandedId(undefined); return }
         setExpandedId(opportunityId)
         if (discoverMilestones[opportunityId]) return
+        const version = requestId.current
         setMilestonesLoadingId(opportunityId)
         try {
             const data = await dataClient.listDiscoverableMilestones(opportunityId)
-            setDiscoverMilestones((current) => ({ ...current, [opportunityId]: data }))
+            if (version === requestId.current) setDiscoverMilestones((current) => ({ ...current, [opportunityId]: data }))
         } catch (error) {
-            setNote(error instanceof Error ? error.message : 'Could not load milestones.')
+            if (version === requestId.current) setNote(error instanceof Error ? error.message : 'Could not load milestones.')
         } finally {
-            setMilestonesLoadingId(undefined)
+            if (version === requestId.current) setMilestonesLoadingId(undefined)
         }
     }
 
@@ -1696,10 +1747,30 @@ function DiscoverPanel(): ReactElement {
             <header className="discover-header">
                 <h2>Discover opportunities</h2>
                 <p>Review all active opportunities for visible accounts and add or remove yourself from the Deal Team — or expand an opportunity to join a milestone team without joining the Deal Team. Deal Team or milestone-team membership brings an opportunity into Portfolio.</p>
-                <AddCustomerButton client={customerSearchClient} onAdded={() => {
-                    setFilters({ include: [], exclude: [] })
-                    setRefreshVersion((version) => version + 1)
-                }} />
+                <div className="customer-management-actions">
+                    <AddCustomerButton client={customerSearchClient} dataMode={dataMode} onAdded={() => {
+                        requestId.current++
+                        setFilters({ include: [], exclude: [] })
+                        onPortfolioChanged()
+                        setRefreshVersion((version) => version + 1)
+                    }} />
+                    <RemoveCustomerButton client={dataClient} onRemoved={(removed) => {
+                        requestId.current++
+                        setAccounts((current) => current.filter((item) => item.id !== removed.id))
+                        setItems((current) => current.data ? { ...current, data: current.data.filter((item) => item.accountId !== removed.id) } : current)
+                        setFilters((current) => ({
+                            include: current.include.filter((item) => item.id !== removed.id),
+                            exclude: current.exclude.filter((item) => item.id !== removed.id)
+                        }))
+                        setExpandedId(undefined)
+                        setDiscoverMilestones({})
+                        setMilestonesLoadingId(undefined)
+                        setPendingMembershipRemoval(undefined)
+                        setNote('Customer removed from this TLC portfolio.')
+                        onPortfolioChanged(removed.id)
+                        setRefreshVersion((version) => version + 1)
+                    }} />
+                </div>
                 <div className="discover-domain-toolbar">
                     <nav className="tabs" role="tablist" aria-label="Solution Engineer domain">
                         {SE_DOMAINS.map((option) => (
@@ -1787,6 +1858,11 @@ export function App(): ReactElement {
     const [accountsExpanded, setAccountsExpanded] = useState(true)
     const [detailsExpanded, setDetailsExpanded] = useState(true)
     const [actionsExpanded, setActionsExpanded] = useState(true)
+    const { revision: portfolioRevision, refresh: refreshPortfolio } = usePortfolioRefresh()
+    const portfolioChanged = useCallback((removedAccountId?: string) => {
+        if (removedAccountId) setFocus((current) => current?.accountId === removedAccountId ? undefined : current)
+        refreshPortfolio()
+    }, [refreshPortfolio])
 
     useEffect(() => {
         onHostMessage((message) => {
@@ -1799,7 +1875,7 @@ export function App(): ReactElement {
     return (
         <div className="app">
             <AppHeader
-                contextKey={`${tab}:${mode}:${focus?.accountId ?? ''}:${focus?.opportunityId ?? ''}:${runRequest?.token ?? ''}`}
+                contextKey={`${tab}:${mode}:${focus?.accountId ?? ''}:${focus?.opportunityId ?? ''}:${runRequest?.token ?? ''}:${portfolioRevision}`}
                 tab={tab}
                 mode={mode}
                 accountsExpanded={accountsExpanded}
@@ -1818,9 +1894,12 @@ export function App(): ReactElement {
                 }}
             />
             <main className={`app-body${tab === 'plays' ? ' app-body--plays' : tab === 'dashboard' ? ' app-body--dashboard' : ''}`}>
-                {tab === 'portfolio' ? (
-                    <PortfolioPanel focus={focus} accountsExpanded={accountsExpanded} detailsExpanded={detailsExpanded} actionsExpanded={actionsExpanded} />
-                ) : tab === 'discover' ? <DiscoverPanel /> : tab === 'dashboard'
+                {tab === 'new' ? <NewWorkspace client={dataClient} onCommitted={(accountId, opportunityId) => {
+                    setTab('portfolio')
+                    setFocus({ accountId, opportunityId })
+                }} /> : tab === 'portfolio' ? (
+                    <PortfolioPanel focus={focus} accountsExpanded={accountsExpanded} detailsExpanded={detailsExpanded} actionsExpanded={actionsExpanded} dataMode={mode} onPortfolioChanged={portfolioChanged} />
+                ) : tab === 'discover' ? <DiscoverPanel dataMode={mode} onPortfolioChanged={portfolioChanged} /> : tab === 'dashboard'
                     ? <DashboardWorkspace invokeSellerDashboard={dataClient.invokeSellerDashboard} /> : <PlaysPanel runRequest={runRequest} />}
             </main>
         </div>

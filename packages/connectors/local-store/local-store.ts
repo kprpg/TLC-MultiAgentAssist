@@ -1,6 +1,14 @@
 import { createRequire } from 'node:module'
 import { LOCAL_STORE_SCHEMA } from './schema.js'
-import { defaultSeed, type LocalStoreSeed } from './seed.js'
+import {
+  defaultSeed,
+  seedCurrencies,
+  seedOptionValues,
+  seedPriceLevels,
+  seedWorkloads,
+  type LocalStoreSeed
+} from './seed.js'
+import { localStoreSchemaVersion, migrateLocalStoreV1 } from './migrations.js'
 
 type Row = Record<string, string | number | null>
 type QueryRow = Record<string, unknown>
@@ -23,12 +31,47 @@ export class LocalStore {
   constructor(options: { path?: string; seed?: LocalStoreSeed } = {}) {
     const { DatabaseSync } = requireModule('node:sqlite') as typeof import('node:sqlite')
     this.db = new DatabaseSync(options.path ?? ':memory:')
-    this.db.exec(LOCAL_STORE_SCHEMA)
-    this.load(options.seed ?? defaultSeed)
+    try {
+      this.db.exec('PRAGMA foreign_keys = ON')
+      const version = Number(this.db.prepare('PRAGMA user_version').get()?.['user_version'])
+      if (version > localStoreSchemaVersion) {
+        throw new Error(`The SQLite test store has an unsupported newer schema (v${version}).`)
+      }
+      const exists = this.db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'account'").get()
+      if (!exists) {
+        this.db.exec('BEGIN IMMEDIATE')
+        try {
+          this.db.exec(LOCAL_STORE_SCHEMA)
+          this.load(options.seed ?? defaultSeed)
+          this.db.exec(`PRAGMA user_version = ${localStoreSchemaVersion}`)
+          this.db.exec('COMMIT')
+        } catch (error) {
+          this.db.exec('ROLLBACK')
+          throw error
+        }
+      } else if (version === 0) {
+        this.db.exec('BEGIN IMMEDIATE')
+        try {
+          this.db.exec(migrateLocalStoreV1)
+          this.loadCreationReferences()
+          this.db.exec(`PRAGMA user_version = ${localStoreSchemaVersion}`)
+          this.db.exec('COMMIT')
+        } catch (error) {
+          this.db.exec('ROLLBACK')
+          throw error
+        }
+      }
+    } catch (error) {
+      this.db.close()
+      throw error
+    }
   }
 
   private load(seed: LocalStoreSeed): void {
     const tables: Array<[string, readonly Row[]]> = [
+      ['price_level', seed.priceLevels],
+      ['transaction_currency', seed.currencies],
+      ['workload', seed.workloads],
       ['account', seed.accounts],
       ['systemuser', seed.systemUsers],
       ['competitor', seed.competitors],
@@ -47,6 +90,21 @@ export class LocalStore {
     ]
     for (const [table, rows] of tables) {
       for (const row of rows) this.insert(table, row)
+    }
+  }
+
+  private loadCreationReferences(): void {
+    for (const [table, rows] of [
+      ['price_level', seedPriceLevels],
+      ['transaction_currency', seedCurrencies],
+      ['workload', seedWorkloads],
+      ['option_value', seedOptionValues]
+    ] as const) {
+      for (const row of rows) {
+        const columns = Object.keys(row)
+        this.db.prepare(`INSERT OR IGNORE INTO ${table} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`)
+          .run(...columns.map((column) => row[column] as ScalarParam))
+      }
     }
   }
 

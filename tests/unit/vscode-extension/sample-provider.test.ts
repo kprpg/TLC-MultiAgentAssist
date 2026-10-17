@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createSampleDataProvider } from '../../../apps/vscode-extension/src/data-provider.js'
 import {
     buildSampleAgentResponse,
@@ -141,6 +141,28 @@ describe('vscode-extension sample data provider', () => {
         const updated = await provider.updateOpportunity('opp-ai-service', { comments: 'Reviewed with the account executive.' })
         expect(updated.comments).toBe('Reviewed with the account executive.')
         await provider.dispose()
+    })
+
+    it('keeps saved Play history and the official Seller Dashboard when a customer is removed', async () => {
+        const provider = createSampleDataProvider()
+        try {
+            if (!provider.sellerDashboard) throw new Error('Expected the sample Seller Dashboard host.')
+            const dashboard = await provider.sellerDashboard.invoke({ contractVersion: '1.0', operation: 'get' })
+            const run = await provider.startWorkflow({
+                workflowId: 'WF-001',
+                scope: { kind: 'account', accountId: 'account-contoso' },
+                input: { asOf: '2026-09-15' }
+            })
+            await vi.waitFor(async () => expect((await provider.getWorkflowRun(run.runId)).run.status).toBe('completed'))
+            const history = await provider.getWorkflowRun(run.runId)
+            await provider.setAccountVisibility('account-contoso', 'hidden')
+            expect(await provider.getWorkflowRun(run.runId)).toEqual(history)
+            expect((await provider.listWorkflowRuns()).some((item) => item.runId === run.runId)).toBe(true)
+            expect(await provider.sellerDashboard.invoke({ contractVersion: '1.0', operation: 'get' })).toEqual(dashboard)
+        } finally {
+            await provider.setAccountVisibility('account-contoso', 'visible')
+            await provider.dispose()
+        }
     })
 
     it('curates accounts, changes Deal Team membership, and filters Plays to visible members', async () => {
