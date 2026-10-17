@@ -15,6 +15,7 @@
 }
 
 .customer-remove-dialog {
+  overflow-wrap: anywhere;
   border-color: var(--vscode-panel-border, var(--colorNeutralStroke1, #d1d1d1));
   background: var(--vscode-editorWidget-background, var(--colorNeutralBackground1, #fff));
   color: var(--vscode-foreground, var(--colorNeutralForeground1, #242424));

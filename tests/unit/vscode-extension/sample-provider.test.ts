@@ -150,11 +150,12 @@ describe('vscode-extension sample data provider', () => {
             const dashboard = await provider.sellerDashboard.invoke({ contractVersion: '1.0', operation: 'get' })
             const run = await provider.startWorkflow({
                 workflowId: 'WF-001',
-                scope: { kind: 'account', accountId: 'account-contoso' },
+                scope: { kind: 'portfolio' },
                 input: { asOf: '2026-09-15' }
             })
             await vi.waitFor(async () => expect((await provider.getWorkflowRun(run.runId)).run.status).toBe('completed'))
             const history = await provider.getWorkflowRun(run.runId)
+            expect(history.output?.queueItems.some((item) => item.accountId === 'account-contoso')).toBe(true)
             await provider.setAccountVisibility('account-contoso', 'hidden')
             expect(await provider.getWorkflowRun(run.runId)).toEqual(history)
             expect((await provider.listWorkflowRuns()).some((item) => item.runId === run.runId)).toBe(true)
