@@ -571,6 +571,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
   async function selectAccount(nextAccount: Account) {
     const request = ++detailRequest.current
+    setAgentLoading(false)
+    setBoardLoading(false)
+    setSavingEdit(false)
+    setActivitiesLoading(false)
+    setSavingActivity(false)
+    setStageMoveSaving(false)
     setError('')
     setAccount(nextAccount)
     setOpportunities([])
@@ -594,6 +600,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   async function selectOpportunity(nextOpportunity: Opportunity, nextAccount = account, refreshedOpportunities?: Opportunity[]) {
     if (!nextAccount) return
     const request = ++detailRequest.current
+    setAgentLoading(false)
+    setBoardLoading(false)
+    setSavingEdit(false)
+    setActivitiesLoading(false)
+    setSavingActivity(false)
+    setStageMoveSaving(false)
     setError('')
     if (account?.id !== nextAccount.id) {
       setAccount(nextAccount)
