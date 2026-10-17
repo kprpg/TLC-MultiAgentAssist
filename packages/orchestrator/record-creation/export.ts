@@ -20,7 +20,7 @@ function csv(rows: readonly (readonly (string | number | undefined)[])[]): strin
 }
 
 function reviewText(value: string): string {
-  return value.replaceAll('\\', '\\\\').replace(/[<>*_[\]`|]/g, '\\$&').replace(/\r?\n/g, ' ')
+  return value.replace(/[\\<>*_[\]`|]/g, '\\$&').replace(/\r?\n/g, ' ')
 }
 
 const opportunityHeaders = [
