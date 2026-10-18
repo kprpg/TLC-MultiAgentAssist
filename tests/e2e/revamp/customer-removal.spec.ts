@@ -313,7 +313,7 @@ test('clears the last VS Code customer and its details, then restores it through
         const accounts = accountsPane(page, 'vscode')
         await accounts.getByRole('button', { name: 'Remove this customer', exact: true }).click()
         await page.getByRole('dialog', { name: 'Remove customer account' }).getByRole('button', { name: 'Remove customer', exact: true }).click()
-        await expect(accounts.getByRole('status')).toContainText('No customer accounts')
+        await expect(accounts.getByRole('status').filter({ hasText: 'No customer accounts' })).toBeVisible()
         await expect(page.getByText('Grid operations modernization', { exact: true })).toHaveCount(0)
         await accounts.getByRole('button', { name: 'Remove customer', exact: true }).click()
         const remove = page.getByRole('dialog', { name: 'Remove customer account' })

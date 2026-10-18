@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { accountSearchLimit, assertAccountNameIndex, fuzzyAccountName, indexedAccountIds, parseAccountSearchPage } from './account-search.js'
 import {
   accountSearchRequestSchema,
@@ -313,6 +314,8 @@ export class MsxRequestError extends Error {
 }
 
 export class LiveMsxConnector implements MsxConnector {
+  private readonly entityVersions = new Map<string, string>()
+  private readonly expectedVersions = new AsyncLocalStorage<Record<string, string>>()
   private readonly baseUrl: URL
   private portfolioPromise: Promise<MsxPortfolio> | undefined
   private readonly observationPromises = new Map<string, Promise<CriterionObservation[]>>()
@@ -330,7 +333,8 @@ export class LiveMsxConnector implements MsxConnector {
     baseUrl = defaultBaseUrl,
     private readonly performanceReporter?: PerformanceReporter,
     private readonly writeMetadata: MsxWriteMetadata = {},
-    private readonly preferenceStore: PortfolioPreferenceStore = new MemoryPortfolioPreferenceStore()
+    private readonly preferenceStore: PortfolioPreferenceStore = new MemoryPortfolioPreferenceStore(),
+    private readonly cacheOptions: { cachePortfolio?: boolean; requireConditionalWrites?: boolean } = {}
   ) {
     this.baseUrl = new URL(baseUrl)
     if (writeMetadata.riskDetailsField && !/^[A-Za-z][A-Za-z0-9_]*$/.test(writeMetadata.riskDetailsField)) {
@@ -1047,6 +1051,43 @@ export class LiveMsxConnector implements MsxConnector {
     this.observationPromises.clear()
     this.milestonePromises.clear()
     this.currentUserIdPromise = undefined
+    this.entityVersions.clear()
+  }
+
+  async getConcurrencyTokens(opportunityId: string): Promise<Record<string, string>> {
+    const milestones = await this.getMilestoneRows(opportunityId)
+    const paths = [`opportunities(${opportunityId})`, ...milestones.map((row) => `msp_engagementmilestones(${row.msp_engagementmilestoneid})`)]
+    const result: Record<string, string> = {}
+    for (const path of paths) {
+      const token = this.entityVersions.get(path.toLowerCase())
+      if (token) result[path.toLowerCase()] = token
+    }
+    return result
+  }
+
+  withExpectedVersions<T>(versions: Readonly<Record<string, string>>, operation: () => Promise<T>): Promise<T> {
+    return this.expectedVersions.run({ ...versions }, operation)
+  }
+
+  private rememberNativeVersions(value: unknown): void {
+    const remember = (row: unknown) => {
+      if (!isObjectRecord(row)) return
+      const records: ReadonlyArray<readonly [string, string]> = [
+        ['opportunityid', 'opportunities'], ['msp_engagementmilestoneid', 'msp_engagementmilestones'],
+        ['msp_dealteamid', this.writeMetadata.dealTeam?.entitySet ?? defaultDealTeamWriteMetadata.entitySet]
+      ]
+      for (const [field, set] of records) {
+        const id = row[field]
+        if (typeof id !== 'string' || !guidPattern.test(id)) continue
+        const path = `${set}(${id})`.toLowerCase()
+        this.entityVersions.delete(path)
+        if ('@odata.etag' in row && typeof row['@odata.etag'] === 'string' && /^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(row['@odata.etag'])) {
+          this.entityVersions.set(path, row['@odata.etag'])
+        }
+      }
+    }
+    if (value && typeof value === 'object' && 'value' in value && Array.isArray(value.value)) value.value.forEach(remember)
+    else remember(value)
   }
 
   /** Returns the signed-in user's Dataverse systemuser id (WhoAmI UserId), cached for reuse. */
@@ -1098,6 +1139,7 @@ export class LiveMsxConnector implements MsxConnector {
   }
 
   private getPortfolio(): Promise<MsxPortfolio> {
+    if (this.cacheOptions.cachePortfolio === false) return this.loadPortfolio()
     this.portfolioPromise ??= this.loadPortfolio().catch((error: unknown) => {
       this.portfolioPromise = undefined
       throw error
@@ -1250,12 +1292,19 @@ export class LiveMsxConnector implements MsxConnector {
     if (!response.ok) {
       throw new MsxRequestError(`MSX request failed with status ${response.status}.`, response.status)
     }
-    return await response.json() as T
+    const result: unknown = await response.json()
+    if (this.cacheOptions.requireConditionalWrites) this.rememberNativeVersions(result)
+    return result as T
   }
 
   private async patch(path: string, body: Record<string, unknown>): Promise<void> {
     const url = new URL(path, this.baseUrl)
     this.assertTrustedUrl(url)
+    const expected = this.expectedVersions.getStore()
+    const version = this.cacheOptions.requireConditionalWrites ? expected?.[path.toLowerCase()] : '*'
+    if (!version || this.cacheOptions.requireConditionalWrites && !/^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(version)) {
+      throw new Error('A reviewed native concurrency token is required before this update.')
+    }
     const accessToken = await this.tokenProvider.getAccessToken()
     const response = await this.fetchImplementation(url, {
       method: 'PATCH',
@@ -1263,12 +1312,17 @@ export class LiveMsxConnector implements MsxConnector {
         Authorization: `Bearer ${accessToken}`,
         Accept: 'application/json',
         'Content-Type': 'application/json',
-        'If-Match': '*'
+        'If-Match': version
       },
       body: JSON.stringify(body)
     })
     if (!response.ok) {
       throw new MsxRequestError(`MSX update failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status)
+    }
+    if (this.cacheOptions.requireConditionalWrites && expected) {
+      const next = response.headers.get('etag')
+      if (next && /^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(next)) expected[path.toLowerCase()] = next
+      else delete expected[path.toLowerCase()]
     }
   }
 
@@ -1315,13 +1369,15 @@ export class LiveMsxConnector implements MsxConnector {
   private async delete(path: string): Promise<void> {
     const url = new URL(path, this.baseUrl)
     this.assertTrustedUrl(url)
+    const version = this.cacheOptions.requireConditionalWrites ? this.entityVersions.get(path.toLowerCase()) : '*'
+    if (!version) throw new Error('A verified native membership concurrency token is required before removal.')
     const accessToken = await this.tokenProvider.getAccessToken()
     const response = await this.fetchImplementation(url, {
       method: 'DELETE',
       headers: {
         Authorization: ['Bearer', accessToken].join(' '),
         Accept: 'application/json',
-        'If-Match': '*'
+        'If-Match': version
       }
     })
     if (!response.ok) {
@@ -1342,6 +1398,10 @@ function unique(values: string[]): string[] {
 
 function isPresent(value: string | undefined): value is string {
   return Boolean(value)
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
 function formattedValue(row: Record<string, unknown>, field: string): string | undefined {

@@ -76,8 +76,8 @@ import {
     type RecordCreationDraftResult,
     type SeDomainId
 } from '../../../packages/common/index.js'
-import { createOutlookDraftMessage } from '../../desktop/electron/main/outlook-compose.js'
-import { createResponseDocumentBuffer } from '../../desktop/electron/main/response-document.js'
+import { createOutlookDraftMessage } from '../../../packages/documents/outlook-compose.js'
+import { createResponseDocumentBuffer } from '../../../packages/documents/response-document.js'
 import { invokeWorkflowHost, type WorkflowHost, type WorkflowHostOperation } from '../../../packages/orchestrator/workflows/index.js'
 import { createBrowserOnlyVoiceHost, type SharedVoiceInputHost } from '../../../packages/orchestrator/voice-input.js'
 import type { SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'

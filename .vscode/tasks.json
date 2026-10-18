@@ -2,6 +2,20 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "build-teams",
+      "type": "shell",
+      "command": "npm run teams:build",
+      "problemMatcher": [],
+      "group": "build"
+    },
+    {
+      "label": "test-teams-cumulative",
+      "type": "shell",
+      "command": "npm run test:teams",
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
       "label": "build-vscode-extension",
       "type": "shell",
       "command": "npm run --workspace apps/vscode-extension build",

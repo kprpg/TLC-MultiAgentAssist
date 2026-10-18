@@ -7,6 +7,7 @@
     "apps/*",
     "packages/common",
     "packages/orchestrator",
+    "packages/documents",
     "packages/agents/*",
     "packages/connectors/*"
   ],
@@ -40,6 +41,15 @@
     "web:start": "npm run web:build && cross-env TLC_WEB_MODE=sample node apps/web/dist/server.js",
     "web:start:sqlite": "npm run web:build && cross-env TLC_WEB_MODE=sample TLC_DATA_STORE=sqlite node apps/web/dist/server.js",
     "web:start:live": "npm run web:build && cross-env TLC_WEB_MODE=azure-cli node apps/web/dist/server.js",
+    "test:teams": "vitest run tests/unit/teams tests/contract/collaboration.test.ts tests/unit/agents/meeting-signal-extractor.test.ts tests/unit/agents/meeting-foundry-extractor.test.ts tests/unit/connectors/meeting-capture.test.ts tests/unit/connectors/live-meeting-capture.test.ts",
+    "test:smoke:teams": "playwright test --config playwright.teams.config.ts --reporter=line",
+    "teams:build": "npm --workspace @tlc/teams run build",
+    "teams:typecheck": "npm --workspace @tlc/teams run typecheck",
+    "teams:start": "npm run teams:build && cross-env TLC_TEAMS_MODE=sample node --experimental-sqlite apps/teams/dist/server.js",
+    "teams:start:configured": "npm run teams:build && node --env-file=apps/teams/.env.local --experimental-sqlite apps/teams/dist/server.js",
+    "teams:package": "node scripts/package-teams.mjs",
+    "teams:package:development": "node scripts/package-teams.mjs --development",
+    "teams:release": "npm run teams:build && npm run test:teams && node scripts/package-teams.mjs --runtime",
     "desktop:revamp:start": "npm run desktop:start",
     "desktop:revamp:package": "npm run desktop:package",
     "desktop:legacy:start": "npm run desktop:build && cross-env TLC_UI_MODE=legacy node node_modules/electron/cli.js apps/desktop",
@@ -67,6 +77,8 @@
     "vosk-browser": "0.0.8"
   },
   "devDependencies": {
+    "ajv-draft-04": "1.0.0",
+    "ajv-formats": "3.0.1",
     "@eslint/js": "^10.0.1",
     "@napi-rs/canvas": "^0.1.80",
     "@playwright/test": "1.62.1",
