@@ -27,6 +27,7 @@ surface adds the following focused areas while preserving one shared backend/har
 
 ```text
 apps/teams/src/                       Teams composition, verified HTTP/bot transport
+apps/teams/src/runtime-resources.ts   Local SQLite/CLI or Azure Table/managed identity
 apps/teams/src/client/                Personal/channel/meeting presentation
 apps/shared/                         Browser-safe prompt/Markdown and existing UI reuse
 packages/orchestrator/application-runtime.ts
@@ -34,14 +35,17 @@ packages/orchestrator/operations.ts   Shared composition and typed operation cat
 packages/orchestrator/collaboration/  Reviewed actions, bindings, events, state admission
 packages/connectors/graph/            Delegated meeting/transcript/subscription access
 packages/connectors/teams/            Authoritative resource membership checks
+packages/connectors/common/encrypted-document-store.ts
+                                     Authenticated local state payload encryption
 packages/documents/                   Shared Word/email builders, not an app dependency
 tests/unit/teams/                     Cumulative deterministic Teams slices
 tests/e2e/teams/                      Actual host/browser journeys
 release-teams/                       Ignored generated installation/runtime archives
+scripts/run-teams-local.ps1          One build/package/extract/verify/run/sideload entrypoint
 ```
 
-The [Teams runbook](./runbooks/teams-app.md) defines the central hosting dependency,
-separate ZIP purposes, F5/HTTPS development path and open production gates. The
+The [Teams runbook](./runbooks/teams-app.md) defines the user-operated local-now,
+Azure-later lifecycle, separate ZIP purposes, F5/opt-in HTTPS and open live gates. The
 installation ZIP references the runtime; it does not execute the application itself.
 
 ### Original proposed layout

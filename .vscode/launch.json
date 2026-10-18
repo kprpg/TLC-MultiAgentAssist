@@ -10,6 +10,7 @@
       "runtimeArgs": ["--experimental-sqlite"],
       "env": {
         "TLC_TEAMS_MODE": "sample",
+        "TLC_TEAMS_RUNTIME_PROFILE": "local",
         "TLC_TEAMS_ORIGIN": "http://127.0.0.1:3978",
         "TLC_TEAMS_PORT": "3978"
       },
@@ -24,8 +25,9 @@
       "request": "launch",
       "program": "${workspaceFolder}/apps/teams/dist/server.js",
       "cwd": "${workspaceFolder}",
+      "runtimeArgs": ["--experimental-sqlite"],
       "envFile": "${workspaceFolder}/apps/teams/.env.local",
-      "env": { "TLC_TEAMS_MODE": "live" },
+      "env": { "TLC_TEAMS_MODE": "live", "TLC_TEAMS_RUNTIME_PROFILE": "local" },
       "outFiles": ["${workspaceFolder}/apps/teams/dist/**/*.js"],
       "sourceMaps": true,
       "preLaunchTask": "build-teams"
@@ -38,7 +40,7 @@
       "cwd": "${workspaceFolder}",
       "runtimeArgs": ["--experimental-sqlite"],
       "envFile": "${workspaceFolder}/apps/teams/.env.teams-dev",
-      "env": { "TLC_TEAMS_MODE": "sample" },
+      "env": { "TLC_TEAMS_MODE": "sample", "TLC_TEAMS_RUNTIME_PROFILE": "local" },
       "outFiles": ["${workspaceFolder}/apps/teams/dist/**/*.js"],
       "sourceMaps": true,
       "preLaunchTask": "build-teams"

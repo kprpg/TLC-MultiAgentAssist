@@ -34,7 +34,10 @@ export async function stageTeamsRuntime(outputDirectory = join(root, 'release-te
   }
   dependencies['@modelcontextprotocol/sdk'] = mcpPackage.dependencies['@modelcontextprotocol/sdk']
   Object.assign(dependencies, documentsPackage.dependencies)
-  await cp(join(sourceRoot, 'apps', 'teams', 'dist'), target, { recursive: true })
+  const build = join(sourceRoot, 'apps', 'teams', 'dist')
+  await cp(join(build, 'server.js'), join(target, 'server.js'))
+  if ((await readdir(build)).includes('server.js.map')) await cp(join(build, 'server.js.map'), join(target, 'server.js.map'))
+  await cp(join(build, 'client'), join(target, 'client'), { recursive: true })
   for (const name of ['foundry.environment.example.json', 'mcp.servers.json', 'mcp.tool-policy.json', 'dataverse.entity-map.json', 'teams-disclosure.example.json']) {
     await mkdir(join(target, 'config'), { recursive: true })
     await cp(join(sourceRoot, 'config', name), join(target, 'config', name))
@@ -44,21 +47,62 @@ export async function stageTeamsRuntime(outputDirectory = join(root, 'release-te
   await cp(join(sourceRoot, 'docs', 'knowledge', 'MCEM Overview.pdf'), join(target, 'docs', 'knowledge', 'MCEM Overview.pdf'))
   await writeFile(join(target, 'package.json'), `${JSON.stringify({
     name: '@tlc/teams-release', version: teamsPackage.version, private: true, type: 'module',
-    engines: rootPackage.engines, scripts: { start: 'node --experimental-sqlite server.js' }, dependencies
+    engines: rootPackage.engines, scripts: {
+      start: 'node --experimental-sqlite server.js',
+      'start:configured': 'node --env-file=runtime.env --experimental-sqlite server.js'
+    }, dependencies
   }, null, 2)}\n`)
   await writeFile(join(target, 'RUNTIME-README.txt'), [
     'TLC Assist Teams host runtime',
     '',
-    'This is the separately hosted service, not the ZIP to upload into Teams.',
+    'Run this ordinary web application yourself: local dev/test now, Azure later.',
+    'This runtime ZIP is not the manifest/icons ZIP to upload into Teams.',
+    'Uploading the Teams ZIP neither starts this server nor deploys Azure resources.',
     'The bundled node_modules match the packaging OS and CPU. Restore dependencies',
     'with npm ci --omit=dev on the destination platform when they differ.',
-    'For a local sanitized preview: set TLC_TEAMS_MODE=sample, then npm start.',
-    'Use a reachable, trusted HTTPS proxy/origin for Teams clients.',
-    'Live mode requires approved FTE/Entra/MSX/MCP/Graph/disclosure/storage configuration.',
+    'Start a sanitized preview: npm start. Stop the foreground process with Ctrl+C.',
+    'For explicit configuration, copy runtime.env.example to runtime.env, then use:',
+    'npm run start:configured',
+    'Node environment variables take precedence over runtime.env; check mode/profile.',
+    'The default loopback listener does not open a firewall, LAN port or tunnel.',
+    'local profile: SQLite state, encrypted in live mode; no required Azure Table.',
+    'Live local Foundry access uses AzureCliCredential in the configured Foundry tenant.',
+    'Azure CLI is for Foundry workload access only, NEVER a substitute for an FTE',
+    "colleague's delegated MSX/Dataverse/Graph permissions. Live app sign-in remains.",
+    'azure profile: managed identity for workload access and configured Table Storage.',
+    'Live mode still requires approved Entra/consent/FTE/MSX/MCP/Graph/Foundry setup.',
     'runtime.env.example and config/teams-disclosure.example.json are safe templates,',
     'not working live credentials or an approved disclosure policy. They are not auto-loaded.',
     'Set TLC_TEAMS_ADMISSION=read-only to stop new work while retaining authorized reads.',
     'No credentials or real Foundry environment configuration are bundled.',
+    '',
+    'State and recovery:',
+    'Default local state is under LOCALAPPDATA\\TLC-Assist\\Teams\\<mode>, outside this',
+    'release folder. Live state additionally separates the tenant and environment.',
+    'TLC_TEAMS_DATA_DIR can select an approved local directory. Keep its filesystem',
+    'ACLs limited to the operator and use approved disk encryption; row metadata is',
+    'not hidden by payload encryption. A live 32-byte TLC_TEAMS_STATE_KEY is required.',
+    'Keep the state key stable and back it up separately in an approved secret store.',
+    'Do not put secrets, live state or transcript data in a distribution ZIP.',
+    'For a backup: stop this runtime, copy its entire data directory to an approved',
+    'protected backup, and retain the matching configuration/key separately.',
+    'For an update: stop, backup, extract to a new release directory, retain the same',
+    'external data directory/key, verify privately, then restart. Never overwrite state.',
+    'Restart does not replay claimed writes; reconcile unknown outcomes. In-memory',
+    'workflows and delegated sessions do not transparently resume; users sign in again.',
+    'Restore first with admission read-only, reconcile receipts/external effects,',
+    'then explicitly resume. Restoring old state cannot undo external source writes.',
+    '',
+    'Connectivity and logs:',
+    'Tabs need HTTPS reachable from their clients; bot/message-extension/Graph',
+    'callbacks need Microsoft-service reachability. Private localhost is insufficient.',
+    'An approved tunnel/HTTPS ingress is opt-in and is NOT launched by these commands.',
+    'Sleep, shutdown, network changes or a stopped tunnel make the app unavailable.',
+    'Keep origin, Entra redirect/broker configuration, bot endpoint, callback URL and',
+    'manifest URLs/validDomains consistent; regenerate/reinstall for origin changes.',
+    'Console diagnostics contain safe codes/category/correlation IDs, not prompts,',
+    'customer payloads, transcripts or tokens. Protect/rotate any redirected log files.',
+    'No Windows Service or automatic background installation is required.',
     ''
   ].join('\n'))
   return target
@@ -101,7 +145,7 @@ export async function packageTeamsRuntime() {
   for (const name of ['server.js', 'client/index.html', 'package.json', 'package-lock.json', 'node_modules/express/package.json', 'config/mcp.tool-policy.json']) {
     if (!zip.file(name)) throw new Error(`Runtime archive is incomplete: ${name}`)
   }
-  if (Object.keys(zip.files).some((name) => /(^|\/)\.env($|\.)|foundry\.environment\.json$|portfolio-preferences|\.sqlite($|-)/i.test(name))) {
+  if (Object.keys(zip.files).some((name) => /(^|\/)(\.env($|\.)|runtime\.env$)|foundry\.environment\.json$|portfolio-preferences|\.sqlite($|-)/i.test(name))) {
     throw new Error('Private environment or state files were included in the runtime archive.')
   }
   return output

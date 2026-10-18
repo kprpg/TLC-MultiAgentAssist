@@ -20,7 +20,7 @@ describe('four-surface core parity', () => {
       listMeetingTranscripts: async () => { throw new Error('Not used by this parity scenario.') },
       getMeetingTranscript: async () => { throw new Error('Not used by this parity scenario.') },
       proposeMeetingChangeSet: async () => { throw new Error('Not used by this parity scenario.') },
-      applyMeetingChangeSet: (input: Parameters<typeof services.meetings.applyMeetingChangeSet>[0]) => services.meetings.applyMeetingChangeSet(input)
+      applyMeetingChangeSet: (input: Parameters<ApplicationServices['meetings']['applyMeetingChangeSet']>[0]) => services.meetings.applyMeetingChangeSet(input)
     })
     const teams = createTeamsHandler({
       configuration: { mode: 'sample', origin: 'http://127.0.0.1', environmentId: 'sample' }, store,

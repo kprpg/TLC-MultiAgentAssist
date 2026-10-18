@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { pages } from '@microsoft/teams-js'
+import { FrameContexts, pages } from '@microsoft/teams-js'
 import { z } from 'zod'
 import { accountSchema } from '../../../../packages/common/contracts/index.js'
 import { contextBindingSchema, type ActionPreview } from '../../../../packages/common/contracts/collaboration.js'
@@ -14,6 +14,7 @@ export function ContextWorkspace({ client, host, selection }: { client: TeamsApi
   const [kind, setKind] = useState<'channel' | 'chat' | 'meeting'>(host.kind)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const configureTab = host.embedded && host.frameContext === FrameContexts.settings && pages.config.isSupported()
   useEffect(() => {
     const controller = new AbortController()
     client.operation('listAccounts', {}, z.array(accountSchema), controller.signal).then((items) => {
@@ -26,7 +27,7 @@ export function ContextWorkspace({ client, host, selection }: { client: TeamsApi
       kind, contextId, accountId,
       ...(selection?.account.id === accountId ? { opportunityId: selection.opportunity.id } : {})
     })
-    if (host.embedded && pages.config.isSupported()) {
+    if (configureTab) {
       await pages.config.setConfig({
         entityId: binding.id, suggestedDisplayName: 'TLC Assist',
         contentUrl: `${location.origin}/?surface=channel&bindingId=${encodeURIComponent(binding.id)}`,
@@ -37,12 +38,12 @@ export function ContextWorkspace({ client, host, selection }: { client: TeamsApi
     return binding
   }
   useEffect(() => {
-    if (!host.embedded || !pages.config.isSupported()) return
+    if (!configureTab) return
     pages.config.setValidityState(Boolean(accountId && contextId))
     pages.config.registerOnSaveHandler((event) => {
       save().then(() => event.notifySuccess()).catch((cause: unknown) => { setError(String(cause)); event.notifyFailure('Context authorization or configuration failed.') })
     })
-  }, [client, host.embedded, accountId, contextId, kind, selection])
+  }, [client, configureTab, accountId, contextId, kind, selection])
   return <section className="panel"><h1>Configure a Teams context</h1>
     <p>A binding shares navigation, not source permission. Every live viewer signs in independently.</p>
     <label className="field">Context type<select value={kind} onChange={(event) => {

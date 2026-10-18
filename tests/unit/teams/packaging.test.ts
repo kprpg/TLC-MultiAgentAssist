@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import JSZip from 'jszip'
-import { createTeamsManifest, buildTeamsAppZip, classifyPackageOrigin, verifyTeamsOrigin } from '../../../scripts/package-teams.mjs'
+import { createTeamsManifest, buildTeamsAppZip, classifyPackageOrigin, verifyTeamsOrigin, validateTeamsManifestCapabilities } from '../../../scripts/package-teams.mjs'
 import { readFileSync } from 'node:fs'
 
 const folders: string[] = []
@@ -18,9 +18,15 @@ describe('Teams end-user upload package', () => {
     expect(Object.keys(zip.files).sort()).toEqual(['color.png', 'manifest.json', 'outline.png'])
     const manifest = JSON.parse(await zip.file('manifest.json')!.async('string'))
     expect(manifest.manifestVersion).toBe('1.30')
+    expect(manifest.version).toBe('0.1.2')
+    expect(manifest.supportsChannelFeatures).toBe('tier1')
+    expect(manifest.authorization.permissions.resourceSpecific).toEqual([
+      { name: 'MeetingStage.Write.Chat', type: 'Delegated' }
+    ])
     expect(manifest.staticTabs[0].contentUrl).toBe('https://tlc.example.com/')
     expect(manifest.name.short).toContain('Sample')
     expect(manifest.bots).toBeUndefined()
+    expect(manifest.webApplicationInfo).toBeUndefined()
     expect(JSON.stringify(manifest)).not.toContain('secret')
     for (const [name, size] of [['color.png', 192], ['outline.png', 32]] as const) {
       const bytes = await zip.file(name)!.async('nodebuffer')
@@ -28,6 +34,34 @@ describe('Teams end-user upload package', () => {
       expect(bytes.readUInt32BE(16)).toBe(size)
       expect(bytes.readUInt32BE(20)).toBe(size)
     }
+  })
+  it.each(['sample', 'live'])('declares required channel support and delegated meeting-stage consent in %s mode', (mode) => {
+    const manifest = createTeamsManifest({
+      ...options, mode, ...(mode === 'live' ? { botId: '44444444-4444-4444-8444-444444444444' } : {})
+    })
+    expect(manifest.configurableTabs[0]?.scopes).toContain('team')
+    expect(manifest.supportsChannelFeatures).toBe('tier1')
+    expect(manifest.configurableTabs[0]?.context).toContain('meetingStage')
+    expect(manifest.authorization.permissions.resourceSpecific).toContainEqual({
+      name: 'MeetingStage.Write.Chat', type: 'Delegated'
+    })
+    expect(validateTeamsManifestCapabilities(manifest)).toBe(true)
+  })
+  it('rejects a team-scope manifest missing the v1.25+ channel declaration, even if JSON schema permits it', () => {
+    const { supportsChannelFeatures: removed, ...manifest } = createTeamsManifest(options)
+    expect(removed).toBe('tier1')
+    expect(() => validateTeamsManifestCapabilities(manifest)).toThrow(/supportsChannelFeatures.*tier1/)
+    expect(() => validateTeamsManifestCapabilities({ ...manifest, supportsChannelFeatures: true })).toThrow(/supportsChannelFeatures/)
+    expect(() => validateTeamsManifestCapabilities({ ...manifest, supportsChannelFeatures: 'tier1', supportedChannelTypes: ['sharedChannels'] })).toThrow(/supportedChannelTypes/)
+  })
+  it.each([
+    undefined,
+    { permissions: { resourceSpecific: [] } },
+    { permissions: { resourceSpecific: [{ name: 'MeetingStage.Write.Chat', type: 'Application' }] } },
+    { permissions: { resourceSpecific: [{ name: 'ChatMember.Read.Chat', type: 'Application' }] } }
+  ])('rejects meeting-stage declarations without the exact delegated RSC permission: %j', (authorization) => {
+    const manifest = { ...createTeamsManifest(options), supportsChannelFeatures: 'tier1', authorization }
+    expect(() => validateTeamsManifestCapabilities(manifest)).toThrow(/MeetingStage\.Write\.Chat.*Delegated/)
   })
   it('declares the full live suite with exact bot SSO identity and least-privilege RSC metadata', () => {
     const botId = '44444444-4444-4444-8444-444444444444'
@@ -38,6 +72,11 @@ describe('Teams end-user upload package', () => {
     expect(manifest.configurableTabs[0]?.context).toContain('meetingStage')
     const text = JSON.stringify(manifest)
     expect(text).toContain('ChannelMember.Read.Group')
+    expect(manifest.authorization.permissions.resourceSpecific).toEqual([
+      { name: 'ChannelMember.Read.Group', type: 'Application' },
+      { name: 'ChatMember.Read.Chat', type: 'Application' },
+      { name: 'MeetingStage.Write.Chat', type: 'Delegated' }
+    ])
     expect(text).not.toContain('OnlineMeetingTranscript.Read.All')
     expect(text).not.toContain('Chat.Read.All')
   })
@@ -57,6 +96,17 @@ describe('Teams end-user upload package', () => {
       manifest.staticTabs[0]!.contentUrl, manifest.staticTabs[0]!.websiteUrl,
       manifest.configurableTabs[0]!.configurationUrl
     ]) expect(new URL(url).origin).toBe(options.origin)
+  })
+  it.each(['https://localhost:3978', 'https://localhost:3979'])('packages the localhost tab and Go to website link for the same trusted HTTPS listener: %s', async (origin) => {
+    const folder = await mkdtemp(join(tmpdir(), 'tlc-teams-local-origin-')); folders.push(folder)
+    const path = await buildTeamsAppZip({ ...options, origin, development: true, outputDirectory: folder })
+    const zip = await JSZip.loadAsync(await readFile(path), { checkCRC32: true })
+    const manifest = JSON.parse(await zip.file('manifest.json')!.async('string'))
+    expect(manifest.id).toBe(options.appId)
+    expect(manifest.staticTabs[0]).toMatchObject({ contentUrl: `${origin}/`, websiteUrl: `${origin}/` })
+    expect(manifest.developer.websiteUrl).toBe(`${origin}/`)
+    expect(manifest.configurableTabs[0].configurationUrl).toBe(`${origin}/?surface=configure`)
+    expect(manifest.validDomains).toEqual(['localhost'])
   })
   it('identifies localhost and reserved template origins as development-only, not configured installations', () => {
     for (const origin of ['https://localhost:3978', 'https://127.0.0.1:3978', 'https://tlc.example.com', 'https://your-host.invalid']) {
@@ -84,5 +134,11 @@ describe('VS Code F5 and release entry points', () => {
     expect(configuration).toMatchObject({ type: 'node', request: 'launch', program: '${workspaceFolder}/apps/teams/dist/server.js', preLaunchTask: 'build-teams' })
     expect(launch.configurations.some((entry: { name: string }) => entry.name === 'Run TLC Assist Extension')).toBe(true)
     expect(tasks.tasks.find((entry: { label: string }) => entry.label === 'build-teams')?.command).toBe('npm run teams:build')
+    expect(configuration.env.TLC_TEAMS_RUNTIME_PROFILE).toBe('local')
+    const live = launch.configurations.find((entry: { name: string }) => entry.name === 'TLC Teams (live, approved environment)')
+    expect(live.runtimeArgs).toContain('--experimental-sqlite')
+    expect(live.env).toMatchObject({ TLC_TEAMS_MODE: 'live', TLC_TEAMS_RUNTIME_PROFILE: 'local' })
+    const root = JSON.parse(readFileSync('package.json', 'utf8'))
+    expect(root.scripts['teams:start:configured']).toContain('--env-file=apps/teams/.env.local')
   })
 })

@@ -6,7 +6,8 @@
   "scripts": {
     "build": "vite build --config vite.client.config.ts && vite build --config vite.server.config.ts",
     "typecheck": "tsc --project tsconfig.json --pretty false",
-    "start": "node dist/server.js"
+    "start": "node --experimental-sqlite dist/server.js",
+    "start:configured": "node --env-file=.env.local --experimental-sqlite dist/server.js"
   },
   "dependencies": {
     "@azure/data-tables": "13.3.2",

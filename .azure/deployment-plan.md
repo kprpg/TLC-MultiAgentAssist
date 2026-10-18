@@ -63,10 +63,18 @@ Status: Preparing locally; no deployment requested.
   running backend. Produce a separate host-runtime bundle and configuration checks.
 - Corporate FTE entitlement, Entra A/B/C registrations/consent, actual MCP client
   allowlisting, Graph permissions/tenant policy and governed shared disclosure remain
-  external release gates. Do not borrow CLI credentials or bypass these gates.
+  external release gates. Do not borrow operator/CLI source credentials or bypass
+  these gates; local Foundry workload credentials are separate from source access.
 - No existing Azure resource, tenant setting or production deployment is modified.
-- The Teams upload ZIP contains installation metadata/icons only. A central operator
-  hosts the Node/UI service once; production end users do not run per-user servers.
+- The user operates the same Node/UI runtime locally on Windows for development/test
+  now and can deploy it to Azure later. No preexisting vendor/operator is assumed.
+  Local live state is encrypted SQLite and Foundry uses a tenant-pinned Azure CLI
+  workload credential; no managed identity or Table service is required locally.
+  The explicit Azure profile retains managed identity and configured Table Storage.
+  Every FTE colleague retains their own signed-in delegated source permissions.
+- HTTPS exposure is opt-in and unapproved here: no tunnel, networking changes,
+  resource provisioning or deployment is performed. The installation ZIP neither
+  starts the user's laptop server nor deploys Azure resources.
 - Development/template packages are explicitly labeled and do not establish
   installed-host readiness. Public UI/API probes do not establish tenant consent,
   Teams sign-in, source permissions or full-suite production readiness.

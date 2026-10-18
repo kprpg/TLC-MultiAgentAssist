@@ -7,28 +7,43 @@
 [![VS Code extension release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/vscode-extension-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/vscode-extension-release.yml)
 [![Nightly VS Code extension release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly-vscode-extension.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly-vscode-extension.yml)
 
-TLC MultiAgent Assist is an account assistant that combines live MSX opportunity context with contextual guidance to help advance each opportunity. It ships as three surfaces from one codebase:
+TLC MultiAgent Assist is an account assistant that combines live MSX opportunity context with contextual guidance to help advance each opportunity. It has three established surfaces plus a Teams development surface from one codebase:
 
 | Surface | What it is | Get started |
 | --- | --- | --- |
 | **VS Code extension** | TLC Assist inside VS Code or VS Code Insiders. | [Install](#vs-code-extension) |
 | **Windows desktop app** | A packaged Electron app with Start menu and desktop shortcuts. | [Install](#desktop-app) |
 | **Web application** | The same UI in the browser, hosted on Azure App Service. | [Run](#web-application) |
-| **Microsoft Teams (development)** | Thin Teams UI/transport over the same core, with a separately operated central HTTPS service. | [Setup, ZIPs and F5](docs/runbooks/teams-app.md) |
+| **Microsoft Teams (development)** | Thin Teams UI/transport over the same core; run it yourself on Windows now, deploy the same runtime to Azure later. | [Setup, ZIPs and F5](docs/runbooks/teams-app.md) |
 
-### Teams installation and central hosting
+### Teams: local development now, Azure hosting later
 
 The Teams-uploadable ZIP contains the manifest and icons, **not a running backend**.
-A vendor-provided ZIP can feel self-contained because the vendor already operates
-its service. For TLC Assist, the platform owner provisions/operates the central
-runtime once; production end users only install the configured Teams app and sign
-in. They do not run Node locally.
+You run the ordinary Node web application yourself on your Windows laptop for
+development/test. The local profile uses durable SQLite (encrypted in live mode),
+not mandatory Azure Table Storage or a laptop managed identity. The same runtime
+has an Azure profile for later deployment; no vendor or other operator is assumed.
+FTE colleagues authenticate individually and retain their own delegated source
+permissions, not the laptop owner's access.
+
+Use `npm run teams:start` for the local sanitized sample, or
+`npm run teams:start:configured` after preparing the ignored local environment file.
+Stop with Ctrl+C. Teams/colleague testing additionally requires approved reachable
+HTTPS ingress; no tunnel, networking change or Azure resource is created by these
+commands. Installing the Teams package neither starts the laptop server nor
+deploys it to Azure.
+
+For the complete build/package/extract/run/upload sequence, use the single
+[local Teams runner](scripts/run-teams-local.ps1). It requires the selected HTTPS
+origin, verifies it before sideloading, and supports supplied trusted localhost
+certificates or an existing approved HTTPS ingress. See the
+[one-script instructions](docs/runbooks/teams-app.md#one-script-build-run-and-upload).
 
 The [Teams runbook](docs/runbooks/teams-app.md) distinguishes the installation ZIP,
 the separately deployable runtime ZIP, and explicitly unconfigured development
-packages. It covers the full F5/runtime + approved HTTPS exposure + manifest +
-Teams sideload path, tenant/FTE/delegated-access prerequisites, and unverified
-release gates. ZIP generation or browser-only testing is not production readiness.
+packages. It covers start/stop, configuration, logs, state/backup/recovery, F5,
+opt-in HTTPS exposure, manifest/Teams setup, local-to-Azure changes and unverified
+live/ingress gates. ZIP generation or browser-only testing is not production readiness.
 
 ## Data modes
 

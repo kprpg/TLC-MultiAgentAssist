@@ -1,16 +1,15 @@
 import { createServer } from 'node:http'
+import { createServer as createHttpsServer } from 'node:https'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
-import { ManagedIdentityCredential } from '@azure/identity'
 import { ConfidentialClientApplication } from '@azure/msal-node'
-import { TableClient } from '@azure/data-tables'
-import { loadTeamsAdmission, loadTeamsConfiguration } from './configuration.js'
+import { loadTeamsAdmission, loadTeamsConfiguration, loadTeamsRuntimeConfiguration, loadTeamsStateKey, loadTeamsTlsConfiguration } from './configuration.js'
 import { createTeamsHandler } from './app.js'
 import { createDelegatedTokenProvider, type DelegatedTokenProvider } from './authentication.js'
-import { SqliteDocumentStore, type ScopedDocumentStore } from '../../../packages/connectors/common/scoped-document-store.js'
-import { TableDocumentStore } from '../../../packages/connectors/common/table-document-store.js'
+import { createTeamsStateStore, createTeamsWorkloadCredential } from './runtime-resources.js'
+import { loadFoundryEnvironmentFromEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
 import { ScopedPortfolioPreferenceStore } from '../../../packages/connectors/common/scoped-portfolio-preferences.js'
 import { GraphContextAuthority } from '../../../packages/connectors/teams/context-authority.js'
 import { createLiveApplicationServices, createSampleApplicationServices, type ApplicationServices } from '../../../packages/orchestrator/application-runtime.js'
@@ -28,26 +27,28 @@ import { WorkflowActivityStore } from '../../../packages/orchestrator/collaborat
 
 export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.env) {
   const configuration = loadTeamsConfiguration(environment)
+  const runtime = loadTeamsRuntimeConfiguration(environment, configuration)
+  const tlsConfiguration = loadTeamsTlsConfiguration(environment, configuration.origin)
+  const tls = tlsConfiguration ? {
+    cert: await readFile(tlsConfiguration.certificatePath),
+    key: await readFile(tlsConfiguration.keyPath)
+  } : undefined
   const acceptNewWork = loadTeamsAdmission(environment)
   const port = Number(environment['TLC_TEAMS_PORT'] ?? environment['PORT'] ?? 3978)
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('The Teams listener port is invalid.')
   const host = environment['TLC_TEAMS_HOST'] ?? (environment['WEBSITE_SITE_NAME'] ? '0.0.0.0' : '127.0.0.1')
-  const localPath = environment['TLC_TEAMS_STATE_PATH'] ?? resolve('.tlc', 'teams-state.sqlite')
-  const managedIdentity = new ManagedIdentityCredential(environment['AZURE_CLIENT_ID'] ? { clientId: environment['AZURE_CLIENT_ID'] } : {})
-  let store: ScopedDocumentStore
-  let localStore: SqliteDocumentStore | undefined
-  if (configuration.mode === 'sample') {
-    if (localPath !== ':memory:') await mkdir(dirname(localPath), { recursive: true })
-    localStore = new SqliteDocumentStore(localPath)
-    store = localStore
-  } else {
-    store = new TableDocumentStore(new TableClient(configuration.storageUrl, 'TlcTeams', managedIdentity))
-  }
+  const stateKey = configuration.mode === 'live' ? loadTeamsStateKey(environment) : undefined
+  const foundry = configuration.mode === 'live' ? await loadFoundryEnvironmentFromEnvironment(environment) : undefined
+  const foundryCredential = foundry ? createTeamsWorkloadCredential(runtime, foundry.authentication.foundryTenantId, environment) : undefined
+  const resources = await createTeamsStateStore(configuration, runtime, environment)
+  const { store } = resources
+  let sample: ApplicationServices | undefined
+  try {
   const lifecycle = new CollaborationLifecycle(store, acceptNewWork)
   const sessions = new Map<string, { services: Promise<ApplicationServices>; tokens: { current: DelegatedTokenProvider }; principal: ExecutionPrincipal; lastUsed: number; generation: number }>()
-  const samplePath = environment['TLC_TEAMS_SAMPLE_PATH'] ?? resolve('.tlc', 'teams-sample.sqlite')
+  const samplePath = runtime.samplePath
   if (configuration.mode === 'sample' && samplePath !== ':memory:') await mkdir(dirname(samplePath), { recursive: true })
-  const sample = configuration.mode === 'sample'
+  sample = configuration.mode === 'sample'
     ? await createSampleApplicationServices({ dataPath: samplePath }) : undefined
   const confidential = configuration.mode === 'live' ? new ConfidentialClientApplication({
     auth: {
@@ -76,7 +77,7 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   }
   async function resolveServices(principal: ExecutionPrincipal, assertion: string): Promise<ApplicationServices> {
     if (sample) return sample
-    if (configuration.mode !== 'live' || !confidential) throw new Error('Live Teams configuration is unavailable.')
+    if (configuration.mode !== 'live' || !confidential || !foundryCredential) throw new Error('Live Teams configuration is unavailable.')
     const key = principalPartition(principal)
     const generation = (await lifecycle.status(principal)).generation
     const provider = createDelegatedTokenProvider(configuration, assertion, (request) => confidential.acquireTokenOnBehalfOf(request), principal.expiresAt ?? Date.now())
@@ -102,7 +103,7 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
         return token
       },
       preferences: new ScopedPortfolioPreferenceStore(store, key),
-      foundryCredential: managedIdentity
+      foundryCredential
     })
     const entry = { services, tokens, principal, lastUsed: Date.now(), generation }
     sessions.set(key, entry)
@@ -134,9 +135,7 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   })
   let transport: Awaited<ReturnType<typeof registerTeamsBot>> | undefined
   if (configuration.mode === 'live') {
-    const encodedKey = environment['TLC_TEAMS_STATE_KEY'] ?? ''
-    const stateKey = Buffer.from(encodedKey, 'base64')
-    if (stateKey.length !== 32 || stateKey.toString('base64') !== encodedKey) throw new Error('Live bot credential state requires a securely provisioned 32-byte Base64 encryption key.')
+    if (!stateKey) throw new Error('Live bot credential state requires its configured encryption key.')
     transport = await registerTeamsBot({ web, configuration, store, stateKey, resolveServices, acceptNewWork, onDeactivate: stopOwnedWork })
   }
   const transcriptEvents = configuration.mode === 'live' ? new TranscriptEventService(
@@ -182,14 +181,15 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   web.use(express.static(clientRoot, { index: false, dotfiles: 'deny', fallthrough: true }))
   web.get('/', (_request, response) => response.sendFile(resolve(clientRoot, 'index.html')))
   web.use((_request, response) => response.status(404).json({ error: 'route_not_found' }))
-  const server = createServer(web)
+  const server = tls ? createHttpsServer(tls, web) : createServer(web)
   await new Promise<void>((resolveReady, reject) => {
     server.once('error', reject)
     server.listen(port, host, () => { server.removeListener('error', reject); resolveReady() })
   })
   const address = server.address()
   const boundPort = address && typeof address !== 'string' ? address.port : port
-  console.info(`TLC Teams ready at http://${host}:${boundPort} (${configuration.mode})`)
+  console.info(`TLC Teams ready at ${tls ? 'https' : 'http'}://${host}:${boundPort} (${configuration.mode})`)
+  console.info(`[teams-host] profile=${runtime.profile} state=${runtime.state.kind} source-identity=${configuration.mode === 'live' ? 'delegated-user' : 'sanitized-sample'}`)
   let work = Promise.resolve()
   let processing = false
   let renewAfter = 0
@@ -211,16 +211,25 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
     })().catch(() => { console.error('[teams-graph] event_processing_failed') }).finally(() => { processing = false })
   }, 5000) : undefined
   interval?.unref()
+  let closing: Promise<void> | undefined
   return {
     server, configuration, store,
-    async close() {
+    close(): Promise<void> {
+      closing ??= (async () => {
       if (interval) clearInterval(interval)
-      await new Promise<void>((resolveClosed, reject) => server.close((error) => error ? reject(error) : resolveClosed()))
-      await work
-      for (const session of sessions.values()) await (await session.services).dispose()
-      await sample?.dispose()
-      localStore?.close()
+      try {
+        await new Promise<void>((resolveClosed, reject) => server.close((error) => error ? reject(error) : resolveClosed()))
+        await work
+        for (const session of sessions.values()) await (await session.services).dispose()
+        await sample?.dispose()
+      } finally { resources.close() }
+      })()
+      return closing
     }
+  }
+  } catch (error) {
+    try { await sample?.dispose() } finally { resources.close() }
+    throw error
   }
 }
 

@@ -1,4 +1,4 @@
-import { app, nestedAppAuth } from '@microsoft/teams-js'
+import { app, nestedAppAuth, type FrameContexts } from '@microsoft/teams-js'
 import {
   BrowserCacheLocation, InteractionRequiredAuthError, PublicClientApplication, createNestablePublicClientApplication,
   type IPublicClientApplication
@@ -8,6 +8,7 @@ import { teamsPublicConfigurationSchema } from '../../../../packages/common/cont
 export interface BrowserHostContext {
   embedded: boolean
   theme: string
+  frameContext?: FrameContexts
   contextId?: string
   kind: 'channel' | 'chat' | 'meeting'
 }
@@ -19,7 +20,7 @@ export async function initializeBrowserAuthentication(onTheme: (theme: string) =
     await app.initialize()
     const host = await app.getContext()
     context = {
-      embedded: true, theme: host.app.theme,
+      embedded: true, theme: host.app.theme, frameContext: host.page.frameContext,
       kind: host.meeting ? 'meeting' : host.channel ? 'channel' : 'chat',
       ...(host.channel?.id ? { contextId: host.channel.id } : host.chat?.id ? { contextId: host.chat.id } : {})
     }

@@ -29,7 +29,7 @@ export function createTeamsManifest(options) {
   return {
     $schema: teamsManifestSchemaUrl,
     manifestVersion: '1.30',
-    version: '0.1.0',
+    version: '0.1.2',
     id: parsed.appId,
     developer: {
       name: 'TLC Assist', websiteUrl: `${origin}/`,
@@ -39,9 +39,10 @@ export function createTeamsManifest(options) {
     name: { short: full ? 'TLC Assist' : 'TLC Assist Sample', full: full ? 'TLC Account Team Assist for Teams' : 'TLC Assist - sanitized sample workspace' },
     description: {
       short: full ? 'Grounded account-team guidance with delegated access and reviewed changes.' : 'Sanitized TLC account-team workspace. No live business data.',
-      full: 'TLC Assist joins authorized account-team information with shared workflows and grounded guidance. Source-system rights, Microsoft FTE eligibility and reviewed-action controls apply independently. The app requires its separately hosted HTTPS service; the upload ZIP does not host a backend.'
+      full: 'TLC Assist joins authorized account-team information with shared workflows and grounded guidance. Source-system rights, Microsoft FTE eligibility and reviewed-action controls apply independently. Run the user-operated web service locally for development/test or deploy the same runtime later. The app requires a reachable HTTPS origin; uploading the ZIP neither starts the server nor deploys a backend.'
     },
     accentColor: '#5B5FC7',
+    supportsChannelFeatures: 'tier1',
     staticTabs: [{
       entityId: 'tlc-personal', name: 'My work', scopes: ['personal'],
       contentUrl: `${origin}/`, websiteUrl: `${origin}/`
@@ -52,6 +53,13 @@ export function createTeamsManifest(options) {
       context: ['channelTab', 'privateChatTab', 'meetingChatTab', 'meetingDetailsTab', 'meetingSidePanel', 'meetingStage']
     }],
     validDomains: [new URL(origin).hostname],
+    authorization: { permissions: { resourceSpecific: [
+      ...(full ? [
+        { name: 'ChannelMember.Read.Group', type: 'Application' },
+        { name: 'ChatMember.Read.Chat', type: 'Application' }
+      ] : []),
+      { name: 'MeetingStage.Write.Chat', type: 'Delegated' }
+    ] } },
     ...(full ? {
       bots: [{ botId: parsed.botId, scopes: ['personal', 'team', 'groupChat'], isNotificationOnly: false, supportsFiles: false }],
       composeExtensions: [{
@@ -61,14 +69,27 @@ export function createTeamsManifest(options) {
           context: ['compose', 'commandBox'], parameters: [{ name: 'search', title: 'Customer name', description: 'Enter at least two characters.' }]
         }]
       }],
-      webApplicationInfo: { id: parsed.botId, resource: `api://botid-${parsed.botId}` },
-      authorization: { permissions: { resourceSpecific: [
-        { name: 'ChannelMember.Read.Group', type: 'Application' },
-        { name: 'ChatMember.Read.Chat', type: 'Application' },
-        { name: 'MeetingStage.Write.Chat', type: 'Delegated' }
-      ] } }
+      webApplicationInfo: { id: parsed.botId, resource: `api://botid-${parsed.botId}` }
     } : {})
   }
+}
+
+export function validateTeamsManifestCapabilities(manifest) {
+  const [major = 0, minor = 0] = manifest.manifestVersion.split('.').map(Number)
+  const modernChannels = major > 1 || major === 1 && minor >= 25
+  const tabs = [...(manifest.staticTabs ?? []), ...(manifest.configurableTabs ?? [])]
+  const teamScope = [...tabs, ...(manifest.bots ?? [])].some((capability) => capability.scopes?.includes('team'))
+  if (modernChannels && Object.hasOwn(manifest, 'supportedChannelTypes')) {
+    throw new Error('Teams manifest v1.25+ must use supportsChannelFeatures instead of supportedChannelTypes.')
+  }
+  if (modernChannels && teamScope && manifest.supportsChannelFeatures !== 'tier1') {
+    throw new Error('Teams manifest v1.25+ with team scope requires supportsChannelFeatures: "tier1".')
+  }
+  if (tabs.some((tab) => tab.context?.includes('meetingStage'))
+    && !manifest.authorization?.permissions?.resourceSpecific?.some((permission) => permission.name === 'MeetingStage.Write.Chat' && permission.type === 'Delegated')) {
+    throw new Error('Teams meetingStage requires authorization.permissions.resourceSpecific with MeetingStage.Write.Chat and type Delegated.')
+  }
+  return true
 }
 
 export function classifyPackageOrigin(origin) {
@@ -102,12 +123,12 @@ export async function verifyTeamsOrigin(origin, mode, fetcher = fetch) {
   }
   const get = (path) => fetcher(`${origin}${path}`, { redirect: 'error', credentials: 'omit', signal: AbortSignal.timeout(10_000) })
   const health = await get('/api/health')
-  if (!health.ok) throw new Error('The central Teams API health endpoint is not reachable.')
+  if (!health.ok) throw new Error('The configured Teams API health endpoint is not reachable.')
   const status = z.object({ status: z.literal('ready'), surface: z.literal('teams'), mode: z.enum(['sample', 'live']) }).safeParse(JSON.parse(await smallBody(health)))
   if (!status.success || status.data.mode !== mode) throw new Error('The configured host is not the expected Teams runtime/data mode.')
   const ui = await get('/')
   if (!ui.ok || !ui.headers.get('content-type')?.includes('text/html') || !(await smallBody(ui)).includes('TLC Assist for Teams')) {
-    throw new Error('The central Teams UI is not reachable at the configured origin.')
+    throw new Error('The configured Teams UI is not reachable at the selected origin.')
   }
   const session = await get('/api/teams/session')
   if (mode === 'live' && session.status !== 401) throw new Error('The live Teams host must reject unauthenticated application sessions.')
@@ -130,8 +151,9 @@ function icon(size, outline) {
 export async function buildTeamsAppZip(options) {
   const { outputDirectory = join(root, 'release-teams'), development = false, ...metadata } = options
   const manifest = createTeamsManifest(metadata)
+  validateTeamsManifestCapabilities(manifest)
   if (classifyPackageOrigin(metadata.origin).developmentOnly && !development) {
-    throw new Error('The package origin is development-only or a template. Use an explicitly labeled development package or configure the central HTTPS host.')
+    throw new Error('The package origin is development-only or a template. Use an explicitly labeled development package or configure the selected HTTPS host.')
   }
   if (development && metadata.mode === 'live') throw new Error('A development/template package cannot claim the live suite.')
   const zip = new JSZip()
@@ -164,7 +186,7 @@ export async function validateTeamsManifest(manifest) {
   addFormats(validator)
   const validate = validator.compile(schema)
   if (!validate(manifest)) throw new Error(`Teams manifest schema validation failed: ${JSON.stringify(validate.errors)}`)
-  return true
+  return validateTeamsManifestCapabilities(manifest)
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -174,18 +196,18 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     development: { type: 'boolean', default: false }, 'verify-origin': { type: 'boolean', default: false }
   } })
   const configuredOrigin = values.origin ?? process.env.TLC_TEAMS_ORIGIN
-  if (!configuredOrigin && !values.development) throw new Error('Configure --origin with the central HTTPS host, or explicitly request --development. Uploading the ZIP does not provision hosting.')
+  if (!configuredOrigin && !values.development) throw new Error('Configure --origin with your selected HTTPS host, or explicitly request --development. Uploading the ZIP does not start a laptop server or provision hosting.')
   if (values.mode === 'live' && !values['app-id'] && !process.env.TLC_TEAMS_PACKAGE_ID) throw new Error('Live packaging requires the explicitly approved Teams package ID.')
   const metadata = {
     mode: values.mode,
-    origin: configuredOrigin ?? 'https://localhost:3978',
+    origin: configuredOrigin ?? 'https://localhost:3979',
     appId: values['app-id'] ?? process.env.TLC_TEAMS_PACKAGE_ID ?? '8cb8c9a2-6ee6-4382-bfa4-5b409c77e54b',
     ...(values.mode === 'live' ? { botId: values['bot-id'] ?? process.env.TLC_TEAMS_BOT_CLIENT_ID } : {})
   }
   await validateTeamsManifest(createTeamsManifest(metadata))
   if (values['verify-origin']) console.info(`Hosting check: ${JSON.stringify(await verifyTeamsOrigin(metadata.origin, metadata.mode))}`)
   console.info(`Teams installation ZIP (manifest/icons only): ${await buildTeamsAppZip({ ...metadata, development: values.development })}`)
-  console.info('The ZIP references the separately operated central HTTPS service. It does not contain or provision a runtime.')
+  console.info('The ZIP references the runtime you operate: local dev/test now, Azure later. It neither starts your laptop server nor deploys a runtime.')
   if (values.development) console.warn('DEVELOPMENT PACKAGE: not a verified Teams installation. Configure trusted HTTPS exposure and repackage with that origin before sideloading.')
   if (values.runtime) {
     const { packageTeamsRuntime } = await import('./package-teams-runtime.mjs')

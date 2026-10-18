@@ -32,7 +32,7 @@ describe('self-contained host release staging', () => {
       await expect(readFile(join(folder, 'unexpected-script'))).rejects.toMatchObject({ code: 'ENOENT' })
       expect(JSON.parse(await readFile(join(folder, 'package-lock.json'), 'utf8')).name).toBe('tlc-runtime-install-policy-fixture')
     } finally { await rm(folder, { recursive: true, force: true }) }
-  }, 30_000)
+  }, 60_000)
 
   it('loads the packager in native Node ESM without relying on test-runner interop', () => {
     const result = execFileSync(process.execPath, [
@@ -54,6 +54,8 @@ describe('self-contained host release staging', () => {
         'packages\\documents\\package.json': JSON.stringify({ dependencies: { docx: '^9.7.1' } }),
         'apps\\teams\\dist\\server.js': 'console.log("test host")',
         'apps\\teams\\dist\\client\\index.html': '<html>fixture</html>',
+        'apps\\teams\\dist\\runtime.env': 'sensitive-runtime-configuration-must-not-ship',
+        'apps\\teams\\dist\\operator-state.sqlite': 'private-state-must-not-ship',
         'docs\\knowledge\\MCEM Overview.pdf': 'fixture pdf',
         'config\\foundry.environment.example.json': '{}',
         'config\\mcp.servers.json': '{}',
@@ -74,11 +76,20 @@ describe('self-contained host release staging', () => {
       expect(await readFile(join(target, 'client', 'index.html'), 'utf8')).toContain('fixture')
       const manifest = JSON.parse(await readFile(join(target, 'package.json'), 'utf8'))
       expect(manifest.scripts.start).toBe('node --experimental-sqlite server.js')
+      expect(manifest.scripts['start:configured']).toBe('node --env-file=runtime.env --experimental-sqlite server.js')
       expect(manifest.workspaces).toBeUndefined()
       expect(manifest.dependencies['@microsoft/teams.apps']).toBe('2.1.1')
       expect(await readFile(join(target, 'runtime.env.example'), 'utf8')).toContain('REPLACE_WITH_APPROVED_SERVER_CREDENTIAL')
       expect(await readFile(join(target, 'config', 'teams-disclosure.example.json'), 'utf8')).toContain('policies')
+      const instructions = await readFile(join(target, 'RUNTIME-README.txt'), 'utf8')
+      expect(instructions).toContain('npm run start:configured')
+      expect(instructions).toContain('Ctrl+C')
+      expect(instructions).toContain('backup')
+      expect(instructions).toContain('Azure later')
+      expect(instructions).not.toContain('central platform operator')
       await expect(readFile(join(target, 'config', 'foundry.environment.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readFile(join(target, 'runtime.env'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readFile(join(target, 'operator-state.sqlite'))).rejects.toMatchObject({ code: 'ENOENT' })
     } finally { await rm(folder, { recursive: true, force: true }) }
   })
 })

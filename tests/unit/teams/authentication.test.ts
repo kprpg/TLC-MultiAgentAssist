@@ -38,9 +38,10 @@ describe('Teams configuration admission', () => {
   it('keeps sample local and never silently selects sample in a hosted environment', () => {
     expect(loadTeamsConfiguration({}).mode).toBe('sample')
     expect(() => loadTeamsConfiguration({ WEBSITE_SITE_NAME: 'hosted' })).toThrow(/mode/i)
+    expect(() => loadTeamsConfiguration({ TLC_TEAMS_RUNTIME_PROFILE: 'azure' })).toThrow(/mode/i)
     expect(() => loadTeamsConfiguration({ TLC_TEAMS_MODE: 'typo' })).toThrow()
   })
-  it('requires the complete live identity and persistent-store configuration', () => {
+  it('requires complete live identity/resource configuration independently of the selected durable store', () => {
     expect(() => loadTeamsConfiguration({ TLC_TEAMS_MODE: 'live' })).toThrow()
     expect(loadTeamsConfiguration(environment).mode).toBe('live')
     expect(() => loadTeamsConfiguration({ ...environment, TLC_TEAMS_MCP_SCOPE: '' })).toThrow()

@@ -46,6 +46,7 @@
     "teams:build": "npm --workspace @tlc/teams run build",
     "teams:typecheck": "npm --workspace @tlc/teams run typecheck",
     "teams:start": "npm run teams:build && cross-env TLC_TEAMS_MODE=sample node --experimental-sqlite apps/teams/dist/server.js",
+    "teams:start:configured": "npm run teams:build && node --env-file=apps/teams/.env.local --experimental-sqlite apps/teams/dist/server.js",
     "teams:package": "node scripts/package-teams.mjs",
     "teams:package:development": "node scripts/package-teams.mjs --development",
     "teams:release": "npm run teams:build && npm run test:teams && node scripts/package-teams.mjs --runtime",
