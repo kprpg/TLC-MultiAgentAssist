@@ -137,6 +137,14 @@ export class ThinSliceOrchestrator {
     return this.msx.listOpportunities(accountId)
   }
 
+  async getOpportunitySnapshot(opportunityId: string): Promise<{ account: Account; opportunity: Opportunity; milestones: Milestone[]; revisionTokens?: Record<string, string> }> {
+    if (!opportunityId.trim()) throw new Error('An opportunity id is required.')
+    const context = await this.msx.getOpportunityContext(opportunityId)
+    const milestones = await this.msx.listMilestones(opportunityId)
+    const revisionTokens = await this.msx.getConcurrencyTokens?.(opportunityId)
+    return { account: context.account, opportunity: context.opportunity, milestones, ...(revisionTokens ? { revisionTokens } : {}) }
+  }
+
   async discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]> {
     return this.msx.discoverOpportunities(seDomainSchema.parse(domain))
   }

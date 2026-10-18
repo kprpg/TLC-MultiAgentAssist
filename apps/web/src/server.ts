@@ -11,10 +11,10 @@ import { createLocalStoreMsxConnector } from '../../../packages/connectors/local
 import { SampleRecordCreationCatalog } from '../../../packages/connectors/local-store/sample-record-creation-catalog.js'
 import type { MsxConnector } from '../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
-import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
+import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
+import { createSampleTaskAgents } from '../../../packages/orchestrator/task-agents.js'
 import { RecordCreationService } from '../../../packages/orchestrator/record-creation/service.js'
 import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
-import type { AgentCapability } from '../../../packages/common/index.js'
 
 const port = parsePort(process.env['PORT'])
 const mode = resolveWebHostMode(process.env)
@@ -33,7 +33,7 @@ const sampleRuntime = sampleMsx
         new ThinSliceOrchestrator(
             sampleMsx,
             new LocalPdfMcemGuidanceConnector(resolve('docs/knowledge/MCEM Overview.pdf')),
-            createSampleTaskAgents(),
+            createSampleTaskAgents('web-sample-v1'),
             undefined,
             new RecordCreationService(
                 sampleMsx,
@@ -112,17 +112,6 @@ async function closeLocalServer(): Promise<void> {
     await new Promise<void>((resolveClose, rejectClose) => {
         server.close((error) => error ? rejectClose(error) : resolveClose())
     })
-}
-
-function createSampleTaskAgents(): TaskAgentRegistry {
-    const capabilities: AgentCapability[] = ['account-pulse', 'mcem-coach', 'pursuit-executive', 'risk-solution-play']
-    return Object.fromEntries(capabilities.map((capability) => [capability, {
-        version: 'web-sample-v1',
-        agent: {
-            invoke: async (context: AgentTaskContext) =>
-                `## ${capability.replaceAll('-', ' ')}\n\nSample guidance for **${context.opportunity.name}**.\n\n${context.prompt}`
-        }
-    }])) as TaskAgentRegistry
 }
 
 try {

@@ -14,13 +14,28 @@ TLC MultiAgent Assist is an account assistant that combines live MSX opportunity
 | **VS Code extension** | TLC Assist inside VS Code or VS Code Insiders. | [Install](#vs-code-extension) |
 | **Windows desktop app** | A packaged Electron app with Start menu and desktop shortcuts. | [Install](#desktop-app) |
 | **Web application** | The same UI in the browser, hosted on Azure App Service. | [Run](#web-application) |
+| **Microsoft Teams (development)** | Thin Teams UI/transport over the same core, with a separately operated central HTTPS service. | [Setup, ZIPs and F5](docs/runbooks/teams-app.md) |
+
+### Teams installation and central hosting
+
+The Teams-uploadable ZIP contains the manifest and icons, **not a running backend**.
+A vendor-provided ZIP can feel self-contained because the vendor already operates
+its service. For TLC Assist, the platform owner provisions/operates the central
+runtime once; production end users only install the configured Teams app and sign
+in. They do not run Node locally.
+
+The [Teams runbook](docs/runbooks/teams-app.md) distinguishes the installation ZIP,
+the separately deployable runtime ZIP, and explicitly unconfigured development
+packages. It covers the full F5/runtime + approved HTTPS exposure + manifest +
+Teams sideload path, tenant/FTE/delegated-access prerequisites, and unverified
+release gates. ZIP generation or browser-only testing is not production readiness.
 
 ## Data modes
 
 Every surface runs in one of two modes:
 
 - **Sample mode** (default) — bundled sanitized data. No sign-in, no network; explore without touching MSX, Foundry, Azure, or Microsoft Entra ID.
-- **Live mode** — real opportunity data over **MSX OData** and **Dataverse MCP**, plus Microsoft Foundry agents. Requires a corporate Microsoft identity through VS Code's built-in Microsoft sign-in.
+- **Live mode** — real opportunity data over **MSX OData** and **Dataverse MCP**, plus Microsoft Foundry agents. Requires corporate identity and the surface's approved authentication. Teams uses dedicated Entra/NAA/OBO admission and tenant/FTE/source authorization, not the VS Code credential.
 
 See [Documentation](#documentation) for the full user guide, FAQ, and runbooks.
 
@@ -41,6 +56,8 @@ In each surface, open **New** (immediately before **Discover**), choose **Opport
 Opportunity uses an authorized parent from that Account; new Opportunities can include child
 Milestones. Multiple Opportunities support repeated forms, an editable grid, and paired CSV import;
 existing-parent Milestones support repeated forms, an editable grid, and Milestone CSV import.
+The Teams development surface places the same creation/draft workflow under
+**Accounts > New / draft** and uses its own sanitized sample database.
 Import validates and loads an editable draft; **it does not insert records**. Whether using a form
 or CSV, select **Validate & review**, check the Account, target, fields, and mutation count, then
 select **Submit to SQLite** to insert the batch. **Export draft** only downloads files.

@@ -7,6 +7,7 @@ import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { PDFParse } from "pdf-parse";
 import { AIProjectClient } from "@azure/ai-projects";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -3151,6 +3152,9 @@ var LiveMsxConnector = class {
 	performanceReporter;
 	writeMetadata;
 	preferenceStore;
+	cacheOptions;
+	entityVersions = /* @__PURE__ */ new Map();
+	expectedVersions = new AsyncLocalStorage();
 	baseUrl;
 	portfolioPromise;
 	observationPromises = /* @__PURE__ */ new Map();
@@ -3161,12 +3165,13 @@ var LiveMsxConnector = class {
 	accountTpidField;
 	accountTpidMetadataPromise;
 	accountNameIndexPromise;
-	constructor(tokenProvider, fetchImplementation = fetch, baseUrl = defaultBaseUrl, performanceReporter, writeMetadata = {}, preferenceStore = new MemoryPortfolioPreferenceStore()) {
+	constructor(tokenProvider, fetchImplementation = fetch, baseUrl = defaultBaseUrl, performanceReporter, writeMetadata = {}, preferenceStore = new MemoryPortfolioPreferenceStore(), cacheOptions = {}) {
 		this.tokenProvider = tokenProvider;
 		this.fetchImplementation = fetchImplementation;
 		this.performanceReporter = performanceReporter;
 		this.writeMetadata = writeMetadata;
 		this.preferenceStore = preferenceStore;
+		this.cacheOptions = cacheOptions;
 		this.baseUrl = new URL(baseUrl);
 		if (writeMetadata.riskDetailsField && !/^[A-Za-z][A-Za-z0-9_]*$/.test(writeMetadata.riskDetailsField)) throw new Error("The MSX risk details logical field name is invalid.");
 		if (writeMetadata.accountTpidField && !navigationPropertyPattern.test(writeMetadata.accountTpidField)) throw new Error("TLC_MSX_ACCOUNT_TPID_FIELD must be a valid Dataverse identifier.");
@@ -3821,6 +3826,39 @@ var LiveMsxConnector = class {
 		this.observationPromises.clear();
 		this.milestonePromises.clear();
 		this.currentUserIdPromise = void 0;
+		this.entityVersions.clear();
+	}
+	async getConcurrencyTokens(opportunityId) {
+		const milestones = await this.getMilestoneRows(opportunityId);
+		const paths = [`opportunities(${opportunityId})`, ...milestones.map((row) => `msp_engagementmilestones(${row.msp_engagementmilestoneid})`)];
+		const result = {};
+		for (const path of paths) {
+			const token = this.entityVersions.get(path.toLowerCase());
+			if (token) result[path.toLowerCase()] = token;
+		}
+		return result;
+	}
+	withExpectedVersions(versions, operation) {
+		return this.expectedVersions.run({ ...versions }, operation);
+	}
+	rememberNativeVersions(value) {
+		const remember = (row) => {
+			if (!isObjectRecord(row)) return;
+			const records = [
+				["opportunityid", "opportunities"],
+				["msp_engagementmilestoneid", "msp_engagementmilestones"],
+				["msp_dealteamid", this.writeMetadata.dealTeam?.entitySet ?? defaultDealTeamWriteMetadata.entitySet]
+			];
+			for (const [field, set] of records) {
+				const id = row[field];
+				if (typeof id !== "string" || !guidPattern.test(id)) continue;
+				const path = `${set}(${id})`.toLowerCase();
+				this.entityVersions.delete(path);
+				if ("@odata.etag" in row && typeof row["@odata.etag"] === "string" && /^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(row["@odata.etag"])) this.entityVersions.set(path, row["@odata.etag"]);
+			}
+		};
+		if (value && typeof value === "object" && "value" in value && Array.isArray(value.value)) value.value.forEach(remember);
+		else remember(value);
 	}
 	/** Returns the signed-in user's Dataverse systemuser id (WhoAmI UserId), cached for reuse. */
 	getCurrentUserId() {
@@ -3872,6 +3910,7 @@ var LiveMsxConnector = class {
 		return milestones;
 	}
 	getPortfolio() {
+		if (this.cacheOptions.cachePortfolio === false) return this.loadPortfolio();
 		this.portfolioPromise ??= this.loadPortfolio().catch((error) => {
 			this.portfolioPromise = void 0;
 			throw error;
@@ -3982,11 +4021,16 @@ var LiveMsxConnector = class {
 			Prefer: "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\",odata.maxpagesize=500"
 		} });
 		if (!response.ok) throw new MsxRequestError(`MSX request failed with status ${response.status}.`, response.status);
-		return await response.json();
+		const result = await response.json();
+		if (this.cacheOptions.requireConditionalWrites) this.rememberNativeVersions(result);
+		return result;
 	}
 	async patch(path, body) {
 		const url = new URL(path, this.baseUrl);
 		this.assertTrustedUrl(url);
+		const expected = this.expectedVersions.getStore();
+		const version = this.cacheOptions.requireConditionalWrites ? expected?.[path.toLowerCase()] : "*";
+		if (!version || this.cacheOptions.requireConditionalWrites && !/^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(version)) throw new Error("A reviewed native concurrency token is required before this update.");
 		const accessToken = await this.tokenProvider.getAccessToken();
 		const response = await this.fetchImplementation(url, {
 			method: "PATCH",
@@ -3994,11 +4038,16 @@ var LiveMsxConnector = class {
 				Authorization: `Bearer ${accessToken}`,
 				Accept: "application/json",
 				"Content-Type": "application/json",
-				"If-Match": "*"
+				"If-Match": version
 			},
 			body: JSON.stringify(body)
 		});
 		if (!response.ok) throw new MsxRequestError(`MSX update failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status);
+		if (this.cacheOptions.requireConditionalWrites && expected) {
+			const next = response.headers.get("etag");
+			if (next && /^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(next)) expected[path.toLowerCase()] = next;
+			else delete expected[path.toLowerCase()];
+		}
 	}
 	async post(path, body) {
 		const url = new URL(path, this.baseUrl);
@@ -4039,13 +4088,15 @@ var LiveMsxConnector = class {
 	async delete(path) {
 		const url = new URL(path, this.baseUrl);
 		this.assertTrustedUrl(url);
+		const version = this.cacheOptions.requireConditionalWrites ? this.entityVersions.get(path.toLowerCase()) : "*";
+		if (!version) throw new Error("A verified native membership concurrency token is required before removal.");
 		const accessToken = await this.tokenProvider.getAccessToken();
 		const response = await this.fetchImplementation(url, {
 			method: "DELETE",
 			headers: {
 				Authorization: ["Bearer", accessToken].join(" "),
 				Accept: "application/json",
-				"If-Match": "*"
+				"If-Match": version
 			}
 		});
 		if (!response.ok) throw new MsxRequestError(`MSX delete failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status);
@@ -4059,6 +4110,9 @@ function unique(values) {
 }
 function isPresent(value) {
 	return Boolean(value);
+}
+function isObjectRecord(value) {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function formattedValue(row, field) {
 	const value = row[`${field}${formattedValueSuffix}`];
@@ -9574,7 +9628,8 @@ function parseTimestampMs(stamp) {
 	return ((hours * 60 + minutes) * 60 + seconds) * 1e3 + millis;
 }
 /** Strips WebVTT speaker voice tags: `<v Priya Nair>text</v>` -> `{ speaker, text }`. */
-function extractVoiceTag(line) {
+function extractVoiceTag(line, attributionAllowed = true) {
+	if (!attributionAllowed) return { text: line.replace(/<\/?v(?:\s+[^>]*)?>/gi, "").trim() };
 	const voice = line.match(/^<v\s+([^>]+)>(.*)$/i);
 	if (voice && voice[1] !== void 0) return {
 		speaker: voice[1].trim(),
@@ -9587,7 +9642,7 @@ function extractVoiceTag(line) {
 	};
 	return { text: line.trim() };
 }
-function parseVtt(raw) {
+function parseVtt(raw, attributionAllowed) {
 	const lines = raw.replace(/\r/g, "").split("\n");
 	const segments = [];
 	let startMs;
@@ -9597,7 +9652,7 @@ function parseVtt(raw) {
 		if (buffer.length === 0) return;
 		const joined = buffer.join(" ").trim();
 		if (joined) {
-			const { speaker, text } = extractVoiceTag(joined);
+			const { speaker, text } = extractVoiceTag(joined, attributionAllowed);
 			if (text) segments.push({
 				text,
 				...startMs !== void 0 ? { startMs } : {},
@@ -9629,9 +9684,9 @@ function parseVtt(raw) {
 	flush();
 	return segments;
 }
-function parsePlainText(raw) {
+function parsePlainText(raw, attributionAllowed) {
 	return raw.replace(/\r/g, "").split("\n").map((line) => line.trim()).filter((line) => line.length > 0).map((line) => {
-		const { speaker, text } = extractVoiceTag(line);
+		const { speaker, text } = extractVoiceTag(line, attributionAllowed);
 		return {
 			text,
 			...speaker ? { speaker } : {}
@@ -9640,14 +9695,16 @@ function parsePlainText(raw) {
 }
 /** Parses a raw transcript (WebVTT or `Speaker: text`) into a validated `MeetingTranscript`. */
 function parseTranscriptContent(raw, options = {}) {
-	const segments = (options.format === "vtt" || options.format !== "text" && (/^\uFEFF?WEBVTT/i.test(raw.trimStart()) || /-->/.test(raw)) ? parseVtt(raw) : parsePlainText(raw)).map((seg, index) => ({
+	const looksLikeVtt = options.format === "vtt" || options.format !== "text" && (/^\uFEFF?WEBVTT/i.test(raw.trimStart()) || /-->/.test(raw));
+	const attributionAllowed = options.attribution !== "prohibited";
+	const segments = (looksLikeVtt ? parseVtt(raw, attributionAllowed) : parsePlainText(raw, attributionAllowed)).map((seg, index) => ({
 		segmentId: `seg-${index + 1}`,
 		...seg
 	}));
 	const transcript = {
 		id: options.id ?? `upload-${Date.now()}`,
 		meetingType: options.meetingType ?? "customer",
-		source: "upload",
+		source: options.source ?? "upload",
 		segments,
 		...options.opportunityId ? { opportunityId: options.opportunityId } : {},
 		...options.title ? { title: options.title } : {}
@@ -9825,7 +9882,7 @@ function csv(rows) {
 	return `${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
 }
 function reviewText(value) {
-	return value.replaceAll("\\", "\\\\").replace(/[<>*_[\]`|]/g, "\\$&").replace(/\r?\n/g, " ");
+	return value.replace(/[\\<>*_[\]`|]/g, "\\$&").replace(/\r?\n/g, " ");
 }
 var opportunityHeaders = [
 	"clientOpportunityKey",
@@ -12700,6 +12757,18 @@ var ThinSliceOrchestrator = class {
 	listOpportunities(accountId) {
 		return this.msx.listOpportunities(accountId);
 	}
+	async getOpportunitySnapshot(opportunityId) {
+		if (!opportunityId.trim()) throw new Error("An opportunity id is required.");
+		const context = await this.msx.getOpportunityContext(opportunityId);
+		const milestones = await this.msx.listMilestones(opportunityId);
+		const revisionTokens = await this.msx.getConcurrencyTokens?.(opportunityId);
+		return {
+			account: context.account,
+			opportunity: context.opportunity,
+			milestones,
+			...revisionTokens ? { revisionTokens } : {}
+		};
+	}
 	async discoverOpportunities(domain) {
 		return this.msx.discoverOpportunities(seDomainSchema.parse(domain));
 	}
@@ -12958,7 +13027,7 @@ function createRuntimeCredentials(authentication) {
 	};
 }
 //#endregion
-//#region apps/desktop/electron/main/outlook-compose.ts
+//#region packages/documents/outlook-compose.ts
 var maxComposeUriLength = 16e3;
 var mimeBoundary = "----tlc-agent-response-boundary";
 async function openOutlookDraft(request, draftPath, host) {
@@ -13121,7 +13190,7 @@ function encodeBase64Lines(value) {
 	return Buffer.from(value, "utf8").toString("base64").match(/.{1,76}/g)?.join("\r\n") ?? "";
 }
 //#endregion
-//#region apps/desktop/electron/main/response-document.ts
+//#region packages/documents/response-document.ts
 var numberingReference = "agent-response-numbering";
 var bulletReference = "agent-response-bullets";
 var listLevels = Array.from({ length: 6 }, (_, level) => ({

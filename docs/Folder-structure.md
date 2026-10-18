@@ -20,6 +20,32 @@ The structure supports these boundaries:
 
 ## Repository Layout
 
+### Teams implementation additions
+
+The original proposal below is retained as historical context. The Teams development
+surface adds the following focused areas while preserving one shared backend/harness:
+
+```text
+apps/teams/src/                       Teams composition, verified HTTP/bot transport
+apps/teams/src/client/                Personal/channel/meeting presentation
+apps/shared/                         Browser-safe prompt/Markdown and existing UI reuse
+packages/orchestrator/application-runtime.ts
+packages/orchestrator/operations.ts   Shared composition and typed operation catalog
+packages/orchestrator/collaboration/  Reviewed actions, bindings, events, state admission
+packages/connectors/graph/            Delegated meeting/transcript/subscription access
+packages/connectors/teams/            Authoritative resource membership checks
+packages/documents/                   Shared Word/email builders, not an app dependency
+tests/unit/teams/                     Cumulative deterministic Teams slices
+tests/e2e/teams/                      Actual host/browser journeys
+release-teams/                       Ignored generated installation/runtime archives
+```
+
+The [Teams runbook](./runbooks/teams-app.md) defines the central hosting dependency,
+separate ZIP purposes, F5/HTTPS development path and open production gates. The
+installation ZIP references the runtime; it does not execute the application itself.
+
+### Original proposed layout
+
 ```text
 TLC-MultiAgentAssist/
 |-- apps/

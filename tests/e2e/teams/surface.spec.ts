@@ -1,0 +1,127 @@
+import { expect, test } from '@playwright/test'
+import { readFile } from 'node:fs/promises'
+import JSZip from 'jszip'
+import { chooseOpportunity, post } from './helpers.js'
+
+test('private work controls pause new work, retain reads and resume only with an explicit action', async ({ page, request }) => {
+  await page.goto('/')
+  await chooseOpportunity(page, request)
+  try {
+    await page.getByRole('button', { name: 'Activity', exact: true }).click()
+    await page.getByRole('button', { name: 'Pause new work', exact: true }).click({ timeout: 5_000 })
+    await expect(page.getByText('Work is paused.', { exact: true })).toBeVisible()
+    const blocked = await request.post('/api/teams/operations/workflows.start', { data: {} })
+    expect(blocked.status()).toBe(409)
+    expect(await blocked.json()).toMatchObject({ error: 'collaboration_paused' })
+    await page.getByRole('button', { name: 'Accounts', exact: true }).click()
+    await expect(page.getByLabel('Customer account', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Run guidance', exact: true }).click()
+    await expect(page.getByRole('alert').filter({ hasText: 'collaboration paused' })).toBeVisible()
+    await page.getByRole('button', { name: 'Activity', exact: true }).click()
+    await page.getByRole('button', { name: 'Resume work', exact: true }).click()
+    await expect(page.getByText('Work is active.', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Accounts', exact: true }).click()
+    await page.getByRole('button', { name: 'Run guidance', exact: true }).click()
+    await expect(page.getByRole('region', { name: 'Grounded TLC response' })).toBeVisible()
+  } finally {
+    expect((await request.post('/api/teams/lifecycle', { data: { contractVersion: '1.0', command: 'resume' } })).ok()).toBeTruthy()
+  }
+})
+
+test('personal workspace uses source data, guided prompts and grounded readable results', async ({ page, request }) => {
+  const failures: string[] = []
+  page.on('response', (response) => { if (new URL(response.url()).pathname.startsWith('/api/teams/') && response.status() >= 400) failures.push(`${response.request().method()} ${new URL(response.url()).pathname}: ${response.status()}`) })
+  await page.goto('/')
+  await expect(page.getByText('Sample - no live business data', { exact: true })).toBeVisible()
+  await chooseOpportunity(page, request)
+  await page.getByRole('button', { name: 'Run guidance', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Grounded TLC response' })).toBeVisible()
+  await expect(page.getByText('Evidence and source health', { exact: true })).toBeVisible()
+  const [document] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Export Word', exact: true }).click()])
+  expect(document.suggestedFilename()).toBe('TLC-response.docx')
+  const documentPath = await document.path()
+  if (!documentPath) throw new Error('The actual Word download was not saved.')
+  expect((await JSZip.loadAsync(await readFile(documentPath))).file('word/document.xml')).not.toBeNull()
+  await page.getByLabel('Email draft recipients').fill('reviewer@example.com')
+  const [email] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download unsent email draft' }).click()])
+  expect(email.suggestedFilename()).toBe('TLC-reviewed-draft.eml')
+  const emailPath = await email.path()
+  if (!emailPath) throw new Error('The actual email draft was not saved.')
+  expect(await readFile(emailPath, 'utf8')).toContain('X-Unsent: 1')
+  expect(failures).toEqual([])
+  expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => /token|msal/i.test(key)))).toEqual([])
+})
+
+test('source changes require an exact private review; cancel leaves the source untouched', async ({ page, request }) => {
+  await page.goto('/')
+  const { opportunity } = await chooseOpportunity(page, request)
+  const before = await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })
+  await page.getByText('Opportunity notes and reviewed updates', { exact: true }).click()
+  await page.getByLabel('Opportunity notes').fill('Teams reviewed sample change')
+  await page.getByRole('button', { name: 'Review opportunity update' }).click()
+  await expect(page.getByRole('dialog', { name: 'Review exact changes' })).toBeVisible()
+  await page.getByRole('button', { name: 'Cancel review' }).click()
+  expect(await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })).toEqual(before)
+  await page.getByRole('button', { name: 'Review opportunity update' }).click()
+  await page.getByLabel('Review reason').fill('Validated this sample update')
+  await page.getByRole('button', { name: 'Confirm selected changes' }).click()
+  await expect(page.getByRole('dialog', { name: 'Review exact changes' })).not.toBeVisible()
+  expect((await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })).opportunity.comments).toBe('Teams reviewed sample change')
+})
+
+test('meeting transcript is acquired automatically and does not mutate source data', async ({ page, request }) => {
+  await page.goto('/')
+  const { opportunity } = await chooseOpportunity(page, request, true)
+  const before = await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })
+  await page.getByRole('button', { name: 'Meetings', exact: true }).click()
+  await expect(page.getByText('Authorized transcripts acquired automatically.', { exact: false })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Proposed meeting changes' })).toBeVisible()
+  expect(await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })).toEqual(before)
+})
+
+test('workflow, activity, and context configuration use shared operations', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
+  await page.getByLabel('Workflow').selectOption({ index: 1 })
+  await page.getByRole('button', { name: 'Run workflow', exact: true }).click()
+  await expect(page.getByTestId('workflow-status')).toContainText('completed')
+  await page.getByRole('button', { name: 'Activity', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Your activity' })).toBeVisible()
+  await page.getByRole('button', { name: 'Context settings' }).click()
+  await expect(page.getByRole('heading', { name: 'Configure a Teams context' })).toBeVisible()
+})
+
+test('narrow meeting layout and unapproved stage do not expose a private workspace', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 })
+  await page.goto('/?surface=stage')
+  await expect(page.getByRole('heading', { name: 'Shared meeting brief' })).toBeVisible()
+  await expect(page.getByText('No approved brief selected.')).toBeVisible()
+  await expect(page.getByLabel('Customer account', { exact: true })).not.toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
+
+test('existing MCEM stage and milestone risk writes are separately reviewed and verified in source state', async ({ page, request }) => {
+  await page.goto('/')
+  const { account, opportunity } = await chooseOpportunity(page, request)
+  const before = await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })
+  await page.getByText('Opportunity notes and reviewed updates', { exact: true }).click()
+  const nextStage = before.opportunity.recordedStage > 1 ? before.opportunity.recordedStage - 1 : 2
+  await page.getByLabel('Target MCEM stage').selectOption(String(nextStage), { timeout: 5000 })
+  await page.getByLabel('Stage change reason').fill('Reviewed sample stage progression evidence')
+  await page.getByRole('button', { name: 'Review MCEM stage change' }).click()
+  await page.getByLabel('Review reason').fill('Confirmed the stage transition and scope')
+  await page.getByRole('button', { name: 'Confirm selected changes' }).click()
+  await expect(page.getByRole('dialog', { name: 'Review exact changes' })).not.toBeVisible()
+  expect((await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })).opportunity.recordedStage).toBe(nextStage)
+  expect((await post(request, 'listAccounts', {})).some((entry: { id: string }) => entry.id === account.id)).toBe(true)
+  const milestones: Array<{ id: string; name: string }> = await post(request, 'listMilestones', { opportunityId: opportunity.id })
+  const milestone = milestones[0]!
+  const card = page.getByRole('article').filter({ has: page.getByRole('heading', { name: milestone.name, exact: true }) })
+  await card.getByText('Reviewed milestone actions', { exact: true }).click()
+  await card.getByLabel('Milestone risk details').fill('Reviewed sample risk')
+  await card.getByRole('button', { name: 'Review milestone fields' }).click()
+  await page.getByLabel('Review reason').fill('Reviewed the exact milestone risk change')
+  await page.getByRole('button', { name: 'Confirm selected changes' }).click()
+  await expect(page.getByRole('dialog', { name: 'Review exact changes' })).not.toBeVisible()
+  expect((await post(request, 'listMilestones', { opportunityId: opportunity.id })).find((entry: { id: string }) => entry.id === milestone.id).riskDetails).toBe('Reviewed sample risk')
+})

@@ -6,7 +6,7 @@ import type {
   RecordCreationPreview
 } from '../../../packages/common/contracts/record-creation.js'
 
-function Detail({ label, value }: { label: string; value?: string | number }): ReactElement | null {
+function Detail({ label, value }: { label: string; value: string | number | undefined }): ReactElement | null {
   if (value === undefined) return null
   return <div><dt>{label}</dt><dd>{value}</dd></div>
 }
@@ -16,7 +16,7 @@ function MilestoneReview({
 }: {
   milestone: MilestoneCreateInput
   parentName: string
-  currency?: string
+  currency?: string | undefined
 }): ReactElement {
   return (
     <section className="new-record-review-item" aria-label={`Milestone ${milestone.name}`}>
@@ -45,7 +45,7 @@ function OpportunityReview({
 }: {
   opportunity: OpportunityCreateInput
   milestones: readonly MilestoneCreateInput[]
-  currency?: string
+  currency?: string | undefined
 }): ReactElement {
   return (
     <article className="new-record-review-item" aria-label={`Opportunity ${opportunity.name}`}>

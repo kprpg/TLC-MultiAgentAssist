@@ -37,3 +37,5 @@ config/account-discovery.cases.local.json
 /docs/TEAMs/Teams-UI-TLC-Assist-Architecture.md
 /docs/TEAMs/Teams-UI-TLC-Assist-Design.md
 /docs/TEAMs/Teams-UI-TLC-Assist-Implementation-Plan.md
+/.tlc/
+/release-teams/

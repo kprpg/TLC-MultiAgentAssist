@@ -5,7 +5,7 @@ import tseslint from 'typescript-eslint'
 
 export default defineConfig(
   {
-    ignores: ['**/node_modules/**', '**/dist/**', '**/dist-electron/**', '**/coverage/**', '**/test-results/**', '**/release-web/**', '**/.vscode-test/**']
+    ignores: ['**/node_modules/**', '**/dist/**', '**/dist-electron/**', '**/coverage/**', '**/test-results/**', '**/release-web/**', '**/release-teams/**', '**/.vscode-test/**']
   },
   eslint.configs.recommended,
   tseslint.configs.recommended,

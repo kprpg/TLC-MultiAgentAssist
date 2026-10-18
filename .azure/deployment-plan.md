@@ -50,3 +50,25 @@ The repository currently has no `azure.yaml`, infrastructure definitions, or azd
 - An extraction-based recovery deployment was accepted as `faf8fa0f-0012-4f54-9824-cc06d990ab99` but stalled while Kudu zipped the 78,700-entry `node_modules` tree.
 - Enabling `WEBSITE_RUN_FROM_PACKAGE=1` bypassed extraction and optimization. Deployment `a69052f6-545c-4179-b666-9b2b31ec6c48` completed with status `4` on 2026-09-10 UTC.
 - The wrapper health gate and an independent request both confirmed HTTP 200 with `{ "status": "ready" }` from the production `/api/health` endpoint.
+
+## Teams surface preparation (separate from the deployed Web application)
+
+Status: Preparing locally; no deployment requested.
+
+- Authorized branch: `feature/vscode-extension-Teams`, baseline `46990c0`.
+- Implement the local Teams plan using test-first slices and cumulative validation.
+- Preserve the deployed Web host and its Easy Auth boundary.
+- Build a dedicated Teams runtime, importable manifest/icons ZIP, and F5 workflow.
+- The Teams upload ZIP references a reachable HTTPS host; it cannot contain a
+  running backend. Produce a separate host-runtime bundle and configuration checks.
+- Corporate FTE entitlement, Entra A/B/C registrations/consent, actual MCP client
+  allowlisting, Graph permissions/tenant policy and governed shared disclosure remain
+  external release gates. Do not borrow CLI credentials or bypass these gates.
+- No existing Azure resource, tenant setting or production deployment is modified.
+- The Teams upload ZIP contains installation metadata/icons only. A central operator
+  hosts the Node/UI service once; production end users do not run per-user servers.
+- Development/template packages are explicitly labeled and do not establish
+  installed-host readiness. Public UI/API probes do not establish tenant consent,
+  Teams sign-in, source permissions or full-suite production readiness.
+- Baseline regression issue: duplicate `target` declaration in the existing
+  orchestrator integration test; record separately from the Teams red/green tests.

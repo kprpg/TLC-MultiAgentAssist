@@ -15,6 +15,8 @@ export interface ParseTranscriptOptions {
     title?: string
     /** Force a format; otherwise it is auto-detected. */
     format?: 'vtt' | 'text'
+    source?: 'teams' | 'upload' | 'paste'
+    attribution?: 'allowed' | 'prohibited'
 }
 
 function parseTimestampMs(stamp: string): number | undefined {
@@ -28,7 +30,8 @@ function parseTimestampMs(stamp: string): number | undefined {
 }
 
 /** Strips WebVTT speaker voice tags: `<v Priya Nair>text</v>` -> `{ speaker, text }`. */
-function extractVoiceTag(line: string): { speaker?: string; text: string } {
+function extractVoiceTag(line: string, attributionAllowed = true): { speaker?: string; text: string } {
+    if (!attributionAllowed) return { text: line.replace(/<\/?v(?:\s+[^>]*)?>/gi, '').trim() }
     const voice = line.match(/^<v\s+([^>]+)>(.*)$/i)
     if (voice && voice[1] !== undefined) return { speaker: voice[1].trim(), text: (voice[2] ?? '').replace(/<\/v>\s*$/i, '').trim() }
     const colon = line.match(/^([A-Z][\w .'-]{1,60}?):\s+(.*)$/)
@@ -36,7 +39,7 @@ function extractVoiceTag(line: string): { speaker?: string; text: string } {
     return { text: line.trim() }
 }
 
-function parseVtt(raw: string): Array<Omit<MeetingTranscriptSegment, 'segmentId'>> {
+function parseVtt(raw: string, attributionAllowed: boolean): Array<Omit<MeetingTranscriptSegment, 'segmentId'>> {
     const lines = raw.replace(/\r/g, '').split('\n')
     const segments: Array<Omit<MeetingTranscriptSegment, 'segmentId'>> = []
     let startMs: number | undefined
@@ -47,7 +50,7 @@ function parseVtt(raw: string): Array<Omit<MeetingTranscriptSegment, 'segmentId'
         if (buffer.length === 0) return
         const joined = buffer.join(' ').trim()
         if (joined) {
-            const { speaker, text } = extractVoiceTag(joined)
+            const { speaker, text } = extractVoiceTag(joined, attributionAllowed)
             if (text) {
                 segments.push({
                     text,
@@ -81,14 +84,14 @@ function parseVtt(raw: string): Array<Omit<MeetingTranscriptSegment, 'segmentId'
     return segments
 }
 
-function parsePlainText(raw: string): Array<Omit<MeetingTranscriptSegment, 'segmentId'>> {
+function parsePlainText(raw: string, attributionAllowed: boolean): Array<Omit<MeetingTranscriptSegment, 'segmentId'>> {
     return raw
         .replace(/\r/g, '')
         .split('\n')
         .map((line) => line.trim())
         .filter((line) => line.length > 0)
         .map((line) => {
-            const { speaker, text } = extractVoiceTag(line)
+            const { speaker, text } = extractVoiceTag(line, attributionAllowed)
             return { text, ...(speaker ? { speaker } : {}) }
         })
         .filter((seg) => seg.text.length > 0)
@@ -97,13 +100,14 @@ function parsePlainText(raw: string): Array<Omit<MeetingTranscriptSegment, 'segm
 /** Parses a raw transcript (WebVTT or `Speaker: text`) into a validated `MeetingTranscript`. */
 export function parseTranscriptContent(raw: string, options: ParseTranscriptOptions = {}): MeetingTranscript {
     const looksLikeVtt = options.format === 'vtt' || (options.format !== 'text' && (/^\uFEFF?WEBVTT/i.test(raw.trimStart()) || /-->/.test(raw)))
-    const rawSegments = looksLikeVtt ? parseVtt(raw) : parsePlainText(raw)
+    const attributionAllowed = options.attribution !== 'prohibited'
+    const rawSegments = looksLikeVtt ? parseVtt(raw, attributionAllowed) : parsePlainText(raw, attributionAllowed)
     const segments: MeetingTranscriptSegment[] = rawSegments.map((seg, index) => ({ segmentId: `seg-${index + 1}`, ...seg }))
 
     const transcript = {
         id: options.id ?? `upload-${Date.now()}`,
         meetingType: options.meetingType ?? 'customer',
-        source: 'upload' as const,
+        source: options.source ?? 'upload',
         segments,
         ...(options.opportunityId ? { opportunityId: options.opportunityId } : {}),
         ...(options.title ? { title: options.title } : {})
