@@ -128,8 +128,8 @@ describe('Teams end-user upload package', () => {
 
 describe('VS Code F5 and release entry points', () => {
   it('preserves existing extension launchers and wires Teams backend debugging to its actual build and entrypoint', () => {
-    const launch = JSON.parse(readFileSync('.vscode\\launch.json', 'utf8'))
-    const tasks = JSON.parse(readFileSync('.vscode\\tasks.json', 'utf8'))
+    const launch = JSON.parse(readFileSync(join('.vscode', 'launch.json'), 'utf8'))
+    const tasks = JSON.parse(readFileSync(join('.vscode', 'tasks.json'), 'utf8'))
     const configuration = launch.configurations.find((entry: { name: string }) => entry.name === 'TLC Teams (sample, F5)')
     expect(configuration).toMatchObject({ type: 'node', request: 'launch', program: '${workspaceFolder}/apps/teams/dist/server.js', preLaunchTask: 'build-teams' })
     expect(launch.configurations.some((entry: { name: string }) => entry.name === 'Run TLC Assist Extension')).toBe(true)
