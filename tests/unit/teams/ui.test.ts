@@ -4,13 +4,25 @@ import { describe, expect, it } from 'vitest'
 import { TeamsShell } from '../../../apps/teams/src/client/shell.js'
 import { AgentResultView } from '../../../apps/teams/src/client/result-view.js'
 import { contractVersion } from '../../../packages/common/contracts/version.js'
+import { NativeConnectionPanel } from '../../../apps/teams/src/client/native-connection-panel.js'
+import { LocalBrowserConnection } from '../../../apps/teams/src/client/local-connection.js'
+import { TeamsApiClient } from '../../../apps/teams/src/client/data-client.js'
 
 describe('Teams-native presentation', () => {
+  it('shows the full native capability/limitation matrix without an HTTP sign-in/approval shortcut', () => {
+    const html = renderToStaticMarkup(createElement(NativeConnectionPanel, {
+      connection: new LocalBrowserConnection(), client: new TeamsApiClient(async () => ''),
+      connected: false, onConnected: async () => undefined, onDisconnected: () => undefined
+    }))
+    for (const text of ['Request local pairing', 'protected local owner command', 'Capabilities and limitations', 'Live MSX Portfolio', 'Dataverse MCP Plays', 'Shared meeting stage', 'Live Seller Dashboard']) expect(html).toContain(text)
+    expect(html).not.toContain('Sign in with Microsoft')
+    expect(html).not.toContain('access_token')
+  })
   it('renders task-focused navigation and an explicit sample boundary without duplicating Teams chrome', () => {
     const html = renderToStaticMarkup(createElement(TeamsShell, {
-      mode: 'sample', view: 'accounts', onNavigate: () => undefined, children: createElement('p', null, 'Workspace')
+      mode: 'sample', view: 'portfolio', onNavigate: () => undefined, children: createElement('p', null, 'Workspace')
     }))
-    for (const label of ['My work', 'Accounts', 'Workflows', 'Meetings', 'Activity']) expect(html).toContain(label)
+    for (const label of ['New', 'Discover', 'Portfolio', 'Plays', 'Dashboards', 'Meetings', 'Activity']) expect(html).toContain(label)
     expect(html).toContain('Sample')
     expect(html).toContain('aria-label="TLC navigation"')
     expect(html).not.toContain('window-controls')

@@ -38,7 +38,8 @@ describe('Portfolio section heading styling', () => {
   })
 
   it('tags the Next Best Actions panel heading', async () => {
-    const nextBest = await readFile(webview('next-best-actions.tsx'), 'utf8')
+    expect(await readFile(webview('next-best-actions.tsx'), 'utf8')).toContain("../../../shared/next-best-actions.js")
+    const nextBest = await readFile(resolve('apps', 'shared', 'next-best-actions.tsx'), 'utf8')
     expect(nextBest).toContain('id="next-best-actions-title" className="section-heading"')
     // The recommendation action remains data text.
     expect(nextBest).toContain('<h4>{recommendation.action}</h4>')

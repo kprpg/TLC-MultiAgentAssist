@@ -5,8 +5,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import express from 'express'
 import { ConfidentialClientApplication } from '@azure/msal-node'
-import { loadTeamsAdmission, loadTeamsConfiguration, loadTeamsRuntimeConfiguration, loadTeamsStateKey, loadTeamsTlsConfiguration } from './configuration.js'
-import { createTeamsHandler } from './app.js'
+import { isLocalConfiguration, isNativeConfiguration, loadTeamsAdmission, loadTeamsConfiguration, loadTeamsRuntimeConfiguration, loadTeamsStateKey, loadTeamsTlsConfiguration } from './configuration.js'
+import { assertNativeHttpRequest, createTeamsHandler } from './app.js'
 import { createDelegatedTokenProvider, type DelegatedTokenProvider } from './authentication.js'
 import { createTeamsStateStore, createTeamsWorkloadCredential } from './runtime-resources.js'
 import { loadFoundryEnvironmentFromEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
@@ -24,10 +24,14 @@ import { NotificationOutbox } from '../../../packages/orchestrator/collaboration
 import { workflowContractVersion } from '../../../packages/common/contracts/workflows.js'
 import { CollaborationLifecycle } from '../../../packages/orchestrator/collaboration/lifecycle.js'
 import { WorkflowActivityStore } from '../../../packages/orchestrator/collaboration/activity.js'
+import { createNativeConnection } from './native-connection.js'
+import { invokeProtectedOwnerCommand, prepareOwnerDirectory } from './local-owner-control.js'
+import { localConnectionVersion, localOwnerCommandSchema } from '../../../packages/common/contracts/local-connection.js'
+import { NativeConnectionError } from './native-identity.js'
 
 export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.env) {
   const configuration = loadTeamsConfiguration(environment)
-  const runtime = loadTeamsRuntimeConfiguration(environment, configuration)
+  const hosted = configuration.mode === 'live' && !isLocalConfiguration(configuration) ? configuration : undefined
   const tlsConfiguration = loadTeamsTlsConfiguration(environment, configuration.origin)
   const tls = tlsConfiguration ? {
     cert: await readFile(tlsConfiguration.certificatePath),
@@ -37,23 +41,29 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   const port = Number(environment['TLC_TEAMS_PORT'] ?? environment['PORT'] ?? 3978)
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('The Teams listener port is invalid.')
   const host = environment['TLC_TEAMS_HOST'] ?? (environment['WEBSITE_SITE_NAME'] ? '0.0.0.0' : '127.0.0.1')
-  const stateKey = configuration.mode === 'live' ? loadTeamsStateKey(environment) : undefined
-  const foundry = configuration.mode === 'live' ? await loadFoundryEnvironmentFromEnvironment(environment) : undefined
-  const foundryCredential = foundry ? createTeamsWorkloadCredential(runtime, foundry.authentication.foundryTenantId, environment) : undefined
-  const resources = await createTeamsStateStore(configuration, runtime, environment)
+  if (isLocalConfiguration(configuration) && (!tls || !['localhost', '127.0.0.1', '::1'].includes(host) ||
+      port !== Number(new URL(configuration.origin).port || 443))) throw new Error('Native Teams requires trusted loopback HTTPS on the exact configured origin port.')
+  const native = isLocalConfiguration(configuration) ? await createNativeConnection(configuration, environment) : undefined
+  const runtimeEnvironment = native?.environment ?? environment
+  const runtime = loadTeamsRuntimeConfiguration(runtimeEnvironment, configuration)
+  const stateKey = configuration.mode === 'live' ? loadTeamsStateKey(runtimeEnvironment) : undefined
+  const foundry = hosted || isNativeConfiguration(configuration) && configuration.guidanceMode === 'foundry'
+    ? await loadFoundryEnvironmentFromEnvironment(runtimeEnvironment) : undefined
+  const foundryCredential = foundry ? createTeamsWorkloadCredential(runtime, foundry.authentication.foundryTenantId, runtimeEnvironment) : undefined
+  const resources = await createTeamsStateStore(configuration, runtime, runtimeEnvironment)
   const { store } = resources
   let sample: ApplicationServices | undefined
   try {
   const lifecycle = new CollaborationLifecycle(store, acceptNewWork)
-  const sessions = new Map<string, { services: Promise<ApplicationServices>; tokens: { current: DelegatedTokenProvider }; principal: ExecutionPrincipal; lastUsed: number; generation: number }>()
+  const sessions = new Map<string, { services: Promise<ApplicationServices>; tokens: { current: DelegatedTokenProvider }; principal: ExecutionPrincipal; lastUsed: number; generation: number; nativeGeneration: number }>()
   const samplePath = runtime.samplePath
   if (configuration.mode === 'sample' && samplePath !== ':memory:') await mkdir(dirname(samplePath), { recursive: true })
   sample = configuration.mode === 'sample'
     ? await createSampleApplicationServices({ dataPath: samplePath }) : undefined
-  const confidential = configuration.mode === 'live' ? new ConfidentialClientApplication({
+  const confidential = hosted ? new ConfidentialClientApplication({
     auth: {
-      clientId: configuration.apiClientId, authority: `https://login.microsoftonline.com/${configuration.tenantId}`,
-      clientSecret: configuration.apiCredential
+      clientId: hosted.apiClientId, authority: `https://login.microsoftonline.com/${hosted.tenantId}`,
+      clientSecret: hosted.apiCredential
     }
   }) : undefined
   let authority: ContextAuthority
@@ -62,27 +72,29 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
       if (principal.mode !== 'sample') throw new Error('Sample disclosure policy cannot authorize a live user.')
       return { revision: 'sanitized-sample-only', canConfigure: true, canPublish: true, audienceEligible: true }
     } }
-  } else {
+  } else if (hosted) {
     const policyPath = environment['TLC_TEAMS_DISCLOSURE_POLICY']
     if (!policyPath) throw new Error('An approved, expiring Teams disclosure policy is required in live mode.')
     const policy: unknown = JSON.parse(await readFile(resolve(policyPath), 'utf8'))
     const metadataClient = new ConfidentialClientApplication({
-      auth: { clientId: configuration.botClientId, authority: `https://login.microsoftonline.com/${configuration.tenantId}`, clientSecret: configuration.botCredential }
+      auth: { clientId: hosted.botClientId, authority: `https://login.microsoftonline.com/${hosted.tenantId}`, clientSecret: hosted.botCredential }
     })
     authority = new GraphContextAuthority(policy, async () => {
       const result = await metadataClient.acquireTokenByClientCredential({ scopes: ['https://graph.microsoft.com/.default'] })
       if (!result?.accessToken) throw new Error('Teams context metadata authorization is unavailable.')
       return result.accessToken
     })
-  }
+  } else authority = { verify: async () => { throw new Error('Private local source access is not cross-device publication authority.') } }
   async function resolveServices(principal: ExecutionPrincipal, assertion: string): Promise<ApplicationServices> {
     if (sample) return sample
-    if (configuration.mode !== 'live' || !confidential || !foundryCredential) throw new Error('Live Teams configuration is unavailable.')
+    if (configuration.mode !== 'live' || !native && (!hosted || !confidential || !foundryCredential)) throw new Error('Live Teams configuration is unavailable.')
     const key = principalPartition(principal)
     const generation = (await lifecycle.status(principal)).generation
-    const provider = createDelegatedTokenProvider(configuration, assertion, (request) => confidential.acquireTokenOnBehalfOf(request), principal.expiresAt ?? Date.now())
+    const nativeGeneration = native?.provider.generation ?? 0
+    const provider = native?.provider ?? (hosted && confidential ? createDelegatedTokenProvider(hosted, assertion, (request) => confidential.acquireTokenOnBehalfOf(request), principal.expiresAt ?? Date.now()) : undefined)
+    if (!provider) throw new Error('The configured live source credential is unavailable.')
     let existing = sessions.get(key)
-    if (existing && existing.generation !== generation) {
+    if (existing && (existing.generation !== generation || existing.nativeGeneration !== nativeGeneration)) {
       await stopOwnedWork(principal)
       existing = undefined
     }
@@ -94,18 +106,33 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
     }
     if (sessions.size >= 50) throw new Error('The live Teams session limit has been reached. Try again later.')
     const tokens = { current: provider }
+    const assertNativeOwner = () => {
+      const identity = native?.provider.identity()
+      if (native && (!identity || identity.generation !== nativeGeneration || principalPartition(identity.principal) !== key)) throw new NativeConnectionError('native_connection_changed')
+    }
     const services = createLiveApplicationServices({
-      environment, msxResource: configuration.msxResource,
+      environment: runtimeEnvironment, msxResource: configuration.msxResource,
+      ...(native ? {
+        guidanceMode: isNativeConfiguration(configuration) ? configuration.guidanceMode : 'deterministic',
+        fetchImplementation: async (input, init) => {
+          assertNativeOwner()
+          const response = await native.fetchImplementation(input, init)
+          assertNativeOwner()
+          return response
+        }
+      } : {}),
       getToken: async (resource) => {
+        assertNativeOwner()
         await lifecycle.assertGeneration(principal, generation)
         const token = await tokens.current.getToken(resource)
+        assertNativeOwner()
         await lifecycle.assertGeneration(principal, generation)
         return token
       },
       preferences: new ScopedPortfolioPreferenceStore(store, key),
-      foundryCredential
+      ...(foundryCredential ? { foundryCredential } : {})
     })
-    const entry = { services, tokens, principal, lastUsed: Date.now(), generation }
+    const entry = { services, tokens, principal, lastUsed: Date.now(), generation, nativeGeneration }
     sessions.set(key, entry)
     void services.catch(() => { if (sessions.get(key) === entry) sessions.delete(key) })
     return services
@@ -126,21 +153,25 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   }
   const web = express()
   web.disable('x-powered-by')
-  web.use((_request, response, next) => {
-    response.setHeader('content-security-policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://login.microsoftonline.com https://*.microsoftonline.com; frame-ancestors https://teams.microsoft.com https://*.teams.microsoft.com https://*.cloud.microsoft; base-uri 'none'; object-src 'none'; form-action 'self'")
+  web.use((request, response, next) => {
+    if (native) {
+      try { assertNativeHttpRequest(request, configuration.origin) }
+      catch { response.status(403).json({ error: 'local_origin_denied' }); return }
+    }
+    response.setHeader('content-security-policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://login.microsoftonline.com https://*.microsoftonline.com https://res.cdn.office.net/teams-js/validDomains/json/validDomains.json; frame-ancestors https://teams.microsoft.com https://*.teams.microsoft.com https://*.cloud.microsoft; base-uri 'none'; object-src 'none'; form-action 'self'")
     response.setHeader('x-content-type-options', 'nosniff')
     response.setHeader('referrer-policy', 'no-referrer')
     response.setHeader('cache-control', 'no-store')
     next()
   })
   let transport: Awaited<ReturnType<typeof registerTeamsBot>> | undefined
-  if (configuration.mode === 'live') {
+  if (hosted) {
     if (!stateKey) throw new Error('Live bot credential state requires its configured encryption key.')
-    transport = await registerTeamsBot({ web, configuration, store, stateKey, resolveServices, acceptNewWork, onDeactivate: stopOwnedWork })
+    transport = await registerTeamsBot({ web, configuration: hosted, store, stateKey, resolveServices, acceptNewWork, onDeactivate: stopOwnedWork })
   }
-  const transcriptEvents = configuration.mode === 'live' ? new TranscriptEventService(
-    store, { tenantId: configuration.tenantId, environmentId: configuration.environmentId },
-    (principal) => new GraphSubscriptionConnector(configuration.origin, async () => {
+  const transcriptEvents = hosted ? new TranscriptEventService(
+    store, { tenantId: hosted.tenantId, environmentId: hosted.environmentId },
+    (principal) => new GraphSubscriptionConnector(hosted.origin, async () => {
       const session = sessions.get(principalPartition(principal))
       if (!session || (session.principal.expiresAt ?? 0) <= Date.now()) throw new Error('The original delegated session requires reauthentication.')
       return session.tokens.current.getToken('graph')
@@ -166,6 +197,7 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
     configuration, store, resolveServices, authority, acceptNewWork, onDeactivate: stopOwnedWork,
     ...(transport ? { deliverPublication: transport.deliverPublication, notify: transport.notify } : {}),
     ...(transcriptEvents ? { transcriptEvents } : {}),
+    ...(native ? { localConnection: native } : {}),
     onError: ({ correlationId, code, method, category }) => console.error(`[teams-api] ${correlationId} ${code} ${method} ${category}`)
   })
   web.use((request, response, next) => {
@@ -188,6 +220,18 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   })
   const address = server.address()
   const boundPort = address && typeof address !== 'string' ? address.port : port
+  let ownerControl: Awaited<ReturnType<NonNullable<typeof native>['startOwnerControl']>> | undefined
+  if (native) {
+    try {
+      ownerControl = await native.startOwnerControl(async () => {
+        for (const entry of [...sessions.values()]) await stopOwnedWork(entry.principal)
+      })
+    }
+    catch (error) {
+      await new Promise<void>((closed) => server.close(() => closed()))
+      throw error
+    }
+  }
   console.info(`TLC Teams ready at ${tls ? 'https' : 'http'}://${host}:${boundPort} (${configuration.mode})`)
   console.info(`[teams-host] profile=${runtime.profile} state=${runtime.state.kind} source-identity=${configuration.mode === 'live' ? 'delegated-user' : 'sanitized-sample'}`)
   let work = Promise.resolve()
@@ -218,10 +262,16 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
       closing ??= (async () => {
       if (interval) clearInterval(interval)
       try {
-        await new Promise<void>((resolveClosed, reject) => server.close((error) => error ? reject(error) : resolveClosed()))
-        await work
-        for (const session of sessions.values()) await (await session.services).dispose()
-        await sample?.dispose()
+        try { await ownerControl?.close() }
+        finally {
+          try { if (native) { native.pairing.invalidate(); await native.provider.disconnect() } }
+          finally {
+            await new Promise<void>((resolveClosed, reject) => server.close((error) => error ? reject(error) : resolveClosed()))
+            await work
+            for (const session of sessions.values()) await (await session.services).dispose()
+            await sample?.dispose()
+          }
+        }
       } finally { resources.close() }
       })()
       return closing
@@ -234,7 +284,26 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  startTeamsServer().then((application) => {
+  if (process.argv[2] === '--local-owner') {
+    const action = process.argv[3]
+    const directory = process.argv[4]
+    void (async () => {
+      if (!directory) throw new Error('A protected owner directory is required.')
+      if (action === 'prepare') { await prepareOwnerDirectory(directory); console.info('Protected native owner directory prepared. No source sign-in or data access occurred.'); return }
+      const command = localOwnerCommandSchema.parse({
+        contractVersion: localConnectionVersion, action,
+        ...(action === 'connect' ? { resource: process.argv[5] ?? 'msx' } : {}),
+        ...(action === 'approve' ? { userCode: process.argv[5] } : {})
+      })
+      const result = await invokeProtectedOwnerCommand(directory, command)
+      if (!result.ok) throw new Error(result.error)
+      console.info(JSON.stringify(result, null, 2))
+    })().catch((error: unknown) => {
+      const code = error instanceof Error && /^[a-z_]{1,100}$/.test(error.message) ? error.message : 'owner_command_failed'
+      console.error(`[teams-owner] ${code}; check the protected directory, native registration/eligibility and resource grants. No source write was performed.`)
+      process.exitCode = 1
+    })
+  } else startTeamsServer().then((application) => {
     const stop = () => { void application.close().catch(() => { console.error('[teams-host] shutdown_failed'); process.exitCode = 1 }) }
     process.once('SIGINT', stop); process.once('SIGTERM', stop)
   }).catch(() => { console.error('[teams-host] configuration_or_startup_failed'); process.exitCode = 1 })

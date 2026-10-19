@@ -1,10 +1,2 @@
-import { z } from 'zod'
-import { workflowRunSchema } from '../../common/contracts/index.js'
-import { initialWorkflowOutputSchema } from './cohort.js'
-
-export const workflowRunViewSchema = z.object({
-    run: workflowRunSchema,
-    output: initialWorkflowOutputSchema.optional()
-}).strict()
-
-export type WorkflowRunView = z.infer<typeof workflowRunViewSchema>
+export { workflowRunViewSchema } from '../../common/contracts/workflow-output.js'
+export type { WorkflowRunView } from '../../common/contracts/workflow-output.js'

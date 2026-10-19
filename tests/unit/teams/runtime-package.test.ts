@@ -63,6 +63,9 @@ describe('self-contained host release staging', () => {
         'config\\dataverse.entity-map.json': '{}',
         'config\\teams-disclosure.example.json': '{"policies":[]}',
         'apps\\teams\\.env.example': 'TLC_TEAMS_MODE=sample\nTLC_TEAMS_API_CREDENTIAL=REPLACE_WITH_APPROVED_SERVER_CREDENTIAL\n',
+        'apps\\teams\\.env.native.example': 'TLC_TEAMS_AUTH_MODE=local-interactive\n',
+        'apps\\teams\\.env.cli.example': 'TLC_TEAMS_AUTH_MODE=local-azure-cli\n',
+        'scripts\\teams-local-connection.ps1': '# fixture owner command\n',
         'config\\foundry.environment.json': 'sensitive-configuration-must-not-ship'
       }
       for (const [name, contents] of Object.entries(files)) {
@@ -80,6 +83,9 @@ describe('self-contained host release staging', () => {
       expect(manifest.workspaces).toBeUndefined()
       expect(manifest.dependencies['@microsoft/teams.apps']).toBe('2.1.1')
       expect(await readFile(join(target, 'runtime.env.example'), 'utf8')).toContain('REPLACE_WITH_APPROVED_SERVER_CREDENTIAL')
+      expect(await readFile(join(target, 'runtime.native.env.example'), 'utf8')).toContain('local-interactive')
+      expect(await readFile(join(target, 'runtime.cli.env.example'), 'utf8')).toContain('local-azure-cli')
+      expect(await readFile(join(target, 'scripts', 'teams-local-connection.ps1'), 'utf8')).toContain('owner command')
       expect(await readFile(join(target, 'config', 'teams-disclosure.example.json'), 'utf8')).toContain('policies')
       const instructions = await readFile(join(target, 'RUNTIME-README.txt'), 'utf8')
       expect(instructions).toContain('npm run start:configured')

@@ -4,6 +4,8 @@ import {
   type IPublicClientApplication
 } from '@azure/msal-browser'
 import { teamsPublicConfigurationSchema } from '../../../../packages/common/contracts/collaboration.js'
+import { z } from 'zod'
+import { LocalBrowserConnection } from './local-connection.js'
 
 export interface BrowserHostContext {
   embedded: boolean
@@ -11,6 +13,8 @@ export interface BrowserHostContext {
   frameContext?: FrameContexts
   contextId?: string
   kind: 'channel' | 'chat' | 'meeting'
+  tenantId?: string
+  userId?: string
 }
 export async function initializeBrowserAuthentication(onTheme: (theme: string) => void) {
   const configuration = teamsPublicConfigurationSchema.parse(await (await fetch('/api/teams/config', { credentials: 'omit' })).json())
@@ -19,9 +23,13 @@ export async function initializeBrowserAuthentication(onTheme: (theme: string) =
   if (window.parent !== window) {
     await app.initialize()
     const host = await app.getContext()
+    const tenantId = z.uuid().safeParse(host.user?.tenant?.id)
+    const userId = z.uuid().safeParse(host.user?.id)
     context = {
       embedded: true, theme: host.app.theme, frameContext: host.page.frameContext,
       kind: host.meeting ? 'meeting' : host.channel ? 'channel' : 'chat',
+      ...(tenantId.success ? { tenantId: tenantId.data } : {}),
+      ...(userId.success ? { userId: userId.data } : {}),
       ...(host.channel?.id ? { contextId: host.channel.id } : host.chat?.id ? { contextId: host.chat.id } : {})
     }
     naa = nestedAppAuth.isNAAChannelRecommended()
@@ -31,7 +39,8 @@ export async function initializeBrowserAuthentication(onTheme: (theme: string) =
   }
   let pca: IPublicClientApplication | undefined
   let currentClaims: string | undefined
-  if (configuration.mode === 'live') {
+  const localConnection = 'authentication' in configuration ? new LocalBrowserConnection(context) : undefined
+  if (configuration.mode === 'live' && !('authentication' in configuration)) {
     const settings = {
       auth: {
         clientId: configuration.spaClientId, authority: `https://login.microsoftonline.com/${configuration.tenantId}`,
@@ -43,9 +52,11 @@ export async function initializeBrowserAuthentication(onTheme: (theme: string) =
     else { pca = new PublicClientApplication(settings); await pca.initialize() }
   }
   return {
-    configuration, context,
+    configuration, context, localConnection,
     async getToken(interactive = false, claims?: string): Promise<string> {
       if (configuration.mode === 'sample') return ''
+      if (localConnection) return localConnection.getToken()
+      if ('authentication' in configuration) throw new Error('The local connection client is unavailable.')
       if (!pca) throw new Error('The authentication client is unavailable.')
       if (claims) currentClaims = claims
       const account = pca.getActiveAccount()
@@ -61,7 +72,7 @@ export async function initializeBrowserAuthentication(onTheme: (theme: string) =
       pca.setActiveAccount(result.account)
       return result.accessToken
     },
-    async clear() { currentClaims = undefined; if (pca) await pca.clearCache() }
+    async clear() { currentClaims = undefined; localConnection?.clear(); if (pca) await pca.clearCache() }
   }
 }
 export type BrowserAuthentication = Awaited<ReturnType<typeof initializeBrowserAuthentication>>

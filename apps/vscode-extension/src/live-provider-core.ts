@@ -9,53 +9,17 @@ import {
     type MeetingTranscriptSummary,
     type ScopeRef
 } from '../../../packages/common/index.js'
-import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
+import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
+import { workflowAgentCapabilityValues } from '../../../packages/common/contracts/workflows.js'
+export { createDeterministicLiveTaskAgents as buildLiveTaskAgents } from '../../../packages/orchestrator/task-agents.js'
 import type { WorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import type { MeetingExtractorFn } from '../../../packages/connectors/local-store/index.js'
 import type { ExtensionDataProvider, MeetingTranscriptSource } from './data-provider.js'
 import { createSellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 
-export const AGENT_CAPABILITIES: readonly AgentCapability[] = ['account-pulse', 'mcem-coach', 'pursuit-executive', 'risk-solution-play']
-const LIVE_AGENT_VERSION = 'guidance-live-v1'
+export const AGENT_CAPABILITIES: readonly AgentCapability[] = workflowAgentCapabilityValues
 const MCEM_COACH_PROMPT = 'Evaluate the current MCEM stage exit criteria and recommend the next best actions.'
-
-/** Deterministic guidance rendered over live MSX context + MCEM evaluation (no Foundry dependency). */
-function formatLiveAgentGuidance(capability: AgentCapability, context: AgentTaskContext): string {
-    const evaluation = context.localEvaluation
-    const opportunity = context.opportunityContext.opportunity
-    const headline: Record<AgentCapability, string> = {
-        'account-pulse': `Focus for ${opportunity.name}: close the highest-priority Stage ${evaluation.recordedStage} evidence gaps and confirm the next customer commitment.`,
-        'mcem-coach': evaluation.summary,
-        'pursuit-executive': `Prepare the pursuit for ${opportunity.name} around its Stage ${evaluation.recordedStage} gaps, decision team, and customer commitments.`,
-        'risk-solution-play': `${opportunity.name} has ${evaluation.recommendations.length} progression risk${evaluation.recommendations.length === 1 ? '' : 's'} to resolve before Stage ${evaluation.evidenceBasedStage}.`
-    }
-    const criteria = evaluation.criteria.map((criterion) => `- **${criterion.label}: ${criterion.status}** — ${criterion.rationale}`).join('\n')
-    const recommendations = evaluation.recommendations.map((recommendation) => `| ${recommendation.ownerRole} | ${recommendation.action} | ${recommendation.confidence} |`).join('\n')
-    const missing = evaluation.missingData.length > 0
-        ? evaluation.missingData.map((item) => `- ${item}`).join('\n')
-        : '- All current-stage exit criteria have supporting evidence.'
-    return [
-        '## Summary', '', headline[capability], '',
-        `> Requested: ${context.request.prompt}`, '',
-        '## Context used', '',
-        `**Opportunity:** ${opportunity.name}`,
-        `**Owner:** ${opportunity.owner ?? 'Account team'}`,
-        `**Recorded / evidence-based stage:** ${evaluation.recordedStage} / ${evaluation.evidenceBasedStage}`,
-        `**MCEM guidance:** ${context.guidance.title}`, '',
-        '## Exit criteria', '', criteria, '',
-        '## Recommended actions', '',
-        '| Owner | Action | Confidence |', '| --- | --- | --- |', recommendations, '',
-        '## Assumptions and missing information', '', missing
-    ].join('\n')
-}
-
-export function buildLiveTaskAgents(): TaskAgentRegistry {
-    return Object.fromEntries(AGENT_CAPABILITIES.map((capability) => [capability, {
-        version: LIVE_AGENT_VERSION,
-        agent: { invoke: async (context: AgentTaskContext) => formatLiveAgentGuidance(capability, context) }
-    }])) as TaskAgentRegistry
-}
 
 /** Minimal meeting-capture surface a connector must provide (LocalStore implements it today). */
 export interface MeetingCaptureConnector {

@@ -28,10 +28,26 @@ surface adds the following focused areas while preserving one shared backend/har
 ```text
 apps/teams/src/                       Teams composition, verified HTTP/bot transport
 apps/teams/src/runtime-resources.ts   Local SQLite/CLI or Azure Table/managed identity
+apps/teams/src/native-identity.ts     Native SDK identity/resource tokens; no HTTP interaction
+apps/teams/src/cli-identity.ts        Verified current CLI user; private read-only MSX, no FTE inference
+apps/teams/src/native-connection.ts   Per-user native composition, private state and owner control
+apps/teams/src/local-owner-control.ts
+apps/teams/src/local-pairing.ts       Windows owner channel and ephemeral local page admission
 apps/teams/src/client/                Personal/channel/meeting presentation
+                                     Focused scope, opportunity, guidance, record actions,
+                                     Plays/result, navigation and responsive-disclosure modules
+                                     Native connection panel and memory-only local API client
+apps/teams/.env.native.example       Safe per-user native configuration, not real credentials
+apps/teams/.env.cli.example          Safe existing-user CLI configuration, not tokens/secrets
 apps/shared/                         Browser-safe prompt/Markdown and existing UI reuse
+                                     Shared Portfolio controls, sorting and Next Best Actions
+packages/common/contracts/workflow-output.ts
+                                     Browser-safe existing workflow result/run-view schemas
+packages/common/contracts/local-connection.ts
+                                     Native/owner protocol v1.0 and CLI public profile v1.1
 packages/orchestrator/application-runtime.ts
 packages/orchestrator/operations.ts   Shared composition and typed operation catalog
+packages/orchestrator/task-agents.ts  Shared Foundry/sample/deterministic-live registries
 packages/orchestrator/collaboration/  Reviewed actions, bindings, events, state admission
 packages/connectors/graph/            Delegated meeting/transcript/subscription access
 packages/connectors/teams/            Authoritative resource membership checks
@@ -42,6 +58,7 @@ tests/unit/teams/                     Cumulative deterministic Teams slices
 tests/e2e/teams/                      Actual host/browser journeys
 release-teams/                       Ignored generated installation/runtime archives
 scripts/run-teams-local.ps1          One build/package/extract/verify/run/sideload entrypoint
+scripts/teams-local-connection.ps1   Explicit native/CLI owner connect/approve/status/disconnect
 ```
 
 The [Teams runbook](./runbooks/teams-app.md) defines the user-operated local-now,

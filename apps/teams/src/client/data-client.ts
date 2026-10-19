@@ -11,11 +11,21 @@ export class TeamsRequestError extends Error {
   }
 }
 export class TeamsApiClient {
-  constructor(private readonly getToken: () => Promise<string>, private readonly onAuthenticationRequired?: (claims?: string) => void) {}
-  async request<T>(path: string, schema: z.ZodType<T>, input?: unknown, signal?: AbortSignal): Promise<T> {
-    return schema.parse(await (await this.fetchResponse(path, input, signal)).json())
+  constructor(
+    private readonly getToken: () => Promise<string>,
+    private readonly onAuthenticationRequired?: (claims?: string) => void,
+    private readonly isCurrentToken?: (token: string) => boolean
+  ) {}
+  private assertCurrentToken(token: string): void {
+    if (this.isCurrentToken && !this.isCurrentToken(token)) throw new TeamsRequestError('local_connection_changed')
   }
-  private async fetchResponse(path: string, input?: unknown, signal?: AbortSignal): Promise<Response> {
+  async request<T>(path: string, schema: z.ZodType<T>, input?: unknown, signal?: AbortSignal): Promise<T> {
+    const { response, token } = await this.fetchResponse(path, input, signal)
+    const value: unknown = await response.json()
+    this.assertCurrentToken(token)
+    return schema.parse(value)
+  }
+  private async fetchResponse(path: string, input?: unknown, signal?: AbortSignal): Promise<{ response: Response; token: string }> {
     const token = await this.getToken()
     const response = await fetch(`/api/teams/${path}`, {
       method: input === undefined ? 'GET' : 'POST', credentials: 'omit',
@@ -26,16 +36,20 @@ export class TeamsApiClient {
       ...(input === undefined ? {} : { body: JSON.stringify(input) }),
       ...(signal ? { signal } : {})
     })
+    this.assertCurrentToken(token)
     if (!response.ok) {
       const error = z.object({ error: z.string(), correlationId: z.string().optional(), claims: z.string().max(8192).optional() }).parse(await response.json())
+      this.assertCurrentToken(token)
       if (response.status === 401) this.onAuthenticationRequired?.(error.claims)
       throw new TeamsRequestError(error.error, error.correlationId, error.claims)
     }
-    return response
+    return { response, token }
   }
   async download(path: string, input: unknown, name: string): Promise<void> {
-    const response = await this.fetchResponse(path, input)
-    const url = URL.createObjectURL(await response.blob())
+    const { response, token } = await this.fetchResponse(path, input)
+    const blob = await response.blob()
+    this.assertCurrentToken(token)
+    const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url; anchor.download = name; anchor.click()
     setTimeout(() => URL.revokeObjectURL(url), 0)

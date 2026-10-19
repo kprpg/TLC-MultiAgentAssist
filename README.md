@@ -45,6 +45,20 @@ packages. It covers start/stop, configuration, logs, state/backup/recovery, F5,
 opt-in HTTPS exposure, manifest/Teams setup, local-to-Azure changes and unverified
 live/ingress gates. ZIP generation or browser-only testing is not production readiness.
 
+For a per-user live Portfolio using an existing local corporate sign-in, the
+explicit [Azure CLI profile](docs/runbooks/teams-app.md#per-user-windows-msx-using-the-existing-cli-user)
+verifies that user's Dataverse identity and automatically loads their deal-team
+accounts. It is private and read-only, needs no new native/API/bot registration,
+and does not infer FTE/writer roles. The separate native and hosted profiles retain
+their own approvals and capabilities.
+
+Teams uses the same **New, Discover, Portfolio, Plays, Dashboards** navigation as
+the VS Code extension, opening Portfolio by default. Its responsive account,
+opportunity, and Next Best Actions workbench retains private reviewed changes.
+Meetings, Activity and Context settings are under **Tools**. The sample Seller
+Dashboard is available; live Teams cannot read the runtime operator's private
+Windows seller profile. See the [Teams UI guide](docs/runbooks/teams-app.md#extension-aligned-workspace).
+
 ## Data modes
 
 Every surface runs in one of two modes:

@@ -14,23 +14,29 @@ const folders: string[] = []
 afterEach(async () => { for (const folder of folders.splice(0)) await rm(folder, { recursive: true, force: true }) })
 
 async function fixture(scenario = 'success', origin = 'https://tlc.testing.contoso.net') {
+  const native = ['native', 'cli'].includes(scenario)
+  const authentication = scenario === 'cli' ? 'local-azure-cli' : 'local-interactive'
   const folder = await mkdtemp(join(tmpdir(), 'tlc-teams-runner-'))
   folders.push(folder)
   const runtime = new JSZip()
-  runtime.file('server.js', 'export {}')
+  runtime.file('server.js', native
+    ? `import { appendFileSync } from 'node:fs'; appendFileSync(process.env.TLC_TEST_RUNNER_TRACE, JSON.stringify({phase:'owner-prepare', arguments:process.argv.slice(2)})+'\\n');`
+    : 'export {}')
   runtime.file('package.json', JSON.stringify({ name: '@tlc/teams-release', version: '0.1.0' }))
   runtime.file('client/index.html', '<title>TLC Assist for Teams</title>')
   runtime.file('.generated-teams-runtime', 'TLC_TEAMS_GENERATED_RUNTIME')
   const runtimeZip = join(folder, 'runtime.zip')
   await writeFile(runtimeZip, await runtime.generateAsync({ type: 'nodebuffer' }))
   const app = new JSZip()
-  app.file('manifest.json', JSON.stringify(createTeamsManifest({ mode: 'sample', origin, appId: '8cb8c9a2-6ee6-4382-bfa4-5b409c77e54b' })))
+  app.file('manifest.json', JSON.stringify(createTeamsManifest({ mode: native ? 'live' : 'sample', ...(native ? { authentication } : {}), origin, appId: '8cb8c9a2-6ee6-4382-bfa4-5b409c77e54b' })))
   app.file('color.png', 'fixture')
   app.file('outline.png', 'fixture')
   const appZip = join(folder, 'teams.zip')
   await writeFile(appZip, await app.generateAsync({ type: 'nodebuffer' }))
   const config = join(folder, 'private.env')
-  await writeFile(config, 'TLC_TEAMS_MODE=sample\nTLC_TEAMS_API_CREDENTIAL=private-fixture-must-not-log\n')
+  await writeFile(config, native
+    ? `TLC_TEAMS_MODE=live\nTLC_TEAMS_AUTH_MODE=${authentication}\nTLC_TEAMS_PACKAGE_ID=8cb8c9a2-6ee6-4382-bfa4-5b409c77e54b\n`
+    : 'TLC_TEAMS_MODE=sample\nTLC_TEAMS_API_CREDENTIAL=private-fixture-must-not-log\n')
   const trace = join(folder, 'calls.jsonl')
   const wrapper = join(folder, 'invoke.ps1')
   await writeFile(wrapper, `
@@ -51,7 +57,7 @@ function Get-NetTCPConnection {
 }
 function Start-Process {
   param($FilePath, $ArgumentList, $WorkingDirectory, $Environment, [switch]$PassThru, $RedirectStandardOutput, $RedirectStandardError, $WindowStyle)
-  Record @{ phase = 'start'; directory = $WorkingDirectory; arguments = $ArgumentList; origin = $Environment.TLC_TEAMS_ORIGIN; mode = $Environment.TLC_TEAMS_MODE; host = $Environment.TLC_TEAMS_HOST; data = $Environment.TLC_TEAMS_DATA_DIR; certificate = $Environment['TLC_TEAMS_TLS_CERT_PATH']; privateKey = $Environment['TLC_TEAMS_TLS_KEY_PATH'] }
+  Record @{ phase = 'start'; directory = $WorkingDirectory; arguments = $ArgumentList; origin = $Environment.TLC_TEAMS_ORIGIN; mode = $Environment.TLC_TEAMS_MODE; authentication = $Environment.TLC_TEAMS_AUTH_MODE; ownerDirectory = $Environment['TLC_TEAMS_OWNER_DIRECTORY']; host = $Environment.TLC_TEAMS_HOST; data = $Environment.TLC_TEAMS_DATA_DIR; certificate = $Environment['TLC_TEAMS_TLS_CERT_PATH']; privateKey = $Environment['TLC_TEAMS_TLS_KEY_PATH'] }
   return [pscustomobject]@{ Id = 2147483000; StartTime = [DateTime]::UtcNow; HasExited = $false }
 }
 function Stop-Process { param($Id) Record @{ phase = 'stop'; id = $Id } }
@@ -72,7 +78,14 @@ function Invoke-WebRequest {
   param($Uri, $TimeoutSec, $MaximumRedirection, [switch]$SkipHttpErrorCheck)
   Record @{ phase = 'probe'; uri = [string]$Uri }
   if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'tls-failure' -and ([string]$Uri).StartsWith('https:')) { throw 'Synthetic TLS certificate validation failed' }
+  if (([string]$Uri).EndsWith('/api/teams/session')) { return [pscustomobject]@{ StatusCode=401; Content='{"error":"authorization_required"}' } }
+  if (([string]$Uri).EndsWith('/api/teams/config')) {
+    $profile = if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'cli') { 'local-azure-cli' } else { 'local-interactive' }
+    $version = if ($profile -eq 'local-azure-cli') { '1.1' } else { '1.0' }
+    return [pscustomobject]@{ StatusCode=200; Content=(@{ mode='live'; authentication=$profile; contractVersion=$version } | ConvertTo-Json -Compress) }
+  }
   $content = if (([string]$Uri).EndsWith('/api/health')) { '{"status":"ready","surface":"teams","mode":"sample"}' } else { '<!doctype html><title>TLC Assist for Teams</title><div id="root"></div>' }
+  if ($env:TLC_TEST_RUNNER_SCENARIO -in @('native','cli')) { $content = $content.Replace('"mode":"sample"','"mode":"live"') }
   $contentType = if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'non-html') { 'application/json; charset=utf-8' } else { 'text/html; charset=utf-8' }
   return [pscustomobject]@{ StatusCode = 200; Content = $content; Headers = @{ 'Content-Type' = @($contentType) } }
 }
@@ -89,6 +102,8 @@ if ($env:TLC_TEST_RUNNER_PRIVATE_KEY) { $arguments.PrivateKeyPath = $env:TLC_TES
 if ($env:TLC_TEST_RUNNER_SCENARIO -ne 'build-failure') { $arguments.SkipBuild = $true }
 else { $arguments.Remove('RuntimeArchive'); $arguments.Remove('TeamsArchive') }
 if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'no-upload') { $arguments.SkipTeamsUpload = $true }
+if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'native') { $arguments.AuthMode = 'local-interactive'; $arguments.SkipTeamsUpload = $true }
+if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'cli') { $arguments.AuthMode = 'local-azure-cli'; $arguments.SkipTeamsUpload = $true }
 if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'tool-bootstrap') { Remove-Item Function:atk }
 if ($env:TLC_TEST_RUNNER_SCENARIO -in @('owned-stop', 'reused-pid')) { $arguments = @{ Stop = $true; WorkDirectory = $env:TLC_TEST_RUNNER_WORK } }
 & $env:TLC_TEST_RUNNER_SCRIPT @arguments
@@ -117,6 +132,22 @@ if ($env:TLC_TEST_RUNNER_SCENARIO -in @('owned-stop', 'reused-pid')) { $argument
 }
 
 describe('one local build/configure/run/Teams-upload entrypoint', () => {
+  it.each(['native', 'cli'])('prepares a private %s installation on the exact frontend port without connecting or writing to MSX', async (profile) => {
+    const data = await fixture(profile, 'https://localhost:49199')
+    const certificate = join(data.folder, 'certificate.pem')
+    const privateKey = join(data.folder, 'private-key.pem')
+    await writeFile(certificate, 'fixture certificate')
+    await writeFile(privateKey, 'fixture key')
+    const result = await data.run(undefined, { certificate, privateKey })
+    const calls = await data.calls()
+    expect(calls[0]).toMatchObject({ phase: 'owner-prepare', arguments: ['--local-owner', 'prepare', join(data.folder, 'owned', 'private')] })
+    const started = calls.find((item) => item.phase === 'start')
+    expect(started).toMatchObject({ mode: 'live', authentication: profile === 'cli' ? 'local-azure-cli' : 'local-interactive', origin: 'https://localhost:49199', ownerDirectory: join(data.folder, 'owned', 'private'), data: join(data.folder, 'owned', 'private', 'data') })
+    expect(calls.filter((item) => item.phase === 'probe').every((item) => String(item.uri).startsWith('https://localhost:49199/'))).toBe(true)
+    expect(result.stdout).toContain('sign-in has NOT occurred')
+    expect(JSON.stringify(calls)).not.toContain('"connect"')
+    expect(calls.some((item) => item.phase === 'upload')).toBe(false)
+  }, 45_000)
   it('extracts the runtime, preserves private configuration outside the archive, verifies HTTPS, then uploads the exact app ZIP', async () => {
     const fixtureData = await fixture()
     const result = await fixtureData.run()

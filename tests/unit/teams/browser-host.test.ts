@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { initializeBrowserAuthentication, type BrowserHostContext } from '../../../apps/teams/src/client/authentication.js'
 import { ContextWorkspace } from '../../../apps/teams/src/client/context.js'
 import { TeamsApiClient } from '../../../apps/teams/src/client/data-client.js'
+import { localConnectionVersion, nativeCapabilities } from '../../../packages/common/contracts/local-connection.js'
 
 const hooks = vi.hoisted(() => {
   const effects: Array<() => unknown> = []
@@ -57,6 +58,14 @@ async function renderContext(host: BrowserHostContext) {
 }
 
 describe('Teams browser host context', () => {
+  it('uses local pairing rather than browser source sign-in for the explicit native strategy', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      contractVersion: localConnectionVersion, mode: 'live', authentication: 'local-interactive', capabilities: nativeCapabilities
+    })))
+    const authentication = await initializeBrowserAuthentication(() => undefined)
+    expect(authentication.localConnection).toBeDefined()
+    await expect(authentication.getToken(true)).rejects.toThrow(/pair/i)
+  })
   it.each([FrameContexts.content, FrameContexts.settings])('retains the SDK frame context for embedded %s pages', async (frameContext) => {
     sdk.getContext.mockResolvedValue({ app: { theme: 'dark' }, page: { frameContext } })
     const onTheme = vi.fn()

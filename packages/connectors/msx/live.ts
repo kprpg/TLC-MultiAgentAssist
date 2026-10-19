@@ -1101,6 +1101,18 @@ export class LiveMsxConnector implements MsxConnector {
     return this.currentUserIdPromise
   }
 
+  async assertNativeIdentity(entraObjectId: string): Promise<string> {
+    const userId = await this.getCurrentUserId()
+    if (!guidPattern.test(entraObjectId) || !guidPattern.test(userId)) throw new Error('The native source identity mapping is invalid.')
+    const user = await this.requestJson<unknown>(`systemusers(${userId})?$select=azureactivedirectoryobjectid,isdisabled`)
+    if (!isObjectRecord(user) || user['isdisabled'] !== false ||
+        typeof user['azureactivedirectoryobjectid'] !== 'string' ||
+        user['azureactivedirectoryobjectid'].toLowerCase() !== entraObjectId.toLowerCase()) {
+      throw new Error('The native source identity is absent, disabled or belongs to another Entra subject.')
+    }
+    return userId
+  }
+
   private async assertOpportunityAccess(opportunityId: string): Promise<void> {
     if (!(await this.getPortfolio()).opportunities.some((opportunity) => opportunity.id === opportunityId)) {
       throw new Error('The opportunity is not in the signed-in user’s active MSX portfolio.')

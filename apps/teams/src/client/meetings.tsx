@@ -11,9 +11,11 @@ const resultSchema = z.object({
 }).strict()
 type MeetingResult = z.infer<typeof resultSchema>
 
-export function MeetingsWorkspace({ client, selection, mode, reviewPreview }: {
+export function MeetingsWorkspace({ client, selection, mode, reviewPreview, compact = false }: {
   client: TeamsApiClient; selection: WorkingSelection | null; mode: 'sample' | 'live'; reviewPreview: ReviewPreview
+  compact?: boolean
 }) {
+  const [task, setTask] = useState<'prep' | 'capture' | 'follow-up'>(compact ? 'prep' : 'follow-up')
   const [meetingId, setMeetingId] = useState('')
   const [meetingLink, setMeetingLink] = useState('')
   const [meetingType, setMeetingType] = useState<MeetingType>('customer')
@@ -85,10 +87,24 @@ export function MeetingsWorkspace({ client, selection, mode, reviewPreview }: {
       setSelected(new Set())
     } catch (cause) { setError(String(cause)) }
   }
-  return <section className="panel"><h1>Meeting preparation and follow-up</h1>
-    {!selection ? <p>Choose an account and opportunity in Accounts first.</p> : <>
+  return <section className={`panel meeting-workspace${compact ? ' meeting-panel' : ''}`}><h1>Meeting preparation and follow-up</h1>
+    <nav className="detail-tabs" role="tablist" aria-label="Meeting tasks">
+      {(['prep', 'capture', 'follow-up'] as const).map((item, index, items) => <button key={item} type="button" role="tab"
+        id={`meeting-tab-${item}`} aria-controls={`meeting-${item}`} aria-selected={task === item} tabIndex={task === item ? 0 : -1}
+        onClick={() => setTask(item)} onKeyDown={(event) => {
+          const next = event.key === 'ArrowRight' ? items[(index + 1) % items.length] : event.key === 'ArrowLeft' ? items[(index + items.length - 1) % items.length] : undefined
+          if (next) { event.preventDefault(); setTask(next); document.getElementById(`meeting-tab-${next}`)?.focus() }
+        }}>{item === 'prep' ? 'Prep' : item === 'capture' ? 'Capture' : 'Follow-up'}</button>)}
+    </nav>
+    {!selection ? <p>Choose an account and opportunity in Portfolio first.</p> : <>
       <h2>{selection.opportunity.name}</h2>
       <p className="muted">Private working view. Being signed into Teams does not grant transcript or MSX access.</p>
+      <section id="meeting-prep" role="tabpanel" aria-labelledby="meeting-tab-prep" hidden={task !== 'prep'}>
+        <h3>Meeting preparation</h3><p>{selection.account.name} - Recorded stage {selection.opportunity.recordedStage}</p>
+        <p>Use the authorized transcript as evidence. Proposed changes remain private until reviewed.</p>
+        <button type="button" onClick={() => setTask('capture')}>Open capture</button>
+      </section>
+      <section id="meeting-capture" role="tabpanel" aria-labelledby="meeting-tab-capture" hidden={task !== 'capture'}>
       <label className="field">Meeting classification<select value={meetingType} onChange={(event) => setMeetingType(event.target.value === 'internal' ? 'internal' : 'customer')}>
         <option value="customer">Customer meeting</option><option value="internal">Internal meeting</option>
       </select></label>
@@ -99,14 +115,17 @@ export function MeetingsWorkspace({ client, selection, mode, reviewPreview }: {
         <button type="button" onClick={() => { void resolve() }}>Verify meeting and acquire transcript</button>
       </div>}
       {busy && <p role="status">Acquiring authorized transcript evidence...</p>}
-      {result && <p role="status" className={result.status.state === 'ready' ? 'success-banner' : 'warning'}>{result.status.detail} ({result.status.attribution})</p>}
+      {task === 'capture' && result && <p role="status" className={result.status.state === 'ready' ? 'success-banner' : 'warning'}>{result.status.detail} ({result.status.attribution})</p>}
       {result?.subscription && <p className={result.subscription.state === 'active' ? 'muted' : 'warning'}>{result.subscription.detail}</p>}
       {result?.subscription?.state === 'active' && selection && <button type="button" onClick={() => {
         void client.request('meetings/unsubscribe', z.object({ state: z.enum(['active', 'unconfirmed', 'foreground-only']), detail: z.string() }), {
           meetingId, opportunityId: selection.opportunity.id, meetingType
         }).then((subscription) => setResult((current) => current ? { ...current, subscription } : current)).catch((cause: unknown) => setError(String(cause)))
       }}>Stop background transcript acquisition</button>}
-      {result?.status.state === 'ready' && <div>
+      </section>
+      {task !== 'capture' && result && <p role="status" className={result.status.state === 'ready' ? 'success-banner' : 'warning'}>{result.status.detail} ({result.status.attribution})</p>}
+      <section id="meeting-follow-up" role="tabpanel" aria-labelledby="meeting-tab-follow-up" hidden={task !== 'follow-up'}>
+      {result?.status.state === 'ready' ? <div>
         <h2>Proposed meeting changes</h2><p>Evidence is {result.status.attribution}. These suggestions have not been applied.</p>
         {result.proposals.map((proposal) => <section key={proposal.changeSetId}>
           {proposal.slots.map((slot) => <label key={slot.slotId} className="meeting-change">
@@ -120,7 +139,8 @@ export function MeetingsWorkspace({ client, selection, mode, reviewPreview }: {
         </section>)}
         <label className="field">Meeting change reason<textarea value={reason} onChange={(event) => setReason(event.target.value)} maxLength={1000} /></label>
         <button type="button" className="primary" disabled={!selected.size || reason.trim().length < 3} onClick={() => { void review() }}>Review selected meeting changes</button>
-      </div>}
+      </div> : <p>No acquired transcript proposal is ready. Check Capture for source status.</p>}
+      </section>
     </>}
     {error && <p role="alert" className="error-banner">{error}</p>}
   </section>

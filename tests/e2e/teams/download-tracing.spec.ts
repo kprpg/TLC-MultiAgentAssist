@@ -33,6 +33,7 @@ for (const snapshots of [false, true]) {
       const page = await context.newPage()
       await page.goto('/')
       await chooseOpportunity(page, context.request)
+      await page.getByRole('tab', { name: 'Guidance', exact: true }).click()
       await page.getByRole('button', { name: 'Run guidance', exact: true }).click()
       await expect(page.getByRole('region', { name: 'Grounded TLC response' })).toBeVisible()
       const [word] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Export Word', exact: true }).click()])
