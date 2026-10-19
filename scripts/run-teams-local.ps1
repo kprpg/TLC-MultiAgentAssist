@@ -372,9 +372,9 @@ if (native && (manifest.name.short !== 'TLC Assist Local' || manifest.configurab
         Write-Host '[4/4] Uploading/installing the Teams package for your signed-in account. Sign-in/consent or tenant policy may require your interaction.'
         try {
             if (Get-Command atk -ErrorAction SilentlyContinue) {
-                Invoke-CheckedCommand -Command atk -Arguments @('install', '--file-path', $TeamsArchive, '--scope', 'Personal', '--interactive', 'true', '--telemetry', 'false')
+                Invoke-CheckedCommand -Command atk -Arguments @('install', '--file-path', $TeamsArchive, '--scope', 'Personal', '--interactive', 'false', '--telemetry', 'false')
             } else {
-                Invoke-CheckedCommand -Command npm -Arguments @('exec', '--yes', '--ignore-scripts', '--package=@microsoft/m365agentstoolkit-cli@1.1.18', '--', 'atk', 'install', '--file-path', $TeamsArchive, '--scope', 'Personal', '--interactive', 'true', '--telemetry', 'false')
+                Invoke-CheckedCommand -Command npm -Arguments @('exec', '--yes', '--ignore-scripts', '--package=@microsoft/m365agentstoolkit-cli@1.1.18', '--', 'atk', 'install', '--file-path', $TeamsArchive, '--scope', 'Personal', '--interactive', 'false', '--telemetry', 'false')
             }
         } catch {
             Write-Warning 'Teams upload/install failed or was declined. The verified runtime remains running; use this script with -Stop when finished.'

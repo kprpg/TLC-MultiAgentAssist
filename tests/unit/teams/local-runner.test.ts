@@ -42,12 +42,25 @@ async function fixture(scenario = 'success', origin = 'https://tlc.testing.conto
   await writeFile(wrapper, `
 $ErrorActionPreference = 'Stop'
 function Record($value) { Add-Content -LiteralPath $env:TLC_TEST_RUNNER_TRACE -Value ($value | ConvertTo-Json -Depth 6 -Compress) }
+function Assert-InstallArguments {
+  param([object[]]$Values)
+  $interactive = [Array]::IndexOf($Values, '--interactive')
+  if ($interactive -ge 0 -and $Values[$interactive + 1] -eq 'true') {
+    throw 'ATK interactive mode discards --file-path. Install requires --interactive false.'
+  }
+  $file = [Array]::IndexOf($Values, '--file-path')
+  if ($file -lt 0 -or $Values[$file + 1] -ne $env:TLC_TEST_RUNNER_APP) {
+    throw 'ATK install requires the exact verified Teams package path.'
+  }
+}
 function npm {
   Record @{ phase = $(if ($args[0] -eq 'exec') { 'upload' } else { 'build' }); arguments = @($args) }
+  if ($args[0] -eq 'exec') { Assert-InstallArguments -Values @($args) }
   $global:LASTEXITCODE = if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'build-failure') { 23 } else { 0 }
 }
 function atk {
   Record @{ phase = 'upload'; arguments = @($args) }
+  Assert-InstallArguments -Values @($args)
   $global:LASTEXITCODE = if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'upload-failure') { 19 } else { 0 }
 }
 function Read-Host {
@@ -233,7 +246,7 @@ describe('one local build/configure/run/Teams-upload entrypoint', () => {
     expect(started).toMatchObject({ host: '127.0.0.1', mode: 'sample', origin: 'https://tlc.testing.contoso.net' })
     expect(await readFile(join(String(started.directory), 'server.js'), 'utf8')).toBe('export {}')
     await expect(readFile(join(String(started.directory), 'runtime.env'))).rejects.toMatchObject({ code: 'ENOENT' })
-    expect(calls.at(-1)?.arguments).toEqual(['install', '--file-path', fixtureData.appZip, '--scope', 'Personal', '--interactive', 'true', '--telemetry', 'false'])
+    expect(calls.at(-1)?.arguments).toEqual(['install', '--file-path', fixtureData.appZip, '--scope', 'Personal', '--interactive', 'false', '--telemetry', 'false'])
     expect(result.stdout).toContain('Teams upload/install completed')
     expect(`${result.stdout}${result.stderr}`).not.toContain('private-fixture-must-not-log')
   }, 60_000)
@@ -331,7 +344,7 @@ describe('one local build/configure/run/Teams-upload entrypoint', () => {
     expect(upload?.phase).toBe('upload')
     expect(upload?.arguments).toEqual([
       'exec', '--yes', '--ignore-scripts', '--package=@microsoft/m365agentstoolkit-cli@1.1.18', '--',
-      'atk', 'install', '--file-path', fixtureData.appZip, '--scope', 'Personal', '--interactive', 'true', '--telemetry', 'false'
+      'atk', 'install', '--file-path', fixtureData.appZip, '--scope', 'Personal', '--interactive', 'false', '--telemetry', 'false'
     ])
   }, 60_000)
   it('stops only a verified owned PID and retains data and release files', async () => {

@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, screen, shell } from "electron";
 import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
 import { mkdirSync } from "node:fs";
 import { access, copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
@@ -14898,6 +14898,20 @@ function createSellerDashboardIpcHandler(host) {
 	return (request) => host.invoke(request);
 }
 //#endregion
+//#region apps/desktop/electron/main/window-bounds.ts
+function desktopWindowBounds(workArea) {
+	const width = Math.min(1440, workArea.width);
+	const height = Math.min(900, workArea.height);
+	return {
+		x: workArea.x + Math.floor((workArea.width - width) / 2),
+		y: workArea.y + Math.floor((workArea.height - height) / 2),
+		width,
+		height,
+		minWidth: Math.min(1080, workArea.width),
+		minHeight: Math.min(720, workArea.height)
+	};
+}
+//#endregion
 //#region apps/desktop/electron/main/index.ts
 var currentDirectory = dirname(fileURLToPath(import.meta.url));
 var desktopRoot = resolve(currentDirectory, "../..");
@@ -15242,10 +15256,7 @@ function safeFileName(value) {
 }
 async function createWindow() {
 	const window = new BrowserWindow({
-		width: 1440,
-		height: 900,
-		minWidth: 1080,
-		minHeight: 720,
+		...desktopWindowBounds(screen.getPrimaryDisplay().workArea),
 		backgroundColor: "#f5f7fa",
 		title: "TLC Account Team Intelligence",
 		icon: appIcon,

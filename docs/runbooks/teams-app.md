@@ -487,6 +487,29 @@ Entra registration or request a tenant-wide catalog publication. See Microsoft's
 The separately installed `teams` Developer CLI is not a substitute: its manifest
 upload command updates developer metadata rather than sideloading this ZIP.
 
+The install call uses **`--interactive false`** so ATK honors the supplied
+`--file-path`. ATK 1.1.18's interactive command mode discards this option, causing
+`MissingRequiredOptionError` for `--file-path or --xml-path` even when a path
+was passed. Non-interactive command selection does not bypass Microsoft 365
+authentication, consent or tenant sideloading policy.
+
+If an earlier launcher reached **Runtime ready** but failed at this final install
+step, leave the backend running. From the repository root, retry only installation
+of the already-built local CLI/native Live package:
+
+```powershell
+npm exec --yes --ignore-scripts --package=@microsoft/m365agentstoolkit-cli@1.1.18 -- `
+  atk install `
+  --file-path ".\release-teams\TLC-Assist-Teams-local-live.zip" `
+  --scope Personal --interactive false --telemetry false
+```
+
+This does not rebuild, restart or stop the backend. Supply the actual matching
+Teams installation ZIP if using a different package; never upload the runtime
+ZIP. Any Microsoft 365 sign-in or tenant approval still requires the end user's
+participation. Source MSX connection and owner-approved page pairing remain
+separate from installing the Teams package.
+
 HTTPS failure stops the new runtime and prevents upload, rather than installing a
 package known to show a blank window. An upload/login/policy failure is surfaced;
 the already verified runtime remains tracked/running for inspection and can be
