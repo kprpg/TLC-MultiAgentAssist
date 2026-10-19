@@ -77,7 +77,8 @@ function Get-Process {
 function Get-CimInstance {
   param($ClassName, $Filter)
   $record = Get-Content -LiteralPath (Join-Path $env:TLC_TEST_RUNNER_WORK 'current-run.json') -Raw | ConvertFrom-Json
-  return [pscustomobject]@{ CommandLine = 'node "' + (Join-Path $record.runtimeDirectory 'server.js') + '"' }
+  $runtimeDirectory = [IO.Path]::GetFullPath([string] $record.runtimeDirectory)
+  return [pscustomobject]@{ CommandLine = 'node "' + (Join-Path $runtimeDirectory 'server.js') + '"' }
 }
 if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'non-html') { function Start-Sleep { param($Seconds) } }
 function Invoke-WebRequest {

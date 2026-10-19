@@ -1,0 +1,15 @@
+{
+  "contractVersion": "1.0",
+  "revision": "example-not-approved",
+  "expiresAt": "2000-01-01T00:00:00.000Z",
+  "contexts": [
+    {
+      "kind": "channel",
+      "contextId": "REPLACE_WITH_APPROVED_CHANNEL_ID",
+      "teamId": "REPLACE_WITH_APPROVED_TEAM_ID",
+      "eligibleFteIds": ["REPLACE_WITH_IAM_VERIFIED_FTE_OBJECT_ID"],
+      "configurerIds": ["REPLACE_WITH_AUTHORIZED_CONTEXT_ADMIN_OBJECT_ID"],
+      "publisherIds": ["REPLACE_WITH_AUTHORIZED_PUBLISHER_OBJECT_ID"]
+    }
+  ]
+}

@@ -41,6 +41,11 @@ config/account-discovery.cases.local.json
 /docs/TEAMs/Teams-UI-TLC-Assist-Implementation-Plan.md
 /docs/TEAMs/Teams UI Revamp.md
 /docs/TEAMs/Teams-Live-MSX-Connectivity.md
+docs/architecture/TLC-Opal-Workflow-Handoff-Plan.local.md
+docs/architecture/TLC-Opal-Workflow-Handoff-Plan.local.mmd
+docs/architecture/TLC-Opal-Workflow-Handoff-Plan.local.schemas.json
+docs/architecture/TLC-Opal-Workflow-Handoff-Plan.local.svg
+docs/architecture/TLC-Opal-Workflow-Handoff-Plan.local.pdf
 /.tlc/
 /release-teams/
 /docs/architecture/TLC-Opal-Workflow-Handoff-Plan.local.*

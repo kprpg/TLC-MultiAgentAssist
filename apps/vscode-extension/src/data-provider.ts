@@ -141,7 +141,7 @@ function opportunityForOrThrow(opportunityId: string): Opportunity {
  * setting is `sqlite`. Pass `storePath` for file-backed records that survive
  * extension-host restarts; the no-path form remains isolated for tests.
  */
-export function createLocalStoreDataProvider(options: { foundryCredential?: TokenCredential; storePath?: string } = {}): ExtensionDataProvider {
+export function createLocalStoreDataProvider(options: { foundryCredential?: TokenCredential | undefined; storePath?: string } = {}): ExtensionDataProvider {
     const { foundryCredential, storePath } = options
     if (storePath !== undefined && !storePath.trim()) throw new Error('The SQLite sample store path cannot be blank.')
     if (storePath) mkdirSync(dirname(storePath), { recursive: true })
