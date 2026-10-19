@@ -1,6 +1,15 @@
 import { access } from 'node:fs/promises'
 
 const requiredPaths = [
+  'apps/teams/src',
+  'apps/teams/src/client',
+  'packages/orchestrator/collaboration',
+  'packages/connectors/graph',
+  'packages/connectors/teams',
+  'packages/documents',
+  'tests/unit/teams',
+  'tests/e2e/teams',
+  'docs/runbooks/teams-app.md',
   'apps/desktop/electron/main/auth',
   'apps/desktop/electron/main/ipc',
   'apps/desktop/electron/main/bootstrap',

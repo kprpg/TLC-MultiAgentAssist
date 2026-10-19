@@ -2,6 +2,50 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "TLC Teams (sample, F5)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/apps/teams/dist/server.js",
+      "cwd": "${workspaceFolder}",
+      "runtimeArgs": ["--experimental-sqlite"],
+      "env": {
+        "TLC_TEAMS_MODE": "sample",
+        "TLC_TEAMS_RUNTIME_PROFILE": "local",
+        "TLC_TEAMS_ORIGIN": "http://127.0.0.1:3978",
+        "TLC_TEAMS_PORT": "3978"
+      },
+      "outFiles": ["${workspaceFolder}/apps/teams/dist/**/*.js"],
+      "sourceMaps": true,
+      "preLaunchTask": "build-teams",
+      "serverReadyAction": { "pattern": "TLC Teams ready at (https?://[^ ]+)", "uriFormat": "%s", "action": "openExternally" }
+    },
+    {
+      "name": "TLC Teams (live, approved environment)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/apps/teams/dist/server.js",
+      "cwd": "${workspaceFolder}",
+      "runtimeArgs": ["--experimental-sqlite"],
+      "envFile": "${workspaceFolder}/apps/teams/.env.local",
+      "env": { "TLC_TEAMS_MODE": "live", "TLC_TEAMS_RUNTIME_PROFILE": "local" },
+      "outFiles": ["${workspaceFolder}/apps/teams/dist/**/*.js"],
+      "sourceMaps": true,
+      "preLaunchTask": "build-teams"
+    },
+    {
+      "name": "TLC Teams (HTTPS tunnel, sample)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/apps/teams/dist/server.js",
+      "cwd": "${workspaceFolder}",
+      "runtimeArgs": ["--experimental-sqlite"],
+      "envFile": "${workspaceFolder}/apps/teams/.env.teams-dev",
+      "env": { "TLC_TEAMS_MODE": "sample", "TLC_TEAMS_RUNTIME_PROFILE": "local" },
+      "outFiles": ["${workspaceFolder}/apps/teams/dist/**/*.js"],
+      "sourceMaps": true,
+      "preLaunchTask": "build-teams"
+    },
+    {
       "name": "Run TLC Assist Extension",
       "type": "extensionHost",
       "request": "launch",

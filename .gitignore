@@ -42,3 +42,5 @@ docs/architecture/TLC-Opal-Workflow-Handoff-Plan.local.mmd
 docs/architecture/TLC-Opal-Workflow-Handoff-Plan.local.schemas.json
 docs/architecture/TLC-Opal-Workflow-Handoff-Plan.local.svg
 docs/architecture/TLC-Opal-Workflow-Handoff-Plan.local.pdf
+/.tlc/
+/release-teams/

@@ -291,8 +291,6 @@ describe('MCEM Coach thin slice', () => {
     const target = infra.find((item) => !item.onDealTeam)
     expect(target).toBeDefined()
     if (!target) throw new Error('No unjoined infrastructure opportunity was found.')
-    const target = infra.find((item) => !item.onDealTeam)!
-    expect(target).toBeDefined()
     expect((await orchestrator.listOpportunities(target.accountId)).some((item) => item.id === target.id)).toBe(false)
 
     const join = await orchestrator.joinDealTeam(target.id)

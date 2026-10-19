@@ -1,15 +1,16 @@
 import { AzureCliCredential, ManagedIdentityCredential } from '@azure/identity'
 import { resolve } from 'node:path'
-import { loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, type AgentCapability } from '../../../packages/common/index.js'
+import { loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy } from '../../../packages/common/index.js'
 import { loadFoundryEnvironmentFromEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
 import { LiveMeetingCaptureConnector, LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
 import { RecordCreationService } from '../../../packages/orchestrator/record-creation/service.js'
-import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../packages/connectors/foundry/index.js'
+import { createFoundryOpenAIClient } from '../../../packages/connectors/foundry/index.js'
 import { createFoundryMeetingExtractor } from '../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
 import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
-import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
+import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
+import { createFoundryTaskAgents } from '../../../packages/orchestrator/task-agents.js'
 import { createLivePlayWorkflowHost, type WorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import { createSellerDashboardHost, type SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 import type { AuthenticatedRequest, WebRuntime } from './app.js'
@@ -41,23 +42,7 @@ export async function createHostedRuntimeFactory(options: HostedRuntimeOptions =
             processTimeoutInMs: 30_000
         })
     const foundryClient = createFoundryOpenAIClient(foundryEnvironment.foundry.projectEndpoint, foundryCredential)
-    const bindings = foundryEnvironment.foundry.agents
-    const agentBindings: Record<AgentCapability, typeof bindings.accountPulse> = {
-        'account-pulse': bindings.accountPulse,
-        'mcem-coach': bindings.mcemCoach,
-        'pursuit-executive': bindings.pursuitExecutive,
-        'risk-solution-play': bindings.riskSolutionPlay
-    }
-    const taskAgents = Object.fromEntries(Object.entries(agentBindings).map(([capability, binding]) => [capability, {
-        version: 'active',
-        agent: new FoundryPromptAgent<AgentTaskContext>({
-            projectEndpoint: foundryEnvironment.foundry.projectEndpoint,
-            agentName: binding.name,
-            requestTimeoutMs: foundryEnvironment.foundry.requestTimeoutMs,
-            credential: foundryCredential,
-            openAIClient: foundryClient
-        })
-    }])) as TaskAgentRegistry
+    const taskAgents = createFoundryTaskAgents(foundryEnvironment, foundryCredential, foundryClient)
     const guidance = new LocalPdfMcemGuidanceConnector(
         resolve(workingDirectory, environment['TLC_MCEM_GUIDANCE_PATH']?.trim() || 'docs/knowledge/MCEM Overview.pdf')
     )
