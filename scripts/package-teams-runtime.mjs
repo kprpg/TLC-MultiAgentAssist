@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createWriteStream } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,7 +15,13 @@ export async function stageTeamsRuntime(outputDirectory = join(root, 'release-te
   let exists = true
   try { await readdir(target) } catch (error) { if (error.code !== 'ENOENT') throw error; exists = false }
   if (exists) {
-    if ((await readFile(join(target, '.generated-teams-runtime'), 'utf8')) !== marker) throw new Error('Refusing to replace a directory not owned by the Teams packager.')
+    let ownership
+    try { ownership = await readFile(join(target, '.generated-teams-runtime'), 'utf8') }
+    catch (error) {
+      if (error.code !== 'ENOENT') throw error
+      throw new Error('Refusing to replace a directory not owned by the Teams packager. The ownership marker is missing; existing files were retained. Use a fresh runtime output directory.', { cause: error })
+    }
+    if (ownership !== marker) throw new Error('Refusing to replace a directory not owned by the Teams packager.')
     await rm(target, { recursive: true, force: true })
   }
   await mkdir(target, { recursive: true })
@@ -155,29 +161,36 @@ export function installTeamsRuntime(runtime, environment = process.env) {
   if (install.status !== 0) throw new Error('Runtime production dependency installation failed.')
 }
 
-export async function packageTeamsRuntime() {
-  const runtime = await stageTeamsRuntime()
-  installTeamsRuntime(runtime)
-  const output = join(root, 'release-teams', `TLC-Assist-Teams-runtime-${process.platform}-${process.arch}.zip`)
-  await new Promise((resolveZip, reject) => {
-    const destination = createWriteStream(output)
-    const archive = new ZipArchive({ forceZip64: true, zlib: { level: 1 } })
-    destination.on('close', resolveZip)
-    destination.on('error', reject)
-    archive.on('error', reject)
-    archive.on('warning', reject)
-    archive.pipe(destination)
-    archive.directory(runtime, false)
-    void archive.finalize().catch(reject)
-  })
-  const zip = await JSZip.loadAsync(await readFile(output), { checkCRC32: true })
-  for (const name of ['server.js', 'client/index.html', 'package.json', 'package-lock.json', 'node_modules/express/package.json', 'config/mcp.tool-policy.json']) {
-    if (!zip.file(name)) throw new Error(`Runtime archive is incomplete: ${name}`)
+export async function packageTeamsRuntime(outputDirectory = join(root, 'release-teams'), sourceRoot = root) {
+  const outputRoot = resolve(outputDirectory)
+  await mkdir(outputRoot, { recursive: true })
+  const staging = await mkdtemp(join(outputRoot, '.runtime-build-'))
+  try {
+    const runtime = await stageTeamsRuntime(join(staging, 'runtime'), sourceRoot)
+    installTeamsRuntime(runtime)
+    const output = join(outputRoot, `TLC-Assist-Teams-runtime-${process.platform}-${process.arch}.zip`)
+    await new Promise((resolveZip, reject) => {
+      const destination = createWriteStream(output)
+      const archive = new ZipArchive({ forceZip64: true, zlib: { level: 1 } })
+      destination.on('close', resolveZip)
+      destination.on('error', reject)
+      archive.on('error', reject)
+      archive.on('warning', reject)
+      archive.pipe(destination)
+      archive.directory(runtime, false)
+      void archive.finalize().catch(reject)
+    })
+    const zip = await JSZip.loadAsync(await readFile(output), { checkCRC32: true })
+    for (const name of ['.generated-teams-runtime', 'server.js', 'client/index.html', 'package.json', 'package-lock.json', 'node_modules/express/package.json', 'config/mcp.tool-policy.json']) {
+      if (!zip.file(name)) throw new Error(`Runtime archive is incomplete: ${name}`)
+    }
+    if (Object.keys(zip.files).some((name) => /(^|\/)(\.env($|\.)|runtime\.env$)|foundry\.environment\.json$|portfolio-preferences|\.sqlite($|-)/i.test(name))) {
+      throw new Error('Private environment or state files were included in the runtime archive.')
+    }
+    return output
+  } finally {
+    await rm(staging, { recursive: true, force: true })
   }
-  if (Object.keys(zip.files).some((name) => /(^|\/)(\.env($|\.)|runtime\.env$)|foundry\.environment\.json$|portfolio-preferences|\.sqlite($|-)/i.test(name))) {
-    throw new Error('Private environment or state files were included in the runtime archive.')
-  }
-  return output
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

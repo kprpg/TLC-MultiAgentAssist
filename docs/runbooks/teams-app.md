@@ -317,6 +317,7 @@ in the repository. This is the single sample/live launcher:
 .\scripts\run-teams-local.ps1                         # Sample / Live menu
 .\scripts\run-teams-local.ps1 -Mode sample            # No menu
 .\scripts\run-teams-local.ps1 -Mode live              # Current CLI user; reviewed writes
+.\scripts\run-teams-local.ps1 -Mode live -CliWriteMode reviewed
 .\scripts\run-teams-local.ps1 -Mode live -CliWriteMode read-only
 .\scripts\run-teams-local.ps1 -Stop
 ```
@@ -328,6 +329,23 @@ configuration; a restarted Live runtime requires a fresh owner-approved pairing.
 Use ordinary invocation (`.\scripts\run-teams-local.ps1`) rather than dot-sourcing
 the launcher into your current PowerShell scope. `-Mode` bypasses the menu;
 `-Stop` needs neither a mode nor an origin.
+
+If PowerShell reports that `.\scripts\run-teams-local.ps1` **is not recognized**,
+check the repository location and branch before changing PowerShell settings:
+
+```powershell
+git branch --show-current
+Test-Path -LiteralPath .\scripts\run-teams-local.ps1 -PathType Leaf
+```
+
+Run from the repository root; the path check must return `True`. During Teams
+feature development, the launcher and this guide are on
+`feature/vscode-extension-Teams`; `feature/vscode-extension` does not contain
+them. If you are on that non-Teams branch, check `git status` and preserve any
+uncommitted work before running `git switch feature/vscode-extension-Teams`.
+Then rerun the launcher. A missing script is not an execution-policy,
+authentication or Live-mode failure; do not copy the launcher alone onto a
+branch without its Teams runtime dependencies.
 
 `Origin:` used to be PowerShell's prompt for a missing mandatory parameter. It is
 now optional. Resolution is **`-Origin` -> `TLC_TEAMS_ORIGIN` in the selected
@@ -448,6 +466,17 @@ specific stopped releases after following the backup/update procedure below.
 `-TeamsArchive` then select explicit files. URL/domain/mode/identity consistency
 is still checked. `-SkipTeamsUpload` is for local verification and does **not**
 report a successful installation; it does not skip HTTPS validation.
+
+If a previous build failed with `ENOENT` for
+`release-teams\runtime\.generated-teams-runtime`, the legacy staging directory
+exists without the packager's ownership marker, possibly with only leftover
+`node_modules`. Do not create the marker by hand or delete unknown contents.
+The packager now uses a fresh `release-teams\.runtime-build-<unique>\runtime`
+directory for each build and removes only that build's staging when finished.
+Existing unmarked `release-teams\runtime` contents are left untouched and no
+longer block packaging. Rerun the normal launcher; the runtime ZIP name and
+Teams client/backend HTTPS origin and port are unchanged. This packaging error
+occurs before backend startup and is unrelated to MSX sign-in or Teams pairing.
 
 If `atk` is absent, the script invokes the pinned official
 `@microsoft/m365agentstoolkit-cli@1.1.18` through `npm exec` with package install
