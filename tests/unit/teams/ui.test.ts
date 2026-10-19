@@ -27,6 +27,16 @@ describe('Teams-native presentation', () => {
     expect(html).toContain('aria-label="TLC navigation"')
     expect(html).not.toContain('window-controls')
   })
+  it.each(['read-only', 'reviewed'] as const)('labels the configured CLI %s capability without promising unreviewed writes', (writeMode) => {
+    const html = renderToStaticMarkup(createElement(NativeConnectionPanel, {
+      connection: new LocalBrowserConnection(), client: new TeamsApiClient(async () => ''),
+      connected: true, authentication: 'local-azure-cli', writeMode,
+      onConnected: async () => undefined, onDisconnected: () => undefined
+    }))
+    expect(html).toContain(`Live MSX - Azure CLI ${writeMode === 'reviewed' ? 'reviewed read/write' : 'read-only'}`)
+    if (writeMode === 'reviewed') expect(html).toContain('explicit review')
+    expect(html).not.toContain('access_token')
+  })
   it('renders safe readable markdown and honest source state, never executable HTML or non-HTTPS evidence', () => {
     const html = renderToStaticMarkup(createElement(AgentResultView, {
       result: {

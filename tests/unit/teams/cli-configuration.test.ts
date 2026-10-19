@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { isLocalConfiguration, isNativeConfiguration, loadTeamsConfiguration, loadTeamsRuntimeConfiguration } from '../../../apps/teams/src/configuration.js'
-import { cliCapabilities, cliPublicConfigurationVersion } from '../../../packages/common/contracts/local-connection.js'
+import { cliCapabilities, cliPublicConfigurationVersion, getCliCapabilities } from '../../../packages/common/contracts/local-connection.js'
 import { teamsPublicConfigurationSchema } from '../../../packages/common/contracts/collaboration.js'
 
 const environment = {
@@ -14,7 +14,7 @@ describe('explicit current-user CLI live configuration', () => {
     const configuration = loadTeamsConfiguration(environment)
     expect(isLocalConfiguration(configuration)).toBe(true)
     expect(isNativeConfiguration(configuration)).toBe(false)
-    expect(configuration).toMatchObject({ mode: 'live', authentication: 'local-azure-cli', guidanceMode: 'deterministic' })
+    expect(configuration).toMatchObject({ mode: 'live', authentication: 'local-azure-cli', guidanceMode: 'deterministic', writeMode: 'read-only' })
     expect(loadTeamsRuntimeConfiguration(environment, configuration).profile).toBe('local')
     expect(JSON.stringify(configuration)).not.toMatch(/clientId|Credential|Secret/)
   })
@@ -28,12 +28,18 @@ describe('explicit current-user CLI live configuration', () => {
       { TLC_TEAMS_GUIDANCE_MODE: 'foundry' }
     ]) expect(() => loadTeamsConfiguration({ ...environment, ...changes })).toThrow()
   })
-  it('publishes a separately versioned read-only profile without changing native protocol v1.0', () => {
+  it('enables reviewed writes only with a validated explicit mode', () => {
+    expect(loadTeamsConfiguration({ ...environment, TLC_TEAMS_CLI_WRITE_MODE: 'reviewed' })).toMatchObject({ writeMode: 'reviewed' })
+    for (const value of ['true', '', 'all']) expect(() => loadTeamsConfiguration({ ...environment, TLC_TEAMS_CLI_WRITE_MODE: value })).toThrow()
+    expect(getCliCapabilities('reviewed').find((entry) => entry.id === 'reviewed-writes')?.state).toBe('requires-source-grant')
+    expect(getCliCapabilities('reviewed').find((entry) => entry.id === 'mcp')?.state).toBe('unavailable-local')
+  })
+  it('versions the write-mode public shape without changing native protocol v1.0', () => {
     const configuration = {
       contractVersion: cliPublicConfigurationVersion, mode: 'live',
-      authentication: 'local-azure-cli', capabilities: cliCapabilities
+      authentication: 'local-azure-cli', writeMode: 'read-only', capabilities: cliCapabilities
     }
-    expect(cliPublicConfigurationVersion).toBe('1.1')
+    expect(cliPublicConfigurationVersion).toBe('1.2')
     expect(teamsPublicConfigurationSchema.parse(configuration)).toEqual(configuration)
     expect(teamsPublicConfigurationSchema.safeParse({ ...configuration, contractVersion: '1.0' }).success).toBe(false)
     expect(teamsPublicConfigurationSchema.safeParse({ ...configuration, accessToken: 'not-public' }).success).toBe(false)

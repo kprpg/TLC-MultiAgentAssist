@@ -26,19 +26,38 @@ export const nativePublicConfigurationSchema = base.extend({
   authentication: z.literal('local-interactive'),
   capabilities: z.array(localCapabilitySchema).min(1)
 }).strict()
-export const cliPublicConfigurationVersion = '1.1' as const
+export const cliPublicConfigurationVersion = '1.2' as const
+export const cliWriteModeSchema = z.enum(['read-only', 'reviewed'])
+export type CliWriteMode = z.infer<typeof cliWriteModeSchema>
 export const cliCapabilities: z.infer<typeof localCapabilitySchema>[] = nativeCapabilities.map((capability) => {
   if (capability.id === 'msx') return { ...capability, detail: 'Use the current Azure CLI user, verify their Dataverse identity and load their active deal-team accounts. Source access is read-only.' }
-  if (['mcp', 'graph', 'foundry', 'reviewed-writes'].includes(capability.id)) return {
+  if (capability.id === 'reviewed-writes') return {
     ...capability, state: 'unavailable-local',
-    detail: 'This explicit CLI profile permits private MSX reads and deterministic guidance only. Use an approved native profile for separately granted capabilities.'
+    detail: 'This CLI connection is read-only. Enable explicit reviewed-write mode to review source changes under your own MSX permissions.'
+  }
+  if (['mcp', 'graph', 'foundry'].includes(capability.id)) return {
+    ...capability, state: 'unavailable-local',
+    detail: 'This CLI profile does not request this optional resource grant. Use an approved native profile for separately granted capabilities.'
   }
   return { ...capability }
 })
+export function getCliCapabilities(writeMode: CliWriteMode): z.infer<typeof localCapabilitySchema>[] {
+  return cliCapabilities.map((capability) => {
+    if (writeMode === 'reviewed' && capability.id === 'msx') return {
+      ...capability, detail: 'Use the verified current Azure CLI user and their own Dataverse permissions. Every source change requires exact review and approval.'
+    }
+    if (writeMode === 'reviewed' && capability.id === 'reviewed-writes') return {
+      ...capability, state: 'requires-source-grant',
+      detail: 'Desktop-equivalent MSX operations use the shared core, explicit review, source permissions, concurrency checks and durable action receipts. No FTE or publication role is inferred.'
+    }
+    return { ...capability }
+  })
+}
 export const cliPublicConfigurationSchema = z.object({
   contractVersion: z.literal(cliPublicConfigurationVersion),
   mode: z.literal('live'),
   authentication: z.literal('local-azure-cli'),
+  writeMode: cliWriteModeSchema,
   capabilities: z.array(localCapabilitySchema).min(1)
 }).strict()
 export const localPairRequestSchema = base.extend({

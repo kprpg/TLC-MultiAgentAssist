@@ -18,11 +18,11 @@ async function result(changes: Record<string, unknown> = {}, issuer = `https://s
     .setProtectedHeader({ alg: 'RS256' }).setIssuer(issuer).setAudience(audience).setExpirationTime(typeof changes['exp'] === 'number' ? changes['exp'] : '5m').sign(keys.privateKey)
   return { token, expiresOnTimestamp: Date.now() + 300_000 }
 }
-async function fixture(changes: Record<string, unknown> = {}, issuer?: string, audience?: string) {
+async function fixture(changes: Record<string, unknown> = {}, issuer?: string, audience?: string, writeMode: 'read-only' | 'reviewed' = 'read-only') {
   if (!isCliConfiguration(configuration)) throw new Error('Invalid CLI fixture.')
   const credential = { getToken: vi.fn(async () => result(changes, issuer, audience)) }
   const probe = vi.fn(async () => undefined)
-  const provider = new CliIdentityProvider(configuration, credential, { resolveKey: () => keys.publicKey, probeMsxIdentity: probe })
+  const provider = new CliIdentityProvider({ ...configuration, writeMode }, credential, { resolveKey: () => keys.publicKey, probeMsxIdentity: probe })
   return { provider, credential, probe }
 }
 
@@ -38,7 +38,7 @@ describe('explicit signed-in CLI source identity', () => {
     const { provider, credential, probe } = await fixture()
     await provider.connect('msx')
     const identity = provider.identity()
-    expect(identity?.principal).toMatchObject({ userId, tenantId, mode: 'live', roles: [], localReadOnly: true })
+    expect(identity?.principal).toMatchObject({ userId, tenantId, mode: 'live', roles: [], localSourceAccess: 'read-only' })
     expect(probe).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ userId, tenantId }))
     expect(credential.getToken).toHaveBeenCalledWith('https://example.crm.dynamics.com/.default')
     expect(provider.status()).toMatchObject({ state: 'connected', account: 'cli-user@example.test' })
@@ -48,10 +48,30 @@ describe('explicit signed-in CLI source identity', () => {
     for (const role of ['TLC.Teams.Writer', 'TLC.Teams.Publisher', 'TLC.Teams.ContextAdmin']) {
       expect(() => requireRole(identity.principal, role)).toThrow()
     }
-    expect(() => requireRole({ ...identity.principal, localReadOnly: false }, 'TLC.Teams.User')).toThrow()
+    const unmarked = { ...identity.principal }
+    delete unmarked.localSourceAccess
+    expect(() => requireRole(unmarked, 'TLC.Teams.User')).toThrow()
     const nativePairing = new LocalPairingAuthority(configuration.origin, () => identity)
     expect(() => nativePairing.reviewGeneration()).toThrow()
-    expect(() => new LocalPairingAuthority(configuration.origin, () => identity, { allowLocalReadOnly: true }).reviewGeneration()).not.toThrow()
+    expect(() => new LocalPairingAuthority(configuration.origin, () => identity, { allowLocalSource: true }).reviewGeneration()).not.toThrow()
+  })
+  it('enables reviewed source writes only through the explicit owner configuration, never token role claims', async () => {
+    const { provider, credential, probe } = await fixture({ roles: ['TLC.Teams.Publisher', 'TLC.Teams.Writer'] }, undefined, undefined, 'reviewed')
+    expect(provider.status().capabilities.find((entry) => entry.id === 'reviewed-writes')?.state).toBe('requires-source-grant')
+    expect(credential.getToken).not.toHaveBeenCalled()
+    await provider.connect('msx')
+    const identity = provider.identity()
+    if (!identity) throw new Error('No verified CLI identity.')
+    expect(probe).toHaveBeenCalledOnce()
+    expect(identity.principal).toMatchObject({ roles: [], localSourceAccess: 'reviewed' })
+    expect(() => requireRole(identity.principal, 'TLC.Teams.Writer')).not.toThrow()
+    expect(() => requireRole(identity.principal, 'TLC.Teams.Publisher')).toThrow()
+    expect(() => requireRole(identity.principal, 'TLC.Teams.ContextAdmin')).toThrow()
+    expect(provider.status().capabilities.find((entry) => entry.id === 'reviewed-writes')?.state).toBe('available')
+    const pairing = new LocalPairingAuthority(configuration.origin, () => identity, { allowLocalSource: true })
+    expect(() => pairing.reviewGeneration()).not.toThrow()
+    await provider.disconnect()
+    expect(provider.status().capabilities.find((entry) => entry.id === 'reviewed-writes')?.state).toBe('requires-source-grant')
   })
   it.each([
     { tid: '66666666-6666-4666-8666-666666666666' }, { oid: 'not-a-guid' },

@@ -15,11 +15,13 @@ identity infrastructure are shared. The existing hosted API/SPA/bot/OBO profile
 remains separate; it is not a prerequisite for local native MSX.
 
 **Existing CLI sign-in:** the additional explicit `local-azure-cli` profile reuses
-the current user's Azure CLI sign-in for **private read-only MSX**. It needs no
+the current user's Azure CLI sign-in for **private MSX access**. It needs no
 new native/API/SPA/bot registration. It verifies the delegated source token and
 the user's own Dataverse mapping, then loads their active deal-team accounts
-automatically. It does not infer FTE/writer/publisher roles or enable optional
-MCP/Graph, shared publication or source writes. The native/hosted gates are unchanged.
+automatically. Explicit `reviewed` write mode enables the same shared MSX
+operations as Desktop, with exact review, approval, concurrency checks and durable
+receipts. It does not infer FTE/publisher roles or enable optional MCP/Graph or
+shared publication. The native/hosted gates are unchanged.
 
 **Engineering validation is offline only.** Do not sign in, read, create, update or
 delete real MSX/Dataverse records while validating these changes. Use the fixture
@@ -118,10 +120,23 @@ active `msp_dealteams`, resolve active opportunities and load distinct accounts.
 Existing explicit Portfolio curation remains governed by the shared connector.
 
 The CLI subject is reverified on each source dispatch; account changes revoke old
-page access. HTTP source writes are denied independently of the read-only action
-gate. Optional grants are not silently replaced, CLI logout is never invoked by
-TLC disconnect, and failed/empty live reads never fall back to sample records.
-Public CLI configuration is version **1.1**; native public configuration and
+page access and invalidate prior reviews. The standalone runtime defaults to
+`TLC_TEAMS_CLI_WRITE_MODE=read-only` when the setting is absent. In that mode,
+both the HTTP action gate and the source transport reject writes. Set
+`TLC_TEAMS_CLI_WRITE_MODE=reviewed` or launch with `-CliWriteMode reviewed` for
+Desktop-equivalent source operations: opportunity and milestone updates, stage
+transitions, milestone activities, opportunity/milestone creation, team membership,
+and the existing reviewed meeting changes. These reuse shared orchestrator and
+connector paths, not a second Teams implementation. Native/hosted IAM role gates
+are unchanged; the private CLI capability is not a manufactured app/FTE role.
+Source row/field permissions still determine which actual operations succeed.
+Every source mutation must go through preview and explicit approval; direct
+operation calls cannot bypass review. Activity retains receipts; uncertain
+outcomes must be reconciled, not blindly retried. Optional grants are not silently
+replaced, CLI logout is never invoked by TLC disconnect, and failed/empty live
+reads never fall back to sample records.
+Public CLI configuration is version **1.2**, including the explicit `writeMode`;
+native public configuration and
 the protected owner/pairing protocol remain version **1.0**.
 
 The Teams frame's initial cross-site `GET /` navigation can load the public
@@ -296,7 +311,45 @@ Keep the existing three surfaces' launchers. The new configurations are additive
 ### One-script build, run and upload
 
 Use [run-teams-local.ps1](../../scripts/run-teams-local.ps1) from PowerShell **7.4+**
-in the repository. It performs the requested sequence:
+in the repository. This is the single sample/live launcher:
+
+```powershell
+.\scripts\run-teams-local.ps1                         # Sample / Live menu
+.\scripts\run-teams-local.ps1 -Mode sample            # No menu
+.\scripts\run-teams-local.ps1 -Mode live              # Current CLI user; reviewed writes
+.\scripts\run-teams-local.ps1 -Mode live -CliWriteMode read-only
+.\scripts\run-teams-local.ps1 -Stop
+```
+
+The menu defaults to **Sample** on Enter. Invalid choices fail explicitly; Live
+never falls back to sample when configuration or authentication is unavailable.
+After switching modes, reload or reopen the Teams tab to fetch its new
+configuration; a restarted Live runtime requires a fresh owner-approved pairing.
+Use ordinary invocation (`.\scripts\run-teams-local.ps1`) rather than dot-sourcing
+the launcher into your current PowerShell scope. `-Mode` bypasses the menu;
+`-Stop` needs neither a mode nor an origin.
+
+`Origin:` used to be PowerShell's prompt for a missing mandatory parameter. It is
+now optional. Resolution is **`-Origin` -> `TLC_TEAMS_ORIGIN` in the selected
+configuration/environment -> `https://localhost:3978`**. If no origin is configured,
+an explicit `-LocalPort` or configured `TLC_TEAMS_PORT` selects the default HTTPS
+port instead. Origins must still be exact HTTPS addresses without paths.
+Command parameters take precedence; environment-file values override inherited
+environment values during inspection.
+
+Live defaults to `local-azure-cli` unless `-AuthMode` or the configuration selects
+another existing profile. Without `-ConfigPath`, it looks for
+`%LOCALAPPDATA%\TLC-Assist\Teams\configuration\cli.env`. Prepare that file once
+from [the safe CLI template](../../apps/teams/.env.cli.example), outside the
+repository, and fill in the approved tenant, MSX resource and environment.
+Do not supply tokens or invent configuration coordinates. The launcher defaults
+to `reviewed` CLI write mode, honors a configured `TLC_TEAMS_CLI_WRITE_MODE`, and
+accepts `-CliWriteMode read-only` or `-CliWriteMode reviewed` as an explicit override.
+Selecting Live enables the reviewed-write capability, **not automatic writes**.
+Startup never connects to MSX or initiates login; the owner must connect and
+approve the page, then review each change. Sample does not auto-load the live file.
+
+The launcher performs the requested sequence:
 
 1. Rebuilds the backend/browser runtime ZIP and runs the cumulative Teams tests.
 2. Rebuilds the three-file Teams installation ZIP for the **same** origin/mode.
@@ -305,8 +358,11 @@ in the repository. It performs the requested sequence:
 4. Uses `atk install` to upload/sideload that exact ZIP for your Microsoft 365
    account. Login, consent or tenant app-upload policy can still require interaction.
 
-For same-laptop sample testing, supply **real, existing, trusted** localhost PEM
-certificate/key files. Paths such as `C:\YOUR_CERT_FOLDER\localhost.pem` and
+For same-laptop testing, prepare **real, existing, trusted** localhost PEM
+certificate/key files once. When both TLS paths are otherwise absent, the launcher
+discovers `%LOCALAPPDATA%\TLC-Assist\Teams\certs\localhost.pem` and
+`localhost-key.pem`. Explicit parameters or configured TLS paths still take
+precedence; partial pairs and missing paths fail. Paths such as `C:\YOUR_CERT_FOLDER\localhost.pem` and
 `C:\YOUR_KEY_FOLDER\localhost-key.pem` are placeholders, not files the runner
 creates. The runner rejects missing files or directories before building or
 starting anything.
@@ -328,8 +384,8 @@ mkcert -cert-file "$certDir\localhost.pem" -key-file "$certDir\localhost-key.pem
 if ($LASTEXITCODE -ne 0) { throw 'Creating the localhost certificate/key failed.' }
 ```
 
-With the trusted pair in that per-user directory (or replace `$certDir` with
-your actual certificate directory), launch from the repository:
+With the trusted pair in that per-user directory, the short launch commands above
+need no certificate parameters. To use another directory or port, launch explicitly:
 
 ```powershell
 $certDir = Join-Path $env:LOCALAPPDATA 'TLC-Assist\Teams\certs'
@@ -356,14 +412,15 @@ that already forwards to the selected loopback port:
   -ConfigPath .\apps\teams\.env.local
 ```
 
-With a configuration file, set its mode explicitly. Live mode additionally needs
-the existing approved credentials, disclosure/Foundry configuration, package ID
-and bot ID. Relative configuration paths are resolved against the repository
+Use the menu or `-Mode` to select the data mode. The separate **hosted-obo** live
+profile still needs the existing approved credentials, disclosure/Foundry
+configuration, package ID and bot ID; it is not the default local CLI profile.
+Relative configuration paths are resolved against the repository
 before the extracted runtime starts. The runner forces the **local** profile and
 loopback binding; source user permissions remain delegated and unchanged.
 Loopback sample testing does not establish colleague or cloud-callback reachability.
-Live Teams packages require the approved shared HTTPS origin rather than a
-development/template origin.
+Hosted live Teams packages require the approved shared HTTPS origin rather than a
+development/template origin; private CLI/native packages require loopback HTTPS.
 
 Stop a runtime started by this script:
 
@@ -376,8 +433,15 @@ Reruns replace only a verified runner-owned process after successful builds.
 It refuses occupied ports belonging to unrelated servers and refuses reused PIDs.
 Private configuration remains at the original environment-file location, never
 inside either ZIP. Data and per-run privacy-safe logs remain under
-`%LOCALAPPDATA%\TLC-Assist\Teams\launcher` unless `-WorkDirectory`/configured data
-paths override them. Old release folders are retained for inspection; remove only
+`%LOCALAPPDATA%\TLC-Assist\Teams\launcher-cli` by default for both Sample and CLI
+Live. The common owner-protected work directory lets a mode switch replace only
+the verified launcher-owned runtime on the same origin. Sample data remains in
+`data\sample`; live state stays in the protected `private` directory.
+`local-interactive` retains its separate `launcher-native` default.
+Use `-WorkDirectory`/configured data paths to override these paths. For older
+installations in `launcher` or other directories, stop them using their actual
+`-WorkDirectory`; the launcher will not kill an unrelated listener.
+Old release folders are retained for inspection; remove only
 specific stopped releases after following the backup/update procedure below.
 
 `-SkipBuild` reuses verified existing archives; optional `-RuntimeArchive` and

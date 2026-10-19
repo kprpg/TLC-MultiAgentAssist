@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { localConnectionVersion, localPairExchangeSchema, localPairRequestSchema, type LocalPairRequestResult, localPairResultSchema } from '../../../packages/common/contracts/local-connection.js'
-import { isLocalReadOnlyPrincipal, principalPartition, type ExecutionPrincipal } from '../../../packages/orchestrator/collaboration/principal.js'
+import { isLocalSourcePrincipal, principalPartition, type ExecutionPrincipal } from '../../../packages/orchestrator/collaboration/principal.js'
 import type { NativeIdentity } from './native-identity.js'
 
 export class LocalPairingError extends Error {
@@ -20,10 +20,10 @@ export class LocalPairingAuthority {
   private readonly requests = new Map<string, Pending>()
   private readonly sessions = new Map<string, { binding: Binding; expiresAt: number }>()
   private readonly now: () => number
-  private readonly allowLocalReadOnly: boolean
-  constructor(private readonly origin: string, private readonly getIdentity: () => NativeIdentity | undefined, options: { now?: () => number; allowLocalReadOnly?: boolean } = {}) {
+  private readonly allowLocalSource: boolean
+  constructor(private readonly origin: string, private readonly getIdentity: () => NativeIdentity | undefined, options: { now?: () => number; allowLocalSource?: boolean } = {}) {
     this.now = options.now ?? Date.now
-    this.allowLocalReadOnly = options.allowLocalReadOnly === true
+    this.allowLocalSource = options.allowLocalSource === true
   }
   private checkOrigin(origin: string): void {
     if (origin !== this.origin) throw new LocalPairingError(403, 'local_origin_denied')
@@ -37,7 +37,7 @@ export class LocalPairingAuthority {
   }
   private eligible(identity: NativeIdentity): boolean {
     return identity.principal.mode === 'live' && (identity.principal.roles.includes('TLC.Teams.User') ||
-      this.allowLocalReadOnly && isLocalReadOnlyPrincipal(identity.principal))
+      this.allowLocalSource && isLocalSourcePrincipal(identity.principal))
   }
   private prune(): void {
     const candidate = this.getIdentity()

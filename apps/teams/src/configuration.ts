@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { configuredUuidSchema } from '../../../packages/common/configuration/foundry-environment.js'
+import { cliWriteModeSchema } from '../../../packages/common/contracts/local-connection.js'
 
 const httpsOrigin = z.url().refine((value) => {
   const url = new URL(value)
@@ -49,6 +50,7 @@ export type NativeTeamsConfiguration = z.infer<typeof nativeSchema>
 const cliSchema = z.object({
   ...nativeSchema.shape,
   authentication: z.literal('local-azure-cli'),
+  writeMode: cliWriteModeSchema,
   graphScopes: z.array(z.never()),
   guidanceMode: z.literal('deterministic')
 }).omit({ nativeClientId: true, nativeRedirectUri: true }).strict().superRefine((value, context) => {
@@ -129,7 +131,9 @@ export function loadTeamsConfiguration(environment: NodeJS.ProcessEnv): TeamsCon
       guidanceMode: environment['TLC_TEAMS_GUIDANCE_MODE'] ?? 'deterministic',
       environmentId: environment['TLC_TEAMS_ENVIRONMENT_ID']
     }
-    return authMode === 'local-azure-cli' ? cliSchema.parse(local) : nativeSchema.parse({
+    return authMode === 'local-azure-cli' ? cliSchema.parse({
+      ...local, writeMode: environment['TLC_TEAMS_CLI_WRITE_MODE'] ?? 'read-only'
+    }) : nativeSchema.parse({
       ...local, nativeClientId: environment['TLC_TEAMS_NATIVE_CLIENT_ID'],
       nativeRedirectUri: environment['TLC_TEAMS_NATIVE_REDIRECT_URI'] ?? 'http://localhost'
     })

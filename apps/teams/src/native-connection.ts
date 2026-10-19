@@ -21,7 +21,7 @@ export async function createNativeConnection(configuration: LocalTeamsConfigurat
   }
   const fetchImplementation: typeof fetch = (input, init) => {
     const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase()
-    if (isCliConfiguration(configuration) && !['GET', 'HEAD'].includes(method)) throw new NativeConnectionError('native_resource_unavailable')
+    if (isCliConfiguration(configuration) && configuration.writeMode === 'read-only' && !['GET', 'HEAD'].includes(method)) throw new NativeConnectionError('native_resource_unavailable')
     return fetch(input, {
       ...init, signal: init?.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000)
     })
@@ -35,7 +35,7 @@ export async function createNativeConnection(configuration: LocalTeamsConfigurat
   const provider = isCliConfiguration(configuration)
     ? new CliIdentityProvider(configuration, undefined, options)
     : new NativeIdentityProvider(configuration, createNativeAuthenticationClient(configuration), options)
-  const pairing = new LocalPairingAuthority(configuration.origin, () => provider.identity(), { allowLocalReadOnly: isCliConfiguration(configuration) })
+  const pairing = new LocalPairingAuthority(configuration.origin, () => provider.identity(), { allowLocalSource: isCliConfiguration(configuration) })
   return {
     provider, pairing, fetchImplementation,
     environment: { ...environment, TLC_TEAMS_STATE_KEY: stateKey, TLC_TEAMS_DATA_DIR: dataDirectory },

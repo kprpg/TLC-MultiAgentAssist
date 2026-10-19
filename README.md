@@ -34,9 +34,22 @@ commands. Installing the Teams package neither starts the laptop server nor
 deploys it to Azure.
 
 For the complete build/package/extract/run/upload sequence, use the single
-[local Teams runner](scripts/run-teams-local.ps1). It requires the selected HTTPS
-origin, verifies it before sideloading, and supports supplied trusted localhost
-certificates or an existing approved HTTPS ingress. See the
+[local Teams runner](scripts/run-teams-local.ps1):
+
+```powershell
+.\scripts\run-teams-local.ps1                  # Sample / Live menu
+.\scripts\run-teams-local.ps1 -Mode sample     # Skip the menu
+.\scripts\run-teams-local.ps1 -Mode live       # Existing CLI user; reviewed MSX read/write
+.\scripts\run-teams-local.ps1 -Stop
+```
+
+After one-time setup, it discovers the private live configuration at
+`%LOCALAPPDATA%\TLC-Assist\Teams\configuration\cli.env` and trusted PEM files at
+`%LOCALAPPDATA%\TLC-Assist\Teams\certs\localhost.pem` / `localhost-key.pem`.
+The origin comes from `-Origin`, configured `TLC_TEAMS_ORIGIN`, or defaults to
+`https://localhost:3978`. It verifies HTTPS before sideloading and also supports
+an existing approved HTTPS ingress. It never creates/trusts certificates or
+signs in to MSX automatically. See the
 [one-script instructions](docs/runbooks/teams-app.md#one-script-build-run-and-upload).
 
 The [Teams runbook](docs/runbooks/teams-app.md) distinguishes the installation ZIP,
@@ -48,8 +61,10 @@ live/ingress gates. ZIP generation or browser-only testing is not production rea
 For a per-user live Portfolio using an existing local corporate sign-in, the
 explicit [Azure CLI profile](docs/runbooks/teams-app.md#per-user-windows-msx-using-the-existing-cli-user)
 verifies that user's Dataverse identity and automatically loads their deal-team
-accounts. It is private and read-only, needs no new native/API/bot registration,
-and does not infer FTE/writer roles. The separate native and hosted profiles retain
+accounts. It is private, needs no new native/API/bot registration, and supports
+Desktop-equivalent MSX writes through the shared review/approval and audit path.
+Source permissions remain enforced; no FTE or publication role is inferred.
+Use `-CliWriteMode read-only` to retain read-only access. The separate native and hosted profiles retain
 their own approvals and capabilities.
 
 Teams uses the same **New, Discover, Portfolio, Plays, Dashboards** navigation as
@@ -64,7 +79,7 @@ Windows seller profile. See the [Teams UI guide](docs/runbooks/teams-app.md#exte
 Every surface runs in one of two modes:
 
 - **Sample mode** (default) — bundled sanitized data. No sign-in, no network; explore without touching MSX, Foundry, Azure, or Microsoft Entra ID.
-- **Live mode** — real opportunity data over **MSX OData** and **Dataverse MCP**, plus Microsoft Foundry agents. Requires corporate identity and the surface's approved authentication. Teams uses dedicated Entra/NAA/OBO admission and tenant/FTE/source authorization, not the VS Code credential.
+- **Live mode** — real opportunity data over **MSX OData** and **Dataverse MCP**, plus Microsoft Foundry agents. Requires corporate identity and the surface's approved authentication. Teams uses its selected private CLI/native or hosted Entra/NAA/OBO profile, never the VS Code credential. Optional source/model capabilities depend on that profile's grants.
 
 See [Documentation](#documentation) for the full user guide, FAQ, and runbooks.
 

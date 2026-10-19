@@ -16,7 +16,7 @@ import { CollaborationAdmissionError, CollaborationLifecycle } from '../../../pa
 import { MeetingAcquisitionService } from '../../../packages/orchestrator/collaboration/meeting-acquisition.js'
 import { PublicationService, type SharedProjection } from '../../../packages/orchestrator/collaboration/publications.js'
 import type { ExecutionPrincipal } from '../../../packages/orchestrator/collaboration/principal.js'
-import { isLocalReadOnlyPrincipal, principalPartition } from '../../../packages/orchestrator/collaboration/principal.js'
+import { isLocalSourcePrincipal, principalPartition } from '../../../packages/orchestrator/collaboration/principal.js'
 import { UserRequestBudget, RequestQuotaError } from '../../../packages/orchestrator/collaboration/request-budget.js'
 import { WorkflowActivityStore } from '../../../packages/orchestrator/collaboration/activity.js'
 import { WorkflowRuntimeError } from '../../../packages/orchestrator/workflows/runtime.js'
@@ -24,7 +24,7 @@ import { workflowContractVersion } from '../../../packages/common/contracts/work
 import type { TranscriptEventService } from '../../../packages/orchestrator/collaboration/transcript-events.js'
 import { createTeamsAuthenticator, TeamsAuthorizationError } from './authentication.js'
 import { isCliConfiguration, isLocalConfiguration, type TeamsConfiguration } from './configuration.js'
-import { cliCapabilities, cliPublicConfigurationVersion, localConnectionVersion, localRevokeRequestSchema, nativeCapabilities, nativeConnectionStatusSchema, type NativeConnectionStatus } from '../../../packages/common/contracts/local-connection.js'
+import { getCliCapabilities, cliPublicConfigurationVersion, localConnectionVersion, localRevokeRequestSchema, nativeCapabilities, nativeConnectionStatusSchema, type NativeConnectionStatus } from '../../../packages/common/contracts/local-connection.js'
 import { LocalPairingError, type LocalPairingAuthority } from './local-pairing.js'
 import { NativeConnectionError } from './native-identity.js'
 
@@ -93,10 +93,13 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
       }
       if (url.pathname === '/api/teams/config' && request.method === 'GET') {
         if (isLocalConfiguration(options.configuration)) {
-          const cli = isCliConfiguration(options.configuration)
+          const configuration = options.configuration
+          const cli = isCliConfiguration(configuration)
           json(200, {
             contractVersion: cli ? cliPublicConfigurationVersion : localConnectionVersion, mode: 'live',
-            authentication: options.configuration.authentication, capabilities: cli ? cliCapabilities : nativeCapabilities
+            authentication: configuration.authentication,
+            ...(cli ? { writeMode: configuration.writeMode } : {}),
+            capabilities: cli ? getCliCapabilities(configuration.writeMode) : nativeCapabilities
           })
           return true
         }
@@ -163,11 +166,11 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         json(200, {
           contractVersion: collaborationVersion, mode: principal.mode,
           roles: principal.roles, displayName: principal.mode === 'sample' ? 'Sample user'
-            : isLocalReadOnlyPrincipal(principal) ? 'Verified local MSX user (read-only)' : 'Authorized Microsoft FTE'
+            : isLocalSourcePrincipal(principal) ? `Verified local MSX user (${principal.localSourceAccess === 'reviewed' ? 'reviewed read/write' : 'read-only'})` : 'Authorized Microsoft FTE'
         })
         return true
       }
-      if (isCliConfiguration(options.configuration) && /^\/api\/teams\/actions(?:\/|$)/.test(url.pathname)) {
+      if (isCliConfiguration(options.configuration) && options.configuration.writeMode === 'read-only' && /^\/api\/teams\/actions(?:\/|$)/.test(url.pathname)) {
         throw new TeamsHttpError(403, 'local_read_only')
       }
       const lifecycle = new CollaborationLifecycle(options.store, options.acceptNewWork ?? true)

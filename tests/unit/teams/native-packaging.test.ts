@@ -23,7 +23,7 @@ describe('explicit device-local live package', () => {
       requests.push(path)
       if (path === '/api/health') return Response.json({ status: 'ready', surface: 'teams', mode: 'live' })
       if (path === '/') return new Response('<title>TLC Assist for Teams</title>', { headers: { 'content-type': 'text/html' } })
-      if (path === '/api/teams/config') return Response.json({ contractVersion: cliPublicConfigurationVersion, mode: 'live', authentication: 'local-azure-cli', capabilities: cliCapabilities })
+      if (path === '/api/teams/config') return Response.json({ contractVersion: cliPublicConfigurationVersion, mode: 'live', authentication: 'local-azure-cli', writeMode: 'read-only', capabilities: cliCapabilities })
       return Response.json({ error: 'authorization_required' }, { status: 401 })
     }
     expect(await verifyTeamsOrigin(options.origin, 'live', transport, 'local-azure-cli')).toEqual({ hosting: 'device-local', tenantSignIn: 'unverified', liveData: 'unverified' })

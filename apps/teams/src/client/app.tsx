@@ -115,8 +115,9 @@ export function TeamsApp() {
   }), [])
   const review = useCallback<ReviewAction>(async (operation, input) => {
     if (!client) throw new Error('Sign in before reviewing changes.')
-    if (authentication && 'authentication' in authentication.configuration && authentication.configuration.authentication === 'local-azure-cli') {
-      throw new Error('The Azure CLI profile is read-only. Use an approved native writer profile for source changes.')
+    if (authentication && 'authentication' in authentication.configuration && authentication.configuration.authentication === 'local-azure-cli' &&
+        authentication.configuration.writeMode === 'read-only') {
+      throw new Error('This Azure CLI connection is read-only. Relaunch with -CliWriteMode reviewed to enable explicitly reviewed MSX changes.')
     }
     return reviewPreview(await client.preview(operation, input))
   }, [client, reviewPreview, authentication])
@@ -191,6 +192,7 @@ export function TeamsApp() {
       {error ? <p role="alert" className="error-banner">{error}</p> : <p role="status">{authentication?.localConnection ? 'Local runtime ready. Connect and pair this page yourself to access live MSX.' : 'Initializing your Teams workspace...'}</p>}
       {authentication?.localConnection && client ? <NativeConnectionPanel connection={authentication.localConnection} client={client}
         authentication={'authentication' in authentication.configuration ? authentication.configuration.authentication : 'local-interactive'}
+        writeMode={'writeMode' in authentication.configuration ? authentication.configuration.writeMode : 'read-only'}
         connected={false} onConnected={finishLocalConnection} onDisconnected={clearPrivateWorkspace} />
         : authentication?.configuration.mode === 'live' && <button type="button" className="primary" onClick={() => { void signIn() }}>Sign in with Microsoft</button>}
     </main> : surface === 'stage' ? <SharedStage client={client} artifactId={parameters.get('artifactId')} /> : <TeamsShell mode={session.mode} view={view} onNavigate={setView} surface={hostSurface}
@@ -203,6 +205,7 @@ export function TeamsApp() {
       {notice && <p role="status" className="success-banner">{notice}</p>}
       {authentication.localConnection && <NativeConnectionPanel connection={authentication.localConnection} client={client}
         authentication={'authentication' in authentication.configuration ? authentication.configuration.authentication : 'local-interactive'}
+        writeMode={'writeMode' in authentication.configuration ? authentication.configuration.writeMode : 'read-only'}
         connected={true} onConnected={finishLocalConnection} onDisconnected={clearPrivateWorkspace} />}
       {reference && <section className="panel"><h2>Private account reference</h2><p>{reference.name}: {reference.state === 'visible' ? 'already available in your Portfolio' : reference.state === 'hidden' ? 'hidden in your private Portfolio' : 'accessible in search, not yet added'}.</p>
         {reference.state !== 'visible' && <button type="button" onClick={() => { void curateReference() }}>{reference.state === 'hidden' ? 'Review unhiding account' : 'Review adding account'}</button>}
@@ -221,7 +224,7 @@ export function TeamsApp() {
         </div>
         <p className="privacy-note">{session.mode === 'sample' ? 'This demonstration uses the canonical sanitized SQLite dataset. No live MSX, Graph, MCP or Foundry calls.'
           : 'authentication' in authentication.configuration && authentication.configuration.authentication === 'local-azure-cli'
-            ? 'Private read-only MSX access uses your verified current CLI user and source permissions. No FTE, writer or publication role is inferred.'
+            ? 'Private MSX access uses your verified current CLI user and source permissions. Source changes require enabled reviewed-write mode and explicit approval. No FTE or publication role is inferred.'
             : 'Microsoft FTE access, your delegated source rights, and reviewed-action policies are enforced separately.'}</p>
       </section>}
       {bindingId && bindingStatus !== 'ready' ? <section className="panel"><h1>{bindingStatus === 'denied' ? 'Bound workspace unavailable' : 'Loading your authorized bound workspace'}</h1>

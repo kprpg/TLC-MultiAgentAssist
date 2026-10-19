@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createTeamsHandler } from '../../../apps/teams/src/app.js'
 import { LocalPairingAuthority } from '../../../apps/teams/src/local-pairing.js'
 import { loadTeamsConfiguration } from '../../../apps/teams/src/configuration.js'
-import { cliCapabilities, cliPublicConfigurationVersion, localConnectionVersion, nativeCapabilities } from '../../../packages/common/contracts/local-connection.js'
+import { getCliCapabilities, cliPublicConfigurationVersion, localConnectionVersion, nativeCapabilities, type CliWriteMode } from '../../../packages/common/contracts/local-connection.js'
 import { SqliteDocumentStore } from '../../../packages/connectors/common/scoped-document-store.js'
 import type { NativeIdentity } from '../../../apps/teams/src/native-identity.js'
 import { createLiveApplicationServices, type ApplicationServices } from '../../../packages/orchestrator/application-runtime.js'
@@ -19,12 +19,13 @@ const configuration = loadTeamsConfiguration({
 })
 const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
-async function fixture(services?: ApplicationServices, readOnly = false) {
+async function fixture(services?: ApplicationServices, writeMode?: CliWriteMode) {
+  const cli = writeMode !== undefined
   const identity: NativeIdentity = {
     account: 'private-owner@example.test', generation: 1,
-    principal: { key: 'native', tenantId: '77777777-7777-4777-8777-777777777777', userId: '99999999-9999-4999-8999-999999999999', mode: 'live', environmentId: 'native', roles: readOnly ? [] : services ? ['TLC.Teams.User', 'TLC.Teams.Writer'] : ['TLC.Teams.User'], ...(readOnly ? { localReadOnly: true } : {}), expiresAt: Date.now() + 300_000 }
+    principal: { key: 'native', tenantId: '77777777-7777-4777-8777-777777777777', userId: '99999999-9999-4999-8999-999999999999', mode: 'live', environmentId: 'native', roles: cli ? [] : services ? ['TLC.Teams.User', 'TLC.Teams.Writer'] : ['TLC.Teams.User'], ...(cli ? { localSourceAccess: writeMode } : {}), expiresAt: Date.now() + 300_000 }
   }
-  const pairing = new LocalPairingAuthority(origin, () => identity, { allowLocalReadOnly: readOnly })
+  const pairing = new LocalPairingAuthority(origin, () => identity, { allowLocalSource: cli })
   const store = new SqliteDocumentStore()
   cleanup.push(() => store.close())
   const resolveServices = vi.fn(async () => {
@@ -33,16 +34,16 @@ async function fixture(services?: ApplicationServices, readOnly = false) {
   })
   let changeBeforeResponse = false
   const handler = createTeamsHandler({
-    configuration: readOnly ? loadTeamsConfiguration({
+    configuration: cli ? loadTeamsConfiguration({
       TLC_TEAMS_MODE: 'live', TLC_TEAMS_AUTH_MODE: 'local-azure-cli', TLC_TEAMS_ORIGIN: origin,
-      TLC_TEAMS_TENANT_ID: identity.principal.tenantId, TLC_TEAMS_MSX_RESOURCE: 'https://example.crm.dynamics.com', TLC_TEAMS_ENVIRONMENT_ID: 'native'
+      TLC_TEAMS_TENANT_ID: identity.principal.tenantId, TLC_TEAMS_MSX_RESOURCE: 'https://example.crm.dynamics.com', TLC_TEAMS_ENVIRONMENT_ID: 'native', TLC_TEAMS_CLI_WRITE_MODE: writeMode
     }) : configuration, store, resolveServices,
     authority: { verify: async () => { throw new Error('Cross-device distribution not approved.') } },
     localConnection: { pairing, status: () => {
       if (changeBeforeResponse) identity.generation++
       return {
       contractVersion: localConnectionVersion, state: 'connected', detail: 'Owner connected.',
-      account: identity.account, resources: [], capabilities: readOnly ? cliCapabilities : nativeCapabilities
+      account: identity.account, resources: [], capabilities: cli ? getCliCapabilities(writeMode) : nativeCapabilities
       }
     } }
   })
@@ -67,7 +68,7 @@ async function fixture(services?: ApplicationServices, readOnly = false) {
 }
 describe('native HTTP admission without any real source access', () => {
   it('exposes CLI live configuration, pairs the current user and denies every source action before service resolution', async () => {
-    const { send, pairing, resolveServices } = await fixture(undefined, true)
+    const { send, pairing, resolveServices } = await fixture(undefined, 'read-only')
     const publicResponse = await send('/api/teams/config')
     expect(publicResponse.status).toBe(200)
     expect(JSON.parse(publicResponse.text)).toMatchObject({ contractVersion: cliPublicConfigurationVersion, mode: 'live', authentication: 'local-azure-cli' })
@@ -147,13 +148,15 @@ describe('native HTTP admission without any real source access', () => {
     expect((await send('/api/teams/session', undefined, headers)).status).toBe(401)
     expect(resolveServices).not.toHaveBeenCalled()
   })
-  it('rejects an old native review after reconnect and sends an exact ETag only for a fresh approved mock write', async () => {
+  it.each(['native', 'cli'] as const)('rejects an old %s review after reconnect and sends an exact ETag only for a fresh approved mock write', async (profile) => {
     const opportunityId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
     const accountId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
     let description = 'Before'
+    let sourceAllowsWrite = true
     const transport = vi.fn<typeof fetch>(async (input, options) => {
       if (options?.method === 'PATCH') {
         expect(new Headers(options.headers).get('if-match')).toBe('W/"1"')
+        if (!sourceAllowsWrite) return Response.json({ error: { message: 'Sanitized source permission denied' } }, { status: 403 })
         description = 'Reviewed offline fixture'
         return new Response(null, { status: 204 })
       }
@@ -169,7 +172,10 @@ describe('native HTTP admission without any real source access', () => {
       getToken: async () => 'offline-fixture-token', preferences: new MemoryPortfolioPreferenceStore(), fetchImplementation: transport
     })
     cleanup.push(() => services.dispose())
-    const { pairing, send, changeGeneration } = await fixture(services)
+    const { pairing, send, changeGeneration } = await fixture(services, profile === 'cli' ? 'reviewed' : undefined)
+    if (profile === 'cli') expect(JSON.parse((await send('/api/teams/config')).text)).toMatchObject({
+      contractVersion: cliPublicConfigurationVersion, authentication: 'local-azure-cli', writeMode: 'reviewed'
+    })
     const pair = () => {
       const verifier = randomBytes(32).toString('base64url')
       const pending = pairing.begin({ contractVersion: localConnectionVersion, challenge: createHash('sha256').update(verifier).digest('base64url') }, origin)
@@ -179,6 +185,7 @@ describe('native HTTP admission without any real source access', () => {
       return { authorization: `Bearer ${paired.token}` }
     }
     const input = { operation: 'updateOpportunity', input: { opportunityId, update: { comments: 'Reviewed offline fixture' } } }
+    expect((await send('/api/teams/operations/updateOpportunity', input.input, pair())).status).toBe(403)
     const first = actionPreviewSchema.parse(JSON.parse((await send('/api/teams/actions/preview', input, pair())).text))
     changeGeneration()
     const headers = pair()
@@ -188,6 +195,15 @@ describe('native HTTP admission without any real source access', () => {
     const fresh = actionPreviewSchema.parse(JSON.parse((await send('/api/teams/actions/preview', input, headers)).text))
     const committed = await send('/api/teams/actions/commit', { contractVersion: collaborationVersion, id: fresh.id, digest: fresh.digest, reason: 'Approved sanitized mock operation only' }, headers)
     expect(JSON.parse(committed.text)).toMatchObject({ state: 'confirmed' })
+    const repeated = await send('/api/teams/actions/commit', { contractVersion: collaborationVersion, id: fresh.id, digest: fresh.digest, reason: 'Retrieve existing receipt, not a second write' }, headers)
+    expect(JSON.parse(repeated.text)).toMatchObject({ id: fresh.id, state: 'confirmed' })
     expect(transport.mock.calls.filter(([, options]) => options?.method === 'PATCH')).toHaveLength(1)
+    const activity = await send('/api/teams/activity', undefined, headers)
+    expect(JSON.parse(activity.text).actions).toContainEqual({ id: fresh.id, operation: 'updateOpportunity', state: 'confirmed' })
+    sourceAllowsWrite = false
+    const deniedPreview = actionPreviewSchema.parse(JSON.parse((await send('/api/teams/actions/preview', input, headers)).text))
+    const denied = await send('/api/teams/actions/commit', { contractVersion: collaborationVersion, id: deniedPreview.id, digest: deniedPreview.digest, reason: 'Source must enforce its current permissions' }, headers)
+    expect(JSON.parse(denied.text)).toMatchObject({ state: 'effect-unknown' })
+    expect(description).toBe('Reviewed offline fixture')
   })
 })

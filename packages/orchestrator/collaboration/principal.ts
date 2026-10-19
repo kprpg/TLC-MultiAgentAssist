@@ -9,7 +9,7 @@ export interface ExecutionPrincipal extends PrincipalIdentity {
   mode: 'sample' | 'live'
   expiresAt?: number
   // Minted only by the protected local owner after delegated source identity verification, never from browser input.
-  localReadOnly?: boolean
+  localSourceAccess?: 'read-only' | 'reviewed'
 }
 
 export function principalPartition(principal: PrincipalIdentity): string {
@@ -17,9 +17,10 @@ export function principalPartition(principal: PrincipalIdentity): string {
 }
 
 export function requireRole(principal: ExecutionPrincipal, role: string): void {
-  if (principal.localReadOnly === true) {
-    if (role === 'TLC.Teams.User' && isLocalReadOnlyPrincipal(principal)) return
-    throw new Error('This local source connection is read-only.')
+  if (principal.localSourceAccess !== undefined) {
+    if (isLocalSourcePrincipal(principal) &&
+        (role === 'TLC.Teams.User' || role === 'TLC.Teams.Writer' && principal.localSourceAccess === 'reviewed')) return
+    throw new Error('This local source connection does not authorize the requested operation.')
   }
   if (!principal.roles.includes('TLC.Teams.User') || !principal.roles.includes(role)) {
     throw new Error('This operation is not authorized for the current user.')
@@ -27,5 +28,9 @@ export function requireRole(principal: ExecutionPrincipal, role: string): void {
 }
 
 export function isLocalReadOnlyPrincipal(principal: ExecutionPrincipal): boolean {
-  return principal.mode === 'live' && principal.localReadOnly === true && principal.roles.length === 0
+  return isLocalSourcePrincipal(principal) && principal.localSourceAccess === 'read-only'
+}
+
+export function isLocalSourcePrincipal(principal: ExecutionPrincipal): boolean {
+  return principal.mode === 'live' && ['read-only', 'reviewed'].includes(principal.localSourceAccess ?? '') && principal.roles.length === 0
 }

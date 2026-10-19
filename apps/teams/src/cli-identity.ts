@@ -2,7 +2,7 @@ import { AzureCliCredential } from '@azure/identity'
 import type { AccessToken, TokenCredential } from '@azure/core-auth'
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose'
 import { z } from 'zod'
-import { cliCapabilities, localConnectionVersion, type NativeConnectionStatus, type NativeResource } from '../../../packages/common/contracts/local-connection.js'
+import { getCliCapabilities, localConnectionVersion, type NativeConnectionStatus, type NativeResource } from '../../../packages/common/contracts/local-connection.js'
 import type { ExecutionPrincipal } from '../../../packages/orchestrator/collaboration/principal.js'
 import type { CliTeamsConfiguration } from './configuration.js'
 import { NativeConnectionError, type NativeIdentity } from './native-identity.js'
@@ -60,7 +60,7 @@ export class CliIdentityProvider {
           generation: this.generation, account: username ?? 'Signed-in Azure CLI user',
           principal: {
             key: `${this.configuration.tenantId}:${userId}`, tenantId: this.configuration.tenantId, userId,
-            environmentId: this.configuration.environmentId, mode: 'live', roles: [], localReadOnly: true,
+            environmentId: this.configuration.environmentId, mode: 'live', roles: [], localSourceAccess: this.configuration.writeMode,
             expiresAt: Math.min(Number(payload.exp) * 1000, result.expiresOnTimestamp)
           }
         }
@@ -114,16 +114,22 @@ export class CliIdentityProvider {
       contractVersion: localConnectionVersion,
       state: identity ? 'connected' : this.state === 'connected' ? 'reconnect-required' : this.state,
       detail: identity
-        ? 'Current Azure CLI user and own Dataverse mapping verified. Private MSX access is read-only; no FTE, writer or publication role is inferred.'
+        ? this.configuration.writeMode === 'reviewed'
+          ? 'Current Azure CLI user and own Dataverse mapping verified. MSX changes require exact review, approval and source permission; action receipts are retained. No FTE or publication role is inferred.'
+          : 'Current Azure CLI user and own Dataverse mapping verified. Private MSX access is read-only; no FTE, writer or publication role is inferred.'
         : 'Use the protected owner Connect command to reuse your existing Azure CLI user. If needed, run az login yourself first. No sign-in or source request is triggered by this page.',
       ...(identity ? { account: identity.account } : {}),
       resources: (['msx', 'mcp', 'graph'] as const).map((resource) => ({
         resource, state: resource !== 'msx' ? 'unavailable' : identity ? 'connected' : 'not-connected',
-        detail: resource !== 'msx' ? 'This read-only CLI profile does not request optional source grants.' : 'Current-user delegated MSX access; account/deal-team queries remain source-authorized.'
+        detail: resource !== 'msx' ? 'This CLI profile does not request optional source grants.' : 'Current-user delegated MSX access; all operations remain source-authorized.'
       })),
-      capabilities: cliCapabilities.map((capability) => capability.id === 'msx' && identity
-        ? { ...capability, state: 'available', detail: 'Signed-in user verified. Portfolio automatically uses their Dataverse system-user ID and active deal-team memberships.' }
-        : { ...capability })
+      capabilities: getCliCapabilities(this.configuration.writeMode).map((capability) => {
+        if (identity && capability.id === 'msx') return { ...capability, state: 'available', detail: 'Signed-in user verified. Portfolio automatically uses their Dataverse system-user ID and active deal-team memberships.' }
+        if (identity && capability.id === 'reviewed-writes' && this.configuration.writeMode === 'reviewed') return {
+          ...capability, state: 'available', detail: 'Reviewed MSX changes are enabled. Each operation is approved explicitly and remains subject to the current user permissions and concurrency checks.'
+        }
+        return capability
+      })
     }
   }
 }

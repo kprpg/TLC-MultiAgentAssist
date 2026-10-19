@@ -51,7 +51,7 @@ export function createTeamsManifest(options) {
     description: {
       short: local ? 'Private live MSX on your device. Local sign-in and owner pairing required.' : full ? 'Grounded account-team guidance with delegated access and reviewed changes.' : 'Sanitized TLC account-team workspace. No live business data.',
       full: local
-        ? 'Every user operates their own private localhost HTTPS runtime and explicitly pairs this page through the protected owner command. The Azure CLI profile uses the current user for read-only MSX and deal-team Portfolio access; no FTE or writer role is inferred. The separate native profile requires approved identity, eligibility and resource grants. Shared channel state, cloud bots, cross-device publication and earnings-profile access are not enabled. Uploading this package does not start the backend or grant source access.'
+        ? 'Every user operates their own private localhost HTTPS runtime and explicitly pairs this page through the protected owner command. The Azure CLI profile uses the verified current user for MSX and deal-team Portfolio access; source changes additionally require enabled reviewed-write mode, exact approval and source permission. No FTE or publication role is inferred. The separate native profile requires approved identity, eligibility and resource grants. Shared channel state, cloud bots, cross-device publication and earnings-profile access are not enabled. Uploading this package does not start the backend or grant source access.'
         : 'TLC Assist joins authorized account-team information with shared workflows and grounded guidance. Source-system rights, Microsoft FTE eligibility and reviewed-action controls apply independently. Run the user-operated web service locally for development/test or deploy the same runtime later. The app requires a reachable HTTPS origin; uploading the ZIP neither starts the server nor deploys a backend.'
     },
     accentColor: '#5B5FC7',
@@ -152,7 +152,8 @@ export async function verifyTeamsOrigin(origin, mode, fetcher = fetch, authentic
   if (local) {
     const config = await get('/api/teams/config')
     if (!config.ok || !z.object({
-      contractVersion: z.literal(authentication === 'local-azure-cli' ? '1.1' : '1.0'), mode: z.literal('live'), authentication: z.literal(authentication)
+      contractVersion: z.literal(authentication === 'local-azure-cli' ? '1.2' : '1.0'), mode: z.literal('live'), authentication: z.literal(authentication),
+      ...(authentication === 'local-azure-cli' ? { writeMode: z.enum(['read-only', 'reviewed']) } : {})
     }).safeParse(JSON.parse(await smallBody(config))).success) throw new Error('The selected endpoint is not the expected native-local profile.')
   }
   return { hosting: local ? 'device-local' : 'reachable', tenantSignIn: 'unverified', liveData: 'unverified' }

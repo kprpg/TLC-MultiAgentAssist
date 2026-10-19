@@ -50,6 +50,11 @@ function atk {
   Record @{ phase = 'upload'; arguments = @($args) }
   $global:LASTEXITCODE = if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'upload-failure') { 19 } else { 0 }
 }
+function Read-Host {
+  param($Prompt)
+  Record @{ phase = 'menu'; prompt = $Prompt }
+  return $env:TLC_TEST_RUNNER_SELECTION
+}
 function Get-NetTCPConnection {
   param($LocalPort, $State)
   if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'occupied-port') { return [pscustomobject]@{ OwningProcess = 42 } }
@@ -57,7 +62,8 @@ function Get-NetTCPConnection {
 }
 function Start-Process {
   param($FilePath, $ArgumentList, $WorkingDirectory, $Environment, [switch]$PassThru, $RedirectStandardOutput, $RedirectStandardError, $WindowStyle)
-  Record @{ phase = 'start'; directory = $WorkingDirectory; arguments = $ArgumentList; origin = $Environment.TLC_TEAMS_ORIGIN; mode = $Environment.TLC_TEAMS_MODE; authentication = $Environment.TLC_TEAMS_AUTH_MODE; ownerDirectory = $Environment['TLC_TEAMS_OWNER_DIRECTORY']; host = $Environment.TLC_TEAMS_HOST; data = $Environment.TLC_TEAMS_DATA_DIR; certificate = $Environment['TLC_TEAMS_TLS_CERT_PATH']; privateKey = $Environment['TLC_TEAMS_TLS_KEY_PATH'] }
+  $script:launchedWriteMode = $Environment['TLC_TEAMS_CLI_WRITE_MODE']
+  Record @{ phase = 'start'; directory = $WorkingDirectory; arguments = $ArgumentList; origin = $Environment.TLC_TEAMS_ORIGIN; mode = $Environment.TLC_TEAMS_MODE; authentication = $Environment.TLC_TEAMS_AUTH_MODE; writeMode = $Environment['TLC_TEAMS_CLI_WRITE_MODE']; ownerDirectory = $Environment['TLC_TEAMS_OWNER_DIRECTORY']; host = $Environment.TLC_TEAMS_HOST; data = $Environment.TLC_TEAMS_DATA_DIR; certificate = $Environment['TLC_TEAMS_TLS_CERT_PATH']; privateKey = $Environment['TLC_TEAMS_TLS_KEY_PATH'] }
   return [pscustomobject]@{ Id = 2147483000; StartTime = [DateTime]::UtcNow; HasExited = $false }
 }
 function Stop-Process { param($Id) Record @{ phase = 'stop'; id = $Id } }
@@ -81,8 +87,9 @@ function Invoke-WebRequest {
   if (([string]$Uri).EndsWith('/api/teams/session')) { return [pscustomobject]@{ StatusCode=401; Content='{"error":"authorization_required"}' } }
   if (([string]$Uri).EndsWith('/api/teams/config')) {
     $profile = if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'cli') { 'local-azure-cli' } else { 'local-interactive' }
-    $version = if ($profile -eq 'local-azure-cli') { '1.1' } else { '1.0' }
-    return [pscustomobject]@{ StatusCode=200; Content=(@{ mode='live'; authentication=$profile; contractVersion=$version } | ConvertTo-Json -Compress) }
+    $version = if ($profile -eq 'local-azure-cli') { '1.2' } else { '1.0' }
+    $writeMode = $script:launchedWriteMode
+    return [pscustomobject]@{ StatusCode=200; Content=(@{ mode='live'; authentication=$profile; contractVersion=$version; writeMode=$writeMode } | ConvertTo-Json -Compress) }
   }
   $content = if (([string]$Uri).EndsWith('/api/health')) { '{"status":"ready","surface":"teams","mode":"sample"}' } else { '<!doctype html><title>TLC Assist for Teams</title><div id="root"></div>' }
   if ($env:TLC_TEST_RUNNER_SCENARIO -in @('native','cli')) { $content = $content.Replace('"mode":"sample"','"mode":"live"') }
@@ -99,11 +106,14 @@ $arguments = @{
 }
 if ($env:TLC_TEST_RUNNER_CERTIFICATE) { $arguments.CertificatePath = $env:TLC_TEST_RUNNER_CERTIFICATE }
 if ($env:TLC_TEST_RUNNER_PRIVATE_KEY) { $arguments.PrivateKeyPath = $env:TLC_TEST_RUNNER_PRIVATE_KEY }
+if ($env:TLC_TEST_RUNNER_MODE -ne 'menu') { $arguments.Mode = $env:TLC_TEST_RUNNER_MODE }
+if ($env:TLC_TEST_RUNNER_WRITE_MODE) { $arguments.CliWriteMode = $env:TLC_TEST_RUNNER_WRITE_MODE }
 if ($env:TLC_TEST_RUNNER_SCENARIO -ne 'build-failure') { $arguments.SkipBuild = $true }
 else { $arguments.Remove('RuntimeArchive'); $arguments.Remove('TeamsArchive') }
 if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'no-upload') { $arguments.SkipTeamsUpload = $true }
 if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'native') { $arguments.AuthMode = 'local-interactive'; $arguments.SkipTeamsUpload = $true }
 if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'cli') { $arguments.AuthMode = 'local-azure-cli'; $arguments.SkipTeamsUpload = $true }
+if ($env:TLC_TEST_RUNNER_AUTH_MODE -eq 'auto') { $arguments.Remove('AuthMode') }
 if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'tool-bootstrap') { Remove-Item Function:atk }
 if ($env:TLC_TEST_RUNNER_SCENARIO -in @('owned-stop', 'reused-pid')) { $arguments = @{ Stop = $true; WorkDirectory = $env:TLC_TEST_RUNNER_WORK } }
 & $env:TLC_TEST_RUNNER_SCRIPT @arguments
@@ -118,20 +128,85 @@ if ($env:TLC_TEST_RUNNER_SCENARIO -in @('owned-stop', 'reused-pid')) { $argument
     }))
     await writeFile(join(folder, 'owned', 'private-state-must-survive'), 'retained')
   }
-  const run = (overrideOrigin = origin, tls: { certificate?: string; privateKey?: string } = {}) => execute('pwsh', ['-NoProfile', '-File', wrapper], {
+  const localAppData = join(folder, 'local-app-data')
+  const run = (overrideOrigin = origin, tls: { certificate?: string; privateKey?: string } = {}, options: {
+    mode?: 'sample' | 'live' | 'menu' | 'LIVE'; selection?: string; configPath?: string | null
+    authMode?: 'auto'; writeMode?: 'read-only' | 'reviewed' | 'READ-ONLY'
+  } = {}) => execute('pwsh', ['-NoProfile', '-File', wrapper], {
     env: {
-      ...process.env, TLC_TEST_RUNNER_SCRIPT: script, TLC_TEST_RUNNER_TRACE: trace,
+      ...process.env, LOCALAPPDATA: localAppData, TLC_TEST_RUNNER_SCRIPT: script, TLC_TEST_RUNNER_TRACE: trace,
       TLC_TEST_RUNNER_SCENARIO: scenario, TLC_TEST_RUNNER_ORIGIN: overrideOrigin,
-      TLC_TEST_RUNNER_CONFIG: config, TLC_TEST_RUNNER_WORK: join(folder, 'owned'),
+      TLC_TEST_RUNNER_CONFIG: options.configPath === null ? '' : options.configPath ?? config, TLC_TEST_RUNNER_WORK: join(folder, 'owned'),
       TLC_TEST_RUNNER_RUNTIME: runtimeZip, TLC_TEST_RUNNER_APP: appZip,
-      TLC_TEST_RUNNER_CERTIFICATE: tls.certificate ?? '', TLC_TEST_RUNNER_PRIVATE_KEY: tls.privateKey ?? ''
+      TLC_TEST_RUNNER_CERTIFICATE: tls.certificate ?? '', TLC_TEST_RUNNER_PRIVATE_KEY: tls.privateKey ?? '',
+      TLC_TEST_RUNNER_MODE: options.mode ?? (native ? 'live' : 'sample'),
+      TLC_TEST_RUNNER_SELECTION: options.selection ?? '',
+      TLC_TEST_RUNNER_AUTH_MODE: options.authMode ?? '',
+      TLC_TEST_RUNNER_WRITE_MODE: options.writeMode ?? ''
     }, timeout: 45_000
   })
   const calls = async () => (await readFile(trace, 'utf8')).trim().split(/\r?\n/).map((line) => JSON.parse(line) as Record<string, unknown>)
-  return { folder, run, calls, appZip, config }
+  return { folder, localAppData, run, calls, appZip, config }
 }
 
 describe('one local build/configure/run/Teams-upload entrypoint', () => {
+  it('offers Sample/Live selection instead of a mandatory Origin prompt and discovers the standard localhost certificate pair', async () => {
+    const data = await fixture('success', 'https://localhost:49199')
+    const certs = join(data.localAppData, 'TLC-Assist', 'Teams', 'certs')
+    await mkdir(certs, { recursive: true })
+    await writeFile(join(certs, 'localhost.pem'), 'fixture certificate')
+    await writeFile(join(certs, 'localhost-key.pem'), 'fixture private key')
+    const result = await data.run('', {}, { mode: 'menu', configPath: null })
+    const calls = await data.calls()
+    expect(calls[0]).toMatchObject({ phase: 'menu' })
+    expect(calls.find((entry) => entry.phase === 'start')).toMatchObject({
+      mode: 'sample', origin: 'https://localhost:49199', authentication: 'hosted-obo',
+      certificate: join(certs, 'localhost.pem'), privateKey: join(certs, 'localhost-key.pem')
+    })
+    expect(result.stdout).toContain('Starting Teams in sample mode')
+  }, 60_000)
+  it('discovers the private CLI configuration and launches menu-selected live with reviewed read/write, never source sign-in', async () => {
+    const data = await fixture('cli', 'https://localhost:49199')
+    const configurationDirectory = join(data.localAppData, 'TLC-Assist', 'Teams', 'configuration')
+    await mkdir(configurationDirectory, { recursive: true })
+    await writeFile(join(configurationDirectory, 'cli.env'), `${await readFile(data.config, 'utf8')}TLC_TEAMS_ORIGIN=https://localhost:49199\n`)
+    const tls = { certificate: join(data.folder, 'certificate.pem'), privateKey: join(data.folder, 'key.pem') }
+    await writeFile(tls.certificate, 'fixture certificate')
+    await writeFile(tls.privateKey, 'fixture key')
+    const result = await data.run('', tls, { mode: 'menu', selection: '2', configPath: null, authMode: 'auto' })
+    expect((await data.calls()).find((entry) => entry.phase === 'start')).toMatchObject({
+      mode: 'live', authentication: 'local-azure-cli', writeMode: 'reviewed', origin: 'https://localhost:49199'
+    })
+    expect(result.stdout).toContain('sign-in has NOT occurred')
+    expect(JSON.stringify(await data.calls())).not.toContain('"connect"')
+  }, 60_000)
+  it.each(['parameter', 'configuration'] as const)('honors read-only CLI mode from %s without silently enabling writes', async (source) => {
+    const data = await fixture('cli', 'https://localhost:49199')
+    const tls = { certificate: join(data.folder, 'certificate.pem'), privateKey: join(data.folder, 'key.pem') }
+    await writeFile(tls.certificate, 'fixture certificate')
+    await writeFile(tls.privateKey, 'fixture key')
+    if (source === 'configuration') await appendFile(data.config, 'TLC_TEAMS_CLI_WRITE_MODE=read-only\n')
+    await data.run(undefined, tls, source === 'parameter' ? { mode: 'LIVE', writeMode: 'READ-ONLY' } : {})
+    expect((await data.calls()).find((entry) => entry.phase === 'start')).toMatchObject({ writeMode: 'read-only' })
+    expect((await data.calls()).some((entry) => entry.phase === 'menu')).toBe(false)
+  }, 60_000)
+  it('uses a configured origin when omitted and gives an explicit parameter precedence', async () => {
+    const data = await fixture()
+    await appendFile(data.config, 'TLC_TEAMS_ORIGIN=https://tlc.testing.contoso.net\n')
+    await data.run('')
+    expect((await data.calls()).find((entry) => entry.phase === 'start')).toMatchObject({ origin: 'https://tlc.testing.contoso.net' })
+    await expect(data.run('https://other.testing.contoso.net')).rejects.toMatchObject({ stderr: expect.stringContaining('URLs/domains') })
+  }, 60_000)
+  it('does not fall back to sample when live configuration is absent', async () => {
+    const data = await fixture()
+    await expect(data.run('', {}, { mode: 'live', configPath: null })).rejects.toMatchObject({ stderr: expect.stringContaining('requires a configured environment file') })
+    await expect(data.calls()).rejects.toMatchObject({ code: 'ENOENT' })
+  }, 60_000)
+  it('rejects an invalid menu choice without building, starting or selecting live implicitly', async () => {
+    const data = await fixture()
+    await expect(data.run('', {}, { mode: 'menu', selection: 'wrong' })).rejects.toMatchObject({ stderr: expect.stringContaining('Select Sample (1) or Live (2)') })
+    expect((await data.calls()).map((entry) => entry.phase)).toEqual(['menu'])
+  }, 60_000)
   it.each(['native', 'cli'])('prepares a private %s installation on the exact frontend port without connecting or writing to MSX', async (profile) => {
     const data = await fixture(profile, 'https://localhost:49199')
     const certificate = join(data.folder, 'certificate.pem')

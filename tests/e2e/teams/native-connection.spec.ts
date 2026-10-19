@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
-import { cliCapabilities, cliPublicConfigurationVersion, localConnectionVersion, localPairRequestSchema, nativeCapabilities } from '../../../packages/common/contracts/local-connection.js'
+import { getCliCapabilities, cliPublicConfigurationVersion, localConnectionVersion, localPairRequestSchema, nativeCapabilities, type CliWriteMode } from '../../../packages/common/contracts/local-connection.js'
+import { chooseOpportunity, post } from './helpers.js'
 
-async function offlineNativeFixture(page: Page, cli = false) {
+async function offlineNativeFixture(page: Page, cli = false, writeMode: CliWriteMode = 'read-only') {
   let approved = false
   let revoked = false
   let unavailable = false
@@ -15,7 +16,8 @@ async function offlineNativeFixture(page: Page, cli = false) {
     const json = (value: unknown, status = 200) => route.fulfill({ status, json: value })
     if (path === 'config') return json({
       contractVersion: cli ? cliPublicConfigurationVersion : localConnectionVersion, mode: 'live',
-      authentication: cli ? 'local-azure-cli' : 'local-interactive', capabilities: cli ? cliCapabilities : nativeCapabilities
+      authentication: cli ? 'local-azure-cli' : 'local-interactive',
+      ...(cli ? { writeMode } : {}), capabilities: cli ? getCliCapabilities(writeMode) : nativeCapabilities
     })
     if (path === 'local/requests') {
       localPairRequestSchema.parse(route.request().postDataJSON())
@@ -26,12 +28,13 @@ async function offlineNativeFixture(page: Page, cli = false) {
       : { contractVersion: localConnectionVersion, state: 'pending-owner-approval', expiresAt })
     privateRequests++
     if (revoked || unavailable || route.request().headers()['authorization'] !== `Bearer ${token}`) return json({ error: 'authorization_required' }, 401)
-    if (path === 'session') return json({ contractVersion: '1.0', mode: 'live', roles: cli ? [] : ['TLC.Teams.User'], displayName: cli ? 'Verified local MSX user (read-only)' : 'Offline native fixture' })
+    if (path === 'session') return json({ contractVersion: '1.0', mode: 'live', roles: cli ? [] : ['TLC.Teams.User'], displayName: cli ? `Verified local MSX user (${writeMode === 'reviewed' ? 'reviewed read/write' : 'read-only'})` : 'Offline native fixture' })
     if (path === 'local/status') return json({
       contractVersion: localConnectionVersion, state: 'connected', detail: 'Offline fixture only. No actual source data was accessed.',
-      account: 'offline-owner@example.test', resources: [], capabilities: cli ? cliCapabilities : nativeCapabilities
+      account: 'offline-owner@example.test', resources: [], capabilities: cli ? getCliCapabilities(writeMode) : nativeCapabilities
     })
     if (path === 'local/revoke') { revoked = true; return json({ contractVersion: localConnectionVersion, state: 'disconnected' }) }
+    if (cli && writeMode === 'reviewed' && /^(operations|actions)\//.test(path)) return route.continue()
     if (path === 'operations/listAccounts') return json(cli ? [{
       id: 'cli-own-account', name: 'Offline signed-in user deal-team account', segment: 'Live MSX', provenance: 'deal-team', visibility: 'visible'
     }] : [])
@@ -41,6 +44,29 @@ async function offlineNativeFixture(page: Page, cli = false) {
   })
   return { approve: () => { approved = true }, invalidate: () => { unavailable = true }, requests, privateRequests: () => privateRequests, token }
 }
+test('CLI reviewed-write UI requires exact confirmation; cancel leaves the offline sample source untouched', async ({ page, request }) => {
+  const fixture = await offlineNativeFixture(page, true, 'reviewed')
+  await page.goto('/')
+  await expect(page.getByText(/MSX changes require exact review and approval/)).toBeVisible()
+  await page.getByRole('button', { name: 'Request local pairing' }).click()
+  fixture.approve()
+  await expect(page.getByText('Live MSX - Azure CLI reviewed read/write', { exact: true })).toBeVisible()
+  const { opportunity } = await chooseOpportunity(page, request)
+  const before = await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })
+  await page.getByText('Opportunity notes and reviewed updates', { exact: true }).click()
+  await page.getByLabel('Opportunity notes').fill('CLI reviewed offline sample change')
+  await page.getByRole('button', { name: 'Review opportunity update' }).click()
+  await expect(page.getByRole('dialog', { name: 'Review exact changes' })).toBeVisible()
+  await page.getByRole('button', { name: 'Cancel review' }).click()
+  expect(await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })).toEqual(before)
+  expect(fixture.requests.filter((path) => path === 'actions/commit')).toHaveLength(0)
+  await page.getByRole('button', { name: 'Review opportunity update' }).click()
+  await page.getByLabel('Review reason').fill('Approved offline fixture change')
+  await page.getByRole('button', { name: 'Confirm selected changes' }).click()
+  await expect(page.getByRole('dialog', { name: 'Review exact changes' })).not.toBeVisible()
+  expect((await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })).opportunity.comments).toBe('CLI reviewed offline sample change')
+  expect(fixture.requests.filter((path) => path === 'actions/commit')).toHaveLength(1)
+})
 test('CLI live profile reuses current-user pairing and automatically displays their default deal-team accounts', async ({ page }) => {
   const fixture = await offlineNativeFixture(page, true)
   await page.goto('/')
