@@ -473,6 +473,14 @@ the discovery operation. Errors are distinguished from an empty result and
 Large live MSX searches can still take time; this change does not cache away
 source-permission checks or broaden the selected solution-domain/account scope.
 
+Source Opportunity values are preserved as signed, finite numbers. A negative
+MSX amount must not reject an entire Discover domain, drop its opportunity or be
+silently replaced with zero. An earlier read-contract constraint could report
+`invalid request` after an otherwise successful Infrastructure query containing
+such an amount; that was validation failure, not a timeout. The read wire shape
+is unchanged, and new-record drafts retain their separate non-negative amount
+constraints and explicit approval requirements.
+
 Discover follows the VS Code extension's compact layout: eight Solution Engineer
 domain tabs, **Add customer**, and a table with Opportunity, Account, Technical
 capability, Stage and Action columns. Account, Stage and Action headers toggle

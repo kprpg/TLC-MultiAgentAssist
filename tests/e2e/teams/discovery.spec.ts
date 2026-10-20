@@ -28,6 +28,18 @@ async function discoveryFixture(page: Page) {
   return { domains, reads }
 }
 
+test('Discover displays every Infrastructure opportunity when source values include a negative amount', async ({ page }) => {
+  await page.route('**/api/teams/operations/discoverOpportunities', (route) => route.fulfill({
+    json: opportunities.map((item, index) => ({ ...item, value: index === 0 ? -1250.75 : item.value }))
+  }))
+  await page.goto('/?view=discover')
+  const panel = page.getByRole('region', { name: 'Discover opportunities', exact: true })
+  await expect(panel.getByRole('table', { name: 'Discovered opportunities' })).toBeVisible()
+  await expect(panel.getByRole('table').locator('tbody > tr > td:first-child strong')).toHaveText(opportunities.map((item) => item.name))
+  await expect(panel.getByText('Showing 4 of 4 opportunities', { exact: true })).toBeVisible()
+  await expect(panel.getByRole('alert')).toHaveCount(0)
+})
+
 test('Discover reuses searchable include/exclude customer filters without extra source calls', async ({ page }) => {
   const { reads } = await discoveryFixture(page)
   await page.goto('/?view=discover')

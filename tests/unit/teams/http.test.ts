@@ -126,6 +126,22 @@ describe('Teams same-origin verified operation boundary', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual(await services.orchestrator.listAccounts())
   })
+  it('returns Infrastructure results with a signed value instead of invalid_request while keeping other domains intact', async () => {
+    const { post, services } = await start()
+    const account = (await services.orchestrator.listAccounts())[0]!
+    const opportunity = (await services.orchestrator.listOpportunities(account.id))[0]!
+    vi.spyOn(services.orchestrator, 'discoverOpportunities').mockImplementation(async (domain) => [
+      { ...opportunity, domain, onDealTeam: false, value: domain === 'infra' ? -1250.75 : 500 }
+    ])
+    for (const domain of ['infra', 'data', 'ai-apps']) {
+      const response = await post('/api/teams/operations/discoverOpportunities', { domain })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual([
+        { ...opportunity, domain, onDealTeam: false, value: domain === 'infra' ? -1250.75 : 500 }
+      ])
+    }
+    expect((await post('/api/teams/operations/discoverOpportunities', { domain: 'unsupported' })).status).toBe(400)
+  })
   it('blocks direct mutations and requires reviewed server-owned intents', async () => {
     const { services, post } = await start()
     const account = (await services.orchestrator.listAccounts())[0]!

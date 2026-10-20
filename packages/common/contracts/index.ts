@@ -49,7 +49,7 @@ export const opportunitySchema = z.object({
   owner: z.string().min(1).optional(),
   opportunityIntent: z.array(z.string().trim().min(1)).max(10).optional(),
   recordedStage: z.number().int().min(1).max(5),
-  value: z.number().nonnegative(),
+  value: z.number().finite(),
   currency: z.string().length(3),
   closeDate: z.string().date(),
   comments: z.string().optional()

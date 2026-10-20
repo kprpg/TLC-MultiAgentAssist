@@ -61,6 +61,15 @@ describe('record creation contracts', () => {
     }).success).toBe(false)
   })
 
+  it('keeps new Opportunity amounts non-negative even though source reads preserve signed values', () => {
+    if (single.kind !== 'opportunity-batch') throw new Error('Invalid fixture.')
+    const bundle = single.opportunities[0]!
+    expect(recordCreationDraftSchema.safeParse({
+      ...single,
+      opportunities: [{ ...bundle, opportunity: { ...bundle.opportunity, estimatedValue: -1 } }]
+    }).success).toBe(false)
+  })
+
   it('only previews an approved target and rejects unreviewed confirmation', () => {
     expect(recordCreationPreviewRequestSchema.safeParse({ contractVersion, target: 'sqlite', draft: single }).success).toBe(true)
     expect(recordCreationPreviewRequestSchema.safeParse({ contractVersion, target: 'live-msx', draft: single }).success).toBe(true)

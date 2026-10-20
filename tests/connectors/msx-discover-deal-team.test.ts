@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { FixtureMsxConnector, LiveMsxConnector } from '../../packages/connectors/msx/index.js'
+import { discoverableOpportunitySchema } from '../../packages/common/contracts/index.js'
 
 const validGuid = '00000000-0000-4000-8000-000000000abc'
 
@@ -8,6 +9,31 @@ function json(body: unknown): Response {
 }
 
 describe('LiveMsxConnector.discoverOpportunities', () => {
+  it('preserves negative estimated/consumed source values and keeps every opportunity valid for the shared contract', async () => {
+    const request = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input))
+      if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
+      if (url.pathname.endsWith('/msp_dealteams')) return json({ value: [{ _msp_parentopportunityid_value: 'opp-existing' }] })
+      if (url.pathname.endsWith('/opportunities')) {
+        if (!url.searchParams.get('$filter')?.includes('msp_technicalcapability')) {
+          return json({ value: [{ opportunityid: 'opp-existing', _parentaccountid_value: 'account-a', name: 'Existing portfolio opportunity' }] })
+        }
+        return json({ value: [
+          { opportunityid: 'negative-estimate', _parentaccountid_value: 'account-a', name: 'A signed estimate', estimatedvalue: -1250.75, msp_consumptionconsumedrecurring: 100 },
+          { opportunityid: 'negative-consumption', _parentaccountid_value: 'account-a', name: 'B signed consumption', estimatedvalue: null, msp_consumptionconsumedrecurring: -10.25 },
+          { opportunityid: 'zero-value', _parentaccountid_value: 'account-a', name: 'C zero value', estimatedvalue: 0 },
+          { opportunityid: 'positive-value', _parentaccountid_value: 'account-a', name: 'D positive value', estimatedvalue: 500 }
+        ] })
+      }
+      if (url.pathname.endsWith('/accounts')) return json({ value: [{ accountid: 'account-a', name: 'Sanitized customer' }] })
+      throw new Error('Unexpected mocked discovery request.')
+    })
+    const connector = new LiveMsxConnector({ getAccessToken: async () => 'offline-fixture-token' }, request)
+    const results = await connector.discoverOpportunities('infra')
+    expect(results.map((item) => item.value)).toEqual([-1250.75, -10.25, 0, 500])
+    expect(discoverableOpportunitySchema.array().parse(results)).toEqual(results)
+  })
+
   it('queries open opportunities by domain and flags existing deal-team membership', async () => {
     const getAccessToken = vi.fn().mockResolvedValue('secret-token')
     let discoverFilter = ''
