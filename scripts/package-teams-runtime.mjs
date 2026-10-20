@@ -53,6 +53,7 @@ export async function stageTeamsRuntime(outputDirectory = join(root, 'release-te
   await cp(join(sourceRoot, 'apps', 'teams', '.env.cli.example'), join(target, 'runtime.cli.env.example'))
   await mkdir(join(target, 'scripts'), { recursive: true })
   await cp(join(sourceRoot, 'scripts', 'teams-local-connection.ps1'), join(target, 'scripts', 'teams-local-connection.ps1'))
+  await cp(join(sourceRoot, 'scripts', 'teams-launch-session.ps1'), join(target, 'scripts', 'teams-launch-session.ps1'))
   await mkdir(join(target, 'docs', 'knowledge'), { recursive: true })
   await cp(join(sourceRoot, 'docs', 'knowledge', 'MCEM Overview.pdf'), join(target, 'docs', 'knowledge', 'MCEM Overview.pdf'))
   await writeFile(join(target, 'package.json'), `${JSON.stringify({

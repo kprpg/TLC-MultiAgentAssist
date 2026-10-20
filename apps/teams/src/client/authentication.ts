@@ -20,7 +20,9 @@ export async function initializeBrowserAuthentication(onTheme: (theme: string) =
   const configuration = teamsPublicConfigurationSchema.parse(await (await fetch('/api/teams/config', { credentials: 'omit' })).json())
   let context: BrowserHostContext = { embedded: false, theme: 'default', kind: 'channel' }
   let naa = false
-  if (window.parent !== window) {
+  const nativeHost = 'nativeInterface' in window && typeof window.nativeInterface === 'object' && window.nativeInterface !== null &&
+    'framelessPostMessage' in window.nativeInterface && typeof window.nativeInterface.framelessPostMessage === 'function'
+  if (window.parent !== window || nativeHost) {
     await app.initialize()
     const host = await app.getContext()
     const tenantId = z.uuid().safeParse(host.user?.tenant?.id)

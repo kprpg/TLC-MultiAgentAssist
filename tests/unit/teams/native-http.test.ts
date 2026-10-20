@@ -10,6 +10,8 @@ import type { NativeIdentity } from '../../../apps/teams/src/native-identity.js'
 import { createLiveApplicationServices, type ApplicationServices } from '../../../packages/orchestrator/application-runtime.js'
 import { MemoryPortfolioPreferenceStore } from '../../../packages/connectors/common/portfolio-preferences.js'
 import { actionPreviewSchema, collaborationVersion } from '../../../packages/common/contracts/collaboration.js'
+import { TeamsLaunchMonitor } from '../../../apps/teams/src/launch-status.js'
+import { teamsLaunchVersion } from '../../../packages/common/contracts/teams-launch.js'
 
 const origin = 'https://localhost:3978'
 const configuration = loadTeamsConfiguration({
@@ -26,6 +28,11 @@ async function fixture(services?: ApplicationServices, writeMode?: CliWriteMode)
     principal: { key: 'native', tenantId: '77777777-7777-4777-8777-777777777777', userId: '99999999-9999-4999-8999-999999999999', mode: 'live', environmentId: 'native', roles: cli ? [] : services ? ['TLC.Teams.User', 'TLC.Teams.Writer'] : ['TLC.Teams.User'], ...(cli ? { localSourceAccess: writeMode } : {}), expiresAt: Date.now() + 300_000 }
   }
   const pairing = new LocalPairingAuthority(origin, () => identity, { allowLocalSource: cli })
+  const launch = new TeamsLaunchMonitor({
+    contractVersion: teamsLaunchVersion, runId: '1'.repeat(32), clientBuildId: '22222222-2222-4222-8222-222222222222',
+    packageId: '8cb8c9a2-6ee6-4382-bfa4-5b409c77e54b', packageVersion: '1.2484.12345',
+    origin, mode: 'live', authentication: cli ? 'local-azure-cli' : 'local-interactive'
+  }, (code) => pairing.hasPage(code))
   const store = new SqliteDocumentStore()
   cleanup.push(() => store.close())
   const resolveServices = vi.fn(async () => {
@@ -33,13 +40,14 @@ async function fixture(services?: ApplicationServices, writeMode?: CliWriteMode)
     throw new Error('A native status/pairing route must not initialize source services.')
   })
   let changeBeforeResponse = false
+  const refreshIdentity = vi.fn(async () => { identity.principal.expiresAt = Date.now() + 3600_000 })
   const handler = createTeamsHandler({
     configuration: cli ? loadTeamsConfiguration({
       TLC_TEAMS_MODE: 'live', TLC_TEAMS_AUTH_MODE: 'local-azure-cli', TLC_TEAMS_ORIGIN: origin,
       TLC_TEAMS_TENANT_ID: identity.principal.tenantId, TLC_TEAMS_MSX_RESOURCE: 'https://example.crm.dynamics.com', TLC_TEAMS_ENVIRONMENT_ID: 'native', TLC_TEAMS_CLI_WRITE_MODE: writeMode
     }) : configuration, store, resolveServices,
     authority: { verify: async () => { throw new Error('Cross-device distribution not approved.') } },
-    localConnection: { pairing, status: () => {
+    launch, localConnection: { pairing, refreshIdentity, status: () => {
       if (changeBeforeResponse) identity.generation++
       return {
       contractVersion: localConnectionVersion, state: 'connected', detail: 'Owner connected.',
@@ -64,9 +72,59 @@ async function fixture(services?: ApplicationServices, writeMode?: CliWriteMode)
     request.on('error', fail)
     request.end(body === undefined ? undefined : JSON.stringify(body))
   })
-  return { pairing, send, resolveServices, changeBeforeResponse: () => { changeBeforeResponse = true }, changeGeneration: () => { identity.generation++ } }
+  return { pairing, send, resolveServices, refreshIdentity, changeBeforeResponse: () => { changeBeforeResponse = true }, changeGeneration: () => { identity.generation++ } }
 }
 describe('native HTTP admission without any real source access', () => {
+  it('requires an issued page capability before silently revalidating the owner and renewing a lease', async () => {
+    const { send, pairing, refreshIdentity, resolveServices } = await fixture()
+    expect((await send('/api/teams/local/renew', { contractVersion: '1.0' })).status).toBe(401)
+    expect(refreshIdentity).not.toHaveBeenCalled()
+    const verifier = randomBytes(32).toString('base64url')
+    const pending = pairing.begin({ contractVersion: localConnectionVersion, challenge: createHash('sha256').update(verifier).digest('base64url') }, origin)
+    pairing.approve(pending.userCode)
+    const paired = pairing.exchange({ contractVersion: localConnectionVersion, requestId: pending.requestId, verifier }, origin)
+    if (paired.state !== 'paired') throw new Error('Fixture pairing failed.')
+    const headers = { authorization: `Bearer ${paired.token}` }
+    const renewed = await send('/api/teams/local/renew', { contractVersion: '1.0' }, headers)
+    expect(renewed.status).toBe(200)
+    expect(JSON.parse(renewed.text)).toMatchObject({ contractVersion: '1.0', sessionExpiresAt: expect.any(String) })
+    expect(refreshIdentity).toHaveBeenCalledOnce()
+    expect(resolveServices).not.toHaveBeenCalled()
+    expect((await send('/api/teams/local/renew', { contractVersion: '1.0' }, { ...headers, origin: 'https://hostile.test' })).status).toBe(403)
+    pairing.revoke(paired.token)
+    expect((await send('/api/teams/local/renew', { contractVersion: '1.0' }, headers)).status).toBe(401)
+    expect(refreshIdentity).toHaveBeenCalledOnce()
+  })
+  it('does not transfer a page lease when owner authority changes during silent revalidation', async () => {
+    const { send, pairing, refreshIdentity, changeGeneration } = await fixture()
+    const verifier = randomBytes(32).toString('base64url')
+    const pending = pairing.begin({ contractVersion: localConnectionVersion, challenge: createHash('sha256').update(verifier).digest('base64url') }, origin)
+    pairing.approve(pending.userCode)
+    const paired = pairing.exchange({ contractVersion: localConnectionVersion, requestId: pending.requestId, verifier }, origin)
+    if (paired.state !== 'paired') throw new Error('Fixture pairing failed.')
+    refreshIdentity.mockImplementationOnce(async () => { changeGeneration() })
+    expect((await send('/api/teams/local/renew', { contractVersion: '1.0' }, { authorization: `Bearer ${paired.token}` })).status).toBe(401)
+  })
+  it('verifies a matching Teams client only after authenticated pairing, without resolving source services', async () => {
+    const { send, pairing, resolveServices } = await fixture()
+    const status = JSON.parse((await send('/api/teams/launch')).text)
+    expect(status.clients).toEqual([])
+    const report = { contractVersion: teamsLaunchVersion, runId: status.runId, clientBuildId: status.clientBuildId, packageVersion: status.packageVersion, host: 'teams' }
+    expect((await send('/api/teams/launch/ready', report)).status).toBe(401)
+    const verifier = randomBytes(32).toString('base64url')
+    const pending = pairing.begin({ contractVersion: localConnectionVersion, challenge: createHash('sha256').update(verifier).digest('base64url') }, origin)
+    pairing.approve(pending.userCode)
+    const paired = pairing.exchange({ contractVersion: localConnectionVersion, requestId: pending.requestId, verifier }, origin)
+    if (paired.state !== 'paired') throw new Error('Fixture pairing failed.')
+    const headers = { authorization: `Bearer ${paired.token}` }
+    expect((await send('/api/teams/launch/ready', { ...report, runId: '2'.repeat(32) }, headers)).status).toBe(409)
+    expect((await send('/api/teams/launch/ready', report, { ...headers, origin: 'https://hostile.test' })).status).toBe(403)
+    expect((await send('/api/teams/launch/ready', report, headers)).status).toBe(200)
+    expect(JSON.parse((await send('/api/teams/launch')).text).clients).toMatchObject([{ host: 'teams', pairingCode: pending.userCode }])
+    pairing.revoke(paired.token)
+    expect(JSON.parse((await send('/api/teams/launch')).text).clients).toEqual([])
+    expect(resolveServices).not.toHaveBeenCalled()
+  })
   it('exposes CLI live configuration, pairs the current user and denies every source action before service resolution', async () => {
     const { send, pairing, resolveServices } = await fixture(undefined, 'read-only')
     const publicResponse = await send('/api/teams/config')

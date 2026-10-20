@@ -1,7 +1,7 @@
 #requires -Version 7.4
 <#
 .SYNOPSIS
-Rebuild both Teams ZIPs, run the extracted local runtime, verify HTTPS, and sideload the app.
+Build and verify the backend, install the Teams client, then guide connection and pairing.
 .DESCRIPTION
 Uses existing approved HTTPS ingress, or a supplied trusted PEM certificate/key for localhost.
 Does not create tunnels, trust certificates, change networking, or provision Azure resources.
@@ -9,6 +9,7 @@ Without -Mode, offers a Sample/Live menu. Live defaults to the current Azure CLI
 explicitly reviewed MSX writes; -CliWriteMode read-only retains the read-only profile.
 Origin defaults to the configured TLC_TEAMS_ORIGIN or https://localhost:3978.
 Stop a runtime started by this script using the same file with -Stop.
+Use -Status for read-only verification or -Resume to finish without restarting.
 #>
 [CmdletBinding(DefaultParameterSetName = 'Run')]
 param(
@@ -35,13 +36,27 @@ param(
     [Parameter(ParameterSetName = 'Run')]
     [switch] $SkipBuild,
     [Parameter(ParameterSetName = 'Run')]
+    [Alias('BackendOnly')]
     [switch] $SkipTeamsUpload,
+    [Parameter(ParameterSetName = 'Run')]
+    [Parameter(ParameterSetName = 'Resume')]
+    [switch] $NoGuide,
+    [Parameter(ParameterSetName = 'Run')]
+    [Parameter(ParameterSetName = 'Resume')]
+    [ValidateRange(1, 600)]
+    [int] $ClientTimeoutSeconds = 120,
     [Parameter(ParameterSetName = 'Run')]
     [string] $RuntimeArchive,
     [Parameter(ParameterSetName = 'Run')]
     [string] $TeamsArchive,
     [Parameter(Mandatory, ParameterSetName = 'Stop')]
     [switch] $Stop,
+    [Parameter(Mandatory, ParameterSetName = 'Status')]
+    [switch] $Status,
+    [Parameter(Mandatory, ParameterSetName = 'Resume')]
+    [switch] $Resume,
+    [Parameter(ParameterSetName = 'Resume')]
+    [switch] $Reinstall,
     [string] $WorkDirectory = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'TLC-Assist\Teams\launcher-cli')
 )
 
@@ -50,6 +65,7 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $localAppData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [Environment]::GetFolderPath('LocalApplicationData') }
 $teamsRoot = Join-Path $localAppData 'TLC-Assist\Teams'
+. (Join-Path $PSScriptRoot 'teams-launch-session.ps1')
 
 function Invoke-CheckedCommand {
     param([string] $Command, [string[]] $Arguments)
@@ -59,28 +75,10 @@ function Invoke-CheckedCommand {
 
 function Stop-OwnedRun {
     if (-not (Test-Path -LiteralPath $recordPath -PathType Leaf)) { return }
-    $record = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
-    $releaseRoot = [IO.Path]::GetFullPath((Join-Path $WorkDirectory 'releases')) + [IO.Path]::DirectorySeparatorChar
-    $directory = [IO.Path]::GetFullPath([string] $record.runtimeDirectory)
-    if (-not $directory.StartsWith($releaseRoot, [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Refusing to stop a process with an unowned runtime directory.'
-    }
-    $markerPath = Join-Path $directory '.runner-owner'
-    if (-not (Test-Path -LiteralPath $markerPath) -or (Get-Content -LiteralPath $markerPath -Raw).Trim() -ne $record.runId) {
-        throw 'Refusing to stop a process without a matching runner ownership marker.'
-    }
-    $running = Get-Process -Id $record.pid -ErrorAction SilentlyContinue
-    if ($running) {
-        $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($record.pid)"
-        $expectedServer = Join-Path $directory 'server.js'
-        $recordedStart = ([DateTimeOffset] $record.startTimeUtc).UtcDateTime
-        if ($running.StartTime.ToUniversalTime().Ticks -ne $recordedStart.Ticks -or
-            -not $processInfo.CommandLine -or
-            -not $processInfo.CommandLine.Contains($expectedServer, [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Refusing to stop a reused PID or an unrelated Node process.'
-        }
-        Stop-Process -Id $record.pid
-        $running.WaitForExit()
+    $owned = Get-OwnedTeamsRun -WorkDirectory $WorkDirectory -AllowStopped
+    if ($owned.Process) {
+        Stop-Process -Id $owned.Record.pid
+        $owned.Process.WaitForExit()
     }
     Remove-Item -LiteralPath $recordPath
     Write-Host 'Stopped the runtime owned by this script. Persistent data was retained.'
@@ -100,7 +98,7 @@ function Test-TeamsEndpoint {
         -not $page.Content.Contains('TLC Assist for Teams')) { throw 'The Teams HTML UI is not reachable.' }
 }
 
-if (-not $Stop) {
+if ($PSCmdlet.ParameterSetName -eq 'Run') {
     if (-not $SkipBuild -and ($RuntimeArchive -or $TeamsArchive)) { throw 'Explicit archive overrides require -SkipBuild. A normal run must use its newly rebuilt ZIPs.' }
     if ($Mode) { $Mode = $Mode.ToLowerInvariant() }
     if (-not $Mode) {
@@ -174,6 +172,13 @@ try {
 }
 $WorkDirectory = [IO.Path]::GetFullPath($WorkDirectory)
 $recordPath = Join-Path $WorkDirectory 'current-run.json'
+if (($Resume -or $Status) -and (Test-Path -LiteralPath $recordPath -PathType Leaf)) {
+    $previous = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
+    if ($previous.PSObject.Properties['authentication']) { $AuthMode = $previous.authentication }
+}
+if (($Resume -or $Status) -and -not (Test-Path -LiteralPath $WorkDirectory -PathType Container)) {
+    throw 'No launcher work directory exists here. Start the launcher normally first, or supply the actual -WorkDirectory.'
+}
 
 if ($AuthMode -in @('local-interactive', 'local-azure-cli') -or -not $PSBoundParameters.ContainsKey('WorkDirectory')) {
     $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
@@ -214,10 +219,15 @@ if ($AuthMode -in @('local-interactive', 'local-azure-cli') -or -not $PSBoundPar
         $parent = $parent.Parent
     }
 }
+if ($Status) { Show-TeamsRunStatus -Status (Get-TeamsRunStatus -WorkDirectory $WorkDirectory); return }
 New-Item -ItemType Directory -Path $WorkDirectory -Force | Out-Null
 $lock = [IO.File]::Open((Join-Path $WorkDirectory 'runner.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
 try {
     if ($Stop) { Stop-OwnedRun; return }
+    if ($Resume) {
+        Complete-TeamsRunSetup -WorkDirectory $WorkDirectory -NoGuide:$NoGuide -Reinstall:$Reinstall -ClientTimeoutSeconds $ClientTimeoutSeconds
+        return
+    }
     Push-Location -LiteralPath $repositoryRoot
     try {
         $native = $AuthMode -in @('local-interactive', 'local-azure-cli')
@@ -260,14 +270,18 @@ try {
         Write-Host "Starting Teams in $Mode mode at $Origin ($AuthMode)."
         if ($AuthMode -eq 'local-azure-cli') { Write-Host "CLI source write mode: $CliWriteMode. Every MSX change requires explicit review and approval; source permissions remain enforced." }
         if (-not $SkipBuild) {
-            Write-Host '[1/4 and 2/4] Building and testing the runtime and Teams installation ZIPs...'
-            $buildArguments = @('run', 'teams:release', '--', '--mode', $Mode, '--origin', $Origin, '--app-id', $metadata.appId)
+            Write-Host '[1/7 and 2/7] Building and testing the runtime and Teams installation ZIPs...'
+            $now = [DateTime]::UtcNow
+            $days = [int] [Math]::Floor(($now - [DateTime]::new(2020, 1, 1)).TotalDays)
+            $revision = [int] [Math]::Floor($now.TimeOfDay.TotalSeconds / 2)
+            $packageVersion = "1.$days.$revision"
+            $buildArguments = @('run', 'teams:release', '--', '--mode', $Mode, '--origin', $Origin, '--app-id', $metadata.appId, '--app-version', $packageVersion)
             if ($AuthMode -eq 'local-azure-cli') { $buildArguments += '--local-azure-cli' }
             elseif ($native) { $buildArguments += '--local-native' }
             elseif ($Mode -eq 'live') { $buildArguments += @('--bot-id', $metadata.botId) }
             if ($uri.IsLoopback) { $buildArguments += '--development' }
             Invoke-CheckedCommand -Command npm -Arguments $buildArguments
-        } else { Write-Host '[1/4 and 2/4] Reusing explicit verified archives (-SkipBuild).' }
+        } else { Write-Host '[1/7 and 2/7] Reusing explicit verified archives (-SkipBuild).' }
         if (-not $RuntimeArchive) { $RuntimeArchive = Join-Path $repositoryRoot 'release-teams\TLC-Assist-Teams-runtime-win32-x64.zip' }
         if (-not $TeamsArchive) {
             $filename = if ($native) { 'TLC-Assist-Teams-local-live.zip' } elseif ($uri.IsLoopback) { 'TLC-Assist-Teams-development.zip' } elseif ($Mode -eq 'live') { 'TLC-Assist-Teams.zip' } else { 'TLC-Assist-Teams-sample.zip' }
@@ -288,19 +302,30 @@ const urls = [manifest.developer.websiteUrl, manifest.developer.privacyUrl, mani
 if (urls.some((url) => new URL(url).origin !== origin) || manifest.validDomains.length !== 1 || manifest.validDomains[0] !== new URL(origin).hostname) throw new Error('The Teams ZIP URLs/domains do not match the runtime origin. Rebuild the correct package.');
 const native = ['local-interactive', 'local-azure-cli'].includes(process.argv[5]);
 if (manifest.id !== process.argv[3] || Boolean(manifest.bots?.length) !== (process.argv[4] === 'live' && !native)) throw new Error('The Teams ZIP identity/data mode does not match this run.');
+if (manifest.staticTabs.find((tab) => tab.entityId === 'tlc-personal')?.contentUrl !== origin + '/?tlcAppVersion=' + encodeURIComponent(manifest.version)) throw new Error('The Teams personal-tab URL lacks the exact package-version stamp. Rebuild the current client package.');
 if (native && (manifest.name.short !== 'TLC Assist Local' || manifest.configurableTabs?.length || manifest.webApplicationInfo)) throw new Error('The native ZIP must declare private local source use, not unreachable shared/cloud capabilities.');
+console.log(JSON.stringify({ packageId: manifest.id, packageVersion: manifest.version }));
 '@
-        Invoke-CheckedCommand -Command $node -Arguments @('--input-type=module', '--eval', $checkPackage, $TeamsArchive, $Origin, $metadata.appId, $Mode, $AuthMode)
-        Write-Host '[3/4] Extracting and configuring the local runtime...'
+        $packageText = & $node --input-type=module --eval $checkPackage $TeamsArchive $Origin $metadata.appId $Mode $AuthMode
+        if ($LASTEXITCODE -ne 0) { throw 'The Teams installation ZIP did not pass identity/origin verification.' }
+        $package = ($packageText -join "`n") | ConvertFrom-Json
+        Write-Host '[3/7] Extracting and configuring the local runtime...'
         $runId = [Guid]::NewGuid().ToString('N')
         $runtimeDirectory = Join-Path $WorkDirectory "releases\$runId"
         New-Item -ItemType Directory -Path $runtimeDirectory | Out-Null
         Expand-Archive -LiteralPath $RuntimeArchive -DestinationPath $runtimeDirectory
-        foreach ($file in @('server.js', 'package.json', 'client\index.html', '.generated-teams-runtime')) {
+        foreach ($file in @('server.js', 'package.json', 'client\index.html', 'client\build.json', '.generated-teams-runtime')) {
             if (-not (Test-Path -LiteralPath (Join-Path $runtimeDirectory $file) -PathType Leaf)) { throw "The runtime ZIP lacks required entry $file." }
         }
         if ((Get-Content -LiteralPath (Join-Path $runtimeDirectory '.generated-teams-runtime') -Raw) -ne 'TLC_TEAMS_GENERATED_RUNTIME') { throw 'The archive is not an owned Teams runtime release.' }
         Set-Content -LiteralPath (Join-Path $runtimeDirectory '.runner-owner') -Value $runId -NoNewline
+        $clientBuild = Get-Content -LiteralPath (Join-Path $runtimeDirectory 'client\build.json') -Raw | ConvertFrom-Json
+        $buildGuid = [Guid]::Empty
+        if ($clientBuild.contractVersion -ne '1.0' -or -not [Guid]::TryParse([string] $clientBuild.buildId, [ref] $buildGuid)) { throw 'The runtime has an invalid client build identity. Rebuild both ZIPs.' }
+        $packageDirectory = Join-Path $WorkDirectory "packages\$runId"
+        New-Item -ItemType Directory -Path $packageDirectory -Force | Out-Null
+        $installedArchive = Join-Path $packageDirectory (Split-Path -Leaf $TeamsArchive)
+        Copy-Item -LiteralPath $TeamsArchive -Destination $installedArchive
         $ownerDirectory = ''
         if ($native) {
             $ownerDirectory = if ($metadata.paths.ContainsKey('TLC_TEAMS_OWNER_DIRECTORY')) { $metadata.paths.TLC_TEAMS_OWNER_DIRECTORY } else { Join-Path $WorkDirectory 'private' }
@@ -317,6 +342,11 @@ if (native && (manifest.name.short !== 'TLC Assist Local' || manifest.configurab
         if ($AuthMode -eq 'local-azure-cli') { $runEnvironment['TLC_TEAMS_CLI_WRITE_MODE'] = $CliWriteMode }
         $runEnvironment['TLC_TEAMS_RUNTIME_PROFILE'] = 'local'
         $runEnvironment['TLC_TEAMS_ORIGIN'] = $Origin
+        $runEnvironment['TLC_TEAMS_RUN_ID'] = $runId
+        $runEnvironment['TLC_TEAMS_CLIENT_BUILD_ID'] = [string] $clientBuild.buildId
+        $runEnvironment['TLC_TEAMS_PACKAGE_ID'] = [string] $package.packageId
+        $runEnvironment['TLC_TEAMS_PACKAGE_VERSION'] = [string] $package.packageVersion
+        $runEnvironment['TLC_TEAMS_STATIC_ROOT'] = Join-Path $runtimeDirectory 'client'
         $runEnvironment['TLC_TEAMS_HOST'] = if ($native -and $uri.HostNameType -eq [UriHostNameType]::IPv6) { '::1' } else { '127.0.0.1' }
         $runEnvironment['TLC_TEAMS_PORT'] = [string] $LocalPort
         if ($native) { $runEnvironment['TLC_TEAMS_OWNER_DIRECTORY'] = $ownerDirectory }
@@ -333,10 +363,14 @@ if (native && (manifest.name.short !== 'TLC Assist Local' || manifest.configurab
         if ($ConfigPath) { $arguments += "--env-file=`"$ConfigPath`"" }
         $arguments += "`"$(Join-Path $runtimeDirectory 'server.js')`""
         $started = Start-Process -FilePath $node -ArgumentList $arguments -WorkingDirectory $runtimeDirectory -Environment $runEnvironment -PassThru -RedirectStandardOutput (Join-Path $logs 'stdout.log') -RedirectStandardError (Join-Path $logs 'stderr.log') -WindowStyle Hidden
-        @{
+        $record = [pscustomobject]@{
             pid = $started.Id; startTimeUtc = $started.StartTime.ToUniversalTime().ToString('o')
             runId = $runId; runtimeDirectory = $runtimeDirectory; origin = $Origin; mode = $Mode; authentication = $AuthMode; ownerDirectory = $ownerDirectory; logs = $logs
-        } | ConvertTo-Json | Set-Content -LiteralPath $recordPath
+            clientBuildId = $clientBuild.buildId; packageId = $package.packageId; packageVersion = $package.packageVersion
+            teamsArchive = $installedArchive; teamsArchiveSha256 = (Get-FileHash -LiteralPath $installedArchive -Algorithm SHA256).Hash
+            installation = 'not-started'; setup = 'backend-ready'; pairingCode = ''; verifiedAt = ''
+        }
+        Write-TeamsRunRecord -WorkDirectory $WorkDirectory -Record $record
         try {
             $localOrigin = if ($CertificatePath) { $Origin } else { "http://127.0.0.1:$LocalPort" }
             $ready = $false
@@ -347,6 +381,7 @@ if (native && (manifest.name.short !== 'TLC Assist Local' || manifest.configurab
             }
             if (-not $ready) { throw 'The local runtime did not become ready.' }
             Test-TeamsEndpoint -Base $Origin -ExpectedMode $Mode
+            Read-TeamsLaunchStatus -Record $record | Out-Null
             if ($Mode -eq 'live') {
                 $anonymous = Invoke-WebRequest -Uri "$Origin/api/teams/session" -TimeoutSec 10 -MaximumRedirection 0 -SkipHttpErrorCheck
                 if ($anonymous.StatusCode -ne 401) { throw 'The live host must reject an unauthenticated session with 401.' }
@@ -363,23 +398,14 @@ if (native && (manifest.name.short !== 'TLC Assist Local' || manifest.configurab
         } catch {
             if (-not $started.HasExited) { Stop-Process -Id $started.Id }
             Remove-Item -LiteralPath $recordPath
-            throw [InvalidOperationException]::new("HTTPS/runtime verification failed; no Teams upload was attempted. Verify trusted certificates, origin and approved ingress. Logs: $logs", $_.Exception)
+            throw [InvalidOperationException]::new("HTTPS/runtime verification failed; no Teams upload was attempted. $($_.Exception.Message) Verify trusted certificates, origin and approved ingress. Logs: $logs", $_.Exception)
         }
         Write-Host "Runtime ready at $Origin ($Mode). Logs: $logs"
         Write-Host "Stop with: pwsh -File `"$PSCommandPath`" -Stop -WorkDirectory `"$WorkDirectory`""
-        if ($native) { Write-Host 'Source sign-in has NOT occurred during startup. Use teams-local-connection.ps1 -Action Connect, then approve the page code yourself. No MSX records are read or modified by this launcher.' }
-        if ($SkipTeamsUpload) { Write-Host '[4/4] Teams upload skipped explicitly (-SkipTeamsUpload).'; return }
-        Write-Host '[4/4] Uploading/installing the Teams package for your signed-in account. Sign-in/consent or tenant policy may require your interaction.'
-        try {
-            if (Get-Command atk -ErrorAction SilentlyContinue) {
-                Invoke-CheckedCommand -Command atk -Arguments @('install', '--file-path', $TeamsArchive, '--scope', 'Personal', '--interactive', 'false', '--telemetry', 'false')
-            } else {
-                Invoke-CheckedCommand -Command npm -Arguments @('exec', '--yes', '--ignore-scripts', '--package=@microsoft/m365agentstoolkit-cli@1.1.18', '--', 'atk', 'install', '--file-path', $TeamsArchive, '--scope', 'Personal', '--interactive', 'false', '--telemetry', 'false')
-            }
-        } catch {
-            Write-Warning 'Teams upload/install failed or was declined. The verified runtime remains running; use this script with -Stop when finished.'
-            throw
-        }
-        Write-Host 'Teams upload/install completed. Actual Teams rendering and live source authorization still require client verification.'
+        Write-Host "Check with: pwsh -File `"$PSCommandPath`" -Status -WorkDirectory `"$WorkDirectory`""
+        Write-Host "Finish/retry without restart: pwsh -File `"$PSCommandPath`" -Resume -WorkDirectory `"$WorkDirectory`""
+        if ($native) { Write-Host 'Source sign-in has NOT occurred during backend startup. Guided setup asks for CONNECT and exact page-code approval; -BackendOnly leaves those steps for later. No source write is performed by setup.' }
+        if ($SkipTeamsUpload) { Write-Host '[4/7] Teams upload skipped explicitly (-SkipTeamsUpload / -BackendOnly). Client setup is incomplete; use -Resume to finish.'; return }
+        Complete-TeamsRunSetup -WorkDirectory $WorkDirectory -NoGuide:$NoGuide -ClientTimeoutSeconds $ClientTimeoutSeconds
     } finally { Pop-Location }
 } finally { $lock.Dispose() }

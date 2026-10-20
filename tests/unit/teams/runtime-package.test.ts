@@ -21,6 +21,7 @@ async function createSourceFixture(folder: string) {
     'packages\\documents\\package.json': JSON.stringify({ dependencies: { docx: '^9.7.1' } }),
     'apps\\teams\\dist\\server.js': 'console.log("test host")',
     'apps\\teams\\dist\\client\\index.html': '<html>fixture</html>',
+    'apps\\teams\\dist\\client\\build.json': '{"contractVersion":"1.0","buildId":"22222222-2222-4222-8222-222222222222"}',
     'apps\\teams\\dist\\runtime.env': 'sensitive-runtime-configuration-must-not-ship',
     'apps\\teams\\dist\\operator-state.sqlite': 'private-state-must-not-ship',
     'docs\\knowledge\\MCEM Overview.pdf': 'fixture pdf',
@@ -33,6 +34,7 @@ async function createSourceFixture(folder: string) {
     'apps\\teams\\.env.native.example': 'TLC_TEAMS_AUTH_MODE=local-interactive\n',
     'apps\\teams\\.env.cli.example': 'TLC_TEAMS_AUTH_MODE=local-azure-cli\n',
     'scripts\\teams-local-connection.ps1': '# fixture owner command\n',
+    'scripts\\teams-launch-session.ps1': '# fixture launch verification\n',
     'config\\foundry.environment.json': 'sensitive-configuration-must-not-ship'
   }
   for (const [name, contents] of Object.entries(files)) {
@@ -89,6 +91,7 @@ describe('self-contained host release staging', () => {
       await stageTeamsRuntime(target, source)
       expect(await readFile(join(target, 'server.js'), 'utf8')).toContain('test host')
       expect(await readFile(join(target, 'client', 'index.html'), 'utf8')).toContain('fixture')
+      expect(JSON.parse(await readFile(join(target, 'client', 'build.json'), 'utf8')).buildId).toBe('22222222-2222-4222-8222-222222222222')
       const manifest = JSON.parse(await readFile(join(target, 'package.json'), 'utf8'))
       expect(manifest.scripts.start).toBe('node --experimental-sqlite server.js')
       expect(manifest.scripts['start:configured']).toBe('node --env-file=runtime.env --experimental-sqlite server.js')
@@ -98,6 +101,7 @@ describe('self-contained host release staging', () => {
       expect(await readFile(join(target, 'runtime.native.env.example'), 'utf8')).toContain('local-interactive')
       expect(await readFile(join(target, 'runtime.cli.env.example'), 'utf8')).toContain('local-azure-cli')
       expect(await readFile(join(target, 'scripts', 'teams-local-connection.ps1'), 'utf8')).toContain('owner command')
+      expect(await readFile(join(target, 'scripts', 'teams-launch-session.ps1'), 'utf8')).toContain('launch verification')
       expect(await readFile(join(target, 'config', 'teams-disclosure.example.json'), 'utf8')).toContain('policies')
       const instructions = await readFile(join(target, 'RUNTIME-README.txt'), 'utf8')
       expect(instructions).toContain('npm run start:configured')

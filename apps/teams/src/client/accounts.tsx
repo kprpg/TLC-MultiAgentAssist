@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { z } from 'zod'
+import { Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions } from '@fluentui/react-components'
 import * as c from '../../../../packages/common/contracts/index.js'
 import { seDomainDefinitions, seDomainIds, seDomainSchema, type SeDomainId } from '../../../../packages/common/configuration/se-domains.js'
 import { AddCustomerButton, type CustomerAccount, type CustomerSearchClient } from '../../../shared/add-customer.js'
@@ -33,6 +34,9 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
   const [newOpened, setNewOpened] = useState(workspace === 'new')
   const [domain, setDomain] = useState<SeDomainId>('infra')
   const [discovery, setDiscovery] = useState<c.DiscoverableOpportunity[]>([])
+  const [discoveryLoading, setDiscoveryLoading] = useState(false)
+  const [discoveryError, setDiscoveryError] = useState('')
+  const [discoveryRevision, setDiscoveryRevision] = useState(0)
   const [revision, setRevision] = useState(0)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -40,6 +44,8 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
   const [sort, setSort] = useState<OpportunitySort>('closeDate')
   const [direction, setDirection] = useState<SortDirection>('ascending')
   const dirty = useRef(false)
+  const accountsReady = useRef(false)
+  const [pendingScope, setPendingScope] = useState<{ apply(): void; cancel?(): void }>()
   const selected = useRef(selection)
   const scopeDisclosure = useResponsiveDisclosure(900, panes.accountsExpanded)
   selected.current = selection
@@ -47,31 +53,40 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
     if (workspace) setTab(workspace)
     if (workspace === 'new') setNewOpened(true)
   }, [workspace])
-  function allowScopeChange() {
-    if (dirty.current && !window.confirm('Changing scope discards unsent edits for this opportunity. Continue?')) return false
-    dirty.current = false
-    return true
+  function changeScope(apply: () => void, cancel?: () => void) {
+    if (dirty.current) { setPendingScope({ apply, ...(cancel ? { cancel } : {}) }); return }
+    apply()
+  }
+  function cancelScopeChange() {
+    pendingScope?.cancel?.()
+    setPendingScope(undefined)
   }
   useEffect(() => {
+    if (tab !== 'portfolio') return
     const controller = new AbortController()
+    accountsReady.current = false
     setLoading(true); setError('')
     client.operation('listAccounts', { includeHidden: showHidden }, z.array(c.accountSchema), controller.signal).then((items) => {
       if (controller.signal.aborted) return
       const scoped = boundAccountId ? items.filter((item) => item.id === boundAccountId) : items
+      accountsReady.current = true
       setAccounts(scoped); setLoading(false)
       setAccountId((current) => scoped.some((entry) => entry.id === current && entry.visibility !== 'hidden') ? current : scoped.find((entry) => entry.visibility !== 'hidden')?.id ?? '')
-    }).catch((cause: unknown) => { if (!controller.signal.aborted) { setError(String(cause)); setLoading(false) } })
+    }).catch((cause: unknown) => {
+      if (!controller.signal.aborted) { setAccounts([]); setOpportunities([]); onSelect(null); setError(String(cause)); setLoading(false) }
+    })
     return () => controller.abort()
-  }, [client, revision, boundAccountId, showHidden])
+  }, [client, revision, boundAccountId, showHidden, tab])
   useEffect(() => {
     if (!preferredAccountId || boundAccountId && boundAccountId !== preferredAccountId) return
     if (selected.current?.account.id === preferredAccountId && (!preferredOpportunityId || selected.current.opportunity.id === preferredOpportunityId)) return
-    if (allowScopeChange()) {
+    changeScope(() => {
       setRequestedOpportunityId(preferredOpportunityId ?? '')
       setAccountId(preferredAccountId)
-    } else if (selected.current) onFocus(selected.current.account.id, selected.current.opportunity.id)
+    }, () => { if (selected.current) onFocus(selected.current.account.id, selected.current.opportunity.id) })
   }, [preferredAccountId, preferredOpportunityId, boundAccountId])
   useEffect(() => {
+    if (tab !== 'portfolio' || !accountsReady.current) return
     if (!accountId) { setOpportunities([]); onSelect(null); return }
     const controller = new AbortController()
     setOpportunities([])
@@ -85,25 +100,27 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
       onSelect(account && opportunity ? { account, opportunity } : null)
     }).catch((cause: unknown) => { if (!controller.signal.aborted) { setError(String(cause)); onSelect(null) } })
     return () => controller.abort()
-  }, [client, accountId, accounts, revision, requestedOpportunityId, boundOpportunityId])
+  }, [client, accountId, accounts, revision, requestedOpportunityId, boundOpportunityId, tab])
   useEffect(() => {
     setMilestones([])
-    if (!selection) return
+    if (tab !== 'portfolio' || !selection) return
     const controller = new AbortController()
     client.operation('listMilestones', { opportunityId: selection.opportunity.id }, z.array(c.milestoneSchema), controller.signal)
       .then((items) => { if (!controller.signal.aborted) setMilestones(items) })
       .catch((cause: unknown) => { if (!controller.signal.aborted) setError(String(cause)) })
     return () => controller.abort()
-  }, [client, selection?.opportunity.id, revision])
+  }, [client, selection?.opportunity.id, revision, tab])
   useEffect(() => {
     if (tab !== 'discovery') return
     const controller = new AbortController()
-    setDiscovery([])
+    setDiscovery([]); setDiscoveryLoading(true); setDiscoveryError('')
     client.operation('discoverOpportunities', { domain }, z.array(c.discoverableOpportunitySchema), controller.signal)
-      .then((items) => { if (!controller.signal.aborted) setDiscovery(boundAccountId ? items.filter((item) => item.accountId === boundAccountId) : items) })
-      .catch((cause: unknown) => { if (!controller.signal.aborted) setError(String(cause)) })
+      .then((items) => {
+        if (!controller.signal.aborted) { setDiscovery(boundAccountId ? items.filter((item) => item.accountId === boundAccountId) : items); setDiscoveryLoading(false) }
+      })
+      .catch((cause: unknown) => { if (!controller.signal.aborted) { setDiscoveryError(String(cause)); setDiscoveryLoading(false) } })
     return () => controller.abort()
-  }, [client, tab, domain, revision, boundAccountId])
+  }, [client, tab, domain, revision, discoveryRevision, boundAccountId])
   const mutate = useCallback(async (operation: string, input: Record<string, unknown>) => {
     setError('')
     const receipt = await review(operation, input)
@@ -136,24 +153,27 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
   }
   function selectOpportunity(id: string) {
     if (boundOpportunityId && id !== boundOpportunityId) return
-    if (id === selection?.opportunity.id || !allowScopeChange()) return
-    setRequestedOpportunityId('')
-    const account = accounts.find((item) => item.id === accountId)
-    const opportunity = opportunities.find((item) => item.id === id)
-    onSelect(account && opportunity ? { account, opportunity } : null)
+    if (id === selection?.opportunity.id) return
+    changeScope(() => {
+      setRequestedOpportunityId('')
+      const account = accounts.find((item) => item.id === accountId)
+      const opportunity = opportunities.find((item) => item.id === id)
+      onSelect(account && opportunity ? { account, opportunity } : null)
+    })
   }
   return <section aria-label="Account workspaces">
     {error && <p role="alert" className="error-banner">{error}</p>}
     <div hidden={tab !== 'portfolio'}>
       <div className="workspace-heading"><h1>Portfolio</h1><p className="muted">{mode === 'sample' ? 'Canonical sanitized sample data' : 'Private - your delegated source access'}</p>
-        <button type="button" onClick={() => { if (allowScopeChange()) setRevision((value) => value + 1) }}>Refresh sources</button></div>
+        <button type="button" onClick={() => changeScope(() => setRevision((value) => value + 1))}>Refresh sources</button></div>
       {loading && <p role="status">Loading portfolio...</p>}
       <div className={`portfolio-workbench${panes.accountsExpanded ? '' : ' accounts-collapsed'}${panes.detailsExpanded ? '' : ' details-collapsed'}${panes.actionsExpanded ? '' : ' actions-collapsed'}`}>
         <details className="portfolio-scope-disclosure" ref={scopeDisclosure} open hidden={!panes.accountsExpanded}><summary className="pane-disclosure-toggle">Account and opportunity scope</summary>
         <section id="portfolio-accounts-panel" className="pane portfolio-scope" hidden={!panes.accountsExpanded} aria-label="Accounts and opportunities">
           <div className="section-heading"><h2>Accounts</h2>{!boundAccountId && <AddCustomerButton client={searchClient} dataMode={mode} onAdded={(account) => { setAccountId(account.id); setRevision((value) => value + 1) }} />}</div>
           <label className="field">Customer account<select aria-label="Customer account" value={accountId} disabled={Boolean(boundAccountId)} onChange={(event) => {
-            if (allowScopeChange()) { setRequestedOpportunityId(''); onSelect(null); setAccountId(event.target.value) }
+            const nextAccountId = event.target.value
+            changeScope(() => { setRequestedOpportunityId(''); onSelect(null); setAccountId(nextAccountId) })
           }}><option value="">Choose an account</option>{accounts.filter((item) => item.visibility !== 'hidden').map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           {!boundAccountId && <><label className="inline-check"><input type="checkbox" checked={showHidden} onChange={(event) => setShowHidden(event.target.checked)} />Show hidden</label>
             {selection && <button type="button" className="link" onClick={() => { void action('setAccountVisibility', { accountId, visibility: 'hidden' }) }}>Hide selected customer</button>}
@@ -180,12 +200,28 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
       </div>
     </div>
     <section className="panel" hidden={tab !== 'discovery'}><h1>Discover</h1>
+      <button type="button" disabled={discoveryLoading} onClick={() => setDiscoveryRevision((value) => value + 1)}>Refresh Discover</button>
       <label className="field">Solution Engineer domain<select value={domain} onChange={(event) => setDomain(seDomainSchema.parse(event.target.value))}>
         {seDomainIds.map((id) => <option key={id} value={id}>{seDomainDefinitions[id].label}</option>)}</select></label>
       <p>Adding an account is separate from joining an opportunity Deal Team or milestone team.</p>
+      {discoveryLoading && <p role="status">Loading Discover opportunities... {mode === 'live' ? 'MSX searches can take time; results will appear when the source responds.' : ''}</p>}
+      {discoveryError && <p role="alert" className="error-banner">{discoveryError}. Use Refresh Discover to retry.</p>}
       <ul className="record-list">{discovery.map((entry) => <li key={entry.id}><strong>{entry.name}</strong><span>{entry.accountName}</span>
         <button type="button" onClick={() => { void action(entry.onDealTeam ? 'leaveDealTeam' : 'joinDealTeam', { opportunityId: entry.id, ...(entry.onDealTeam ? {} : { domain }) }) }}>{entry.onDealTeam ? 'Review leaving Deal Team' : 'Review joining Deal Team'}</button></li>)}</ul>
-      {!discovery.length && <p>No eligible opportunities for this source scope and domain.</p>}
+      {!discoveryLoading && !discoveryError && !discovery.length && <p>No eligible opportunities for this source scope and domain.</p>}
+      <Dialog open={!!pendingScope} onOpenChange={(_, data) => { if (!data.open) cancelScopeChange() }}>
+        <DialogSurface className="teams-review-dialog"><DialogBody>
+          <DialogTitle>Discard unsent edits?</DialogTitle>
+          <DialogContent>Changing customer, opportunity or refreshing sources discards unsent edits for this opportunity. No source change has been sent.</DialogContent>
+          <DialogActions>
+            <button type="button" onClick={cancelScopeChange}>Keep editing</button>
+            <button type="button" className="primary" onClick={() => {
+              const change = pendingScope
+              setPendingScope(undefined); dirty.current = false; change?.apply()
+            }}>Discard edits and continue</button>
+          </DialogActions>
+        </DialogBody></DialogSurface>
+      </Dialog>
     </section>
     <div hidden={tab !== 'new'}>{newOpened && <section className="panel"><h1>New / draft</h1>
       <p>{mode === 'live' ? 'Live record creation stays disabled. Export a reviewed draft.' : 'Creation changes the sample SQLite store only.'}</p>

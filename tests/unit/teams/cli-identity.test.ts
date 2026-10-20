@@ -1,5 +1,5 @@
 import { generateKeyPair, SignJWT } from 'jose'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { CliIdentityProvider } from '../../../apps/teams/src/cli-identity.js'
 import { isCliConfiguration, loadTeamsConfiguration } from '../../../apps/teams/src/configuration.js'
 import { requireRole } from '../../../packages/orchestrator/collaboration/principal.js'
@@ -13,6 +13,7 @@ const configuration = loadTeamsConfiguration({
 })
 let keys: Awaited<ReturnType<typeof generateKeyPair>>
 beforeAll(async () => { keys = await generateKeyPair('RS256') })
+afterEach(() => { vi.useRealTimers() })
 async function result(changes: Record<string, unknown> = {}, issuer = `https://sts.windows.net/${tenantId}/`, audience = 'https://example.crm.dynamics.com') {
   const token = await new SignJWT({ tid: tenantId, oid: userId, ver: '1.0', scp: 'user_impersonation', upn: 'cli-user@example.test', ...changes })
     .setProtectedHeader({ alg: 'RS256' }).setIssuer(issuer).setAudience(audience).setExpirationTime(typeof changes['exp'] === 'number' ? changes['exp'] : '5m').sign(keys.privateKey)
@@ -27,6 +28,20 @@ async function fixture(changes: Record<string, unknown> = {}, issuer?: string, a
 }
 
 describe('explicit signed-in CLI source identity', () => {
+  it('renews an expired delegated token for the same explicitly connected owner without changing its generation', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const { provider, probe } = await fixture()
+    await provider.connect('msx')
+    const generation = provider.generation
+    vi.setSystemTime(Date.now() + 6 * 60_000)
+    expect(provider.identity()).toBeUndefined()
+    await provider.getToken('msx', true)
+    expect(provider.identity()?.principal.userId).toBe(userId)
+    expect(provider.generation).toBe(generation)
+    expect(probe).toHaveBeenCalledTimes(2)
+    await provider.disconnect()
+    await expect(provider.getToken('msx', true)).rejects.toMatchObject({ code: 'native_sign_in_required' })
+  })
   it('does not obtain tokens, query MSX or initiate a login before the owner connects', async () => {
     const { provider, credential, probe } = await fixture()
     expect(provider.identity()).toBeUndefined()

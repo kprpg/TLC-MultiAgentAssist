@@ -1,9 +1,21 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { describe, expect, it } from 'vitest'
-import { localConnectionVersion } from '../../../packages/common/contracts/local-connection.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { localConnectionVersion, localSessionLeaseMs, localWorkSessionMs } from '../../../packages/common/contracts/local-connection.js'
 import { LocalPairingAuthority } from '../../../apps/teams/src/local-pairing.js'
 import type { NativeIdentity } from '../../../apps/teams/src/native-identity.js'
 
+const codes = vi.hoisted(() => ({ values: [] as string[] }))
+vi.mock('node:crypto', async (original) => {
+  const actual = await original<typeof import('node:crypto')>()
+  return {
+    ...actual,
+    randomBytes: (size: number) => {
+      const code = size === 4 ? codes.values.shift() : undefined
+      return code ? Buffer.from(code, 'hex') : actual.randomBytes(size)
+    }
+  }
+})
+afterEach(() => { codes.values = [] })
 const origin = 'https://localhost:3978'
 const verifier = () => randomBytes(32).toString('base64url')
 function request(value = verifier()) {
@@ -19,6 +31,52 @@ function fixture() {
   return { authority, identity: () => identity, change: (value: NativeIdentity | undefined) => { identity = value }, advance: (ms: number) => { now += ms } }
 }
 describe('owner-approved local pairing', () => {
+  it('renews a short lease for the same verified owner without extending the original eight-hour deadline', () => {
+    const { authority, advance, identity, change } = fixture()
+    const first = request()
+    const pending = authority.begin(first.input, origin)
+    authority.approve(pending.userCode)
+    const paired = authority.exchange({ contractVersion: localConnectionVersion, requestId: pending.requestId, verifier: first.value }, origin)
+    if (paired.state !== 'paired') throw new Error('Fixture pairing failed.')
+    const original = authority.renew(paired.token)
+    advance(localSessionLeaseMs + 1)
+    expect(() => authority.authenticate(paired.token)).toThrow()
+    const current = identity()
+    if (!current) throw new Error('Missing owner fixture.')
+    change(undefined)
+    expect(() => authority.authenticate(paired.token)).toThrow()
+    expect(() => authority.assertRenewable(paired.token)).not.toThrow()
+    change({ ...current, principal: { ...current.principal, expiresAt: Date.now() + localWorkSessionMs * 2 } })
+    const renewed = authority.renew(paired.token)
+    expect(renewed.sessionExpiresAt).toBe(original.sessionExpiresAt)
+    expect(Date.parse(renewed.expiresAt)).toBeGreaterThan(Date.parse(original.expiresAt))
+    expect(authority.authenticate(paired.token).userId).toBe(current.principal.userId)
+    advance(localWorkSessionMs)
+    expect(() => authority.renew(paired.token)).toThrow()
+  })
+  it('revokes an expired short lease without forcing source sign-in and never lets it renew again', () => {
+    const { authority, advance } = fixture()
+    const first = request()
+    const pending = authority.begin(first.input, origin)
+    authority.approve(pending.userCode)
+    const paired = authority.exchange({ contractVersion: localConnectionVersion, requestId: pending.requestId, verifier: first.value }, origin)
+    if (paired.state !== 'paired') throw new Error('Fixture pairing failed.')
+    advance(localSessionLeaseMs + 1)
+    authority.revoke(paired.token)
+    expect(() => authority.assertRenewable(paired.token)).toThrow()
+  })
+  it('does not reuse an active page code for another pending page or its client acknowledgement', () => {
+    const { authority } = fixture()
+    codes.values = ['A1B2C3D4', 'A1B2C3D4', 'ABCDEF12']
+    const first = request()
+    const pending = authority.begin(first.input, origin)
+    authority.approve(pending.userCode)
+    const paired = authority.exchange({ contractVersion: localConnectionVersion, requestId: pending.requestId, verifier: first.value }, origin)
+    if (paired.state !== 'paired') throw new Error('Fixture pairing failed.')
+    expect(authority.pageCode(paired.token)).toBe('A1B2C3D4')
+    expect(authority.begin(request().input, origin).userCode).toBe('ABCDEF12')
+    expect(authority.hasPage(pending.userCode)).toBe(true)
+  })
   it('gives no source authority before owner approval and exchanges once for an opaque capability', () => {
     const { authority } = fixture()
     const { input, value } = request()

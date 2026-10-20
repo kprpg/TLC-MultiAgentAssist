@@ -11,6 +11,15 @@ afterEach(async () => { for (const folder of folders.splice(0)) await rm(folder,
 const options = { mode: 'sample', origin: 'https://tlc.example.com', appId: '8cb8c9a2-6ee6-4382-bfa4-5b409c77e54b' }
 
 describe('Teams end-user upload package', () => {
+  it('accepts an explicit increasing app version for updating the same Teams identity', () => {
+    const manifest = createTeamsManifest({ ...options, version: '1.2484.12345' })
+    expect(manifest.id).toBe(options.appId)
+    expect(manifest.version).toBe('1.2484.12345')
+    expect(manifest.staticTabs[0]?.contentUrl).toBe(`${options.origin}/?tlcAppVersion=1.2484.12345`)
+    for (const version of ['latest', '1.2', '01.2.3', '1.2.3-beta']) {
+      expect(() => createTeamsManifest({ ...options, version })).toThrow()
+    }
+  })
   it('packages only manifest and correctly-sized PNG icons at the ZIP root', async () => {
     const folder = await mkdtemp(join(tmpdir(), 'tlc-teams-zip-')); folders.push(folder)
     const path = await buildTeamsAppZip({ ...options, development: true, outputDirectory: folder })
@@ -23,7 +32,7 @@ describe('Teams end-user upload package', () => {
     expect(manifest.authorization.permissions.resourceSpecific).toEqual([
       { name: 'MeetingStage.Write.Chat', type: 'Delegated' }
     ])
-    expect(manifest.staticTabs[0].contentUrl).toBe('https://tlc.example.com/')
+    expect(manifest.staticTabs[0].contentUrl).toBe('https://tlc.example.com/?tlcAppVersion=0.1.3')
     expect(manifest.name.short).toContain('Sample')
     expect(manifest.bots).toBeUndefined()
     expect(manifest.webApplicationInfo).toBeUndefined()
@@ -105,7 +114,7 @@ describe('Teams end-user upload package', () => {
     const zip = await JSZip.loadAsync(await readFile(path), { checkCRC32: true })
     const manifest = JSON.parse(await zip.file('manifest.json')!.async('string'))
     expect(manifest.id).toBe(options.appId)
-    expect(manifest.staticTabs[0]).toMatchObject({ contentUrl: `${origin}/`, websiteUrl: `${origin}/` })
+    expect(manifest.staticTabs[0]).toMatchObject({ contentUrl: `${origin}/?tlcAppVersion=0.1.3`, websiteUrl: `${origin}/?tlcAppVersion=0.1.3` })
     expect(manifest.developer.websiteUrl).toBe(`${origin}/`)
     expect(manifest.configurableTabs[0].configurationUrl).toBe(`${origin}/?surface=configure`)
     expect(manifest.validDomains).toEqual(['localhost'])

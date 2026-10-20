@@ -82,6 +82,22 @@ describe('Teams browser host context', () => {
     expect(authentication.context).toEqual({ embedded: false, theme: 'default', kind: 'channel' })
     expect(sdk.initialize).not.toHaveBeenCalled()
   })
+  it('initializes the public SDK for a frameless native Teams webview, not just iframe hosts', async () => {
+    const native = { parent: {}, nativeInterface: { framelessPostMessage: vi.fn() } }
+    native.parent = native
+    vi.stubGlobal('window', native)
+    const authentication = await initializeBrowserAuthentication(() => undefined)
+    expect(sdk.initialize).toHaveBeenCalledOnce()
+    expect(authentication.context.embedded).toBe(true)
+  })
+  it('does not mistake an unrelated or malformed nativeInterface object for a Teams host', async () => {
+    const browser = { parent: {}, nativeInterface: { framelessPostMessage: 'not-a-bridge' } }
+    browser.parent = browser
+    vi.stubGlobal('window', browser)
+    const authentication = await initializeBrowserAuthentication(() => undefined)
+    expect(authentication.context.embedded).toBe(false)
+    expect(sdk.initialize).not.toHaveBeenCalled()
+  })
 })
 
 describe('Teams configuration-frame APIs', () => {

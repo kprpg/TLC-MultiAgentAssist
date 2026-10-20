@@ -16,6 +16,7 @@ param(
     [string] $Resource = 'msx',
     [ValidatePattern('^[A-Fa-f0-9]{8}$')]
     [string] $UserCode,
+    [switch] $PassThru,
     [string] $WorkDirectory = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'TLC-Assist\Teams\launcher-native')
 )
 Set-StrictMode -Version Latest
@@ -61,8 +62,18 @@ if (-not $runtime.StartsWith($releaseRoot, [StringComparison]::OrdinalIgnoreCase
 $server = Join-Path $runtime 'server.js'
 $ownerDirectory = [string] $record.ownerDirectory
 if (-not $ownerDirectory) { throw 'The protected native owner directory is not recorded.' }
+. (Join-Path $PSScriptRoot 'teams-launch-session.ps1')
+Get-OwnedTeamsRun -WorkDirectory $WorkDirectory | Out-Null
+$control = Get-Content -LiteralPath (Join-Path $ownerDirectory 'control.json') -Raw | ConvertFrom-Json
+if ($control.processId -ne $record.pid -or $control.origin -ne $record.origin) {
+    throw 'The protected owner channel does not match this launcher backend PID and origin. Do not connect or approve a different backend.'
+}
 $arguments = @('--experimental-sqlite', $server, '--local-owner', $Action.ToLowerInvariant(), $ownerDirectory)
 if ($Action -eq 'Connect') { $arguments += $Resource }
 if ($Action -eq 'Approve') { $arguments += $UserCode.ToUpperInvariant() }
-& (Get-Command node -ErrorAction Stop).Source @arguments
+$output = & (Get-Command node -ErrorAction Stop).Source @arguments
 if ($LASTEXITCODE -ne 0) { throw 'The protected native owner command failed. No success or source access is implied.' }
+$result = ($output -join "`n") | ConvertFrom-Json
+if (-not $result.ok) { throw 'The protected owner did not confirm this command.' }
+if ($PassThru) { return $result }
+$result | ConvertTo-Json -Depth 8

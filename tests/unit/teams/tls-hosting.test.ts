@@ -19,6 +19,18 @@ const nativeClient = vi.hoisted(() => ({
 const cliCredential = vi.hoisted(() => ({
   getToken: vi.fn(async () => { throw new Error('A CLI TLS/bootstrap test must not acquire a source token.') })
 }))
+const ownerStartup = vi.hoisted(() => ({ beforeReady: vi.fn(async () => undefined) }))
+vi.mock('../../../apps/teams/src/local-owner-control.js', async (original) => {
+  const actual = await original<typeof import('../../../apps/teams/src/local-owner-control.js')>()
+  return {
+    ...actual,
+    startProtectedOwnerControl: async (options: Parameters<typeof actual.startProtectedOwnerControl>[0]) => {
+      const control = await actual.startProtectedOwnerControl(options)
+      await ownerStartup.beforeReady()
+      return control
+    }
+  }
+})
 vi.mock('@azure/identity', async (original) => ({
   ...await original<typeof import('@azure/identity')>(),
   AzureCliCredential: class { getToken = cliCredential.getToken }
@@ -66,7 +78,12 @@ describe('explicit local HTTPS hosting', () => {
     const ownerDirectory = join(directory, `${authentication}-owner`)
     await prepareOwnerDirectory(ownerDirectory)
     const origin = `https://localhost:${port}`
-    const application = await startTeamsServer({
+    let releaseOwner = () => {}
+    const gate = new Promise<void>((resolve) => { releaseOwner = resolve })
+    const waiting = new Promise<void>((resolve) => {
+      ownerStartup.beforeReady.mockImplementationOnce(async () => { resolve(); await gate })
+    })
+    const startup = startTeamsServer({
       TLC_TEAMS_MODE: 'live', TLC_TEAMS_AUTH_MODE: authentication, TLC_TEAMS_RUNTIME_PROFILE: 'local',
       TLC_TEAMS_ORIGIN: origin, TLC_TEAMS_HOST: '127.0.0.1', TLC_TEAMS_PORT: String(port),
       TLC_TEAMS_TENANT_ID: '77777777-7777-4777-8777-777777777777',
@@ -74,6 +91,23 @@ describe('explicit local HTTPS hosting', () => {
       TLC_TEAMS_MSX_RESOURCE: 'https://example.crm.dynamics.com', TLC_TEAMS_ENVIRONMENT_ID: 'offline-native-bootstrap',
       TLC_TEAMS_OWNER_DIRECTORY: ownerDirectory, TLC_TEAMS_TLS_CERT_PATH: certificatePath, TLC_TEAMS_TLS_KEY_PATH: keyPath
     })
+    try {
+      await Promise.race([waiting, startup.then(() => { throw new Error('The startup readiness gate was not reached.') })])
+      const ca = await readFile(certificatePath)
+      const status = await new Promise<number>((resolve, reject) => {
+        const response = get(`https://127.0.0.1:${port}/api/health`, { ca, headers: { host: `localhost:${port}` } }, (incoming) => {
+          incoming.resume()
+          incoming.once('end', () => resolve(incoming.statusCode ?? 0))
+        })
+        response.once('error', reject)
+      })
+      expect(status).toBe(503)
+    } catch (error) {
+      releaseOwner()
+      await (await startup).close()
+      throw error
+    } finally { releaseOwner() }
+    const application = await startup
     try {
       const ca = await readFile(certificatePath)
       const request = (path: string, headers: Record<string, string> = {}) => new Promise<{ status: number; body: string }>((done, fail) => {

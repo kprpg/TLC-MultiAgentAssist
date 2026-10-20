@@ -21,6 +21,7 @@ import { ActivityWorkspace } from './activity.js'
 import { ContextWorkspace, SharedStage } from './context.js'
 import { ReviewDialog } from './review-dialog.js'
 import { NativeConnectionPanel } from './native-connection-panel.js'
+import { TeamsLaunchStatusPanel } from './launch-status.js'
 
 interface PendingReview { preview: ActionPreview; resolve(receipt: ActionReceipt): void; reject(error: Error): void }
 
@@ -187,6 +188,7 @@ export function TeamsApp() {
     if (hostSurface === 'configure') setView('configure')
   }, [hostSurface, setView])
   return <FluentProvider theme={selectedTheme}>
+    {hostSurface === 'personal' && !bindingId && <TeamsLaunchStatusPanel authentication={authentication} client={client} connected={!!session} />}
     {!session || !client || !authentication ? <main className="signin-panel">
       <h1>TLC Assist for Teams</h1><p>Private, grounded account-team guidance.</p>
       {error ? <p role="alert" className="error-banner">{error}</p> : <p role="status">{authentication?.localConnection ? 'Local runtime ready. Connect and pair this page yourself to access live MSX.' : 'Initializing your Teams workspace...'}</p>}

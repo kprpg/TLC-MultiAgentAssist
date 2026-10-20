@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
-import { localConnectionVersion, localPairExchangeSchema, localPairRequestSchema, type LocalPairRequestResult, localPairResultSchema } from '../../../packages/common/contracts/local-connection.js'
+import { localConnectionVersion, localPairExchangeSchema, localPairRequestSchema, type LocalPairRequestResult, localPairResultSchema, localSessionLeaseMs, localWorkSessionMs, localSessionVersion, localSessionRenewalResultSchema } from '../../../packages/common/contracts/local-connection.js'
 import { isLocalSourcePrincipal, principalPartition, type ExecutionPrincipal } from '../../../packages/orchestrator/collaboration/principal.js'
 import type { NativeIdentity } from './native-identity.js'
 
@@ -18,7 +18,7 @@ const matches = (expected: Binding, identity: NativeIdentity) => expected.partit
 export class LocalPairingAuthority {
   private readonly instanceId = randomUUID()
   private readonly requests = new Map<string, Pending>()
-  private readonly sessions = new Map<string, { binding: Binding; expiresAt: number }>()
+  private readonly sessions = new Map<string, { binding: Binding; expiresAt: number; sessionExpiresAt: number; userCode: string }>()
   private readonly now: () => number
   private readonly allowLocalSource: boolean
   constructor(private readonly origin: string, private readonly getIdentity: () => NativeIdentity | undefined, options: { now?: () => number; allowLocalSource?: boolean } = {}) {
@@ -46,7 +46,7 @@ export class LocalPairingAuthority {
       if (request.expiresAt <= this.now() || request.ownerAtRequest && identity && !matches(request.ownerAtRequest, identity)) this.requests.delete(id)
     }
     for (const [id, session] of this.sessions) {
-      if (session.expiresAt <= this.now() || !identity || !matches(session.binding, identity)) this.sessions.delete(id)
+      if (session.sessionExpiresAt <= this.now() || candidate && (!identity || !matches(session.binding, candidate))) this.sessions.delete(id)
     }
   }
   begin(value: unknown, origin: string): LocalPairRequestResult {
@@ -55,7 +55,10 @@ export class LocalPairingAuthority {
     this.prune()
     if (this.requests.size >= 3) throw new LocalPairingError(429, 'local_pairing_capacity')
     let userCode: string
-    do { userCode = randomBytes(4).toString('hex').toUpperCase() } while ([...this.requests.values()].some((request) => request.userCode === userCode))
+    do { userCode = randomBytes(4).toString('hex').toUpperCase() } while (
+      [...this.requests.values()].some((request) => request.userCode === userCode) ||
+      [...this.sessions.values()].some((session) => session.userCode === userCode)
+    )
     const requestId = randomUUID()
     const expiresAt = this.now() + 300_000
     const identity = this.getIdentity()
@@ -102,8 +105,8 @@ export class LocalPairingAuthority {
     }
     if (this.sessions.size >= 8) throw new LocalPairingError(429, 'local_session_capacity')
     const token = randomBytes(32).toString('base64url')
-    const expiresAt = Math.min(this.now() + 900_000, identity.principal.expiresAt ?? this.now())
-    this.sessions.set(hash(token), { binding: pending.approved, expiresAt })
+    const expiresAt = Math.min(this.now() + localSessionLeaseMs, identity.principal.expiresAt ?? this.now())
+    this.sessions.set(hash(token), { binding: pending.approved, expiresAt, sessionExpiresAt: this.now() + localWorkSessionMs, userCode: pending.userCode })
     this.requests.delete(input.requestId)
     return { contractVersion: localConnectionVersion, state: 'paired', token, expiresAt: new Date(expiresAt).toISOString() }
   }
@@ -113,12 +116,42 @@ export class LocalPairingAuthority {
     const key = hash(token)
     const session = this.sessions.get(key)
     const identity = this.current()
-    if (!session || !matches(session.binding, identity)) {
-      this.sessions.delete(key)
+    if (!session || session.expiresAt <= this.now() || !matches(session.binding, identity)) {
+      if (session && !matches(session.binding, identity)) this.sessions.delete(key)
       throw new LocalPairingError(401, 'local_session_required')
     }
     return { ...identity.principal, expiresAt: Math.min(session.expiresAt, identity.principal.expiresAt ?? 0) }
   }
-  revoke(token: string): void { this.authenticate(token); this.sessions.delete(hash(token)) }
+  assertRenewable(token: string): void {
+    this.prune()
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token) || !this.sessions.has(hash(token))) throw new LocalPairingError(401, 'local_session_required')
+  }
+  renew(token: string) {
+    this.assertRenewable(token)
+    const identity = this.current()
+    const session = this.sessions.get(hash(token))
+    if (!session || !matches(session.binding, identity)) {
+      this.sessions.delete(hash(token))
+      throw new LocalPairingError(401, 'local_connection_changed')
+    }
+    session.expiresAt = Math.min(this.now() + localSessionLeaseMs, session.sessionExpiresAt, identity.principal.expiresAt ?? this.now())
+    return localSessionRenewalResultSchema.parse({
+      contractVersion: localSessionVersion, expiresAt: new Date(session.expiresAt).toISOString(),
+      sessionExpiresAt: new Date(session.sessionExpiresAt).toISOString()
+    })
+  }
+  revoke(token: string): void { this.assertRenewable(token); this.sessions.delete(hash(token)) }
+  pageCode(token: string): string {
+    this.authenticate(token)
+    const session = this.sessions.get(hash(token))
+    if (!session) throw new LocalPairingError(401, 'local_session_required')
+    return session.userCode
+  }
+  hasPage(userCode: string): boolean {
+    this.prune()
+    const identity = this.getIdentity()
+    return !!identity && this.eligible(identity) && [...this.sessions.values()].some((session) =>
+      session.userCode === userCode && session.expiresAt > this.now() && matches(session.binding, identity))
+  }
   invalidate(): void { this.requests.clear(); this.sessions.clear() }
 }

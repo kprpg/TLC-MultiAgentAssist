@@ -40,6 +40,9 @@ export async function createNativeConnection(configuration: LocalTeamsConfigurat
     provider, pairing, fetchImplementation,
     environment: { ...environment, TLC_TEAMS_STATE_KEY: stateKey, TLC_TEAMS_DATA_DIR: dataDirectory },
     status: () => provider.status(),
+    async refreshIdentity() {
+      await provider.getToken('msx', true)
+    },
     async startOwnerControl(stopOwnedWork: () => Promise<void>) {
       return startProtectedOwnerControl({
         directory, origin: configuration.origin,

@@ -19,7 +19,7 @@ export interface NativeAuthenticationResult {
 }
 export interface NativeAuthenticationClient {
   interactive(scopes: string[]): Promise<NativeAuthenticationResult>
-  silent(scopes: string[], account: AccountInfo): Promise<NativeAuthenticationResult>
+  silent(scopes: string[], account: AccountInfo, forceRefresh?: boolean): Promise<NativeAuthenticationResult>
   clear(): Promise<void>
 }
 export interface NativeIdentity {
@@ -51,7 +51,7 @@ export function createNativeAuthenticationClient(configuration: NativeTeamsConfi
         })
       }
     }),
-    silent: (scopes, account) => client.acquireTokenSilent({ scopes, account }),
+    silent: (scopes, account, forceRefresh = false) => client.acquireTokenSilent({ scopes, account, forceRefresh }),
     clear: async () => {
       const cache = client.getTokenCache()
       for (const account of await cache.getAllAccounts()) await cache.removeAccount(account)
@@ -155,27 +155,29 @@ export class NativeIdentityProvider {
       throw this.failure(resource, error)
     } finally { this.connecting = false }
   }
-  async getToken(resource: NativeResource): Promise<string> {
-    const identity = this.identity()
+  async getToken(resource: NativeResource, renewSession = false): Promise<string> {
+    const identity = renewSession ? this.current?.identity : this.identity()
     if (!identity || !this.current) throw new NativeConnectionError('native_sign_in_required')
     const scopes = this.scopes(resource)
     const cached = this.tokens.get(resource)
-    if (cached && cached.expiresAt > this.now() + 30_000) return cached.token
+    if (!renewSession && cached && cached.expiresAt > this.now() + 30_000) return cached.token
     const generation = this.generation
     try {
-      const result = await this.client.silent(scopes, this.current.account)
+      const result = renewSession ? await this.client.silent(scopes, this.current.account, true) : await this.client.silent(scopes, this.current.account)
       const verified = await this.validate(result)
       if (generation !== this.generation) throw new NativeConnectionError('native_connection_changed')
       if (!this.sameAuthority(verified.identity, identity)) {
         await this.disconnect()
         throw new NativeConnectionError('native_connection_changed')
       }
+      if (renewSession) await this.options.probeMsxIdentity(result.accessToken, verified.identity.principal)
+      if (generation !== this.generation) throw new NativeConnectionError('native_connection_changed')
       this.current = verified
       this.tokens.set(resource, { token: result.accessToken, expiresAt: verified.tokenExpiresAt })
       this.states.set(resource, { state: 'connected', detail: 'Native resource token acquired silently for the same owner.' })
       return result.accessToken
     } catch (error) {
-      if (generation === this.generation && error instanceof NativeConnectionError && error.code === 'native_identity_rejected') await this.disconnect()
+      if (generation === this.generation && (renewSession || error instanceof NativeConnectionError && error.code === 'native_identity_rejected')) await this.disconnect()
       throw this.failure(resource, error)
     }
   }

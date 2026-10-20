@@ -7,8 +7,15 @@ import { contractVersion } from '../../../packages/common/contracts/version.js'
 import { NativeConnectionPanel } from '../../../apps/teams/src/client/native-connection-panel.js'
 import { LocalBrowserConnection } from '../../../apps/teams/src/client/local-connection.js'
 import { TeamsApiClient } from '../../../apps/teams/src/client/data-client.js'
+import { TeamsLaunchStatusPanel } from '../../../apps/teams/src/client/launch-status.js'
 
 describe('Teams-native presentation', () => {
+  it('shows a pending backend check rather than claiming Teams is already connected before initialization', () => {
+    const html = renderToStaticMarkup(createElement(TeamsLaunchStatusPanel, { authentication: undefined, client: undefined, connected: false }))
+    expect(html).toContain('Checking backend connection')
+    expect(html).toContain('Backend connection')
+    expect(html).not.toContain('Teams client and backend verified')
+  })
   it('shows the full native capability/limitation matrix without an HTTP sign-in/approval shortcut', () => {
     const html = renderToStaticMarkup(createElement(NativeConnectionPanel, {
       connection: new LocalBrowserConnection(), client: new TeamsApiClient(async () => ''),

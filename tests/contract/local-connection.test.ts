@@ -4,8 +4,17 @@ import {
   nativePublicConfigurationSchema, nativeCapabilities, cliCapabilities, cliPublicConfigurationVersion, getCliCapabilities
 } from '../../packages/common/contracts/local-connection.js'
 import { teamsPublicConfigurationSchema } from '../../packages/common/contracts/collaboration.js'
+import { localSessionRenewalRequestSchema, localSessionRenewalResultSchema, localWorkSessionMs } from '../../packages/common/contracts/local-connection.js'
 
 describe('local native connection contracts', () => {
+  it('bounds work sessions to eight hours and versions strict renewal independently of pairing', () => {
+    expect(localWorkSessionMs).toBe(8 * 60 * 60_000)
+    expect(localSessionRenewalRequestSchema.parse({ contractVersion: '1.0' })).toEqual({ contractVersion: '1.0' })
+    expect(localSessionRenewalRequestSchema.safeParse({ contractVersion: '1.0', roles: ['TLC.Teams.Writer'] }).success).toBe(false)
+    expect(localSessionRenewalResultSchema.safeParse({
+      contractVersion: '1.0', expiresAt: '2026-10-20T09:00:00.000Z', sessionExpiresAt: '2026-10-20T08:00:00.000Z'
+    }).success).toBe(false)
+  })
   it('versions the CLI public profile without changing the owner/pairing protocol or claiming writer authority', () => {
     expect(localConnectionVersion).toBe('1.0')
     expect(cliPublicConfigurationVersion).toBe('1.2')

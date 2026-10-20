@@ -1,5 +1,5 @@
 import { generateKeyPair, SignJWT } from 'jose'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { AccountInfo } from '@azure/msal-node'
 import { loadTeamsConfiguration, isNativeConfiguration } from '../../../apps/teams/src/configuration.js'
 import { NativeIdentityProvider, type NativeAuthenticationResult } from '../../../apps/teams/src/native-identity.js'
@@ -15,6 +15,7 @@ const config = loadTeamsConfiguration({
 })
 let keys: Awaited<ReturnType<typeof generateKeyPair>>
 beforeAll(async () => { keys = await generateKeyPair('RS256') })
+afterEach(() => { vi.useRealTimers() })
 async function result(changes: Record<string, unknown> = {}): Promise<NativeAuthenticationResult> {
   const idToken = await new SignJWT({ tid: tenantId, oid: userId, ver: '2.0', roles: ['TLC.Teams.User', 'TLC.Teams.Writer'], ...changes })
     .setProtectedHeader({ alg: 'RS256' }).setIssuer(`https://login.microsoftonline.com/${tenantId}/v2.0`)
@@ -28,6 +29,20 @@ function fixture(response: NativeAuthenticationResult, probe = vi.fn(async () =>
   return { provider, client, probe }
 }
 describe('native identity and resource tokens', () => {
+  it('uses silent forced refresh for an expired owner token and rechecks source mapping without interactive sign-in', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const { provider, client, probe } = fixture(await result())
+    await provider.connect('msx')
+    const generation = provider.generation
+    vi.setSystemTime(Date.now() + 6 * 60_000)
+    expect(provider.identity()).toBeUndefined()
+    client.silent.mockResolvedValueOnce(await result())
+    await provider.getToken('msx', true)
+    expect(client.silent).toHaveBeenCalledWith(['https://example.crm.dynamics.com/.default'], account, true)
+    expect(client.interactive).toHaveBeenCalledOnce()
+    expect(provider.generation).toBe(generation)
+    expect(probe).toHaveBeenCalledTimes(2)
+  })
   it('never prompts from a source HTTP read before explicit owner connection', async () => {
     const { provider, client } = fixture(await result())
     await expect(provider.getToken('msx')).rejects.toMatchObject({ code: 'native_sign_in_required' })

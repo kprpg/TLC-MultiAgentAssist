@@ -1,16 +1,72 @@
 import { randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LocalBrowserConnection } from '../../../apps/teams/src/client/local-connection.js'
-import { localConnectionVersion } from '../../../packages/common/contracts/local-connection.js'
+import { localConnectionVersion, localSessionLeaseMs, localWorkSessionMs } from '../../../packages/common/contracts/local-connection.js'
 import { TeamsApiClient } from '../../../apps/teams/src/client/data-client.js'
 import { z } from 'zod'
 
-afterEach(() => { vi.unstubAllGlobals() })
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 const pending = () => ({
   contractVersion: localConnectionVersion, requestId: randomUUID(), userCode: 'ABCDEF12',
   expiresAt: new Date(Date.now() + 300_000).toISOString(), state: 'pending-owner-approval'
 })
 describe('native browser connection with no source credentials or live calls', () => {
+  it('silently resumes after a fifteen-minute lease and retains the bounded work session in memory', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const start = Date.now()
+    const transport = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(pending()))
+      .mockResolvedValueOnce(Response.json({ contractVersion: localConnectionVersion, state: 'paired', token: 'L'.repeat(43), expiresAt: new Date(start + localSessionLeaseMs).toISOString() }))
+    vi.stubGlobal('fetch', transport)
+    const local = new LocalBrowserConnection()
+    await local.begin(); await local.poll()
+    vi.setSystemTime(start + 16 * 60_000)
+    transport.mockResolvedValueOnce(Response.json({
+      contractVersion: '1.0', expiresAt: new Date(Date.now() + localSessionLeaseMs).toISOString(),
+      sessionExpiresAt: new Date(start + localWorkSessionMs).toISOString()
+    }))
+    expect(await local.getToken()).toBe('L'.repeat(43))
+    expect(transport.mock.calls.at(-1)?.[0]).toBe('/api/teams/local/renew')
+    expect(local.sessionExpiresAt()).toBe(start + localWorkSessionMs)
+    vi.setSystemTime(start + localWorkSessionMs + 1)
+    await expect(local.getToken()).rejects.toThrow(/pair/i)
+    expect(transport).toHaveBeenCalledTimes(3)
+  })
+  it('coalesces concurrent renewal requests and discards a late result after disconnect', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const start = Date.now()
+    let finish: (response: Response) => void = () => {}
+    const renewal = new Promise<Response>((resolve) => { finish = resolve })
+    const transport = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(pending()))
+      .mockResolvedValueOnce(Response.json({ contractVersion: localConnectionVersion, state: 'paired', token: 'L'.repeat(43), expiresAt: new Date(start + localSessionLeaseMs).toISOString() }))
+      .mockReturnValueOnce(renewal)
+    vi.stubGlobal('fetch', transport)
+    const local = new LocalBrowserConnection()
+    await local.begin(); await local.poll()
+    vi.setSystemTime(start + 6 * 60_000)
+    const requests = [local.getToken(), local.getToken(), local.getToken()]
+    const rejected = requests.map((request) => expect(request).rejects.toThrow(/changed/))
+    local.clear()
+    finish(Response.json({ contractVersion: '1.0', expiresAt: new Date(Date.now() + localSessionLeaseMs).toISOString(), sessionExpiresAt: new Date(start + localWorkSessionMs).toISOString() }))
+    await Promise.all(rejected)
+    expect(transport).toHaveBeenCalledTimes(3)
+    await expect(local.getToken()).rejects.toThrow(/pair/i)
+  })
+  it('rejects failed renewal rather than keeping a success-shaped private capability', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const start = Date.now()
+    const transport = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(pending()))
+      .mockResolvedValueOnce(Response.json({ contractVersion: localConnectionVersion, state: 'paired', token: 'L'.repeat(43), expiresAt: new Date(start + localSessionLeaseMs).toISOString() }))
+      .mockResolvedValueOnce(Response.json({ error: 'native_source_denied' }, { status: 403 }))
+    vi.stubGlobal('fetch', transport)
+    const local = new LocalBrowserConnection()
+    await local.begin(); await local.poll()
+    vi.setSystemTime(start + 6 * 60_000)
+    await expect(local.getToken()).rejects.toThrow(/renewal was rejected/)
+    expect(local.isCurrentToken('L'.repeat(43))).toBe(false)
+  })
   it('creates a verifier challenge and retains only a memory-local opaque API capability', async () => {
     const source = pending()
     const transport = vi.fn<typeof fetch>()

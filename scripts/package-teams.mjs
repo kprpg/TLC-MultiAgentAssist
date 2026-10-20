@@ -19,6 +19,7 @@ const optionsSchema = z.object({
     return url.protocol === 'https:' && value === url.origin && !url.username && !url.password
   }, 'An exact reachable HTTPS origin is required.'),
   appId: z.uuid(),
+  version: z.string().regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/).default('0.1.3'),
   authentication: z.enum(['hosted-obo', 'local-interactive', 'local-azure-cli']).default('hosted-obo'),
   botId: z.uuid().optional()
 }).strict().superRefine((value, context) => {
@@ -34,10 +35,11 @@ export function createTeamsManifest(options) {
   const origin = parsed.origin
   const local = localAuthenticationModes.has(parsed.authentication)
   const full = parsed.mode === 'live' && !local
+  const personalUrl = `${origin}/?tlcAppVersion=${encodeURIComponent(parsed.version)}`
   return {
     $schema: teamsManifestSchemaUrl,
     manifestVersion: '1.30',
-    version: '0.1.3',
+    version: parsed.version,
     id: parsed.appId,
     developer: {
       name: 'TLC Assist', websiteUrl: `${origin}/`,
@@ -58,7 +60,7 @@ export function createTeamsManifest(options) {
     ...(!local ? { supportsChannelFeatures: 'tier1' } : {}),
     staticTabs: [{
       entityId: 'tlc-personal', name: 'My work', scopes: ['personal'],
-      contentUrl: `${origin}/`, websiteUrl: `${origin}/`
+      contentUrl: personalUrl, websiteUrl: personalUrl
     }],
     ...(!local ? { configurableTabs: [{
       configurationUrl: `${origin}/?surface=configure`,
@@ -215,7 +217,7 @@ export async function validateTeamsManifest(manifest) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const { values } = parseArgs({ options: {
     mode: { type: 'string', default: 'sample' }, origin: { type: 'string' },
-    'app-id': { type: 'string' }, 'bot-id': { type: 'string' }, runtime: { type: 'boolean', default: false },
+    'app-id': { type: 'string' }, 'app-version': { type: 'string' }, 'bot-id': { type: 'string' }, runtime: { type: 'boolean', default: false },
     development: { type: 'boolean', default: false }, 'verify-origin': { type: 'boolean', default: false },
     'local-native': { type: 'boolean', default: false },
     'local-azure-cli': { type: 'boolean', default: false }
@@ -230,6 +232,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     authentication: values['local-azure-cli'] ? 'local-azure-cli' : values['local-native'] ? 'local-interactive' : 'hosted-obo',
     origin: configuredOrigin ?? (localOwner ? 'https://localhost:3978' : 'https://localhost:3979'),
     appId: values['app-id'] ?? process.env.TLC_TEAMS_PACKAGE_ID ?? '8cb8c9a2-6ee6-4382-bfa4-5b409c77e54b',
+    ...(values['app-version'] ? { version: values['app-version'] } : {}),
     ...(values.mode === 'live' && !localOwner ? { botId: values['bot-id'] ?? process.env.TLC_TEAMS_BOT_CLIENT_ID } : {})
   }
   await validateTeamsManifest(createTeamsManifest(metadata))

@@ -28,6 +28,8 @@ import { createNativeConnection } from './native-connection.js'
 import { invokeProtectedOwnerCommand, prepareOwnerDirectory } from './local-owner-control.js'
 import { localConnectionVersion, localOwnerCommandSchema } from '../../../packages/common/contracts/local-connection.js'
 import { NativeConnectionError } from './native-identity.js'
+import { TeamsLaunchMonitor } from './launch-status.js'
+import { teamsClientBuildSchema, teamsLaunchIdentitySchema, teamsLaunchVersion } from '../../../packages/common/contracts/teams-launch.js'
 
 export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.env) {
   const configuration = loadTeamsConfiguration(environment)
@@ -43,7 +45,20 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   const host = environment['TLC_TEAMS_HOST'] ?? (environment['WEBSITE_SITE_NAME'] ? '0.0.0.0' : '127.0.0.1')
   if (isLocalConfiguration(configuration) && (!tls || !['localhost', '127.0.0.1', '::1'].includes(host) ||
       port !== Number(new URL(configuration.origin).port || 443))) throw new Error('Native Teams requires trusted loopback HTTPS on the exact configured origin port.')
+  const clientRoot = resolve(environment['TLC_TEAMS_STATIC_ROOT'] ?? fileURLToPath(new URL('./client', import.meta.url)))
+  const build = environment['TLC_TEAMS_RUN_ID'] || environment['TLC_TEAMS_CLIENT_BUILD_ID']
+    ? teamsClientBuildSchema.parse(JSON.parse(await readFile(resolve(clientRoot, 'build.json'), 'utf8'))) : undefined
+  if (environment['TLC_TEAMS_CLIENT_BUILD_ID'] && environment['TLC_TEAMS_CLIENT_BUILD_ID'] !== build?.buildId) {
+    throw new Error('The configured client build does not match the served Teams client.')
+  }
   const native = isLocalConfiguration(configuration) ? await createNativeConnection(configuration, environment) : undefined
+  const launch = build
+    ? new TeamsLaunchMonitor(teamsLaunchIdentitySchema.parse({
+      contractVersion: teamsLaunchVersion, runId: environment['TLC_TEAMS_RUN_ID'],
+      clientBuildId: build.buildId, packageId: environment['TLC_TEAMS_PACKAGE_ID'],
+      packageVersion: environment['TLC_TEAMS_PACKAGE_VERSION'], origin: configuration.origin, mode: configuration.mode,
+      authentication: isLocalConfiguration(configuration) ? configuration.authentication : 'hosted-obo'
+    }), native ? (code) => native.pairing.hasPage(code) : undefined) : undefined
   const runtimeEnvironment = native?.environment ?? environment
   const runtime = loadTeamsRuntimeConfiguration(runtimeEnvironment, configuration)
   const stateKey = configuration.mode === 'live' ? loadTeamsStateKey(runtimeEnvironment) : undefined
@@ -151,6 +166,7 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
     }
     if (entry) await services.dispose()
   }
+  let ready = false
   const web = express()
   web.disable('x-powered-by')
   web.use((request, response, next) => {
@@ -162,6 +178,10 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
     response.setHeader('x-content-type-options', 'nosniff')
     response.setHeader('referrer-policy', 'no-referrer')
     response.setHeader('cache-control', 'no-store')
+    if (!ready && (request.path === '/api/health' || request.path.startsWith('/api/teams/'))) {
+      response.status(503).json({ error: 'runtime_starting' })
+      return
+    }
     next()
   })
   let transport: Awaited<ReturnType<typeof registerTeamsBot>> | undefined
@@ -198,6 +218,7 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
     ...(transport ? { deliverPublication: transport.deliverPublication, notify: transport.notify } : {}),
     ...(transcriptEvents ? { transcriptEvents } : {}),
     ...(native ? { localConnection: native } : {}),
+    ...(launch ? { launch } : {}),
     onError: ({ correlationId, code, method, category }) => console.error(`[teams-api] ${correlationId} ${code} ${method} ${category}`)
   })
   web.use((request, response, next) => {
@@ -209,7 +230,6 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   web.get('/auth/callback', (_request, response) => response.type('html').send('<!doctype html><html lang="en"><head><title>Microsoft sign-in complete</title></head><body>Return to TLC Assist.</body></html>'))
   web.get('/privacy', (_request, response) => response.type('text').send('TLC Assist uses delegated source permissions. Prompts, tokens, customer details and transcripts are not operational telemetry. Contact your application owner for the approved data and audit retention policy.'))
   web.get('/terms', (_request, response) => response.type('text').send('Internal Microsoft FTE application. Source-system authorization and reviewed-action controls apply. Sample mode uses sanitized data only.'))
-  const clientRoot = resolve(environment['TLC_TEAMS_STATIC_ROOT'] ?? fileURLToPath(new URL('./client', import.meta.url)))
   web.use(express.static(clientRoot, { index: false, dotfiles: 'deny', fallthrough: true }))
   web.get('/', (_request, response) => response.sendFile(resolve(clientRoot, 'index.html')))
   web.use((_request, response) => response.status(404).json({ error: 'route_not_found' }))
@@ -232,6 +252,7 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
       throw error
     }
   }
+  ready = true
   console.info(`TLC Teams ready at ${tls ? 'https' : 'http'}://${host}:${boundPort} (${configuration.mode})`)
   console.info(`[teams-host] profile=${runtime.profile} state=${runtime.state.kind} source-identity=${configuration.mode === 'live' ? 'delegated-user' : 'sanitized-sample'}`)
   let work = Promise.resolve()
@@ -260,6 +281,7 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
     server, configuration, store,
     close(): Promise<void> {
       closing ??= (async () => {
+      ready = false
       if (interval) clearInterval(interval)
       try {
         try { await ownerControl?.close() }

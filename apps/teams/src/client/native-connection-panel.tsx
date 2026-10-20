@@ -39,6 +39,7 @@ export function NativeConnectionPanel({ connection, client, connected, authentic
     if (!connected) { setStatus(undefined); return }
     const controller = new AbortController()
     const refresh = () => {
+      if (document.visibilityState === 'hidden') return
       void client.request('local/status', nativeConnectionStatusSchema, undefined, controller.signal).then((value) => {
         if (!controller.signal.aborted) setStatus(value)
       }).catch((cause: unknown) => {
@@ -49,10 +50,15 @@ export function NativeConnectionPanel({ connection, client, connected, authentic
     }
     refresh()
     const monitor = setInterval(refresh, 15_000)
-    const expiry = setTimeout(() => {
-      connection.clear(); onDisconnected('Local page authorization expired. Private results were cleared; pair again.')
-    }, Math.max(0, (connection.expiresAt() ?? 0) - Date.now()))
-    return () => { controller.abort(); clearInterval(monitor); clearTimeout(expiry) }
+    let expiry: ReturnType<typeof setTimeout>
+    const checkExpiry = () => {
+      const remaining = (connection.sessionExpiresAt() ?? 0) - Date.now()
+      if (remaining > 0) { expiry = setTimeout(checkExpiry, remaining); return }
+      connection.clear(); onDisconnected('The 8-hour local work session ended. Private results were cleared; pair again.')
+    }
+    checkExpiry()
+    document.addEventListener('visibilitychange', refresh)
+    return () => { controller.abort(); clearInterval(monitor); clearTimeout(expiry); document.removeEventListener('visibilitychange', refresh) }
   }, [connected, connection, client, onDisconnected])
   async function begin() {
     setBusy(true); setError('')
@@ -72,6 +78,7 @@ export function NativeConnectionPanel({ connection, client, connected, authentic
     <h2>{connected ? 'Live MSX: this device' : 'Connect your local MSX installation'}</h2>
     {connected ? <>
       <p>{status?.detail ?? 'Checking the owner connection...'}</p>
+      <p>This paired page supports an 8-hour work session. Authorization renews silently for the same verified owner; disconnect, account changes or lost source access still revoke it.</p>
       {status?.account && <p>{cli ? 'Azure CLI account' : 'Native account'}: <strong>{status.account}</strong></p>}
       <button type="button" disabled={busy} onClick={() => { void disconnect() }}>Disconnect this page</button>
     </> : <>

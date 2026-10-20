@@ -27,6 +27,9 @@ import { isCliConfiguration, isLocalConfiguration, type TeamsConfiguration } fro
 import { getCliCapabilities, cliPublicConfigurationVersion, localConnectionVersion, localRevokeRequestSchema, nativeCapabilities, nativeConnectionStatusSchema, type NativeConnectionStatus } from '../../../packages/common/contracts/local-connection.js'
 import { LocalPairingError, type LocalPairingAuthority } from './local-pairing.js'
 import { NativeConnectionError } from './native-identity.js'
+import { teamsClientReadyResultSchema, teamsLaunchVersion } from '../../../packages/common/contracts/teams-launch.js'
+import { TeamsLaunchError, type TeamsLaunchMonitor } from './launch-status.js'
+import { localSessionRenewalRequestSchema } from '../../../packages/common/contracts/local-connection.js'
 
 export interface TeamsHandlerOptions {
   configuration: TeamsConfiguration
@@ -39,7 +42,8 @@ export interface TeamsHandlerOptions {
   acceptNewWork?: boolean
   onDeactivate?(principal: ExecutionPrincipal): Promise<void>
   authenticate?(assertion: string): Promise<ExecutionPrincipal>
-  localConnection?: { pairing: LocalPairingAuthority; status(): NativeConnectionStatus }
+  localConnection?: { pairing: LocalPairingAuthority; status(): NativeConnectionStatus; refreshIdentity(): Promise<void> }
+  launch?: TeamsLaunchMonitor
   onError?(event: { correlationId: string; code: string; method: string; category: string }): void
 }
 export class TeamsHttpError extends Error {
@@ -89,6 +93,11 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
       if (local) assertNativeHttpRequest(request, options.configuration.origin)
       if (url.pathname === '/api/health' && request.method === 'GET') {
         json(200, { status: 'ready', surface: 'teams', mode: options.configuration.mode })
+        return true
+      }
+      if (url.pathname === '/api/teams/launch' && request.method === 'GET') {
+        if (!options.launch) throw new TeamsHttpError(404, 'launch_monitor_not_configured')
+        json(200, options.launch.status())
         return true
       }
       if (url.pathname === '/api/teams/config' && request.method === 'GET') {
@@ -142,17 +151,35 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
       }
       const authorization = request.headers.authorization
       const assertion = authorization?.startsWith('Bearer ') ? authorization.slice(7) : ''
+      if (local && request.method === 'POST' && url.pathname === '/api/teams/local/renew') {
+        localSessionRenewalRequestSchema.parse(await readBody(request))
+        local.pairing.assertRenewable(assertion)
+        await local.refreshIdentity()
+        const renewed = local.pairing.renew(assertion)
+        authenticatedAssertion = assertion
+        json(200, renewed)
+        return true
+      }
+      if (local && request.method === 'POST' && url.pathname === '/api/teams/local/revoke') {
+        localRevokeRequestSchema.parse(await readBody(request))
+        local.pairing.revoke(assertion)
+        json(200, { contractVersion: localConnectionVersion, state: 'disconnected' })
+        return true
+      }
       let principal: ExecutionPrincipal
       try { principal = await authenticate(assertion) } catch (error) {
         if (error instanceof TeamsAuthorizationError) throw error
         throw new TeamsHttpError(401, 'authorization_required')
       }
       authenticatedAssertion = assertion
-      if (local && request.method === 'POST' && url.pathname === '/api/teams/local/revoke') {
-        localRevokeRequestSchema.parse(await readBody(request))
-        local.pairing.revoke(assertion)
-        authenticatedAssertion = undefined
-        json(200, { contractVersion: localConnectionVersion, state: 'disconnected' })
+      if (request.method === 'POST' && url.pathname === '/api/teams/launch/ready') {
+        if (!options.launch) throw new TeamsHttpError(404, 'launch_monitor_not_configured')
+        try { options.launch.report(await readBody(request), local?.pairing.pageCode(assertion), principal.expiresAt) }
+        catch (error) {
+          if (error instanceof TeamsLaunchError) throw new TeamsHttpError(409, error.code)
+          throw error
+        }
+        json(200, teamsClientReadyResultSchema.parse({ contractVersion: teamsLaunchVersion, state: 'ready' }))
         return true
       }
       if (local && request.method === 'GET' && url.pathname === '/api/teams/local/status') {

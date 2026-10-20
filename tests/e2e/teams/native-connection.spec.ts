@@ -1,19 +1,24 @@
 import { expect, test, type Page } from '@playwright/test'
-import { getCliCapabilities, cliPublicConfigurationVersion, localConnectionVersion, localPairRequestSchema, nativeCapabilities, type CliWriteMode } from '../../../packages/common/contracts/local-connection.js'
-import { chooseOpportunity, post } from './helpers.js'
+import { getCliCapabilities, cliPublicConfigurationVersion, localConnectionVersion, localPairRequestSchema, nativeCapabilities, localSessionLeaseMs, localWorkSessionMs, type CliWriteMode } from '../../../packages/common/contracts/local-connection.js'
+import { chooseOpportunity, embeddedTeams, post } from './helpers.js'
+import { teamsClientReadyRequestSchema } from '../../../packages/common/contracts/teams-launch.js'
 
 async function offlineNativeFixture(page: Page, cli = false, writeMode: CliWriteMode = 'read-only') {
+  const launch = await (await page.request.get('/api/teams/launch')).json()
   let approved = false
   let revoked = false
   let unavailable = false
   let privateRequests = 0
   const token = 'L'.repeat(43)
   const expiresAt = new Date(Date.now() + 300_000).toISOString()
+  const sessionExpiresAt = Date.now() + localWorkSessionMs
   const requests: string[] = []
+  const reports: unknown[] = []
   await page.route('**/api/teams/**', async (route) => {
     const path = new URL(route.request().url()).pathname.slice('/api/teams/'.length)
     requests.push(path)
     const json = (value: unknown, status = 200) => route.fulfill({ status, json: value })
+    if (path === 'launch') return json({ ...launch, mode: 'live', authentication: cli ? 'local-azure-cli' : 'local-interactive' })
     if (path === 'config') return json({
       contractVersion: cli ? cliPublicConfigurationVersion : localConnectionVersion, mode: 'live',
       authentication: cli ? 'local-azure-cli' : 'local-interactive',
@@ -28,11 +33,19 @@ async function offlineNativeFixture(page: Page, cli = false, writeMode: CliWrite
       : { contractVersion: localConnectionVersion, state: 'pending-owner-approval', expiresAt })
     privateRequests++
     if (revoked || unavailable || route.request().headers()['authorization'] !== `Bearer ${token}`) return json({ error: 'authorization_required' }, 401)
+    if (path === 'local/renew') {
+      const now = await page.evaluate(() => Date.now())
+      return json({ contractVersion: '1.0', expiresAt: new Date(Math.min(now + localSessionLeaseMs, sessionExpiresAt)).toISOString(), sessionExpiresAt: new Date(sessionExpiresAt).toISOString() })
+    }
     if (path === 'session') return json({ contractVersion: '1.0', mode: 'live', roles: cli ? [] : ['TLC.Teams.User'], displayName: cli ? `Verified local MSX user (${writeMode === 'reviewed' ? 'reviewed read/write' : 'read-only'})` : 'Offline native fixture' })
     if (path === 'local/status') return json({
       contractVersion: localConnectionVersion, state: 'connected', detail: 'Offline fixture only. No actual source data was accessed.',
       account: 'offline-owner@example.test', resources: [], capabilities: cli ? getCliCapabilities(writeMode) : nativeCapabilities
     })
+    if (path === 'launch/ready') {
+      reports.push(teamsClientReadyRequestSchema.parse(route.request().postDataJSON()))
+      return json({ contractVersion: '1.0', state: 'ready' })
+    }
     if (path === 'local/revoke') { revoked = true; return json({ contractVersion: localConnectionVersion, state: 'disconnected' }) }
     if (cli && writeMode === 'reviewed' && /^(operations|actions)\//.test(path)) return route.continue()
     if (path === 'operations/listAccounts') return json(cli ? [{
@@ -42,8 +55,37 @@ async function offlineNativeFixture(page: Page, cli = false, writeMode: CliWrite
     if (path === 'operations/workflows.list') return json([])
     return json({ error: 'offline_fixture_operation_not_configured' }, 409)
   })
-  return { approve: () => { approved = true }, invalidate: () => { unavailable = true }, requests, privateRequests: () => privateRequests, token }
+  return { approve: () => { approved = true }, invalidate: () => { unavailable = true }, requests, reports, privateRequests: () => privateRequests, token }
 }
+test('a paired live page renews past fifteen minutes but clears its private workspace at the eight-hour workday limit', async ({ page }) => {
+  await page.clock.install({ time: new Date() })
+  const fixture = await offlineNativeFixture(page, true)
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Request local pairing' }).click()
+  fixture.approve()
+  await expect(page.getByLabel('Customer account', { exact: true })).toHaveValue('cli-own-account')
+  const checksBefore = fixture.requests.filter((path) => path === 'local/status').length
+  await page.clock.fastForward(16 * 60_000)
+  await expect.poll(() => fixture.requests.filter((path) => path === 'local/renew').length).toBeGreaterThan(0)
+  await expect.poll(() => fixture.requests.filter((path) => path === 'local/status').length).toBeGreaterThan(checksBefore)
+  await expect(page.getByLabel('Customer account', { exact: true })).toHaveValue('cli-own-account')
+  await expect(page.getByRole('button', { name: 'Request local pairing' })).toHaveCount(0)
+  await page.clock.fastForward(localWorkSessionMs)
+  await expect(page.getByRole('alert').filter({ hasText: '8-hour local work session ended' })).toBeVisible()
+  await expect(page.getByLabel('Customer account', { exact: true })).toHaveCount(0)
+})
+test('the embedded local-live client acknowledges its exact backend/build only after owner-approved pairing', async ({ page }) => {
+  const fixture = await offlineNativeFixture(page, true)
+  const app = await embeddedTeams(page, 'content')
+  await expect(app.getByRole('heading', { name: 'Connect your local MSX installation' })).toBeVisible()
+  expect(fixture.reports).toEqual([])
+  await app.getByRole('button', { name: 'Request local pairing' }).click()
+  await expect(app.getByText('A1B2C3D4', { exact: true })).toBeVisible()
+  expect(fixture.reports).toEqual([])
+  fixture.approve()
+  await expect(app.getByText('Teams client and backend verified', { exact: true })).toBeVisible()
+  expect(teamsClientReadyRequestSchema.parse(fixture.reports[0])).toMatchObject({ host: 'teams', runId: '11111111111111111111111111111111' })
+})
 test('CLI reviewed-write UI requires exact confirmation; cancel leaves the offline sample source untouched', async ({ page, request }) => {
   const fixture = await offlineNativeFixture(page, true, 'reviewed')
   await page.goto('/')

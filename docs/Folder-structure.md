@@ -33,6 +33,7 @@ apps/teams/src/cli-identity.ts        Verified current CLI user; private read-on
 apps/teams/src/native-connection.ts   Per-user native composition, private state and owner control
 apps/teams/src/local-owner-control.ts
 apps/teams/src/local-pairing.ts       Windows owner channel and ephemeral local page admission
+apps/teams/src/launch-status.ts       Exact runtime/build and authenticated client readiness monitor
 apps/teams/src/client/                Personal/channel/meeting presentation
                                      Focused scope, opportunity, guidance, record actions,
                                      Plays/result, navigation and responsive-disclosure modules
@@ -44,7 +45,10 @@ apps/shared/                         Browser-safe prompt/Markdown and existing U
 packages/common/contracts/workflow-output.ts
                                      Browser-safe existing workflow result/run-view schemas
 packages/common/contracts/local-connection.ts
-                                     Native/owner protocol v1.0 and CLI write-mode public profile v1.2
+                                     Native/owner protocol v1.0, CLI public profile v1.2,
+                                     and independently versioned work-session renewal v1.0
+packages/common/contracts/teams-launch.ts
+                                     Separate strict v1.0 launch/build/client-readiness contracts
 packages/orchestrator/application-runtime.ts
 packages/orchestrator/operations.ts   Shared composition and typed operation catalog
 packages/orchestrator/task-agents.ts  Shared Foundry/sample/deterministic-live registries
@@ -57,7 +61,8 @@ packages/documents/                   Shared Word/email builders, not an app dep
 tests/unit/teams/                     Cumulative deterministic Teams slices
 tests/e2e/teams/                      Actual host/browser journeys
 release-teams/                       Ignored generated installation/runtime archives
-scripts/run-teams-local.ps1          Sample/live menu, build/package/extract/verify/run/sideload
+scripts/run-teams-local.ps1          Guided build/start/install/pair/verify; status and restart-free resume
+scripts/teams-launch-session.ps1     Owned-run checks, exact-ZIP install and finish-line verification
 scripts/teams-local-connection.ps1   Explicit native/CLI owner connect/approve/status/disconnect
 ```
 

@@ -116,3 +116,14 @@ export const localOwnerRecordSchema = base.extend({
 export type LocalOwnerCommand = z.infer<typeof localOwnerCommandSchema>
 export type LocalOwnerResult = z.infer<typeof localOwnerResultSchema>
 export type LocalOwnerRecord = z.infer<typeof localOwnerRecordSchema>
+
+export const localSessionVersion = '1.0' as const
+export const localSessionLeaseMs = 15 * 60_000
+export const localWorkSessionMs = 8 * 60 * 60_000
+export const localSessionRenewalIntervalMs = 5 * 60_000
+export const localSessionRenewalRequestSchema = z.object({ contractVersion: z.literal(localSessionVersion) }).strict()
+export const localSessionRenewalResultSchema = z.object({
+  contractVersion: z.literal(localSessionVersion),
+  expiresAt: z.iso.datetime(),
+  sessionExpiresAt: z.iso.datetime()
+}).strict().refine((value) => Date.parse(value.expiresAt) <= Date.parse(value.sessionExpiresAt))

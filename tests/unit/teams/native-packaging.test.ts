@@ -32,7 +32,7 @@ describe('explicit device-local live package', () => {
   it('advertises private native source use without unreachable bots or shared-state promises', () => {
     const manifest = createTeamsManifest(options)
     expect(manifest.name.short).toBe('TLC Assist Local')
-    expect(manifest.staticTabs[0]).toMatchObject({ contentUrl: `${options.origin}/`, websiteUrl: `${options.origin}/`, scopes: ['personal'] })
+    expect(manifest.staticTabs[0]).toMatchObject({ contentUrl: `${options.origin}/?tlcAppVersion=0.1.3`, websiteUrl: `${options.origin}/?tlcAppVersion=0.1.3`, scopes: ['personal'] })
     expect(manifest.configurableTabs).toBeUndefined()
     expect(manifest.bots).toBeUndefined()
     expect(manifest.composeExtensions).toBeUndefined()

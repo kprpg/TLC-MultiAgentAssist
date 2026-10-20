@@ -85,9 +85,9 @@ export class CliIdentityProvider {
       throw error instanceof NativeConnectionError ? error : new NativeConnectionError('native_source_denied')
     }
   }
-  async getToken(resource: NativeResource): Promise<string> {
+  async getToken(resource: NativeResource, renewSession = false): Promise<string> {
     this.assertResource(resource)
-    const identity = this.identity()
+    const identity = renewSession ? this.current : this.identity()
     if (!identity) throw new NativeConnectionError('native_sign_in_required')
     const generation = this.generation
     try {
@@ -98,6 +98,8 @@ export class CliIdentityProvider {
         await this.disconnect()
         throw new NativeConnectionError('native_connection_changed')
       }
+      if (renewSession) await this.options.probeMsxIdentity(result.token, result.identity.principal)
+      if (generation !== this.generation) throw new NativeConnectionError('native_connection_changed')
       this.current = result.identity
       return result.token
     } catch (error) {
