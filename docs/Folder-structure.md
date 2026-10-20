@@ -20,6 +20,13 @@ The structure supports these boundaries:
 
 ## Repository Layout
 
+### Product feedback intake
+
+- [Product Backlog](./Product-Backlog.md) records incoming user requests, ideas,
+  screenshots, triage decisions, and acceptance criteria; capture is not implementation approval.
+- [Backlog screenshot assets](./media/product-backlog/) contains redacted,
+  ID-labelled references linked from each entry. Sensitive originals stay outside Git.
+
 ### Teams implementation additions
 
 The original proposal below is retained as historical context. The Teams development

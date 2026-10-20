@@ -217,6 +217,7 @@ The `ext-v*` tag must match the extension `version` in `apps/vscode-extension/pa
 - [Account Discovery: implementation and validation](docs/Account-Discovery-Portfolio-Feasibility.md)
 - [Voice search: usage, offline engines, and tests](docs/user-guide/VOICE-SEARCH.md)
 - [Frequently asked questions](docs/FAQ.md)
+- [Product Backlog: feature requests, feedback, and screenshots](docs/Product-Backlog.md)
 - [VS Code extension install (end user)](docs/user-guide/VSCODE-EXTENSION-INSTALL.md)
 - [VS Code extension — command-line build, install, and run](docs/user-guide/VSCODE-EXTENSION-CLI.md)
 - [VS Code extension build, package, and deploy](docs/runbooks/vscode-extension.md)
