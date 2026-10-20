@@ -57,6 +57,12 @@ describe('Discovery customer filters', () => {
     expect(filterDiscoveryOpportunities([unnamed], { include: [], exclude: [customer] })).toEqual([])
   })
 
+  it('accepts contract-parsed rows with explicitly undefined optional account names', () => {
+    const item = { ...opportunities[0]!, accountName: undefined, technicalCapability: 'Compute' }
+    expect(discoveryCustomers([item])).toEqual([{ id: 'zulu', name: 'zulu' }])
+    expect(sortDiscoveryOpportunities(filterDiscoveryOpportunities([item], { include: [], exclude: [] }), null)[0]).toBe(item)
+  })
+
   it('deduplicates customer choices by ID and sorts names naturally', () => {
     const items = [
       { accountId: 'ten', accountName: 'Customer 10' },

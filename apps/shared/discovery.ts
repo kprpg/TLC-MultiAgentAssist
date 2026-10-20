@@ -2,7 +2,7 @@ export interface DiscoveryOpportunity {
   id: string
   name: string
   accountId: string
-  accountName?: string
+  accountName?: string | undefined
   recordedStage: number
   onDealTeam: boolean
 }
@@ -19,7 +19,7 @@ export type DiscoverySort = { column: DiscoverySortColumn; direction: 'ascending
 
 const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 
-export function discoveryCustomers(opportunities: readonly { accountId: string; accountName?: string }[]): DiscoveryCustomer[] {
+export function discoveryCustomers(opportunities: readonly { accountId: string; accountName?: string | undefined }[]): DiscoveryCustomer[] {
   const customers = new Map<string, DiscoveryCustomer>()
   for (const item of opportunities) {
     const name = item.accountName?.trim()

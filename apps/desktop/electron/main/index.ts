@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, screen, shell, type IpcMainInvokeEvent } from 'electron'
 import { AzureCliCredential } from '@azure/identity'
 import { mkdirSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -37,6 +37,7 @@ import { WindowsVoiceCaptureDriver } from '../../../../packages/connectors/commo
 import { createVoiceIpcHandler, voiceIpcChannel } from './voice-ipc.js'
 import { createSellerDashboardHost } from '../../../../packages/orchestrator/seller-dashboard.js'
 import { createSellerDashboardIpcHandler, sellerDashboardIpcChannel } from './seller-dashboard-ipc.js'
+import { desktopWindowBounds } from './window-bounds.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -446,10 +447,7 @@ function safeFileName(value: string): string {
 
 async function createWindow(): Promise<void> {
   const window = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 1080,
-    minHeight: 720,
+    ...desktopWindowBounds(screen.getPrimaryDisplay().workArea),
     backgroundColor: '#f5f7fa',
     title: 'TLC Account Team Intelligence',
     icon: appIcon,

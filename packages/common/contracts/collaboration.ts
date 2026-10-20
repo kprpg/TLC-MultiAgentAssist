@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { cliPublicConfigurationSchema, nativePublicConfigurationSchema } from './local-connection.js'
 
 export const collaborationVersion = '1.0' as const
 const identifier = z.string().min(1).max(500)
@@ -61,9 +62,11 @@ export const teamsSessionSchema = base.extend({
   roles: z.array(z.string()),
   displayName: z.string().min(1)
 }).strict()
-export const teamsPublicConfigurationSchema = z.discriminatedUnion('mode', [
+export const teamsPublicConfigurationSchema = z.union([
   z.object({ mode: z.literal('sample') }).strict(),
-  z.object({ mode: z.literal('live'), tenantId: z.uuid(), spaClientId: z.uuid(), apiScope: z.string().min(1) }).strict()
+  z.object({ mode: z.literal('live'), tenantId: z.uuid(), spaClientId: z.uuid(), apiScope: z.string().min(1) }).strict(),
+  nativePublicConfigurationSchema,
+  cliPublicConfigurationSchema
 ])
 export type TeamsSession = z.infer<typeof teamsSessionSchema>
 

@@ -7,50 +7,21 @@
 [![VS Code extension release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/vscode-extension-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/vscode-extension-release.yml)
 [![Nightly VS Code extension release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly-vscode-extension.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly-vscode-extension.yml)
 
-TLC MultiAgent Assist is an account assistant that combines live MSX opportunity context with contextual guidance to help advance each opportunity. It has three established surfaces plus a Teams development surface from one codebase:
+TLC MultiAgent Assist is an account assistant that combines live MSX opportunity context with contextual guidance to help advance each opportunity. It has three established surfaces from one codebase; Microsoft Teams is a fourth surface **under development**:
 
 | Surface | What it is | Get started |
 | --- | --- | --- |
 | **VS Code extension** | TLC Assist inside VS Code or VS Code Insiders. | [Install](#vs-code-extension) |
 | **Windows desktop app** | A packaged Electron app with Start menu and desktop shortcuts. | [Install](#desktop-app) |
 | **Web application** | The same UI in the browser, hosted on Azure App Service. | [Run](#web-application) |
-| **Microsoft Teams (development)** | Thin Teams UI/transport over the same core; run it yourself on Windows now, deploy the same runtime to Azure later. | [Setup, ZIPs and F5](docs/runbooks/teams-app.md) |
-
-### Teams: local development now, Azure hosting later
-
-The Teams-uploadable ZIP contains the manifest and icons, **not a running backend**.
-You run the ordinary Node web application yourself on your Windows laptop for
-development/test. The local profile uses durable SQLite (encrypted in live mode),
-not mandatory Azure Table Storage or a laptop managed identity. The same runtime
-has an Azure profile for later deployment; no vendor or other operator is assumed.
-FTE colleagues authenticate individually and retain their own delegated source
-permissions, not the laptop owner's access.
-
-Use `npm run teams:start` for the local sanitized sample, or
-`npm run teams:start:configured` after preparing the ignored local environment file.
-Stop with Ctrl+C. Teams/colleague testing additionally requires approved reachable
-HTTPS ingress; no tunnel, networking change or Azure resource is created by these
-commands. Installing the Teams package neither starts the laptop server nor
-deploys it to Azure.
-
-For the complete build/package/extract/run/upload sequence, use the single
-[local Teams runner](scripts/run-teams-local.ps1). It requires the selected HTTPS
-origin, verifies it before sideloading, and supports supplied trusted localhost
-certificates or an existing approved HTTPS ingress. See the
-[one-script instructions](docs/runbooks/teams-app.md#one-script-build-run-and-upload).
-
-The [Teams runbook](docs/runbooks/teams-app.md) distinguishes the installation ZIP,
-the separately deployable runtime ZIP, and explicitly unconfigured development
-packages. It covers start/stop, configuration, logs, state/backup/recovery, F5,
-opt-in HTTPS exposure, manifest/Teams setup, local-to-Azure changes and unverified
-live/ingress gates. ZIP generation or browser-only testing is not production readiness.
+| **Microsoft Teams (under development)** | Development UI/transport over the same core; run it yourself on Windows now, deploy the same runtime to Azure later. | [Development setup, ZIPs and F5](#microsoft-teams-under-development) |
 
 ## Data modes
 
 Every surface runs in one of two modes:
 
 - **Sample mode** (default) — bundled sanitized data. No sign-in, no network; explore without touching MSX, Foundry, Azure, or Microsoft Entra ID.
-- **Live mode** — real opportunity data over **MSX OData** and **Dataverse MCP**, plus Microsoft Foundry agents. Requires corporate identity and the surface's approved authentication. Teams uses dedicated Entra/NAA/OBO admission and tenant/FTE/source authorization, not the VS Code credential.
+- **Live mode** — real opportunity data over **MSX OData** and **Dataverse MCP**, plus Microsoft Foundry agents. Requires corporate identity and the surface's approved authentication. Teams uses its selected private CLI/native or hosted Entra/NAA/OBO profile, never the VS Code credential. Optional source/model capabilities depend on that profile's grants.
 
 See [Documentation](#documentation) for the full user guide, FAQ, and runbooks.
 
@@ -71,8 +42,6 @@ In each surface, open **New** (immediately before **Discover**), choose **Opport
 Opportunity uses an authorized parent from that Account; new Opportunities can include child
 Milestones. Multiple Opportunities support repeated forms, an editable grid, and paired CSV import;
 existing-parent Milestones support repeated forms, an editable grid, and Milestone CSV import.
-The Teams development surface places the same creation/draft workflow under
-**Accounts > New / draft** and uses its own sanitized sample database.
 Import validates and loads an editable draft; **it does not insert records**. Whether using a form
 or CSV, select **Validate & review**, check the Account, target, fields, and mutation count, then
 select **Submit to SQLite** to insert the batch. **Export draft** only downloads files.
@@ -220,11 +189,12 @@ npm install
 
 | Target | Command | Notes |
 | --- | --- | --- |
+| VS Code extension | **F5** in VS Code | See the launch configs under [VS Code extension](#vs-code-extension), or the [command-line build/install/run guide](docs/user-guide/VSCODE-EXTENSION-CLI.md). |
 | Desktop (sample) | `npm run desktop:start` | First copy the Foundry config: `Copy-Item config/foundry.environment.example.json config/foundry.environment.json`. |
 | Desktop (package) | `npm run desktop:package` | Windows artifacts are written to `release/`. |
 | Web (sample) | `npm run web:start` | See [Web application](#web-application). |
 | Web (live) | `az login` then `npm run web:start:live` | Uses the private Foundry environment file plus an Azure CLI sign-in. |
-| VS Code extension | **F5** in VS Code | See the launch configs under [VS Code extension](#vs-code-extension), or the [command-line build/install/run guide](docs/user-guide/VSCODE-EXTENSION-CLI.md). |
+| Microsoft Teams (under development) | `npm run teams:start` | Local sanitized sample; see [Teams development setup](#microsoft-teams-under-development) for installation and pairing. |
 
 Packaged desktop releases seed the non-secret shared Foundry configuration automatically and open the system browser for Microsoft sign-in. The private developer file above stays ignored and can override the shared default. Downloaded artifacts may need to be unblocked before launch (right-click → **Properties** → **Unblock**).
 
@@ -249,6 +219,81 @@ The `ext-v*` tag must match the extension `version` in `apps/vscode-extension/pa
 - [Frequently asked questions](docs/FAQ.md)
 - [VS Code extension install (end user)](docs/user-guide/VSCODE-EXTENSION-INSTALL.md)
 - [VS Code extension — command-line build, install, and run](docs/user-guide/VSCODE-EXTENSION-CLI.md)
+- [VS Code extension build, package, and deploy](docs/runbooks/vscode-extension.md)
 - [Desktop setup and troubleshooting](docs/runbooks/desktop-app.md)
 - [Web setup and hosting](docs/runbooks/web-app.md)
-- [VS Code extension build, package, and deploy](docs/runbooks/vscode-extension.md)
+- [Microsoft Teams setup, ZIPs and F5 — under development](docs/runbooks/teams-app.md)
+
+## Microsoft Teams (under development)
+
+**Status: under development.** Teams is the fourth surface, after the VS Code
+extension, Windows desktop app and Web application. It is not presented as an
+established or production-ready release.
+
+### Local development now, Azure hosting later
+
+The Teams-uploadable ZIP contains the manifest and icons, **not a running backend**.
+You run the ordinary Node web application yourself on your Windows laptop for
+development/test. The local profile uses durable SQLite (encrypted in live mode),
+not mandatory Azure Table Storage or a laptop managed identity. The same runtime
+has an Azure profile for later deployment; no vendor or other operator is assumed.
+FTE colleagues authenticate individually and retain their own delegated source
+permissions, not the laptop owner's access.
+
+Use `npm run teams:start` for the local sanitized sample, or
+`npm run teams:start:configured` after preparing the ignored local environment file.
+Stop with Ctrl+C. Teams/colleague testing additionally requires approved reachable
+HTTPS ingress; no tunnel, networking change or Azure resource is created by these
+commands. Installing the Teams package neither starts the laptop server nor
+deploys it to Azure.
+
+For guided backend startup, exact-client installation **inside Teams**, source
+connection and verified pairing, use the single
+[local Teams runner](scripts/run-teams-local.ps1):
+
+```powershell
+.\scripts\run-teams-local.ps1                  # Sample / Live menu
+.\scripts\run-teams-local.ps1 -Mode sample     # Skip the menu
+.\scripts\run-teams-local.ps1 -Mode live       # Existing CLI user; reviewed MSX read/write
+.\scripts\run-teams-local.ps1 -Status          # Check backend, client and connection separately
+.\scripts\run-teams-local.ps1 -Resume          # Finish without restarting/losing pairing
+.\scripts\run-teams-local.ps1 -Resume -Reinstall
+.\scripts\run-teams-local.ps1 -Stop
+```
+
+After one-time setup, it discovers the private live configuration at
+`%LOCALAPPDATA%\TLC-Assist\Teams\configuration\cli.env` and trusted PEM files at
+`%LOCALAPPDATA%\TLC-Assist\Teams\certs\localhost.pem` / `localhost-key.pem`.
+The origin comes from `-Origin`, configured `TLC_TEAMS_ORIGIN`, or defaults to
+`https://localhost:3978`. It verifies HTTPS before sideloading and also supports
+an existing approved HTTPS ingress. It never creates/trusts certificates or
+signs in to MSX automatically. The guide asks for explicit **CONNECT** confirmation
+and the exact code displayed by the Teams page, then requires a fresh matching
+client/build/runtime acknowledgement before printing **VERIFIED**. Upload success
+or a browser preview alone is not completion. `-BackendOnly` defers installation;
+`-NoGuide` permits unattended upload without claiming rendering/pairing. See the
+[guided instructions](docs/runbooks/teams-app.md#recommended-guided-windows-launch-installation-and-pairing).
+
+The [Teams runbook](docs/runbooks/teams-app.md) distinguishes the installation ZIP,
+the separately deployable runtime ZIP, and explicitly unconfigured development
+packages. It covers start/stop, configuration, logs, state/backup/recovery, F5,
+opt-in HTTPS exposure, manifest/Teams setup, local-to-Azure changes and unverified
+live/ingress gates. ZIP generation or browser-only testing is not production readiness.
+
+For a per-user live Portfolio using an existing local corporate sign-in, the
+explicit [Azure CLI profile](docs/runbooks/teams-app.md#per-user-windows-msx-using-the-existing-cli-user)
+verifies that user's Dataverse identity and automatically loads their deal-team
+accounts. It is private, needs no new native/API/bot registration, and supports
+Desktop-equivalent MSX writes through the shared review/approval and audit path.
+Source permissions remain enforced; no FTE or publication role is inferred.
+Use `-CliWriteMode read-only` to retain read-only access. The separate native and hosted profiles retain
+their own approvals and capabilities.
+
+Teams uses the same **New, Discover, Portfolio, Plays, Dashboards** navigation as
+the VS Code extension, opening Portfolio by default. Its responsive account,
+opportunity, and Next Best Actions workbench retains private reviewed changes.
+The **New** workspace provides the shared creation/draft workflow and uses its
+own sanitized sample database; live record creation remains disabled.
+Meetings, Activity and Context settings are under **Tools**. The sample Seller
+Dashboard is available; live Teams cannot read the runtime operator's private
+Windows seller profile. See the [Teams UI guide](docs/runbooks/teams-app.md#extension-aligned-workspace).

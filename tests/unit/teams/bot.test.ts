@@ -33,4 +33,13 @@ describe('deterministic Teams conversational transport', () => {
     expect((await routeTeamsCommand({ conversationType: 'personal', text: 'update opportunity arbitrary', principal: user }, service, 'https://tlc.example.com')).text).toMatch(/review/i)
     expect(write).not.toHaveBeenCalled()
   })
+  it('hands workflow progress to Plays using its opaque run reference', async () => {
+    const service = await fixture()
+    const reply = await routeTeamsCommand({ conversationType: 'personal', text: 'workflow WF-001', principal: user }, service, 'https://tlc.example.com')
+    const link = new URL(reply.openUrl)
+    expect(link.origin).toBe('https://tlc.example.com')
+    expect(link.searchParams.get('view')).toBe('plays')
+    expect(link.searchParams.get('runId')).toMatch(/^[a-f0-9-]{36}$/)
+    expect(link.searchParams.has('token')).toBe(false)
+  })
 })

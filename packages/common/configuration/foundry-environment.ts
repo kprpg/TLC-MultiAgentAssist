@@ -10,7 +10,7 @@ const templatePlaceholderIds = new Set([
   '33333333-3333-4333-8333-333333333333'
 ])
 
-const configuredUuidSchema = z.string().uuid().refine(
+export const configuredUuidSchema = z.string().uuid().refine(
   (value) => !templatePlaceholderIds.has(value),
   'Replace the template UUID with the Azure resource value.'
 )

@@ -13,17 +13,23 @@ import { CollaborationService, type ContextAuthority } from '../../../packages/o
 import { NotificationOutbox } from '../../../packages/orchestrator/collaboration/notifications.js'
 import { ReviewedActionService, ActionDispatchPreventedError, ActionReviewStaleError } from '../../../packages/orchestrator/collaboration/reviewed-actions.js'
 import { CollaborationAdmissionError, CollaborationLifecycle } from '../../../packages/orchestrator/collaboration/lifecycle.js'
-import { MeetingAcquisitionService } from '../../../packages/orchestrator/collaboration/meeting-acquisition.js'
+import { GraphMeetingError, ManualTranscriptError, MeetingAcquisitionService } from '../../../packages/orchestrator/collaboration/meeting-acquisition.js'
 import { PublicationService, type SharedProjection } from '../../../packages/orchestrator/collaboration/publications.js'
 import type { ExecutionPrincipal } from '../../../packages/orchestrator/collaboration/principal.js'
-import { principalPartition } from '../../../packages/orchestrator/collaboration/principal.js'
+import { isLocalSourcePrincipal, principalPartition } from '../../../packages/orchestrator/collaboration/principal.js'
 import { UserRequestBudget, RequestQuotaError } from '../../../packages/orchestrator/collaboration/request-budget.js'
 import { WorkflowActivityStore } from '../../../packages/orchestrator/collaboration/activity.js'
 import { WorkflowRuntimeError } from '../../../packages/orchestrator/workflows/runtime.js'
 import { workflowContractVersion } from '../../../packages/common/contracts/workflows.js'
 import type { TranscriptEventService } from '../../../packages/orchestrator/collaboration/transcript-events.js'
 import { createTeamsAuthenticator, TeamsAuthorizationError } from './authentication.js'
-import type { TeamsConfiguration } from './configuration.js'
+import { isCliConfiguration, isLocalConfiguration, type TeamsConfiguration } from './configuration.js'
+import { getCliCapabilities, cliPublicConfigurationVersion, localConnectionVersion, localRevokeRequestSchema, nativeCapabilities, nativeConnectionStatusSchema, type NativeConnectionStatus } from '../../../packages/common/contracts/local-connection.js'
+import { LocalPairingError, type LocalPairingAuthority } from './local-pairing.js'
+import { NativeConnectionError } from './native-identity.js'
+import { teamsClientReadyResultSchema, teamsLaunchVersion } from '../../../packages/common/contracts/teams-launch.js'
+import { TeamsLaunchError, type TeamsLaunchMonitor } from './launch-status.js'
+import { localSessionRenewalRequestSchema } from '../../../packages/common/contracts/local-connection.js'
 
 export interface TeamsHandlerOptions {
   configuration: TeamsConfiguration
@@ -36,6 +42,8 @@ export interface TeamsHandlerOptions {
   acceptNewWork?: boolean
   onDeactivate?(principal: ExecutionPrincipal): Promise<void>
   authenticate?(assertion: string): Promise<ExecutionPrincipal>
+  localConnection?: { pairing: LocalPairingAuthority; status(): NativeConnectionStatus; refreshIdentity(): Promise<void> }
+  launch?: TeamsLaunchMonitor
   onError?(event: { correlationId: string; code: string; method: string; category: string }): void
 }
 export class TeamsHttpError extends Error {
@@ -48,26 +56,62 @@ export const samplePrincipal: ExecutionPrincipal = {
   roles: ['TLC.Teams.User', 'TLC.Teams.Writer', 'TLC.Teams.ContextAdmin', 'TLC.Teams.Publisher']
 }
 
+export function assertNativeHttpRequest(request: IncomingMessage, origin: string): void {
+  const target = new URL(request.url ?? '/', origin)
+  // Teams must navigate to the public shell before that frame can make same-origin private API requests.
+  const publicNavigation = request.method === 'GET' && target.origin === origin && target.pathname === '/' &&
+    request.headers['sec-fetch-mode'] === 'navigate' && ['iframe', 'document'].includes(String(request.headers['sec-fetch-dest']))
+  if (request.headers.host?.toLowerCase() !== new URL(origin).host.toLowerCase() ||
+      request.headers['x-forwarded-host'] || request.headers['x-forwarded-proto'] ||
+      request.headers.origin && request.headers.origin !== origin ||
+      request.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(String(request.headers['sec-fetch-site'])) && !publicNavigation ||
+      ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method ?? '') && request.headers.origin !== origin) {
+    throw new LocalPairingError(403, 'local_origin_denied')
+  }
+}
+
 export function createTeamsHandler(options: TeamsHandlerOptions) {
-  const authenticate = options.authenticate ?? (options.configuration.mode === 'sample'
-    ? async () => samplePrincipal : createTeamsAuthenticator(options.configuration))
+  const local = isLocalConfiguration(options.configuration) ? options.localConnection : undefined
+  if (isLocalConfiguration(options.configuration) && !local) throw new Error('Local HTTP requires the protected local pairing authority.')
+  const authenticate = options.authenticate ?? (local ? async (assertion: string) => local.pairing.authenticate(assertion)
+    : options.configuration.mode === 'sample' ? async () => samplePrincipal : createTeamsAuthenticator(options.configuration))
   return async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
     const url = new URL(request.url ?? '/', options.configuration.origin)
     if (!url.pathname.startsWith('/api/teams/') && url.pathname !== '/api/health') return false
     const correlationId = randomUUID()
     response.setHeader('x-correlation-id', correlationId)
     response.setHeader('cache-control', 'no-store')
+    let authenticatedAssertion: string | undefined
+    const assertCurrentCaller = () => { if (local && authenticatedAssertion !== undefined) local.pairing.authenticate(authenticatedAssertion) }
     const json = (status: number, value: unknown) => {
+      if (status >= 200 && status < 300) assertCurrentCaller()
       response.statusCode = status
       response.setHeader('content-type', 'application/json; charset=utf-8')
       response.end(JSON.stringify(value))
     }
     try {
+      if (local) assertNativeHttpRequest(request, options.configuration.origin)
       if (url.pathname === '/api/health' && request.method === 'GET') {
         json(200, { status: 'ready', surface: 'teams', mode: options.configuration.mode })
         return true
       }
+      if (url.pathname === '/api/teams/launch' && request.method === 'GET') {
+        if (!options.launch) throw new TeamsHttpError(404, 'launch_monitor_not_configured')
+        json(200, options.launch.status())
+        return true
+      }
       if (url.pathname === '/api/teams/config' && request.method === 'GET') {
+        if (isLocalConfiguration(options.configuration)) {
+          const configuration = options.configuration
+          const cli = isCliConfiguration(configuration)
+          json(200, {
+            contractVersion: cli ? cliPublicConfigurationVersion : localConnectionVersion, mode: 'live',
+            authentication: configuration.authentication,
+            ...(cli ? { writeMode: configuration.writeMode } : {}),
+            capabilities: cli ? getCliCapabilities(configuration.writeMode) : nativeCapabilities
+          })
+          return true
+        }
         json(200, options.configuration.mode === 'sample' ? { mode: 'sample' } : {
           mode: 'live', tenantId: options.configuration.tenantId,
           spaClientId: options.configuration.spaClientId,
@@ -97,19 +141,65 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
           throw new TeamsHttpError(403, 'cross_origin_denied')
         }
       }
+      if (local && request.method === 'POST' && url.pathname === '/api/teams/local/requests') {
+        json(201, local.pairing.begin(await readBody(request), request.headers.origin ?? ''))
+        return true
+      }
+      if (local && request.method === 'POST' && url.pathname === '/api/teams/local/exchange') {
+        json(200, local.pairing.exchange(await readBody(request), request.headers.origin ?? ''))
+        return true
+      }
       const authorization = request.headers.authorization
       const assertion = authorization?.startsWith('Bearer ') ? authorization.slice(7) : ''
+      if (local && request.method === 'POST' && url.pathname === '/api/teams/local/renew') {
+        localSessionRenewalRequestSchema.parse(await readBody(request))
+        local.pairing.assertRenewable(assertion)
+        await local.refreshIdentity()
+        const renewed = local.pairing.renew(assertion)
+        authenticatedAssertion = assertion
+        json(200, renewed)
+        return true
+      }
+      if (local && request.method === 'POST' && url.pathname === '/api/teams/local/revoke') {
+        localRevokeRequestSchema.parse(await readBody(request))
+        local.pairing.revoke(assertion)
+        json(200, { contractVersion: localConnectionVersion, state: 'disconnected' })
+        return true
+      }
       let principal: ExecutionPrincipal
       try { principal = await authenticate(assertion) } catch (error) {
         if (error instanceof TeamsAuthorizationError) throw error
         throw new TeamsHttpError(401, 'authorization_required')
       }
+      authenticatedAssertion = assertion
+      if (request.method === 'POST' && url.pathname === '/api/teams/launch/ready') {
+        if (!options.launch) throw new TeamsHttpError(404, 'launch_monitor_not_configured')
+        try { options.launch.report(await readBody(request), local?.pairing.pageCode(assertion), principal.expiresAt) }
+        catch (error) {
+          if (error instanceof TeamsLaunchError) throw new TeamsHttpError(409, error.code)
+          throw error
+        }
+        json(200, teamsClientReadyResultSchema.parse({ contractVersion: teamsLaunchVersion, state: 'ready' }))
+        return true
+      }
+      if (local && request.method === 'GET' && url.pathname === '/api/teams/local/status') {
+        json(200, nativeConnectionStatusSchema.parse(local.status()))
+        return true
+      }
+      if (local && /^\/api\/teams\/(?:contexts|publications|shared)(?:\/|$)/.test(url.pathname)) {
+        throw new TeamsHttpError(409, 'local_collaboration_distribution_required')
+      }
       if (request.method === 'GET' && url.pathname === '/api/teams/session') {
         json(200, {
           contractVersion: collaborationVersion, mode: principal.mode,
-          roles: principal.roles, displayName: principal.mode === 'sample' ? 'Sample user' : 'Authorized Microsoft FTE'
+          roles: principal.roles, displayName: principal.mode === 'sample' ? 'Sample user'
+            : isLocalSourcePrincipal(principal) ? `Verified local MSX user (${principal.localSourceAccess === 'reviewed' ? 'reviewed read/write' : 'read-only'})` : 'Authorized Microsoft FTE'
         })
         return true
+      }
+      if (isCliConfiguration(options.configuration) && options.configuration.writeMode === 'read-only' &&
+          (/^\/api\/teams\/actions(?:\/|$)/.test(url.pathname) || url.pathname === '/api/teams/meetings/preview-changes')) {
+        throw new TeamsHttpError(403, 'local_read_only')
       }
       const lifecycle = new CollaborationLifecycle(options.store, options.acceptNewWork ?? true)
       if (url.pathname === '/api/teams/lifecycle' && request.method === 'GET') {
@@ -125,6 +215,9 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
       }
       await lifecycle.assertReadable(principal)
       await new UserRequestBudget(options.store).consume(principal, 'requests', principal.mode === 'sample' ? 600 : 60)
+      if (isCliConfiguration(options.configuration) && ['/api/teams/meetings/resolve', '/api/teams/meetings/acquire'].includes(url.pathname)) {
+        throw new TeamsHttpError(409, 'graph_unavailable_in_cli_profile')
+      }
       const services = await options.resolveServices(principal, assertion)
       const operations = createApplicationOperations(services)
       const notifications = new NotificationOutbox(options.store)
@@ -137,17 +230,31 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
       const actions = new ReviewedActionService(options.store, {
         authorize: async (_actor, name, input) => {
           const admission = await lifecycle.assertActive(principal)
+          const localGeneration = local?.pairing.reviewGeneration()
           if (name === 'publishSummary') {
+            if (local) throw new TeamsHttpError(409, 'local_collaboration_distribution_required')
             if (principal.mode === 'live' && !options.deliverPublication) throw new TeamsHttpError(503, 'publication_delivery_unavailable')
             return { source: await publications.authorize(principal, input), admissionGeneration: admission.generation }
           }
           if (operations.describe(name).effect === 'read') throw new TeamsHttpError(400, 'not_a_mutation')
-          return { source: await operations.snapshot(name, input), admissionGeneration: admission.generation }
+          const source = await operations.snapshot(name, input)
+          assertCurrentCaller()
+          if (local && localGeneration !== local.pairing.reviewGeneration()) throw new NativeConnectionError('native_connection_changed')
+          return { source, admissionGeneration: admission.generation, ...(localGeneration ? { localGeneration } : {}) }
         },
         execute: async (_actor, name, input, before) => {
-          const reviewed = z.object({ source: z.unknown(), admissionGeneration: z.number().int().nonnegative() }).strict().parse(before)
+          const reviewed = z.object({ source: z.unknown(), admissionGeneration: z.number().int().nonnegative(), localGeneration: z.string().optional() }).strict().parse(before)
           const admission = await lifecycle.status(principal)
           if (!admission.acceptingNewWork || admission.generation !== reviewed.admissionGeneration) throw new ActionDispatchPreventedError()
+          if (local) {
+            try {
+              assertCurrentCaller()
+              if (local.pairing.reviewGeneration() !== reviewed.localGeneration) throw new ActionDispatchPreventedError()
+            } catch (error) {
+              if (error instanceof LocalPairingError) throw new ActionDispatchPreventedError()
+              throw error
+            }
+          }
           return name === 'publishSummary' ? publications.execute(principal, input)
             : services.withReviewedVersions(reviewed.source, () => operations.invoke(name, input))
         }
@@ -221,6 +328,7 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         const input = z.object({ opportunityId: z.string().min(1).max(200), document: exportResponseRequestSchema }).strict().parse(body)
         await services.orchestrator.getOpportunitySnapshot(input.opportunityId)
         const bytes = await createResponseDocumentBuffer(input.document)
+        assertCurrentCaller()
         response.statusCode = 200
         response.setHeader('content-type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
         response.setHeader('content-disposition', 'attachment; filename="TLC-response.docx"')
@@ -228,6 +336,7 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
       } else if (url.pathname === '/api/teams/documents/email') {
         const input = z.object({ opportunityId: z.string().min(1).max(200), draft: emailComposeRequestSchema }).strict().parse(body)
         await services.orchestrator.getOpportunitySnapshot(input.opportunityId)
+        assertCurrentCaller()
         response.statusCode = 200
         response.setHeader('content-type', 'message/rfc822')
         response.setHeader('content-disposition', 'attachment; filename="TLC-reviewed-draft.eml"')
@@ -265,6 +374,11 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         if (principal.mode !== 'sample') throw new TeamsHttpError(400, 'live_meeting_binding_required')
         await services.orchestrator.getOpportunitySnapshot(input.opportunityId)
         json(200, await services.listTranscriptSources(input.opportunityId))
+      } else if (url.pathname === '/api/teams/meetings/manual') {
+        const result = await acquisition.ingest(principal, body)
+        await notifications.enqueueAcquisition(principal, result)
+        await options.notify?.(principal)
+        json(200, { status: result.status, proposals: result.proposals })
       } else if (url.pathname === '/api/teams/meetings/acquire') {
         const result = await acquisition.acquire(principal, body)
         if (result.status.state === 'ready') {
@@ -297,12 +411,16 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         throw new TeamsHttpError(404, 'route_not_found')
       }
     } catch (error) {
-      const status = error instanceof CollaborationAdmissionError || error instanceof ActionReviewStaleError ? 409 : error instanceof WorkflowScopeAuthorizationError ? 403 : error instanceof RequestQuotaError ? 429 : error instanceof TeamsAuthorizationError ? 401 : error instanceof TeamsHttpError ? error.status
+      const status = error instanceof GraphMeetingError ? error.state === 'denied' || error.state === 'admin-blocked' ? 403 : error.state === 'auth-required' ? 409 : error.state === 'unsupported' ? 400 : 503
+        : error instanceof ManualTranscriptError ? 400
+        : error instanceof NativeConnectionError ? error.code === 'native_source_denied' ? 403 : error.code === 'native_resource_unavailable' ? 409 : 401 : error instanceof LocalPairingError ? error.status : error instanceof CollaborationAdmissionError || error instanceof ActionReviewStaleError ? 409 : error instanceof WorkflowScopeAuthorizationError ? 403 : error instanceof RequestQuotaError ? 429 : error instanceof TeamsAuthorizationError ? 401 : error instanceof TeamsHttpError ? error.status
         : error instanceof ZodError || error instanceof SyntaxError || error instanceof URIError ? 400 : 500
-      const code = error instanceof CollaborationAdmissionError ? error.code : error instanceof ActionReviewStaleError ? 'action_review_stale' : error instanceof WorkflowScopeAuthorizationError ? 'workflow_source_scope_changed' : error instanceof RequestQuotaError ? 'user_quota_exhausted' : error instanceof TeamsAuthorizationError ? error.code : error instanceof TeamsHttpError ? error.code : status === 400 ? 'invalid_request' : 'operation_failed'
+      const code = error instanceof GraphMeetingError ? error.code === 'invalid_meeting_link' ? 'graph_invalid_meeting_link' : `graph_${error.state.replaceAll('-', '_')}`
+        : error instanceof ManualTranscriptError ? error.code
+        : error instanceof NativeConnectionError || error instanceof LocalPairingError ? error.code : error instanceof CollaborationAdmissionError ? error.code : error instanceof ActionReviewStaleError ? 'action_review_stale' : error instanceof WorkflowScopeAuthorizationError ? 'workflow_source_scope_changed' : error instanceof RequestQuotaError ? 'user_quota_exhausted' : error instanceof TeamsAuthorizationError ? error.code : error instanceof TeamsHttpError ? error.code : status === 400 ? 'invalid_request' : 'operation_failed'
       const method = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method ?? '') ? request.method! : 'OTHER'
       const candidate = url.pathname.split('/')[3] ?? ''
-      const category = ['session', 'config', 'operations', 'actions', 'activity', 'contexts', 'meetings', 'publications', 'shared', 'documents', 'graph', 'references', 'lifecycle'].includes(candidate) ? candidate : 'unknown'
+      const category = ['session', 'config', 'local', 'operations', 'actions', 'activity', 'contexts', 'meetings', 'publications', 'shared', 'documents', 'graph', 'references', 'lifecycle'].includes(candidate) ? candidate : 'unknown'
       options.onError?.({ correlationId, code, method, category })
       const claims = error instanceof TeamsAuthorizationError ? error.claims : undefined
       if (claims && options.configuration.mode === 'live') response.setHeader('www-authenticate', `Bearer authorization_uri="https://login.microsoftonline.com/${options.configuration.tenantId}/oauth2/v2.0/authorize", error="insufficient_claims", claims="${Buffer.from(claims).toString('base64')}"`)

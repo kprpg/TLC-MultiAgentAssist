@@ -1,6 +1,6 @@
 export interface MilestoneVisibilityFields {
   status: string
-  targetDate?: string
+  targetDate?: string | undefined
 }
 
 const hiddenStatuses = new Set(['cancelled', 'closed'])

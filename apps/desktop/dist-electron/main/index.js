@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, screen, shell } from "electron";
 import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
 import { mkdirSync } from "node:fs";
 import { access, copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
@@ -3867,6 +3867,13 @@ var LiveMsxConnector = class {
 			throw error;
 		});
 		return this.currentUserIdPromise;
+	}
+	async assertNativeIdentity(entraObjectId) {
+		const userId = await this.getCurrentUserId();
+		if (!guidPattern.test(entraObjectId) || !guidPattern.test(userId)) throw new Error("The native source identity mapping is invalid.");
+		const user = await this.requestJson(`systemusers(${userId})?$select=azureactivedirectoryobjectid,isdisabled`);
+		if (!isObjectRecord(user) || user["isdisabled"] !== false || typeof user["azureactivedirectoryobjectid"] !== "string" || user["azureactivedirectoryobjectid"].toLowerCase() !== entraObjectId.toLowerCase()) throw new Error("The native source identity is absent, disabled or belongs to another Entra subject.");
+		return userId;
 	}
 	async assertOpportunityAccess(opportunityId) {
 		if (!(await this.getPortfolio()).opportunities.some((opportunity) => opportunity.id === opportunityId)) throw new Error("The opportunity is not in the signed-in user’s active MSX portfolio.");
@@ -10379,7 +10386,7 @@ function getFailureCode(error) {
 	return "unknown";
 }
 //#endregion
-//#region packages/orchestrator/workflows/cohort.ts
+//#region packages/common/contracts/workflow-output.ts
 var initialWorkflowIds = [
 	"WF-001",
 	"WF-002",
@@ -10394,6 +10401,40 @@ var initialWorkflowIds = [
 	"WF-011",
 	"WF-012"
 ];
+var workflowQueueItemSchema = z.object({
+	id: z.string().min(1),
+	workflowId: z.enum(initialWorkflowIds),
+	priority: z.enum([
+		"P0",
+		"P1",
+		"P2"
+	]),
+	title: z.string().min(1),
+	owner: z.string().min(1).optional(),
+	accountId: z.string().min(1).optional(),
+	accountName: z.string().min(1).optional(),
+	opportunityId: z.string().min(1).optional(),
+	opportunityName: z.string().min(1).optional(),
+	dueDate: z.string().date().optional(),
+	evidenceIds: z.array(z.string().min(1)),
+	status: z.literal("new")
+}).strict();
+var initialWorkflowOutputSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	workflowId: z.enum(initialWorkflowIds),
+	generatedAt: z.string().datetime(),
+	scope: scopeRefSchema,
+	card: workflowResultCardSchema,
+	queueItems: z.array(workflowQueueItemSchema),
+	lineage: z.array(mcpEvidenceLineageSchema).min(1),
+	sourceHealth: z.array(sourceHealthSchema).min(1)
+}).strict();
+var workflowRunViewSchema = z.object({
+	run: workflowRunSchema,
+	output: initialWorkflowOutputSchema.optional()
+}).strict();
+//#endregion
+//#region packages/orchestrator/workflows/cohort.ts
 var asOfSchema = z.string().date();
 var initialWorkflowInputSchemas = {
 	"WF-001": z.object({
@@ -10424,34 +10465,6 @@ var initialWorkflowInputSchemas = {
 	"WF-011": z.object({ asOf: asOfSchema }).strict(),
 	"WF-012": z.object({ asOf: asOfSchema }).strict()
 };
-var workflowQueueItemSchema = z.object({
-	id: z.string().min(1),
-	workflowId: z.enum(initialWorkflowIds),
-	priority: z.enum([
-		"P0",
-		"P1",
-		"P2"
-	]),
-	title: z.string().min(1),
-	owner: z.string().min(1).optional(),
-	accountId: z.string().min(1).optional(),
-	accountName: z.string().min(1).optional(),
-	opportunityId: z.string().min(1).optional(),
-	opportunityName: z.string().min(1).optional(),
-	dueDate: z.string().date().optional(),
-	evidenceIds: z.array(z.string().min(1)),
-	status: z.literal("new")
-}).strict();
-var initialWorkflowOutputSchema = z.object({
-	contractVersion: z.literal("1.0"),
-	workflowId: z.enum(initialWorkflowIds),
-	generatedAt: z.string().datetime(),
-	scope: scopeRefSchema,
-	card: workflowResultCardSchema,
-	queueItems: z.array(workflowQueueItemSchema),
-	lineage: z.array(mcpEvidenceLineageSchema).min(1),
-	sourceHealth: z.array(sourceHealthSchema).min(1)
-}).strict();
 function parseInitialWorkflowInput(workflowId, input) {
 	return initialWorkflowInputSchemas[workflowId].parse(input);
 }
@@ -12270,12 +12283,6 @@ function linkedAbortController(parent) {
 		dispose: () => parent.removeEventListener("abort", abort)
 	};
 }
-//#endregion
-//#region packages/orchestrator/workflows/view-contracts.ts
-var workflowRunViewSchema = z.object({
-	run: workflowRunSchema,
-	output: initialWorkflowOutputSchema.optional()
-}).strict();
 //#endregion
 //#region packages/orchestrator/workflows/host.ts
 var workflowIdSchema = z.string().regex(/^WF-[0-9]{3}$/);
@@ -14891,6 +14898,20 @@ function createSellerDashboardIpcHandler(host) {
 	return (request) => host.invoke(request);
 }
 //#endregion
+//#region apps/desktop/electron/main/window-bounds.ts
+function desktopWindowBounds(workArea) {
+	const width = Math.min(1440, workArea.width);
+	const height = Math.min(900, workArea.height);
+	return {
+		x: workArea.x + Math.floor((workArea.width - width) / 2),
+		y: workArea.y + Math.floor((workArea.height - height) / 2),
+		width,
+		height,
+		minWidth: Math.min(1080, workArea.width),
+		minHeight: Math.min(720, workArea.height)
+	};
+}
+//#endregion
 //#region apps/desktop/electron/main/index.ts
 var currentDirectory = dirname(fileURLToPath(import.meta.url));
 var desktopRoot = resolve(currentDirectory, "../..");
@@ -15235,10 +15256,7 @@ function safeFileName(value) {
 }
 async function createWindow() {
 	const window = new BrowserWindow({
-		width: 1440,
-		height: 900,
-		minWidth: 1080,
-		minHeight: 720,
+		...desktopWindowBounds(screen.getPrimaryDisplay().workArea),
 		backgroundColor: "#f5f7fa",
 		title: "TLC Account Team Intelligence",
 		icon: appIcon,

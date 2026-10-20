@@ -2,8 +2,9 @@
   "8a496494-f17e-e511-80e1-3863bb35ce00": {
     "manualAccountIds": [],
     "hiddenAccountIds": [
+      "26e56b6d-683b-48b1-b4fd-9822f709ddf5",
       "48bb2580-eb81-484a-9342-692cde43e20f"
     ],
-    "revision": 1
+    "revision": 2
   }
 }

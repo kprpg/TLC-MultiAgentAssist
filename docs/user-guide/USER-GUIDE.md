@@ -339,7 +339,15 @@ The workspace is organized into vertical *blades*:
 | **Workbench** (center)             | Detail view of the selected opportunity — MSX evidence, agent guidance, or MCEM stage board.              |
 | **Next best actions rail** (right) | Role-based prioritized next steps derived from the opportunity's stage, exit-criteria evidence, and milestone health (status and customer commitment). |
 
-Every blade has a collapse arrow in its header so you can widen the center workbench during long tasks; the collapse states persist between sessions.
+Use the collapse arrows in the blade headers to make room for the center workbench.
+In Desktop and Web, the Guidance toolbar stays visible while its content scrolls.
+**Maximize Guidance pane** temporarily hides the surrounding blades; **Restore Guidance pane**
+brings them back with their previous widths and collapse states. **Collapse Guidance pane**
+reduces the workbench to a narrow strip; use **Expand Guidance pane** to reopen it.
+
+The Desktop window opens within the display's usable work area, leaving the operating-system
+taskbar accessible. Desktop and Web keep the workspace within the current viewport; scroll
+inside a pane to reach content rather than extending the workspace below the window.
 
 ---
 
@@ -466,6 +474,10 @@ The **⋮** icon menu on each opportunity currently exposes:
 ## 5. Milestones — drilling down inside an opportunity
 
 Click an opportunity to *select and expand* it. The workbench center switches to the opportunity’s detail view, and the milestone tree opens beneath it in the left blade.
+
+In Desktop and Web, Opportunities and Milestones have separate bounded scroll regions.
+Milestones has a vertical scrollbar as well as horizontal scrolling for its wider table;
+the milestone heading and column headers remain visible as you scroll down the list.
 
 ![Opportunity selected — milestone tree open, MSX evidence view in the workbench, next best actions on the right](./media/04-milestones-and-evidence.png)
 

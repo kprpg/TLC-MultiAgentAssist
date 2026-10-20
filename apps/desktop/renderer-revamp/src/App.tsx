@@ -56,6 +56,7 @@ import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
 import { AddCustomerButton, type CustomerAccount } from '../../../shared/add-customer.js'
 import { RemoveCustomerButton } from '../../../shared/remove-customer.js'
+import { WorkbenchPane } from './workbench-pane.js'
 
 type Shell = 'desktop' | 'web'
 type WorkspaceView = 'accounts' | 'workflows' | 'discover' | 'dashboard' | 'new'
@@ -1389,15 +1390,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         {!collapsed.has('opportunities') && <BladeResizeHandle blade="opportunities" label="Opportunities blade" edge="end" width={bladeWidths.opportunities} onResize={(width) => resizeBlade('opportunities', width)} />}
       </section>}
 
-      <section className={`center-pane ${guidanceCollapsed ? 'guidance-collapsed' : ''} ${mobileBlade === 'center' ? 'mobile-active' : ''} ${opportunity && centerTab === 'stages' ? 'stage-board-active' : ''}`} aria-label="Opportunity workbench">
-        <Button
-          appearance="subtle"
-          className="icon-button desktop-only guidance-collapse-button"
-          icon={guidanceCollapsed ? <ChevronDoubleRight20Regular /> : <ChevronDoubleLeft20Regular />}
-          onClick={() => setGuidanceCollapsed((current) => !current)}
-          aria-label={`${guidanceCollapsed ? 'Expand' : 'Collapse'} Guidance pane`}
-          title={`${guidanceCollapsed ? 'Expand' : 'Collapse'} Guidance`}
-        />
+      <WorkbenchPane
+        collapsed={guidanceCollapsed}
+        mobileActive={mobileBlade === 'center'}
+        stageBoardActive={!!opportunity && centerTab === 'stages'}
+        onToggleCollapsed={() => setGuidanceCollapsed((current) => !current)}
+      >
         {!opportunity && <div className="landing-state">
           <span className="landing-icon">{account ? <Building20Regular /> : <Apps20Regular />}</span>
           <p className="eyebrow">{account ? 'ACCOUNT SELECTED' : 'MY ACCOUNT PORTFOLIO'}</p>
@@ -1587,7 +1585,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
             </Dialog>
           </div>}
         </>}
-      </section>
+      </WorkbenchPane>
 
       {opportunity && actionsOpen && <aside className={`blade action-blade ${collapsed.has('actions') ? 'collapsed' : ''} ${mobileBlade === 'actions' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('actions') ? undefined : bladeWidths.actions }} aria-label="Next best actions blade">
         {!collapsed.has('actions') && <BladeResizeHandle blade="actions" label="Next best actions blade" edge="start" width={bladeWidths.actions} onResize={(width) => resizeBlade('actions', width)} />}

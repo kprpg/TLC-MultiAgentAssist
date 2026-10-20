@@ -5,6 +5,9 @@ import { GraphMeetingError } from '../../../packages/connectors/graph/meetings.j
 import type { ExecutionPrincipal } from '../../../packages/orchestrator/collaboration/principal.js'
 import { CollaborationLifecycle } from '../../../packages/orchestrator/collaboration/lifecycle.js'
 import { RequestQuotaError } from '../../../packages/orchestrator/collaboration/request-budget.js'
+import { principalPartition } from '../../../packages/orchestrator/collaboration/principal.js'
+import { manualMeetingTranscriptVersion, meetingTranscriptSchema, type MeetingTranscript } from '../../../packages/common/contracts/meeting.js'
+import { z } from 'zod'
 
 const user: ExecutionPrincipal = { key: 't:u', tenantId: 't', userId: 'u', environmentId: 'env', roles: ['TLC.Teams.User'], mode: 'sample' }
 const stores: SqliteDocumentStore[] = []
@@ -24,6 +27,104 @@ function fixture() {
   return { store, getTranscripts, propose, readOpportunity, service: new MeetingAcquisitionService(store, { getTranscripts, propose, readOpportunity }) }
 }
 const input = { meetingId: 'meeting', opportunityId: 'opp', meetingType: 'internal' }
+
+function manualFixture() {
+  const data = fixture()
+  data.propose.mockImplementation(async (_actor: ExecutionPrincipal, opportunityId: string, transcript: MeetingTranscript) => ({
+    changeSetId: `change-${transcript.id}`, transcriptId: transcript.id, opportunityId, meetingType: transcript.meetingType,
+    slots: [], newMilestones: [], suggestedMilestoneIds: [], unmappedSignals: [], proposedAt: '2026-10-20T16:00:00.000Z'
+  }))
+  return data
+}
+const manualInput = {
+  contractVersion: manualMeetingTranscriptVersion, opportunityId: 'opp', meetingType: 'internal', source: 'paste',
+  content: 'Seller: Review the technical validation next week.\nSeller: Security approval is blocked.'
+}
+
+describe('manual transcript acquisition orchestration', () => {
+  it('parses pasted evidence and reviews the server-owned draft without any Graph access or business write', async () => {
+    const { service, getTranscripts, propose, readOpportunity } = manualFixture()
+    const result = await service.ingest(user, manualInput)
+    expect(result.status).toMatchObject({ state: 'ready', attribution: 'unknown' })
+    expect(result.status.id).toMatch(/^manual-[a-f0-9]{64}$/)
+    expect(result.status.detail).toContain('user-provided evidence, not a Graph-verified meeting')
+    expect(readOpportunity).toHaveBeenCalledWith(user, 'opp')
+    expect(propose).toHaveBeenCalledWith(user, 'opp', expect.objectContaining({
+      opportunityId: 'opp', meetingType: 'internal', source: 'paste',
+      segments: [
+        { segmentId: 'seg-1', speaker: 'Seller', text: 'Review the technical validation next week.' },
+        { segmentId: 'seg-2', speaker: 'Seller', text: 'Security approval is blocked.' }
+      ]
+    }))
+    expect(await service.review(user, result.status.id)).toEqual(result.proposals)
+    expect(getTranscripts).not.toHaveBeenCalled()
+    await expect(service.review({ ...user, userId: 'another-user' }, result.status.id)).rejects.toThrow(/unavailable/i)
+  })
+  it('uses the existing WebVTT parser for uploaded content and retains its evidence timestamps', async () => {
+    const { service, propose, getTranscripts } = manualFixture()
+    await service.ingest(user, {
+      ...manualInput, source: 'upload', format: 'vtt',
+      content: 'WEBVTT\n\n00:00:01.000 --> 00:00:03.000\n<v Seller>Security approval is blocked.</v>'
+    })
+    expect(propose).toHaveBeenCalledWith(user, 'opp', expect.objectContaining({
+      source: 'upload', segments: [{ segmentId: 'seg-1', startMs: 1000, endMs: 3000, speaker: 'Seller', text: 'Security approval is blocked.' }]
+    }))
+    expect(getTranscripts).not.toHaveBeenCalled()
+  })
+  it('retains per-user manual evidence across service recreation and detects tampered stored evidence', async () => {
+    const { service, store, readOpportunity, getTranscripts, propose } = manualFixture()
+    const result = await service.ingest(user, manualInput)
+    const resumed = new MeetingAcquisitionService(store, { readOpportunity, getTranscripts, propose })
+    expect(await resumed.review(user, result.status.id)).toEqual(result.proposals)
+    const key = `acquisition:${result.status.id}`
+    const row = await store.read(principalPartition(user), key)
+    if (!row) throw new Error('The manual draft was not persisted.')
+    const stored = z.object({ manualTranscript: meetingTranscriptSchema }).passthrough().parse(row.value)
+    expect(await store.replace(principalPartition(user), key, row.revision, {
+      ...stored, manualTranscript: { ...stored.manualTranscript, segments: [{ segmentId: 'seg-1', text: 'Changed evidence' }] }
+    })).toBe(true)
+    await expect(resumed.review(user, result.status.id)).rejects.toThrow(/evidence changed/i)
+    expect(getTranscripts).not.toHaveBeenCalled()
+  })
+  it('binds manual draft identity to content, classification, source and opportunity', async () => {
+    const { service } = manualFixture()
+    const ids: string[] = []
+    for (const value of [
+      manualInput, { ...manualInput, content: `${manualInput.content}\nSeller: A new next step.` },
+      { ...manualInput, meetingType: 'customer' }, { ...manualInput, source: 'upload' }, { ...manualInput, opportunityId: 'other-opportunity' }
+    ]) ids.push((await service.ingest(user, value)).status.id)
+    expect(new Set(ids).size).toBe(5)
+  })
+  it('honors pause, current source access and local CLI admission without requiring a Graph grant', async () => {
+    const { service, store, readOpportunity, propose, getTranscripts } = manualFixture()
+    const cliUser = { ...user, mode: 'live' as const, roles: [], localSourceAccess: 'read-only' as const }
+    expect((await service.ingest(cliUser, manualInput)).status.state).toBe('ready')
+    expect(getTranscripts).not.toHaveBeenCalled()
+    await new CollaborationLifecycle(store).set(user, 'pause')
+    await expect(service.ingest(user, manualInput)).rejects.toMatchObject({ code: 'collaboration_paused' })
+    await new CollaborationLifecycle(store).set(user, 'resume')
+    readOpportunity.mockRejectedValueOnce(new Error('Source access denied'))
+    await expect(service.ingest(user, { ...manualInput, content: `${manualInput.content}\nNew evidence.` })).rejects.toThrow('Source access denied')
+    expect(propose).toHaveBeenCalledTimes(1)
+  })
+  it('applies the shared live per-user agent budget to manual extraction', async () => {
+    const { service, propose } = manualFixture()
+    const liveUser = { ...user, mode: 'live' as const }
+    for (let index = 0; index < 4; index++) await service.ingest(liveUser, { ...manualInput, content: `${manualInput.content}\nSeller: Item ${index}.` })
+    await expect(service.ingest(liveUser, { ...manualInput, content: `${manualInput.content}\nSeller: Over quota.` })).rejects.toBeInstanceOf(RequestQuotaError)
+    expect(propose).toHaveBeenCalledTimes(4)
+  })
+  it.each([
+    { content: 'WEBVTT\n\nNOTE No spoken content is present.\n', code: 'empty_transcript' },
+    { content: 'Seller: Review outcome.\n'.repeat(2001), code: 'too_many_transcript_segments' }
+  ])('rejects $code without acquiring or extracting source data', async ({ content, code }) => {
+    const { service, readOpportunity, getTranscripts, propose } = manualFixture()
+    await expect(service.ingest(user, { ...manualInput, content })).rejects.toMatchObject({ code })
+    expect(readOpportunity).not.toHaveBeenCalled()
+    expect(getTranscripts).not.toHaveBeenCalled()
+    expect(propose).not.toHaveBeenCalled()
+  })
+})
 
 describe('automatic meeting acquisition orchestration', () => {
   it('lets a deduplicated server notification trigger a fresh bounded pass after foreground polling is exhausted', async () => {

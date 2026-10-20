@@ -140,7 +140,7 @@ export async function registerTeamsBot(options: {
       type: 'result' as const, attachmentLayout: 'list' as const,
       attachments: [{ contentType: 'application/vnd.microsoft.card.hero', content: {
         title: 'TLC Assist', text: 'Open the private workbench to sign in or prepare an approved shared summary.',
-        buttons: [{ type: 'openUrl', title: 'Open TLC Assist', value: configuration.origin }]
+        buttons: [{ type: 'openUrl', title: 'Open private Portfolio', value: configuration.origin }]
       } }]
     } }
     if (context.activity.channelData?.tenant?.id !== configuration.tenantId) return handoff
@@ -162,7 +162,7 @@ export async function registerTeamsBot(options: {
         attachments.push({
           contentType: 'application/vnd.microsoft.card.hero',
           content: { title: 'Private TLC account reference', text: 'Sign in to view with your own source permissions.', buttons: [
-            { type: 'openUrl', title: 'Open private account', value: `${configuration.origin}/?referenceId=${encodeURIComponent(referenceId)}` }
+            { type: 'openUrl', title: 'Open in private Portfolio', value: `${configuration.origin}/?referenceId=${encodeURIComponent(referenceId)}` }
           ] },
           preview: { contentType: 'application/vnd.microsoft.card.thumbnail', content: { title: candidate.name, text: 'Private search result. Insertion shares an authenticated link, not this account data.' } }
         })
@@ -184,7 +184,7 @@ export async function registerTeamsBot(options: {
     if (reference.disabled) return
     await new NotificationOutbox(store).deliver(principal, async (notification) => {
       await lifecycle.assertActive(principal)
-      await bot.send(reference.conversationId, { type: 'message', textFormat: 'plain', text: `${notification.title}. Open your private Activity view: ${configuration.origin}/` })
+      await bot.send(reference.conversationId, { type: 'message', textFormat: 'plain', text: `${notification.title}. Open your private Activity view: ${configuration.origin}/?view=activity` })
     })
   }
   return {
