@@ -13,7 +13,7 @@ import { CollaborationService, type ContextAuthority } from '../../../packages/o
 import { NotificationOutbox } from '../../../packages/orchestrator/collaboration/notifications.js'
 import { ReviewedActionService, ActionDispatchPreventedError, ActionReviewStaleError } from '../../../packages/orchestrator/collaboration/reviewed-actions.js'
 import { CollaborationAdmissionError, CollaborationLifecycle } from '../../../packages/orchestrator/collaboration/lifecycle.js'
-import { MeetingAcquisitionService } from '../../../packages/orchestrator/collaboration/meeting-acquisition.js'
+import { GraphMeetingError, ManualTranscriptError, MeetingAcquisitionService } from '../../../packages/orchestrator/collaboration/meeting-acquisition.js'
 import { PublicationService, type SharedProjection } from '../../../packages/orchestrator/collaboration/publications.js'
 import type { ExecutionPrincipal } from '../../../packages/orchestrator/collaboration/principal.js'
 import { isLocalSourcePrincipal, principalPartition } from '../../../packages/orchestrator/collaboration/principal.js'
@@ -197,7 +197,8 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         })
         return true
       }
-      if (isCliConfiguration(options.configuration) && options.configuration.writeMode === 'read-only' && /^\/api\/teams\/actions(?:\/|$)/.test(url.pathname)) {
+      if (isCliConfiguration(options.configuration) && options.configuration.writeMode === 'read-only' &&
+          (/^\/api\/teams\/actions(?:\/|$)/.test(url.pathname) || url.pathname === '/api/teams/meetings/preview-changes')) {
         throw new TeamsHttpError(403, 'local_read_only')
       }
       const lifecycle = new CollaborationLifecycle(options.store, options.acceptNewWork ?? true)
@@ -214,6 +215,9 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
       }
       await lifecycle.assertReadable(principal)
       await new UserRequestBudget(options.store).consume(principal, 'requests', principal.mode === 'sample' ? 600 : 60)
+      if (isCliConfiguration(options.configuration) && ['/api/teams/meetings/resolve', '/api/teams/meetings/acquire'].includes(url.pathname)) {
+        throw new TeamsHttpError(409, 'graph_unavailable_in_cli_profile')
+      }
       const services = await options.resolveServices(principal, assertion)
       const operations = createApplicationOperations(services)
       const notifications = new NotificationOutbox(options.store)
@@ -370,6 +374,11 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         if (principal.mode !== 'sample') throw new TeamsHttpError(400, 'live_meeting_binding_required')
         await services.orchestrator.getOpportunitySnapshot(input.opportunityId)
         json(200, await services.listTranscriptSources(input.opportunityId))
+      } else if (url.pathname === '/api/teams/meetings/manual') {
+        const result = await acquisition.ingest(principal, body)
+        await notifications.enqueueAcquisition(principal, result)
+        await options.notify?.(principal)
+        json(200, { status: result.status, proposals: result.proposals })
       } else if (url.pathname === '/api/teams/meetings/acquire') {
         const result = await acquisition.acquire(principal, body)
         if (result.status.state === 'ready') {
@@ -402,9 +411,13 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         throw new TeamsHttpError(404, 'route_not_found')
       }
     } catch (error) {
-      const status = error instanceof NativeConnectionError ? error.code === 'native_source_denied' ? 403 : error.code === 'native_resource_unavailable' ? 409 : 401 : error instanceof LocalPairingError ? error.status : error instanceof CollaborationAdmissionError || error instanceof ActionReviewStaleError ? 409 : error instanceof WorkflowScopeAuthorizationError ? 403 : error instanceof RequestQuotaError ? 429 : error instanceof TeamsAuthorizationError ? 401 : error instanceof TeamsHttpError ? error.status
+      const status = error instanceof GraphMeetingError ? error.state === 'denied' || error.state === 'admin-blocked' ? 403 : error.state === 'auth-required' ? 409 : error.state === 'unsupported' ? 400 : 503
+        : error instanceof ManualTranscriptError ? 400
+        : error instanceof NativeConnectionError ? error.code === 'native_source_denied' ? 403 : error.code === 'native_resource_unavailable' ? 409 : 401 : error instanceof LocalPairingError ? error.status : error instanceof CollaborationAdmissionError || error instanceof ActionReviewStaleError ? 409 : error instanceof WorkflowScopeAuthorizationError ? 403 : error instanceof RequestQuotaError ? 429 : error instanceof TeamsAuthorizationError ? 401 : error instanceof TeamsHttpError ? error.status
         : error instanceof ZodError || error instanceof SyntaxError || error instanceof URIError ? 400 : 500
-      const code = error instanceof NativeConnectionError || error instanceof LocalPairingError ? error.code : error instanceof CollaborationAdmissionError ? error.code : error instanceof ActionReviewStaleError ? 'action_review_stale' : error instanceof WorkflowScopeAuthorizationError ? 'workflow_source_scope_changed' : error instanceof RequestQuotaError ? 'user_quota_exhausted' : error instanceof TeamsAuthorizationError ? error.code : error instanceof TeamsHttpError ? error.code : status === 400 ? 'invalid_request' : 'operation_failed'
+      const code = error instanceof GraphMeetingError ? error.code === 'invalid_meeting_link' ? 'graph_invalid_meeting_link' : `graph_${error.state.replaceAll('-', '_')}`
+        : error instanceof ManualTranscriptError ? error.code
+        : error instanceof NativeConnectionError || error instanceof LocalPairingError ? error.code : error instanceof CollaborationAdmissionError ? error.code : error instanceof ActionReviewStaleError ? 'action_review_stale' : error instanceof WorkflowScopeAuthorizationError ? 'workflow_source_scope_changed' : error instanceof RequestQuotaError ? 'user_quota_exhausted' : error instanceof TeamsAuthorizationError ? error.code : error instanceof TeamsHttpError ? error.code : status === 400 ? 'invalid_request' : 'operation_failed'
       const method = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method ?? '') ? request.method! : 'OTHER'
       const candidate = url.pathname.split('/')[3] ?? ''
       const category = ['session', 'config', 'local', 'operations', 'actions', 'activity', 'contexts', 'meetings', 'publications', 'shared', 'documents', 'graph', 'references', 'lifecycle'].includes(candidate) ? candidate : 'unknown'

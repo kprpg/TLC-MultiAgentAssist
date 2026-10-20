@@ -3,6 +3,7 @@ import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface
 import { ArrowDownload20Regular, Mic20Regular } from '@fluentui/react-icons'
 import { contractVersion, type Milestone, type MeetingChangeSetProposal, type MeetingChangeSetResult, type MeetingTranscriptSummary, type MeetingType } from '../../../../packages/common/index.js'
 import type { RevampDataClient } from './data-client.js'
+import { readTranscriptFile } from '../../../shared/transcript-file.js'
 
 function toggleSet(previous: ReadonlySet<string>, id: string): Set<string> {
     const next = new Set(previous)
@@ -31,7 +32,7 @@ function meetingProposalToMarkdown(proposal: MeetingChangeSetProposal, opportuni
 async function readFileIntoContent(event: ChangeEvent<HTMLInputElement>, setContent: (value: string) => void, onNote: (message: string) => void): Promise<void> {
     const file = event.target.files?.[0]
     if (!file) return
-    try { setContent(await file.text()) }
+    try { setContent((await readTranscriptFile(file)).content) }
     catch (error) { onNote((error as Error).message) }
 }
 

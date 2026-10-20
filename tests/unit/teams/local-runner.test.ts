@@ -68,6 +68,7 @@ function atk {
 function Read-Host {
   param($Prompt)
   Record @{ phase = 'menu'; prompt = $Prompt }
+  if ($Prompt.Contains('INSTALLED')) { return $env:TLC_TEST_RUNNER_CONFIRMATION }
   return $env:TLC_TEST_RUNNER_SELECTION
 }
 function Get-NetTCPConnection {
@@ -77,6 +78,7 @@ function Get-NetTCPConnection {
 }
 function Start-Process {
   param($FilePath, $ArgumentList, $WorkingDirectory, $Environment, [switch]$PassThru, $RedirectStandardOutput, $RedirectStandardError, $WindowStyle)
+  if (-not $Environment) { Record @{ phase = 'open'; path = $FilePath }; return }
   $script:launchedWriteMode = $Environment['TLC_TEAMS_CLI_WRITE_MODE']
   $script:launchEnvironment = $Environment
   Record @{ phase = 'start'; directory = $WorkingDirectory; arguments = $ArgumentList; origin = $Environment.TLC_TEAMS_ORIGIN; mode = $Environment.TLC_TEAMS_MODE; authentication = $Environment.TLC_TEAMS_AUTH_MODE; writeMode = $Environment['TLC_TEAMS_CLI_WRITE_MODE']; ownerDirectory = $Environment['TLC_TEAMS_OWNER_DIRECTORY']; host = $Environment.TLC_TEAMS_HOST; data = $Environment.TLC_TEAMS_DATA_DIR; certificate = $Environment['TLC_TEAMS_TLS_CERT_PATH']; privateKey = $Environment['TLC_TEAMS_TLS_KEY_PATH'] }
@@ -106,7 +108,8 @@ function Invoke-WebRequest {
     $record = Get-Content -LiteralPath (Join-Path $env:TLC_TEST_RUNNER_WORK 'current-run.json') -Raw | ConvertFrom-Json
     return [pscustomobject]@{ StatusCode=200; Content=(@{
       contractVersion='1.0'; runId=$record.runId; clientBuildId=$record.clientBuildId; packageId=$record.packageId
-      packageVersion=$record.packageVersion; origin=$record.origin; mode=$record.mode; authentication=$record.authentication; clients=@()
+      packageVersion=$record.packageVersion; origin=$record.origin; mode=$record.mode; authentication=$record.authentication
+      clients=@(if ($env:TLC_TEST_RUNNER_CLIENT_READY -eq 'true') { @{ host='teams'; checkedAt=[DateTime]::UtcNow.ToString('o') } })
     } | ConvertTo-Json -Depth 6 -Compress) }
   }
   if (([string]$Uri).EndsWith('/api/teams/session')) { return [pscustomobject]@{ StatusCode=401; Content='{"error":"authorization_required"}' } }
@@ -144,7 +147,15 @@ if ($env:TLC_TEST_RUNNER_SCENARIO -eq 'tool-bootstrap') { Remove-Item Function:a
 if ($env:TLC_TEST_RUNNER_SCENARIO -in @('owned-stop', 'reused-pid')) { $arguments = @{ Stop = $true; WorkDirectory = $env:TLC_TEST_RUNNER_WORK } }
 if ($env:TLC_TEST_RUNNER_ACTION -eq 'Status') { $arguments = @{ Status = $true; WorkDirectory = $env:TLC_TEST_RUNNER_WORK } }
 if ($env:TLC_TEST_RUNNER_ACTION -eq 'Resume') { $arguments = @{ Resume = $true; NoGuide = $true; WorkDirectory = $env:TLC_TEST_RUNNER_WORK } }
-& $env:TLC_TEST_RUNNER_SCRIPT @arguments
+if ($env:TLC_TEST_RUNNER_GUIDE -eq 'true') { $arguments.Remove('NoGuide'); $arguments.ClientTimeoutSeconds = 1 }
+if ($env:TLC_TEST_RUNNER_MANUAL_UPLOAD -eq 'true') { $arguments.ManualUpload = $true }
+if ($env:TLC_TEST_RUNNER_REINSTALL -eq 'true') { $arguments.Reinstall = $true }
+try {
+  & $env:TLC_TEST_RUNNER_SCRIPT @arguments
+} catch {
+  [Console]::Error.WriteLine($_.Exception.Message)
+  exit 1
+}
 `, 'utf8')
   if (['owned-stop', 'reused-pid'].includes(scenario)) {
     const runtimeDirectory = join(folder, 'owned', 'releases', 'verified-run')
@@ -161,6 +172,7 @@ if ($env:TLC_TEST_RUNNER_ACTION -eq 'Resume') { $arguments = @{ Resume = $true; 
     mode?: 'sample' | 'live' | 'menu' | 'LIVE'; selection?: string; configPath?: string | null
     authMode?: 'auto'; writeMode?: 'read-only' | 'reviewed' | 'READ-ONLY'
     action?: 'Status' | 'Resume'
+    guide?: boolean; manualUpload?: boolean; reinstall?: boolean; confirmation?: string; clientReady?: boolean
   } = {}) => execute('pwsh', ['-NoProfile', '-File', wrapper], {
     env: {
       ...process.env, LOCALAPPDATA: localAppData, TLC_TEST_RUNNER_SCRIPT: script, TLC_TEST_RUNNER_TRACE: trace,
@@ -172,7 +184,12 @@ if ($env:TLC_TEST_RUNNER_ACTION -eq 'Resume') { $arguments = @{ Resume = $true; 
       TLC_TEST_RUNNER_SELECTION: options.selection ?? '',
       TLC_TEST_RUNNER_AUTH_MODE: options.authMode ?? '',
       TLC_TEST_RUNNER_WRITE_MODE: options.writeMode ?? '',
-      TLC_TEST_RUNNER_ACTION: options.action ?? ''
+      TLC_TEST_RUNNER_ACTION: options.action ?? '',
+      TLC_TEST_RUNNER_GUIDE: String(options.guide ?? false),
+      TLC_TEST_RUNNER_MANUAL_UPLOAD: String(options.manualUpload ?? false),
+      TLC_TEST_RUNNER_REINSTALL: String(options.reinstall ?? false),
+      TLC_TEST_RUNNER_CONFIRMATION: options.confirmation ?? '',
+      TLC_TEST_RUNNER_CLIENT_READY: String(options.clientReady ?? false)
     }, timeout: 45_000
   })
   const calls = async () => (await readFile(trace, 'utf8')).trim().split(/\r?\n/).map((line) => JSON.parse(line) as Record<string, unknown>)
@@ -365,6 +382,92 @@ describe('one local build/configure/run/Teams-upload entrypoint', () => {
       'exec', '--yes', '--ignore-scripts', '--package=@microsoft/m365agentstoolkit-cli@1.1.18', '--',
       'atk', 'install', '--file-path', record.teamsArchive, '--scope', 'Personal', '--interactive', 'false', '--telemetry', 'false'
     ])
+  }, 60_000)
+  it('supports direct manual upload without invoking or bootstrapping the CLI and verifies the matching Teams client', async () => {
+    const data = await fixture('tool-bootstrap')
+    const result = await data.run(undefined, {}, { guide: true, manualUpload: true, confirmation: 'INSTALLED', clientReady: true })
+    const calls = await data.calls()
+    const record = JSON.parse(await readFile(join(data.folder, 'owned', 'current-run.json'), 'utf8'))
+    expect(calls.some((entry) => ['upload', 'build', 'stop'].includes(String(entry.phase)))).toBe(false)
+    expect(calls.find((entry) => entry.phase === 'open')).toEqual({ phase: 'open', path: join(record.teamsArchive, '..') })
+    expect(result.stdout).toContain(record.teamsArchive)
+    expect(result.stdout).toContain('Upload a custom app')
+    expect(result.stdout).toContain('VERIFIED')
+    expect(record).toMatchObject({ installation: 'verified', setup: 'complete' })
+  }, 60_000)
+  it.each([false, true])('resumes with direct manual upload (Reinstall = %s) without repeating CLI login or restarting the backend', async (reinstall) => {
+    const data = await fixture()
+    await data.run()
+    const before = JSON.parse(await readFile(join(data.folder, 'owned', 'current-run.json'), 'utf8'))
+    await data.run(undefined, {}, { action: 'Resume', guide: true, manualUpload: true, reinstall, confirmation: 'INSTALLED', clientReady: true })
+    const calls = await data.calls()
+    expect(calls.filter((entry) => entry.phase === 'start')).toHaveLength(1)
+    expect(calls.filter((entry) => entry.phase === 'upload')).toHaveLength(1)
+    expect(calls.some((entry) => ['stop', 'build'].includes(String(entry.phase)))).toBe(false)
+    expect(calls.find((entry) => entry.phase === 'open')).toEqual({ phase: 'open', path: join(before.teamsArchive, '..') })
+    const after = JSON.parse(await readFile(join(data.folder, 'owned', 'current-run.json'), 'utf8'))
+    expect(after).toMatchObject({ pid: before.pid, runId: before.runId, teamsArchive: before.teamsArchive, installation: 'verified', setup: 'complete' })
+  }, 60_000)
+  it('keeps manual upload available after CLI failure through the existing recovery menu', async () => {
+    const data = await fixture('upload-failure')
+    const result = await data.run(undefined, {}, { guide: true, selection: 'M', confirmation: 'INSTALLED', clientReady: true })
+    const calls = await data.calls()
+    expect(calls.filter((entry) => entry.phase === 'upload')).toHaveLength(1)
+    expect(calls.some((entry) => entry.phase === 'open')).toBe(true)
+    expect(result.stdout).toContain('-Resume -Reinstall -ManualUpload')
+    expect(result.stdout).toContain('AADSTS530084')
+    expect(result.stdout).toContain('VERIFIED')
+  }, 60_000)
+  it('does not treat manual confirmation alone as a verified Teams installation', async () => {
+    const data = await fixture('tool-bootstrap')
+    await expect(data.run(undefined, {}, { guide: true, manualUpload: true, confirmation: 'INSTALLED' })).rejects.toMatchObject({
+      stdout: expect.not.stringContaining('VERIFIED'),
+      stderr: expect.stringContaining('no matching Teams client acknowledged')
+    })
+    const record = JSON.parse(await readFile(join(data.folder, 'owned', 'current-run.json'), 'utf8'))
+    expect(record).toMatchObject({ installation: 'manually-confirmed', setup: 'backend-ready', verifiedAt: '' })
+    expect((await data.calls()).some((entry) => ['upload', 'stop'].includes(String(entry.phase)))).toBe(false)
+  }, 60_000)
+  it('pauses an unconfirmed manual reinstall without claiming installation or losing the running backend', async () => {
+    const data = await fixture()
+    await data.run()
+    const before = JSON.parse(await readFile(join(data.folder, 'owned', 'current-run.json'), 'utf8'))
+    await expect(data.run(undefined, {}, { action: 'Resume', guide: true, manualUpload: true })).rejects.toMatchObject({
+      stderr: expect.stringContaining('paused before installation confirmation')
+    })
+    const after = JSON.parse(await readFile(join(data.folder, 'owned', 'current-run.json'), 'utf8'))
+    expect(after).toMatchObject({ pid: before.pid, runId: before.runId, installation: 'not-started' })
+    const calls = await data.calls()
+    expect(calls.filter((entry) => entry.phase === 'upload')).toHaveLength(1)
+    expect(calls.some((entry) => entry.phase === 'stop')).toBe(false)
+  }, 60_000)
+  it.each([
+    { scenario: 'success', guide: false },
+    { scenario: 'no-upload', guide: true }
+  ])('rejects conflicting manual upload options before startup ($scenario, guide = $guide)', async ({ scenario, guide }) => {
+    const data = await fixture(scenario)
+    await expect(data.run(undefined, {}, { guide, manualUpload: true })).rejects.toMatchObject({
+      stderr: expect.stringContaining('cannot be combined')
+    })
+    await expect(data.calls()).rejects.toMatchObject({ code: 'ENOENT' })
+  }, 60_000)
+  it.each(['changed', 'missing', 'outside'] as const)('rejects a %s recorded ZIP before opening manual upload', async (condition) => {
+    const data = await fixture()
+    await data.run()
+    const recordPath = join(data.folder, 'owned', 'current-run.json')
+    const record = JSON.parse(await readFile(recordPath, 'utf8'))
+    if (condition === 'changed') await writeFile(record.teamsArchive, 'changed fixture')
+    else if (condition === 'missing') await rm(record.teamsArchive)
+    else await writeFile(recordPath, JSON.stringify({ ...record, teamsArchive: data.appZip }))
+    await expect(data.run(undefined, {}, { action: 'Resume', guide: true, manualUpload: true })).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.stringMatching(/^The recorded Teams installation ZIP is missing, changed or outside this run\. Rebuild normally; do not upload an unverified ZIP\.\r?\n$/)
+    })
+    const calls = await data.calls()
+    expect(calls.some((entry) => entry.phase === 'open')).toBe(false)
+    expect(calls.some((entry) => entry.phase === 'stop')).toBe(false)
+    expect(calls.filter((entry) => entry.phase === 'upload')).toHaveLength(1)
+    expect(calls.filter((entry) => entry.phase === 'start')).toHaveLength(1)
   }, 60_000)
   it('checks status and resumes installation without building, starting, stopping or selecting a data mode again', async () => {
     const fixtureData = await fixture()

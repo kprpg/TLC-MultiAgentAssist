@@ -10,6 +10,7 @@ explicitly reviewed MSX writes; -CliWriteMode read-only retains the read-only pr
 Origin defaults to the configured TLC_TEAMS_ORIGIN or https://localhost:3978.
 Stop a runtime started by this script using the same file with -Stop.
 Use -Status for read-only verification or -Resume to finish without restarting.
+Use -ManualUpload to install the verified ZIP through Teams without CLI sign-in.
 #>
 [CmdletBinding(DefaultParameterSetName = 'Run')]
 param(
@@ -40,6 +41,9 @@ param(
     [switch] $SkipTeamsUpload,
     [Parameter(ParameterSetName = 'Run')]
     [Parameter(ParameterSetName = 'Resume')]
+    [switch] $ManualUpload,
+    [Parameter(ParameterSetName = 'Run')]
+    [Parameter(ParameterSetName = 'Resume')]
     [switch] $NoGuide,
     [Parameter(ParameterSetName = 'Run')]
     [Parameter(ParameterSetName = 'Resume')]
@@ -66,6 +70,10 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $localAppData = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { [Environment]::GetFolderPath('LocalApplicationData') }
 $teamsRoot = Join-Path $localAppData 'TLC-Assist\Teams'
 . (Join-Path $PSScriptRoot 'teams-launch-session.ps1')
+
+if ($ManualUpload -and ($NoGuide -or $SkipTeamsUpload)) {
+    throw '-ManualUpload cannot be combined with -NoGuide or -SkipTeamsUpload/-BackendOnly; it requires explicit installation confirmation.'
+}
 
 function Invoke-CheckedCommand {
     param([string] $Command, [string[]] $Arguments)
@@ -225,7 +233,7 @@ $lock = [IO.File]::Open((Join-Path $WorkDirectory 'runner.lock'), [IO.FileMode]:
 try {
     if ($Stop) { Stop-OwnedRun; return }
     if ($Resume) {
-        Complete-TeamsRunSetup -WorkDirectory $WorkDirectory -NoGuide:$NoGuide -Reinstall:$Reinstall -ClientTimeoutSeconds $ClientTimeoutSeconds
+        Complete-TeamsRunSetup -WorkDirectory $WorkDirectory -NoGuide:$NoGuide -Reinstall:$Reinstall -ManualUpload:$ManualUpload -ClientTimeoutSeconds $ClientTimeoutSeconds
         return
     }
     Push-Location -LiteralPath $repositoryRoot
@@ -406,6 +414,6 @@ console.log(JSON.stringify({ packageId: manifest.id, packageVersion: manifest.ve
         Write-Host "Finish/retry without restart: pwsh -File `"$PSCommandPath`" -Resume -WorkDirectory `"$WorkDirectory`""
         if ($native) { Write-Host 'Source sign-in has NOT occurred during backend startup. Guided setup asks for CONNECT and exact page-code approval; -BackendOnly leaves those steps for later. No source write is performed by setup.' }
         if ($SkipTeamsUpload) { Write-Host '[4/7] Teams upload skipped explicitly (-SkipTeamsUpload / -BackendOnly). Client setup is incomplete; use -Resume to finish.'; return }
-        Complete-TeamsRunSetup -WorkDirectory $WorkDirectory -NoGuide:$NoGuide -ClientTimeoutSeconds $ClientTimeoutSeconds
+        Complete-TeamsRunSetup -WorkDirectory $WorkDirectory -NoGuide:$NoGuide -ManualUpload:$ManualUpload -ClientTimeoutSeconds $ClientTimeoutSeconds
     } finally { Pop-Location }
 } finally { $lock.Dispose() }

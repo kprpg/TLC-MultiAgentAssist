@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { z } from 'zod'
 import { Dialog, DialogSurface, DialogBody, DialogTitle, DialogContent, DialogActions } from '@fluentui/react-components'
 import * as c from '../../../../packages/common/contracts/index.js'
-import { seDomainDefinitions, seDomainIds, seDomainSchema, type SeDomainId } from '../../../../packages/common/configuration/se-domains.js'
 import { AddCustomerButton, type CustomerAccount, type CustomerSearchClient } from '../../../shared/add-customer.js'
 import { NewWorkspace, type CreationClient } from '../../../shared/record-creation/new-workspace.js'
 import { sortOpportunities, type OpportunitySort, type SortDirection } from '../../../shared/portfolio-sorting.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
 import { sellerMoney } from '../../../shared/seller-dashboard-analysis.js'
 import { OpportunityWorkbench } from './opportunity-workbench.js'
+import { DiscoveryWorkspace } from './discovery.js'
 import { defaultPortfolioPanes, type PortfolioPanes } from './workspace-navigation.js'
 import type { TeamsApiClient, ReviewAction } from './data-client.js'
 import { useResponsiveDisclosure } from './use-responsive-disclosure.js'
@@ -32,11 +32,6 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
   const [milestones, setMilestones] = useState<c.Milestone[]>([])
   const [tab, setTab] = useState<AccountWorkspace>(workspace ?? 'portfolio')
   const [newOpened, setNewOpened] = useState(workspace === 'new')
-  const [domain, setDomain] = useState<SeDomainId>('infra')
-  const [discovery, setDiscovery] = useState<c.DiscoverableOpportunity[]>([])
-  const [discoveryLoading, setDiscoveryLoading] = useState(false)
-  const [discoveryError, setDiscoveryError] = useState('')
-  const [discoveryRevision, setDiscoveryRevision] = useState(0)
   const [revision, setRevision] = useState(0)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -110,17 +105,6 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
       .catch((cause: unknown) => { if (!controller.signal.aborted) setError(String(cause)) })
     return () => controller.abort()
   }, [client, selection?.opportunity.id, revision, tab])
-  useEffect(() => {
-    if (tab !== 'discovery') return
-    const controller = new AbortController()
-    setDiscovery([]); setDiscoveryLoading(true); setDiscoveryError('')
-    client.operation('discoverOpportunities', { domain }, z.array(c.discoverableOpportunitySchema), controller.signal)
-      .then((items) => {
-        if (!controller.signal.aborted) { setDiscovery(boundAccountId ? items.filter((item) => item.accountId === boundAccountId) : items); setDiscoveryLoading(false) }
-      })
-      .catch((cause: unknown) => { if (!controller.signal.aborted) { setDiscoveryError(String(cause)); setDiscoveryLoading(false) } })
-    return () => controller.abort()
-  }, [client, tab, domain, revision, discoveryRevision, boundAccountId])
   const mutate = useCallback(async (operation: string, input: Record<string, unknown>) => {
     setError('')
     const receipt = await review(operation, input)
@@ -199,17 +183,9 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
           : <section className="pane"><h2>Select an opportunity</h2><p>An account may be visible without any eligible Portfolio opportunities.</p></section>}
       </div>
     </div>
-    <section className="panel" hidden={tab !== 'discovery'}><h1>Discover</h1>
-      <button type="button" disabled={discoveryLoading} onClick={() => setDiscoveryRevision((value) => value + 1)}>Refresh Discover</button>
-      <label className="field">Solution Engineer domain<select value={domain} onChange={(event) => setDomain(seDomainSchema.parse(event.target.value))}>
-        {seDomainIds.map((id) => <option key={id} value={id}>{seDomainDefinitions[id].label}</option>)}</select></label>
-      <p>Adding an account is separate from joining an opportunity Deal Team or milestone team.</p>
-      {discoveryLoading && <p role="status">Loading Discover opportunities... {mode === 'live' ? 'MSX searches can take time; results will appear when the source responds.' : ''}</p>}
-      {discoveryError && <p role="alert" className="error-banner">{discoveryError}. Use Refresh Discover to retry.</p>}
-      <ul className="record-list">{discovery.map((entry) => <li key={entry.id}><strong>{entry.name}</strong><span>{entry.accountName}</span>
-        <button type="button" onClick={() => { void action(entry.onDealTeam ? 'leaveDealTeam' : 'joinDealTeam', { opportunityId: entry.id, ...(entry.onDealTeam ? {} : { domain }) }) }}>{entry.onDealTeam ? 'Review leaving Deal Team' : 'Review joining Deal Team'}</button></li>)}</ul>
-      {!discoveryLoading && !discoveryError && !discovery.length && <p>No eligible opportunities for this source scope and domain.</p>}
-      <Dialog open={!!pendingScope} onOpenChange={(_, data) => { if (!data.open) cancelScopeChange() }}>
+    <DiscoveryWorkspace client={client} mode={mode} active={tab === 'discovery'} searchClient={searchClient} onAction={mutate}
+      {...(boundAccountId ? { boundAccountId } : {})} />
+    <Dialog open={!!pendingScope} onOpenChange={(_, data) => { if (!data.open) cancelScopeChange() }}>
         <DialogSurface className="teams-review-dialog"><DialogBody>
           <DialogTitle>Discard unsent edits?</DialogTitle>
           <DialogContent>Changing customer, opportunity or refreshing sources discards unsent edits for this opportunity. No source change has been sent.</DialogContent>
@@ -221,8 +197,7 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
             }}>Discard edits and continue</button>
           </DialogActions>
         </DialogBody></DialogSurface>
-      </Dialog>
-    </section>
+    </Dialog>
     <div hidden={tab !== 'new'}>{newOpened && <section className="panel"><h1>New / draft</h1>
       <p>{mode === 'live' ? 'Live record creation stays disabled. Export a reviewed draft.' : 'Creation changes the sample SQLite store only.'}</p>
       <NewWorkspace client={creationClient} onCommitted={onFocus} />

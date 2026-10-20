@@ -241,7 +241,8 @@ export function TeamsApp() {
         scope: selection ? { kind: 'opportunity' as const, accountId: selection.account.id, opportunityId: selection.opportunity.id } : { kind: 'account' as const, accountId: preferredAccountId }
       } : {})} />}
       {workspaceAllowed && view === 'dashboard' && !bindingId && <DashboardWorkspace invokeSellerDashboard={invokeDashboard} />}
-      {workspaceAllowed && view === 'meetings' && <MeetingsWorkspace client={client} mode={session.mode} selection={selection} reviewPreview={reviewPreview} compact={hostSurface === 'panel'} />}
+      {workspaceAllowed && view === 'meetings' && <MeetingsWorkspace client={client} mode={session.mode} selection={selection} reviewPreview={reviewPreview} compact={hostSurface === 'panel'}
+        graphAvailable={!('authentication' in authentication.configuration && authentication.configuration.authentication === 'local-azure-cli')} />}
       {workspaceAllowed && view === 'activity' && <ActivityWorkspace client={client} onDisconnect={() => {
         setSelection(null); setReference(undefined)
         pendingRef.current?.reject(new Error('Work disconnected. Resume and prepare a fresh review.'))

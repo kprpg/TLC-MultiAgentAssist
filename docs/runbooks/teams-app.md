@@ -23,7 +23,8 @@ once as described below. The normal launcher now carries the sequence through
 3. Install/update the exact three-file ZIP for your signed-in Microsoft 365
    account, then open that app's **My work** personal tab inside Teams. A failed
    CLI upload offers retry or guided manual custom-app upload of the exact ZIP;
-   tenant policy and sign-in still require your participation.
+   use `-ManualUpload` to select that manual route without attempting CLI sign-in.
+   Tenant policy and sign-in still require your participation.
 4. In local Live mode, type **CONNECT** in PowerShell to explicitly authorize the
    existing read-only MSX identity checks. Nothing signs in or reads MSX merely
    because the backend started. No setup step writes MSX.
@@ -46,6 +47,7 @@ Check or finish the **same** run without rebuilding, restarting or losing pairin
 .\scripts\run-teams-local.ps1 -Status
 .\scripts\run-teams-local.ps1 -Resume
 .\scripts\run-teams-local.ps1 -Resume -Reinstall  # Re-upload this run's exact ZIP
+.\scripts\run-teams-local.ps1 -Resume -Reinstall -ManualUpload  # Upload through Teams, not the CLI
 .\scripts\run-teams-local.ps1 -Stop
 ```
 
@@ -67,10 +69,121 @@ private per-run package directory, so another build cannot change what resume
 uploads. Older launcher records without build identity require one normal rebuild;
 their owned processes can still be stopped with `-Stop`.
 
+If the normal launcher stops during **[1/7 and 2/7] Building and testing**, no
+new client has been installed. Fix the reported build/test failure and rerun the
+original launch command; `-Resume` reuses an existing packaged run and cannot
+load changes that have not passed the build/test gate. Launcher tests read the
+underlying PowerShell exception message directly so terminal-width wrapping and
+colored error formatting cannot cause a false release failure.
+
+### Manually deploy TLC Assist into the Teams environment
+
+Use this route to install or update the Teams personal app through the signed-in
+Teams desktop client instead of the Agents Toolkit CLI. The walkthrough below is
+for **local Live**; Sample mode skips source connection and local pairing. To
+resume, the backend must already be running and recorded by the launcher:
+
+```powershell
+.\scripts\run-teams-local.ps1 -Resume -Reinstall -ManualUpload
+```
+
+Include the original `-WorkDirectory` if you used a non-default location. This
+resumes the same backend without rebuilding or restarting it. `-ManualUpload`
+also works on a normal launch, and explicitly requests installation even when a
+previous upload was recorded as successful. Do not combine it with `-NoGuide`,
+`-BackendOnly` or `-SkipTeamsUpload`.
+
+1. **Upload the exact retained ZIP.** The launcher displays the package version
+   and hash-checked ZIP path, then opens its containing folder. In your signed-in
+   **Teams desktop client**, select **Apps > Manage your apps > Upload an app >
+   Upload a custom app**. Select only the ZIP printed by the launcher, not the
+   runtime ZIP or a package from another build. Accept **Add/Update**.
+2. **Confirm installation in PowerShell.** Only after Teams accepts that ZIP,
+   type **INSTALLED** at the prompt. Anything else pauses setup and retains the
+   backend. The launcher then opens the installed personal app in Teams and
+   prints the expected backend origin, app version and backend run.
+3. **Authorize source connection when prompted.** Type **CONNECT** to authorize
+   the checks of your own MSX identity using the configured authentication
+   profile. These setup checks do not write MSX records. An already connected
+   source does not need to reconnect.
+4. **Pair the page displayed inside Teams.** Select **Request local pairing** if
+   not already connected. Expand **Backend connection** and compare its backend
+   origin/run with PowerShell. Enter that Teams page's exact eight-character
+   pairing code in PowerShell. Do not use a code from a standalone browser,
+   another page or an example transcript. When resuming an already paired page,
+   use the offered Enter option to check its fresh acknowledgement instead.
+5. **Wait for verified completion.** Keep the Teams app visible until the guide
+   reports `Installation: verified`, `Source: connected`, `TeamsClient: verified`
+   and `Ready: True`, followed by **VERIFIED**. Upload confirmation or pairing
+   approval alone is not completion. Use `-Status` to check the same run later.
+
+The following is a sanitized example of the successful local Live flow observed
+on **2026-10-20**. Personal paths and one-time pairing/run/build identifiers are
+replaced with placeholders. The version, origin and timestamp are illustrative;
+use the values printed for your own run, not the example values.
+
+```text
+[4/7] Installing/updating Teams personal app version 1.2484.26493. Exact ZIP: %LOCALAPPDATA%\TLC-Assist\Teams\launcher-cli\packages\<run-id>\TLC-Assist-Teams-local-live.zip
+Manual upload selected. No Agents Toolkit CLI sign-in will be attempted; tenant custom-app upload policy still applies.
+In your signed-in Teams desktop client: Apps > Manage your apps > Upload an app > Upload a custom app. Select ONLY: %LOCALAPPDATA%\TLC-Assist\Teams\launcher-cli\packages\<run-id>\TLC-Assist-Teams-local-live.zip
+After Teams accepts that exact ZIP, type INSTALLED; anything else pauses setup: INSTALLED
+[5/7] Opening the installed TLC personal app in Teams: https://teams.microsoft.com/l/entity/<package-id>/tlc-personal?webjoin=true
+Expected backend: https://localhost:3978. App version: 1.2484.26493. Backend run: <run-id>.
+[6/7] Explicit source connection. This verifies your own MSX identity; it does not write source records.
+Type CONNECT to connect this backend using your own account; anything else pauses setup: CONNECT
+In the Teams app select Request local pairing if not already connected. Expand Backend connection and check the expected backend/run above.
+Enter the exact eight-character pairing code displayed INSIDE Teams (Enter = check a previously paired page; Q = pause): <code shown inside Teams>
+[7/7] Waiting for the matching, visible Teams client to acknowledge this exact backend and build...
+
+Backend        : ready
+Origin         : https://localhost:3978
+Mode           : live
+Authentication : local-azure-cli
+AppVersion     : 1.2484.26493
+RunId          : <run-id>
+ClientBuild    : <client-build-id>
+Installation   : verified
+Source         : connected
+TeamsClient    : verified
+Ready          : True
+CheckedAt      : 2026-10-20T16:28:04.6633525Z
+Logs           : %LOCALAPPDATA%\TLC-Assist\Teams\launcher-cli\logs\<run-id>
+
+VERIFIED: the latest packaged Teams client is connected to this exact backend. No MSX source write was performed by setup.
+```
+
+Manual upload skips only the installer's CLI sign-in. Teams custom-app upload
+policy, the source identity check, explicit page pairing and matching-client
+verification remain enforced.
+
+### If CLI sign-in reports AADSTS530084
+
+`AADSTS530084` means organizational Conditional Access token protection blocked
+the installer's token request. It is not a damaged app ZIP or an MSX connection
+failure. Repeating `-Reinstall` or deleting the Toolkit's `.fx\account` cache does
+not resolve a token-protection policy denial. Do not weaken tenant policy or
+copy tokens from another application.
+
+If the CLI keeps opening sign-in windows, press **Ctrl+C** in its PowerShell
+terminal, leave the verified backend running, and follow
+[Manually deploy TLC Assist into the Teams environment](#manually-deploy-tlc-assist-into-the-teams-environment)
+with the same work directory.
+
+This uses Teams' own supported sign-in, not a Conditional Access bypass. Custom
+app upload must still be permitted. If upload is unavailable or Teams itself is
+blocked, ask your tenant administrator to inspect the sign-in's Conditional
+Access and **Token Protection - Sign In Session** details using its timestamp
+and correlation ID. Client broker support and device registration both matter;
+the CLI error alone does not distinguish them. See Microsoft's
+[Windows token-protection guide](https://learn.microsoft.com/en-us/entra/identity/conditional-access/deployment-guide-token-protection-windows)
+and [manual app-upload instructions](https://learn.microsoft.com/en-us/microsoftteams/platform/concepts/deploy-and-publish/apps-upload).
+
 For automation/offline checks, `-BackendOnly` (alias `-SkipTeamsUpload`) verifies
 only the backend and defers all client setup. `-NoGuide` additionally permits
 unattended package upload, but explicitly does **not** claim a rendered/paired
-Teams installation. Use `-ClientTimeoutSeconds` (default 120, maximum 600) when
+Teams installation. `-ManualUpload` requires explicit confirmation and cannot be
+combined with `-NoGuide` or `-BackendOnly`/`-SkipTeamsUpload`.
+Use `-ClientTimeoutSeconds` (default 120, maximum 600) when
 Teams takes longer to open. Hosted Live continues to use its own corporate
 browser sign-in; local-owner connection/pairing is never substituted for it.
 
@@ -356,9 +469,85 @@ Discover shows a loading state while its authorized source query runs, rather
 than prematurely claiming no results. Hidden Portfolio account/opportunity/
 milestone reads no longer run alongside it; a direct Discover visit makes only
 the discovery operation. Errors are distinguished from an empty result and
-**Refresh Discover** retries that query without refreshing the hidden Portfolio.
+**Refresh** retries that query without refreshing the hidden Portfolio.
 Large live MSX searches can still take time; this change does not cache away
 source-permission checks or broaden the selected solution-domain/account scope.
+
+Discover follows the VS Code extension's compact layout: eight Solution Engineer
+domain tabs, **Add customer**, and a table with Opportunity, Account, Technical
+capability, Stage and Action columns. Account, Stage and Action headers toggle
+ascending/descending sort. Domain tabs support arrow keys, Home and End; narrow
+Teams windows scroll the tabs/table horizontally rather than hiding customer data.
+
+The shared **Customers equals all** / **Add filter** controls support customer
+search, include (**equals**) and exclude (**does not equal**) selections, select
+all matching customers, Apply/Cancel, removable filter chips and **Clear filters**.
+The count reports the visible and total opportunities for the loaded domain.
+Filters and sorting stay selected across domain changes and Refresh and work on
+the already authorized results without additional source reads. A filter with no
+matches is reported separately from a genuinely empty source result.
+
+Use an opportunity's expand button to load its discoverable milestones on demand.
+The same closed/cancelled/old-milestone visibility rules used by the other UIs
+apply. **Add me**, **Remove me** and milestone-team toggles all open Teams' exact
+change-review dialog; no membership changes before explicit confirmation.
+Confirmed membership updates appear in the table without another discovery scan.
+
+## Meeting Capture: paste/upload and meeting-link access
+
+Select an account and opportunity in **Portfolio**, then open **Tools > Meetings >
+Capture**. Choose **Customer meeting** or **Internal meeting** before extraction;
+the existing customer/internal field-routing and sensitive-change gates still
+apply.
+
+### Paste or upload a transcript
+
+1. Select **Paste / upload**. Paste WebVTT or `Speaker: text` lines into
+   **Transcript text**, or choose a UTF-8 `.vtt` / `.txt` **Transcript file**.
+   Word/PDF/binary files are not accepted; export VTT/text or paste their text.
+2. Review the loaded text and classification, then select **Extract & Review**.
+   Files are read locally first; their text is sent to the private backend only
+   when you request extraction. Limits are **150,000 characters, 500 KiB and
+   2,000 segments**. Invalid, empty, oversized and unsupported input is reported,
+   not treated as a successful capture.
+3. In **Follow-up**, inspect the grounded proposals and evidence IDs. These are
+   private suggestions, not applied source changes. Manual input is explicitly
+   labelled **user-provided evidence, not a Graph-verified meeting**; a pasted
+   speaker label is not proof of that speaker's identity or meeting access.
+4. Select the eligible changes, enter a **Meeting change reason**, and select
+   **Review selected meeting changes**. Inspect the exact private review, enter
+   its **Review reason**, then explicitly **Confirm selected changes**. Cancel
+   sends no new changes. Read-only source profiles cannot commit writes.
+
+Editing the supplied text or classification invalidates the previous displayed
+proposal. Changing opportunity clears the draft and cancels pending client work
+so a late result is not applied to a different opportunity. The backend retains
+the bounded, parsed evidence in its protected per-user store for server-owned
+review; it never logs transcript content or accepts client-authored proposals.
+Review checks the stored evidence and current source permissions again and
+preserves lifecycle, quota, source-version and exact-approval safeguards.
+
+### Why a meeting join link may be unavailable
+
+The **local-azure-cli** profile provides MSX access, not a delegated Graph
+meeting grant. Capture defaults to **Paste / upload** for this profile. The
+**Teams meeting** option explains this limitation and disables **Verify meeting
+and acquire transcript**, rather than making a request that can only fail.
+Being signed into Teams, installing the app, or enabling reviewed MSX writes
+does not grant Graph meeting/transcript access.
+
+Automatic lookup remains available only through a separately approved
+Graph-enabled native/hosted profile with the appropriate delegated permissions,
+consent, tenant transcript policy and actual meeting access. Missing Graph
+connection/consent, access denial, administrator blocking, invalid links and
+temporary acquisition failures now have distinct, actionable errors with their
+correlation reference, rather than a generic `operation failed`. An optional
+Graph-authentication failure does not discard a valid MSX connection.
+
+Sample mode retains the bundled transcript picker and also supports
+**Paste / upload** against the canonical sample store. No extraction path writes
+MSX automatically, changes tenant policy, or treats manual input as Graph
+authorization.
 
 ## Architecture and trust boundaries
 
@@ -480,8 +669,9 @@ The launcher performs the requested sequence:
 2. Rebuilds the three-file Teams installation ZIP for the **same** origin/mode.
 3. Extracts a new versioned runtime beneath your local AppData, configures stable
    external data paths, starts Node, and verifies the local and trusted HTTPS UI/API.
-4. Uses `atk install` to upload/sideload that exact ZIP for your Microsoft 365
-   account. Login, consent or tenant app-upload policy can still require interaction.
+4. Uses `atk install`, or guided Teams custom-app upload with `-ManualUpload`, to
+   upload/sideload that exact ZIP for your Microsoft 365 account. Login, consent
+   or tenant app-upload policy can still require interaction.
 5. Opens the matching installed personal app, guides explicit source connection
    and page-code approval where applicable, and waits for its authenticated Teams
    client/build/run acknowledgement before reporting complete.

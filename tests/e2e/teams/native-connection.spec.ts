@@ -2,6 +2,8 @@ import { expect, test, type Page } from '@playwright/test'
 import { getCliCapabilities, cliPublicConfigurationVersion, localConnectionVersion, localPairRequestSchema, nativeCapabilities, localSessionLeaseMs, localWorkSessionMs, type CliWriteMode } from '../../../packages/common/contracts/local-connection.js'
 import { chooseOpportunity, embeddedTeams, post } from './helpers.js'
 import { teamsClientReadyRequestSchema } from '../../../packages/common/contracts/teams-launch.js'
+import { meetingChangeSetResultSchema } from '../../../packages/common/contracts/meeting.js'
+import { actionReceiptSchema } from '../../../packages/common/contracts/collaboration.js'
 
 async function offlineNativeFixture(page: Page, cli = false, writeMode: CliWriteMode = 'read-only') {
   const launch = await (await page.request.get('/api/teams/launch')).json()
@@ -108,6 +110,54 @@ test('CLI reviewed-write UI requires exact confirmation; cancel leaves the offli
   await expect(page.getByRole('dialog', { name: 'Review exact changes' })).not.toBeVisible()
   expect((await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })).opportunity.comments).toBe('CLI reviewed offline sample change')
   expect(fixture.requests.filter((path) => path === 'actions/commit')).toHaveLength(1)
+})
+
+test('CLI meeting capture offers manual input, disables unsupported Graph lookup and requires exact review before applying its draft', async ({ page, request }) => {
+  const fixture = await offlineNativeFixture(page, true, 'reviewed')
+  await page.route('**/api/teams/meetings/**', (route) => route.continue())
+  const graphRequests: string[] = []
+  page.on('request', (entry) => {
+    if (/\/meetings\/(?:resolve|acquire)$/.test(entry.url())) graphRequests.push(entry.url())
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Request local pairing' }).click()
+  fixture.approve()
+  const { opportunity } = await chooseOpportunity(page, request)
+  const before = await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })
+  await page.getByText('Tools', { exact: true }).click()
+  await page.getByRole('button', { name: 'Meetings', exact: true }).click()
+  await page.getByRole('tab', { name: 'Capture', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Paste / upload', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await page.getByRole('button', { name: 'Teams meeting', exact: true }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'Automatic meeting-link lookup is unavailable in this Azure CLI profile.' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Verify meeting and acquire transcript', exact: true })).toBeDisabled()
+  await page.getByRole('button', { name: 'Paste / upload', exact: true }).click()
+  await page.getByLabel('Meeting classification', { exact: true }).selectOption('customer')
+  await page.getByRole('textbox', { name: 'Transcript text', exact: true }).fill('Seller: We have sign-off to spend 987 thousand this quarter.')
+  await page.getByRole('button', { name: 'Extract & Review', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Proposed meeting changes', exact: true })).toBeVisible()
+  expect(await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })).toEqual(before)
+  for (const checkbox of await page.locator('#meeting-follow-up').getByRole('checkbox').all()) {
+    if (await checkbox.isEnabled()) await checkbox.check()
+  }
+  await page.getByLabel('Meeting change reason', { exact: true }).fill('Reviewed the sanitized manual transcript evidence')
+  await page.getByRole('button', { name: 'Review selected meeting changes', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Review exact changes' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Cancel review' }).click()
+  expect(await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })).toEqual(before)
+  expect(fixture.requests.filter((path) => path === 'actions/commit')).toHaveLength(0)
+  await page.getByRole('button', { name: 'Review selected meeting changes', exact: true }).click()
+  await dialog.getByRole('textbox', { name: 'Review reason', exact: true }).fill('Explicitly approve only the selected sample changes')
+  const committed = page.waitForResponse((response) => response.url().endsWith('/actions/commit'))
+  await dialog.getByRole('button', { name: 'Confirm selected changes', exact: true }).click()
+  const receipt = actionReceiptSchema.parse(await (await committed).json())
+  expect(receipt.state).toBe('confirmed')
+  const result = meetingChangeSetResultSchema.parse(receipt.result)
+  expect(result.state).toBe('applied')
+  expect(result.items.some((item) => item.kind === 'field' && item.state === 'applied')).toBe(true)
+  expect((await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })).opportunity.comments).toContain('Meeting inject')
+  expect(graphRequests).toEqual([])
 })
 test('CLI live profile reuses current-user pairing and automatically displays their default deal-team accounts', async ({ page }) => {
   const fixture = await offlineNativeFixture(page, true)

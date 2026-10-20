@@ -109,7 +109,12 @@ function Invoke-TeamsRunOwner {
     }
   }
 }
-Complete-TeamsRunSetup -WorkDirectory $env:TLC_GUIDED_WORK -ClientTimeoutSeconds 1 -NoGuide:($env:TLC_GUIDED_SCENARIO -eq 'no-guide')
+try {
+  Complete-TeamsRunSetup -WorkDirectory $env:TLC_GUIDED_WORK -ClientTimeoutSeconds 1 -NoGuide:($env:TLC_GUIDED_SCENARIO -eq 'no-guide')
+} catch {
+  [Console]::Error.WriteLine($_.Exception.Message)
+  exit 1
+}
 `)
   const run = () => execute('pwsh', ['-NoProfile', '-File', wrapper], {
     env: {

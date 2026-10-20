@@ -9,6 +9,23 @@ import { z } from 'zod'
 
 export const meetingTypeSchema = z.enum(['customer', 'internal'])
 export const meetingSourceSchema = z.enum(['teams', 'upload', 'paste'])
+export const manualMeetingTranscriptVersion = '1.0' as const
+export const transcriptMaximumCharacters = 150_000
+export const transcriptMaximumBytes = 512_000
+export const transcriptMaximumSegments = 2000
+export const transcriptContentSchema = z.string().trim()
+    .min(11, 'Paste at least 11 characters of transcript text.')
+    .max(transcriptMaximumCharacters, 'Transcript text must not exceed 150,000 characters.')
+    .refine((value) => !value.includes('\0'), 'Use a UTF-8 text transcript, not a binary file.')
+    .refine((value) => new TextEncoder().encode(value).byteLength <= transcriptMaximumBytes, 'Transcript text must not exceed 500 KiB.')
+export const manualMeetingTranscriptRequestSchema = z.object({
+    contractVersion: z.literal(manualMeetingTranscriptVersion),
+    opportunityId: z.string().min(1).max(200),
+    meetingType: meetingTypeSchema,
+    source: z.enum(['paste', 'upload']),
+    content: transcriptContentSchema,
+    format: z.enum(['vtt', 'text']).optional()
+}).strict()
 export const meetingTargetKindSchema = z.enum(['opportunity', 'milestone', 'new-milestone'])
 export const meetingValueTypeSchema = z.enum(['text', 'money', 'date', 'optionset', 'boolean', 'percent'])
 export const mcemCriterionSchema = z.enum([
@@ -122,6 +139,7 @@ export const meetingChangeSetResultSchema = z.object({
 }).strict()
 
 export type MeetingType = z.infer<typeof meetingTypeSchema>
+export type ManualMeetingTranscriptRequest = z.infer<typeof manualMeetingTranscriptRequestSchema>
 export type MeetingSource = z.infer<typeof meetingSourceSchema>
 export type MeetingTargetKind = z.infer<typeof meetingTargetKindSchema>
 export type MeetingValueType = z.infer<typeof meetingValueTypeSchema>

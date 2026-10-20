@@ -75,6 +75,39 @@ async function fixture(services?: ApplicationServices, writeMode?: CliWriteMode)
   return { pairing, send, resolveServices, refreshIdentity, changeBeforeResponse: () => { changeBeforeResponse = true }, changeGeneration: () => { identity.generation++ } }
 }
 describe('native HTTP admission without any real source access', () => {
+  it('keeps manual transcript extraction readable but rejects meeting-change review in a read-only CLI profile before source initialization', async () => {
+    const { pairing, send, resolveServices } = await fixture(undefined, 'read-only')
+    const verifier = randomBytes(32).toString('base64url')
+    const pending = pairing.begin({ contractVersion: localConnectionVersion, challenge: createHash('sha256').update(verifier).digest('base64url') }, origin)
+    pairing.approve(pending.userCode)
+    const paired = pairing.exchange({ contractVersion: localConnectionVersion, requestId: pending.requestId, verifier }, origin)
+    if (paired.state !== 'paired') throw new Error('Fixture pairing failed.')
+    const response = await send('/api/teams/meetings/preview-changes', {}, { authorization: `Bearer ${paired.token}` })
+    expect(response.status).toBe(403)
+    expect(JSON.parse(response.text)).toMatchObject({ error: 'local_read_only' })
+    expect(resolveServices).not.toHaveBeenCalled()
+  })
+
+  it('reports unsupported Graph lookup in a CLI profile before initializing source services and retains the paired MSX session', async () => {
+    const { pairing, send, resolveServices } = await fixture(undefined, 'reviewed')
+    const verifier = randomBytes(32).toString('base64url')
+    const pending = pairing.begin({ contractVersion: localConnectionVersion, challenge: createHash('sha256').update(verifier).digest('base64url') }, origin)
+    pairing.approve(pending.userCode)
+    const paired = pairing.exchange({ contractVersion: localConnectionVersion, requestId: pending.requestId, verifier }, origin)
+    if (paired.state !== 'paired') throw new Error('Fixture pairing failed.')
+    const headers = { authorization: `Bearer ${paired.token}` }
+    for (const [path, body] of [
+      ['/api/teams/meetings/resolve', { joinUrl: 'https://teams.microsoft.com/l/meetup-join/sanitized' }],
+      ['/api/teams/meetings/acquire', { meetingId: 'sanitized', opportunityId: 'opp', meetingType: 'internal' }]
+    ] as const) {
+      const result = await send(path, body, headers)
+      expect(result.status).toBe(409)
+      expect(JSON.parse(result.text)).toMatchObject({ error: 'graph_unavailable_in_cli_profile' })
+    }
+    expect((await send('/api/teams/session', undefined, headers)).status).toBe(200)
+    expect(resolveServices).not.toHaveBeenCalled()
+  })
+
   it('requires an issued page capability before silently revalidating the owner and renewing a lease', async () => {
     const { send, pairing, refreshIdentity, resolveServices } = await fixture()
     expect((await send('/api/teams/local/renew', { contractVersion: '1.0' })).status).toBe(401)

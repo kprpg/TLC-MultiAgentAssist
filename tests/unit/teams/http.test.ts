@@ -7,6 +7,10 @@ import { loadTeamsConfiguration } from '../../../apps/teams/src/configuration.js
 import { collaborationVersion } from '../../../packages/common/contracts/collaboration.js'
 import { contractVersion } from '../../../packages/common/contracts/version.js'
 import JSZip from 'jszip'
+import { GraphMeetingError } from '../../../packages/orchestrator/collaboration/meeting-acquisition.js'
+import { manualMeetingTranscriptVersion, meetingChangeSetProposalSchema } from '../../../packages/common/contracts/meeting.js'
+import { acquisitionSchema } from '../../../packages/common/contracts/collaboration.js'
+import { z } from 'zod'
 
 const cleanups: Array<() => Promise<void> | void> = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
@@ -31,6 +35,55 @@ async function start(acceptNewWork = true) {
 }
 
 describe('Teams same-origin verified operation boundary', () => {
+  it('accepts bounded manual evidence as a server-owned draft, preserves source state and does not expose transcript content through Activity', async () => {
+    const { services, base, post } = await start()
+    const account = (await services.orchestrator.listAccounts())[0]!
+    const opportunity = (await services.orchestrator.listOpportunities(account.id))[0]!
+    const before = await services.orchestrator.getOpportunitySnapshot(opportunity.id)
+    const content = 'Seller: The security approval is blocked.\nSeller: The next step is a proof of concept.'
+    const response = await post('/api/teams/meetings/manual', {
+      contractVersion: manualMeetingTranscriptVersion, opportunityId: opportunity.id, meetingType: 'internal', source: 'paste', content
+    })
+    expect(response.status).toBe(200)
+    const result = z.object({ status: acquisitionSchema, proposals: z.array(meetingChangeSetProposalSchema) }).strict().parse(await response.json())
+    expect(result.status).toMatchObject({ state: 'ready', attribution: 'unknown' })
+    expect(result.proposals).toHaveLength(1)
+    expect(await services.orchestrator.getOpportunitySnapshot(opportunity.id)).toEqual(before)
+    const reviewed = await post('/api/teams/meetings/review', { acquisitionId: result.status.id })
+    expect(await reviewed.json()).toEqual(result.proposals)
+    const activity = await (await fetch(base + '/api/teams/activity')).text()
+    expect(activity).not.toContain('The security approval is blocked.')
+    expect(activity).not.toContain('The next step is a proof of concept.')
+    const forged = await post('/api/teams/actions/preview', { operation: 'applyMeetingChangeSet', input: { proposal: result.proposals[0] } })
+    expect(forged.status).toBe(403)
+  })
+  it('rejects invalid manual input before extracting it and keeps lifecycle pause admission', async () => {
+    const { post, services } = await start()
+    const propose = vi.spyOn(services, 'proposeTranscript')
+    const input = { contractVersion: manualMeetingTranscriptVersion, opportunityId: 'opp', meetingType: 'internal', source: 'paste', content: 'Seller: Review next steps.' }
+    expect((await post('/api/teams/meetings/manual', { ...input, contractVersion: '0.0' })).status).toBe(400)
+    expect((await post('/api/teams/meetings/manual', { ...input, source: 'teams' })).status).toBe(400)
+    expect((await post('/api/teams/meetings/manual', { ...input, proposals: [] })).status).toBe(400)
+    await post('/api/teams/lifecycle', { contractVersion: collaborationVersion, command: 'pause' })
+    expect((await post('/api/teams/meetings/manual', input)).status).toBe(409)
+    expect(propose).not.toHaveBeenCalled()
+  })
+  it.each([
+    ['auth-required', 'expired', 409, 'graph_auth_required'],
+    ['denied', 'Authorization_RequestDenied', 403, 'graph_denied'],
+    ['admin-blocked', 'GraphAccessToTranscriptsDisabled', 403, 'graph_admin_blocked'],
+    ['unsupported', 'invalid_meeting_link', 400, 'graph_invalid_meeting_link'],
+    ['unsupported', 'meeting_unavailable', 400, 'graph_unsupported'],
+    ['paused', 'graph_transport', 503, 'graph_paused']
+  ] as const)('returns an actionable %s meeting-link error instead of operation_failed', async (state, code, status, expected) => {
+    const { services, base, post } = await start()
+    vi.spyOn(services, 'resolveMeeting').mockRejectedValue(new GraphMeetingError(state, code))
+    const response = await post('/api/teams/meetings/resolve', { joinUrl: 'https://teams.microsoft.com/l/meetup-join/sanitized' })
+    expect(response.status).toBe(status)
+    expect(await response.json()).toEqual({ error: expected, correlationId: expect.any(String) })
+    expect((await fetch(base + '/api/teams/session')).status).toBe(200)
+  })
+
   it('pauses new effects, preserves reads and cancellation, and requires a fresh review after resume', async () => {
     const { services, base, post } = await start()
     const account = (await services.orchestrator.listAccounts())[0]!

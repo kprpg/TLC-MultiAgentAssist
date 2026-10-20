@@ -93,7 +93,7 @@ function Show-TeamsRunStatus {
 }
 
 function Install-TeamsRunClient {
-    param([string] $WorkDirectory, [object] $Record, [switch] $NoGuide, [switch] $Reinstall)
+    param([string] $WorkDirectory, [object] $Record, [switch] $NoGuide, [switch] $Reinstall, [switch] $ManualUpload)
     $packageRoot = [IO.Path]::GetFullPath((Join-Path $WorkDirectory "packages\$($Record.runId)")) + [IO.Path]::DirectorySeparatorChar
     $archive = [IO.Path]::GetFullPath([string] $Record.teamsArchive)
     if (-not $archive.StartsWith($packageRoot, [StringComparison]::OrdinalIgnoreCase) -or
@@ -101,13 +101,27 @@ function Install-TeamsRunClient {
         (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $Record.teamsArchiveSha256) {
         throw 'The recorded Teams installation ZIP is missing, changed or outside this run. Rebuild normally; do not upload an unverified ZIP.'
     }
-    if (-not $Reinstall -and $Record.installation -in @('command-succeeded', 'manually-confirmed', 'verified')) {
+    if (-not $Reinstall -and -not $ManualUpload -and $Record.installation -in @('command-succeeded', 'manually-confirmed', 'verified')) {
         Write-Host 'Reusing this run''s recorded installation. Use -Resume -Reinstall to upload the exact package again.'
         return
     }
     while ($true) {
+        Write-Host "[4/7] Installing/updating Teams personal app version $($Record.packageVersion). Exact ZIP: $archive"
+        if ($ManualUpload) {
+            $Record.installation = 'not-started'
+            Write-TeamsRunRecord -WorkDirectory $WorkDirectory -Record $Record
+            Write-Host 'Manual upload selected. No Agents Toolkit CLI sign-in will be attempted; tenant custom-app upload policy still applies.'
+            Write-Host "In your signed-in Teams desktop client: Apps > Manage your apps > Upload an app > Upload a custom app. Select ONLY: $archive"
+            Start-Process -FilePath (Split-Path -Parent $archive)
+            if ((Read-Host 'After Teams accepts that exact ZIP, type INSTALLED; anything else pauses setup').Trim() -cne 'INSTALLED') {
+                throw 'Setup paused before installation confirmation. The backend is still running; use -Resume -Reinstall -ManualUpload with the same -WorkDirectory.'
+            }
+            $Record.installation = 'manually-confirmed'
+            Write-TeamsRunRecord -WorkDirectory $WorkDirectory -Record $Record
+            return
+        }
         try {
-            Write-Host "[4/7] Installing/updating Teams personal app version $($Record.packageVersion). Exact ZIP: $archive"
+            Write-Host 'If CLI sign-in is blocked by token protection (AADSTS530084) or keeps prompting, cancel with Ctrl+C and use -Resume -Reinstall -ManualUpload with the same -WorkDirectory.'
             $installArguments = @('install', '--file-path', $archive, '--scope', 'Personal', '--interactive', 'false', '--telemetry', 'false')
             if (Get-Command atk -ErrorAction SilentlyContinue) {
                 & atk @installArguments | Out-Host
@@ -124,18 +138,9 @@ function Install-TeamsRunClient {
             Write-TeamsRunRecord -WorkDirectory $WorkDirectory -Record $Record
             Write-Warning "Teams upload/install did not complete. The verified backend remains running. $($_.Exception.Message)"
             if ($NoGuide) { throw }
-            Write-Host "Manual route: Teams > Apps > Manage your apps > Upload an app > Upload a custom app. Select ONLY: $archive"
             switch ((Read-Host 'R = retry installation, M = use manual upload, Q/Enter = pause and resume later').Trim().ToUpperInvariant()) {
                 'R' { continue }
-                'M' {
-                    Start-Process -FilePath (Split-Path -Parent $archive)
-                    if ((Read-Host 'After Teams accepts that exact ZIP, type INSTALLED; anything else pauses setup').Trim() -cne 'INSTALLED') {
-                        throw 'Setup paused before installation confirmation. The backend is still running; use -Resume.'
-                    }
-                    $Record.installation = 'manually-confirmed'
-                    Write-TeamsRunRecord -WorkDirectory $WorkDirectory -Record $Record
-                    return
-                }
+                'M' { $ManualUpload = $true; continue }
                 default { throw 'Setup paused: Teams installation is incomplete. The backend is still running; use -Resume.' }
             }
         }
@@ -143,10 +148,10 @@ function Install-TeamsRunClient {
 }
 
 function Complete-TeamsRunSetup {
-    param([string] $WorkDirectory, [switch] $NoGuide, [switch] $Reinstall, [int] $ClientTimeoutSeconds = 120)
+    param([string] $WorkDirectory, [switch] $NoGuide, [switch] $Reinstall, [switch] $ManualUpload, [int] $ClientTimeoutSeconds = 120)
     $record = (Get-OwnedTeamsRun -WorkDirectory $WorkDirectory).Record
     Read-TeamsLaunchStatus -Record $record | Out-Null
-    Install-TeamsRunClient -WorkDirectory $WorkDirectory -Record $record -NoGuide:$NoGuide -Reinstall:$Reinstall
+    Install-TeamsRunClient -WorkDirectory $WorkDirectory -Record $record -NoGuide:$NoGuide -Reinstall:$Reinstall -ManualUpload:$ManualUpload
     if ($NoGuide) {
         Write-Host 'Teams upload/install command completed. Rendering, source connection and page pairing are NOT verified (-NoGuide). Use -Resume to finish.'
         return

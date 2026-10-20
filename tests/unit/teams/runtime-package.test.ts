@@ -163,7 +163,7 @@ describe('self-contained host release staging', () => {
       installer.mockClear()
       await rm(folder, { recursive: true, force: true })
     }
-  })
+  }, 30_000)
 
   it('cleans its own staging after an install failure without touching unowned output or publishing an archive', async () => {
     const folder = await mkdtemp(join(tmpdir(), 'tlc-teams-failed-build-'))

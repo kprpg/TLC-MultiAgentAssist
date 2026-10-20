@@ -35,7 +35,11 @@ export const cliCapabilities: z.infer<typeof localCapabilitySchema>[] = nativeCa
     ...capability, state: 'unavailable-local',
     detail: 'This CLI connection is read-only. Enable explicit reviewed-write mode to review source changes under your own MSX permissions.'
   }
-  if (['mcp', 'graph', 'foundry'].includes(capability.id)) return {
+  if (capability.id === 'graph') return {
+    ...capability, title: 'Automatic Teams transcripts', state: 'unavailable-local',
+    detail: 'This CLI profile does not request Graph meeting access. Use Paste / upload for a transcript you are authorized to provide, or an approved profile with separate Graph grants.'
+  }
+  if (['mcp', 'foundry'].includes(capability.id)) return {
     ...capability, state: 'unavailable-local',
     detail: 'This CLI profile does not request this optional resource grant. Use an approved native profile for separately granted capabilities.'
   }

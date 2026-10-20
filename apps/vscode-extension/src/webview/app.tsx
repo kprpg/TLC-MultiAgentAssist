@@ -23,6 +23,7 @@ import { sortMilestones, sortOpportunities, type MilestoneSort, type Opportunity
 import { DiscoveryControls, DiscoverySortHeader } from '../../../shared/discovery-controls.js'
 import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportunities, toggleDiscoverySort, type DiscoveryFilters, type DiscoverySort } from '../../../shared/discovery.js'
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
+import { readTranscriptFile } from '../../../shared/transcript-file.js'
 import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
 import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
@@ -962,7 +963,7 @@ function meetingProposalToMarkdown(proposal: MeetingChangeSetProposalView, oppor
 async function readFileIntoContent(event: ChangeEvent<HTMLInputElement>, setContent: (value: string) => void, onNote: (message: string) => void): Promise<void> {
     const file = event.target.files?.[0]
     if (!file) return
-    try { setContent(await file.text()) }
+    try { setContent((await readTranscriptFile(file)).content) }
     catch (error) { onNote((error as Error).message) }
 }
 
