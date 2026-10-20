@@ -56,6 +56,7 @@ import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
 import { AddCustomerButton, type CustomerAccount } from '../../../shared/add-customer.js'
 import { RemoveCustomerButton } from '../../../shared/remove-customer.js'
+import { McemStageColumns } from '../../../shared/mcem-stage-board.js'
 import { WorkbenchPane } from './workbench-pane.js'
 
 type Shell = 'desktop' | 'web'
@@ -74,13 +75,6 @@ type PendingMembershipRemoval =
 type BoardDrag = { pointerId: number; opportunityId: string; sourceStage: number; startX: number; startY: number; targetStage: number | null; dragging: boolean }
 type WorkflowDescription = { summary: string; reads: string; useIt: string }
 
-const mcemStages = [
-  { id: 1, name: 'Listen & Consult', role: 'Account Executive' },
-  { id: 2, name: 'Inspire & Design', role: 'Specialist / SSP' },
-  { id: 3, name: 'Empower & Achieve', role: 'Solution Engineer' },
-  { id: 4, name: 'Realize Value', role: 'Cloud Solution Architect' },
-  { id: 5, name: 'Manage & Optimize', role: 'CSAM' }
-] as const
 
 const bladeWidthStorageKey = 'tlc.blade-widths.v1'
 const defaultBladeWidths: BladeWidths = { accounts: 230, opportunities: 320, actions: 310 }
@@ -1484,16 +1478,8 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
               maxTop: Math.max(0, Math.round(event.currentTarget.scrollHeight - event.currentTarget.clientHeight))
             })}>
               {boardLoading && <div className="loading-state">Evaluating stage gates for this account…</div>}
-              <div className="mcem-board" aria-label={`MCEM stages for ${account?.name}`}>
-              {mcemStages.map((stage) => <section
-                key={stage.id}
-                className={`mcem-column ${dragTargetStage === stage.id ? 'drop-target' : ''}`}
-                aria-label={`Stage ${stage.id}: ${stage.name}`}
-                data-stage={stage.id}
-              >
-                <header><span>Stage {stage.id}</span><strong>{stage.name}</strong><small>{stage.role}</small></header>
-                <div className="mcem-column-cards">
-                  {opportunities.filter((item) => item.recordedStage === stage.id).map((item) => {
+              <McemStageColumns label={`MCEM stages for ${account?.name}`} opportunities={opportunities} dropTargetStage={dragTargetStage}
+                renderOpportunity={(item, stage) => {
                     const evaluation = boardEvaluations[item.id]
                     const met = evaluation?.criteria.filter((criterion) => criterion.status === 'met').length ?? 0
                     const total = evaluation?.criteria.length ?? 0
@@ -1530,10 +1516,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                         <Button size="small" appearance="subtle" className="text-action" disabled={stage.id === 5} icon={<ChevronRight20Regular />} aria-label={`Move ${item.name} to next stage`} onClick={(event) => { event.stopPropagation(); void proposeStageMove(item, stage.id + 1) }} />
                       </div>
                     </article>
-                  })}
-                </div>
-                </section>)}
-              </div>
+                }} />
             </div>
             <div className="mcem-horizontal-scrollbar">
               <input

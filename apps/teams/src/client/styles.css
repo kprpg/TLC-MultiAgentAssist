@@ -203,3 +203,7 @@ summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
 .teams-surface-panel .panel { padding: 12px; }
 .teams-surface-panel h1 { font-size: 18px; }
 .meeting-panel .detail-tabs { position: sticky; top: 0; background: var(--colorNeutralBackground1); }
+.teams-mcem-board { --cp-accent: var(--tlc-accent); margin-bottom: 20px; }
+.teams-mcem-board .record-table-wrap { max-height: 480px; overflow: auto; }
+.teams-mcem-board .mcem-card { cursor: pointer; touch-action: auto; user-select: text; }
+.teams-mcem-board .mcem-column { min-height: 220px; }

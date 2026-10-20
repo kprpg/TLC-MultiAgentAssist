@@ -72,9 +72,12 @@ export function createApplicationOperations(services: ApplicationServices) {
     return operations[name]!
   }
   async function workingSet() {
-    const accounts = await core.listAccounts()
-    const opportunities = (await Promise.all(accounts.map((account) => core.listOpportunities(account.id)))).flat()
-    return { accountIds: accounts.map((account) => account.id).sort(), opportunityIds: opportunities.map((opportunity) => opportunity.id).sort() }
+    const capture = async () => {
+      const accounts = await core.listAccounts()
+      const opportunities = (await Promise.all(accounts.map((account) => core.listOpportunities(account.id)))).flat()
+      return { accountIds: accounts.map((account) => account.id).sort(), opportunityIds: opportunities.map((opportunity) => opportunity.id).sort() }
+    }
+    return services.withReadContext ? services.withReadContext(capture) : capture()
   }
   async function verifyWorkflow(runId: string) {
     const captured = services.workflowScopes.get(runId)
@@ -90,8 +93,9 @@ export function createApplicationOperations(services: ApplicationServices) {
       services.refreshSource()
       const entry = describe(name)
       if (name === 'workflows.start') {
+        const request = entry.parse(input)
         const captured = await workingSet()
-        const run = c.workflowRunSchema.parse(await entry.run(input))
+        const run = c.workflowRunSchema.parse(await entry.run(request))
         if (services.workflowScopes.size >= 100) services.workflowScopes.delete(services.workflowScopes.keys().next().value!)
         services.workflowScopes.set(run.runId, captured)
         return run

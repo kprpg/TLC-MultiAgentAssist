@@ -582,6 +582,7 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
         expect(horizontalBox!.y + horizontalBox!.height).toBeLessThanOrEqual(workbenchBox!.y + workbenchBox!.height)
         expect(verticalBox!.x + verticalBox!.width).toBeLessThanOrEqual(workbenchBox!.x + workbenchBox!.width)
         await expect.poll(() => horizontalScrollbar.evaluate((element) => Number((element as HTMLInputElement).max))).toBeGreaterThan(0)
+        await expect(horizontalScrollbar).toBeEnabled()
         await horizontalScrollbar.focus()
         await horizontalScrollbar.press('End')
         await expect.poll(() => stageBoardViewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
@@ -589,7 +590,9 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
         await stageBoardViewport.locator('.mcem-board').evaluate((element, viewportHeight) => {
             ; (element as HTMLElement).style.minHeight = `${viewportHeight + 400}px`
         }, viewportBox!.height)
+        await expect.poll(() => stageBoardViewport.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
         await expect.poll(() => verticalScrollbar.evaluate((element) => Number((element as HTMLInputElement).max))).toBeGreaterThan(0)
+        await expect(verticalScrollbar).toBeEnabled()
         await verticalScrollbar.focus()
         await verticalScrollbar.press('End')
         await expect.poll(() => stageBoardViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)

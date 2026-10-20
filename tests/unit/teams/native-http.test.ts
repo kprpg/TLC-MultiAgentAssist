@@ -75,6 +75,21 @@ async function fixture(services?: ApplicationServices, writeMode?: CliWriteMode)
   return { pairing, send, resolveServices, refreshIdentity, changeBeforeResponse: () => { changeBeforeResponse = true }, changeGeneration: () => { identity.generation++ } }
 }
 describe('native HTTP admission without any real source access', () => {
+  it('requires explicit MCP connection before costly workflow source reads without discarding the paired MSX session', async () => {
+    const { pairing, send, resolveServices } = await fixture(undefined, 'reviewed')
+    const verifier = randomBytes(32).toString('base64url')
+    const pending = pairing.begin({ contractVersion: localConnectionVersion, challenge: createHash('sha256').update(verifier).digest('base64url') }, origin)
+    pairing.approve(pending.userCode)
+    const paired = pairing.exchange({ contractVersion: localConnectionVersion, requestId: pending.requestId, verifier }, origin)
+    if (paired.state !== 'paired') throw new Error('Fixture pairing failed.')
+    const headers = { authorization: `Bearer ${paired.token}` }
+    const response = await send('/api/teams/operations/workflows.start', { contractVersion: '1.0', workflowId: 'WF-001', scope: { kind: 'portfolio' } }, headers)
+    expect(response.status).toBe(409)
+    expect(JSON.parse(response.text)).toMatchObject({ error: 'mcp_connection_required' })
+    expect((await send('/api/teams/session', undefined, headers)).status).toBe(200)
+    expect(resolveServices).not.toHaveBeenCalled()
+  })
+
   it('keeps manual transcript extraction readable but rejects meeting-change review in a read-only CLI profile before source initialization', async () => {
     const { pairing, send, resolveServices } = await fixture(undefined, 'read-only')
     const verifier = randomBytes(32).toString('base64url')

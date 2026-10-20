@@ -289,6 +289,10 @@ Desktop-equivalent MSX writes through the shared review/approval and audit path.
 Source permissions remain enforced; no FTE or publication role is inferred.
 Use `-CliWriteMode read-only` to retain read-only access. The separate native and hosted profiles retain
 their own approvals and capabilities.
+Live Plays additionally require an explicit owner-enabled MCP connection; see
+[optional CLI MCP setup](docs/runbooks/teams-app.md#optional-cli-mcp-connection-for-live-plays).
+This reuses approved current-user permissions and does not grant tenant consent
+or bypass source/tool policy.
 
 Teams uses the same **New, Discover, Portfolio, Plays, Dashboards** navigation as
 the VS Code extension, opening Portfolio by default. Its responsive account,

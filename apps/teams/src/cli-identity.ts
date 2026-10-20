@@ -11,6 +11,7 @@ export class CliIdentityProvider {
   generation = 0
   private current: NativeIdentity | undefined
   private state: NativeConnectionStatus['state'] = 'sign-in-required'
+  private mcpState: NativeConnectionStatus['resources'][number]['state'] = 'not-connected'
   private readonly resolveKey: JWTVerifyGetKey
   private readonly now: () => number
   constructor(
@@ -29,7 +30,7 @@ export class CliIdentityProvider {
     return this.current && (this.current.principal.expiresAt ?? 0) > this.now() ? this.current : undefined
   }
   private assertResource(resource: NativeResource): void {
-    if (resource !== 'msx') throw new NativeConnectionError('native_resource_unavailable')
+    if (resource !== 'msx' && resource !== 'mcp') throw new NativeConnectionError('native_resource_unavailable')
   }
   private async acquire(): Promise<{ token: string; identity: NativeIdentity }> {
     const result = await this.credential.getToken(`${this.configuration.msxResource}/.default`)
@@ -70,18 +71,29 @@ export class CliIdentityProvider {
   async connect(resource: NativeResource): Promise<void> {
     this.assertResource(resource)
     if (this.state === 'connecting') throw new NativeConnectionError('native_sign_in_in_progress')
-    await this.disconnect()
+    const previous = this.identity()
+    if (resource === 'mcp' && !previous) throw new NativeConnectionError('native_sign_in_required')
+    if (resource === 'msx') await this.disconnect()
     const generation = this.generation
     this.state = 'connecting'
     try {
       const result = await this.acquire()
       if (generation !== this.generation) throw new NativeConnectionError('native_connection_changed')
-      await this.options.probeMsxIdentity(result.token, result.identity.principal)
+      if (previous && resource === 'mcp' && previous.principal.userId !== result.identity.principal.userId) {
+        await this.disconnect()
+        throw new NativeConnectionError('native_connection_changed')
+      }
+      if (resource === 'msx') await this.options.probeMsxIdentity(result.token, result.identity.principal)
       if (generation !== this.generation) throw new NativeConnectionError('native_connection_changed')
       this.current = result.identity
+      if (resource === 'mcp') this.mcpState = 'connected'
       this.state = 'connected'
     } catch (error) {
-      if (generation === this.generation) { this.current = undefined; this.state = 'blocked' }
+      if (generation === this.generation) {
+        if (resource === 'mcp' && !(error instanceof NativeConnectionError && error.code === 'native_identity_rejected')) {
+          this.mcpState = 'denied'; this.state = this.identity() ? 'connected' : 'blocked'
+        } else { await this.disconnect(); this.state = 'blocked' }
+      }
       throw error instanceof NativeConnectionError ? error : new NativeConnectionError('native_source_denied')
     }
   }
@@ -89,6 +101,7 @@ export class CliIdentityProvider {
     this.assertResource(resource)
     const identity = renewSession ? this.current : this.identity()
     if (!identity) throw new NativeConnectionError('native_sign_in_required')
+    if (resource === 'mcp' && this.mcpState !== 'connected') throw new NativeConnectionError('native_resource_unavailable')
     const generation = this.generation
     try {
       // The CLI owns its cache. Recheck its current subject rather than retaining a token across account switches.
@@ -103,12 +116,16 @@ export class CliIdentityProvider {
       this.current = result.identity
       return result.token
     } catch (error) {
-      if (generation === this.generation) { await this.disconnect(); this.state = 'blocked' }
+      if (generation === this.generation) {
+        if (resource === 'mcp' && !(error instanceof NativeConnectionError && error.code === 'native_identity_rejected')) {
+          this.mcpState = 'denied'
+        } else { await this.disconnect(); this.state = 'blocked' }
+      }
       throw error instanceof NativeConnectionError ? error : new NativeConnectionError('native_source_denied')
     }
   }
   async disconnect(): Promise<void> {
-    this.generation++; this.current = undefined; this.state = 'sign-in-required'
+    this.generation++; this.current = undefined; this.state = 'sign-in-required'; this.mcpState = 'not-connected'
   }
   status(): NativeConnectionStatus {
     const identity = this.identity()
@@ -122,11 +139,16 @@ export class CliIdentityProvider {
         : 'Use the protected owner Connect command to reuse your existing Azure CLI user. If needed, run az login yourself first. No sign-in or source request is triggered by this page.',
       ...(identity ? { account: identity.account } : {}),
       resources: (['msx', 'mcp', 'graph'] as const).map((resource) => ({
-        resource, state: resource !== 'msx' ? 'unavailable' : identity ? 'connected' : 'not-connected',
-        detail: resource !== 'msx' ? 'This CLI profile does not request optional source grants.' : 'Current-user delegated MSX access; all operations remain source-authorized.'
+        resource, state: resource === 'graph' ? 'unavailable' : resource === 'mcp' ? identity ? this.mcpState : 'not-connected' : identity ? 'connected' : 'not-connected',
+        detail: resource === 'graph' ? 'This CLI profile does not request Graph grants.'
+          : resource === 'mcp' ? 'Explicit owner Connect for MCP is required. Uses a verified current-user Dataverse token; MCP tool policy and source permissions are checked separately.'
+            : 'Current-user delegated MSX access; all operations remain source-authorized.'
       })),
       capabilities: getCliCapabilities(this.configuration.writeMode).map((capability) => {
         if (identity && capability.id === 'msx') return { ...capability, state: 'available', detail: 'Signed-in user verified. Portfolio automatically uses their Dataverse system-user ID and active deal-team memberships.' }
+        if (identity && capability.id === 'mcp' && this.mcpState === 'connected') return {
+          ...capability, state: 'available', detail: 'Owner-enabled delegated Dataverse token is available. MCP server admission, read-query allowlists and row permissions remain enforced.'
+        }
         if (identity && capability.id === 'reviewed-writes' && this.configuration.writeMode === 'reviewed') return {
           ...capability, state: 'available', detail: 'Reviewed MSX changes are enabled. Each operation is approved explicitly and remains subject to the current user permissions and concurrency checks.'
         }

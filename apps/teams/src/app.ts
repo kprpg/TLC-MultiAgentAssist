@@ -215,6 +215,10 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
       }
       await lifecycle.assertReadable(principal)
       await new UserRequestBudget(options.store).consume(principal, 'requests', principal.mode === 'sample' ? 600 : 60)
+      if (local && url.pathname === '/api/teams/operations/workflows.start' &&
+          !local.status().resources.some((resource) => resource.resource === 'mcp' && resource.state === 'connected')) {
+        throw new TeamsHttpError(409, 'mcp_connection_required')
+      }
       if (isCliConfiguration(options.configuration) && ['/api/teams/meetings/resolve', '/api/teams/meetings/acquire'].includes(url.pathname)) {
         throw new TeamsHttpError(409, 'graph_unavailable_in_cli_profile')
       }

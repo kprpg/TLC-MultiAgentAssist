@@ -47,6 +47,8 @@ apps/teams/src/client/                Personal/channel/meeting presentation
                                      Native connection panel and memory-only local API client
 apps/teams/src/client/discovery.tsx   Domain tabs, shared customer filters/sort and reviewed memberships
 apps/teams/src/client/discovery.css   Teams-themed compact discovery table and responsive layout
+apps/teams/src/client/mcem-stage-board.tsx
+                                     Account-scoped Teams selection over shared MCEM stage columns
 apps/teams/src/client/manual-transcript-input.tsx
                                      Bounded paste/upload input and scope-safe extraction
 apps/teams/src/client/meeting-capture.ts
@@ -56,6 +58,9 @@ apps/teams/.env.cli.example          Safe existing-user CLI configuration, not t
 apps/shared/                         Browser-safe prompt/Markdown and existing UI reuse
 apps/shared/transcript-file.ts       Shared UTF-8 VTT/text reader for Desktop/Web, VS Code and Teams
                                      Shared Portfolio controls, sorting and Next Best Actions
+apps/shared/mcem-stages.ts           Browser-safe stage names and accountable role metadata
+apps/shared/mcem-stage-board.tsx     Shared Desktop/Web/Teams stage columns and presentation
+apps/shared/mcem-stage-board.css     Shared stage headers, cards, selection and gate styling
 packages/common/contracts/workflow-output.ts
                                      Browser-safe existing workflow result/run-view schemas
 packages/common/contracts/local-connection.ts

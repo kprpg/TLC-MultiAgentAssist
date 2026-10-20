@@ -10,6 +10,7 @@ async function offlineNativeFixture(page: Page, cli = false, writeMode: CliWrite
   let approved = false
   let revoked = false
   let unavailable = false
+  let mcpConnected = false
   let privateRequests = 0
   const token = 'L'.repeat(43)
   const expiresAt = new Date(Date.now() + 300_000).toISOString()
@@ -42,7 +43,9 @@ async function offlineNativeFixture(page: Page, cli = false, writeMode: CliWrite
     if (path === 'session') return json({ contractVersion: '1.0', mode: 'live', roles: cli ? [] : ['TLC.Teams.User'], displayName: cli ? `Verified local MSX user (${writeMode === 'reviewed' ? 'reviewed read/write' : 'read-only'})` : 'Offline native fixture' })
     if (path === 'local/status') return json({
       contractVersion: localConnectionVersion, state: 'connected', detail: 'Offline fixture only. No actual source data was accessed.',
-      account: 'offline-owner@example.test', resources: [], capabilities: cli ? getCliCapabilities(writeMode) : nativeCapabilities
+      account: 'offline-owner@example.test',
+      resources: [{ resource: 'mcp', state: mcpConnected ? 'connected' : 'not-connected', detail: 'Offline optional source fixture.' }],
+      capabilities: cli ? getCliCapabilities(writeMode) : nativeCapabilities
     })
     if (path === 'launch/ready') {
       reports.push(teamsClientReadyRequestSchema.parse(route.request().postDataJSON()))
@@ -57,8 +60,26 @@ async function offlineNativeFixture(page: Page, cli = false, writeMode: CliWrite
     if (path === 'operations/workflows.list') return json([])
     return json({ error: 'offline_fixture_operation_not_configured' }, 409)
   })
-  return { approve: () => { approved = true }, invalidate: () => { unavailable = true }, requests, reports, privateRequests: () => privateRequests, token }
+  return { approve: () => { approved = true }, connectMcp: () => { mcpConnected = true }, invalidate: () => { unavailable = true }, requests, reports, privateRequests: () => privateRequests, token }
 }
+test('live Plays explains optional MCP setup, waits for owner connection and preserves the MSX page', async ({ page }) => {
+  const fixture = await offlineNativeFixture(page, true, 'reviewed')
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Request local pairing' }).click()
+  fixture.approve()
+  await expect(page.getByRole('button', { name: 'Plays', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Plays', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Connect MCP to run live Plays', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Run workflow', exact: true })).toBeDisabled()
+  expect(fixture.requests).not.toContain('operations/workflows.start')
+  expect(fixture.requests.some((path) => path.includes('/connect'))).toBe(false)
+  fixture.connectMcp()
+  await page.getByRole('button', { name: 'Check MCP connection', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Run workflow', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: 'Run workflow', exact: true }).click()
+  await expect(page.getByTestId('workflow-status')).toContainText('completed')
+  await expect(page.getByRole('button', { name: 'Request local pairing' })).toHaveCount(0)
+})
 test('a paired live page renews past fifteen minutes but clears its private workspace at the eight-hour workday limit', async ({ page }) => {
   await page.clock.install({ time: new Date() })
   const fixture = await offlineNativeFixture(page, true)

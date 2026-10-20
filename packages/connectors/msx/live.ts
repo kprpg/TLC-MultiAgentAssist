@@ -314,6 +314,7 @@ export class MsxRequestError extends Error {
 }
 
 export class LiveMsxConnector implements MsxConnector {
+  private readonly readContext = new AsyncLocalStorage<{ portfolio?: Promise<MsxPortfolio> }>()
   private readonly entityVersions = new Map<string, string>()
   private readonly expectedVersions = new AsyncLocalStorage<Record<string, string>>()
   private readonly baseUrl: URL
@@ -1151,12 +1152,21 @@ export class LiveMsxConnector implements MsxConnector {
   }
 
   private getPortfolio(): Promise<MsxPortfolio> {
-    if (this.cacheOptions.cachePortfolio === false) return this.loadPortfolio()
+    if (this.cacheOptions.cachePortfolio === false) {
+      const context = this.readContext.getStore()
+      if (!context) return this.loadPortfolio()
+      context.portfolio ??= this.loadPortfolio()
+      return context.portfolio
+    }
     this.portfolioPromise ??= this.loadPortfolio().catch((error: unknown) => {
       this.portfolioPromise = undefined
       throw error
     })
     return this.portfolioPromise
+  }
+
+  withReadContext<T>(operation: () => Promise<T>): Promise<T> {
+    return this.readContext.run({}, operation)
   }
 
   private async loadPortfolio(): Promise<MsxPortfolio> {

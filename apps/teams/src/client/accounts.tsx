@@ -7,7 +7,7 @@ import { NewWorkspace, type CreationClient } from '../../../shared/record-creati
 import { sortOpportunities, type OpportunitySort, type SortDirection } from '../../../shared/portfolio-sorting.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
 import { sellerMoney } from '../../../shared/seller-dashboard-analysis.js'
-import { OpportunityWorkbench } from './opportunity-workbench.js'
+import { OpportunityWorkbench, type DetailTab } from './opportunity-workbench.js'
 import { DiscoveryWorkspace } from './discovery.js'
 import { defaultPortfolioPanes, type PortfolioPanes } from './workspace-navigation.js'
 import type { TeamsApiClient, ReviewAction } from './data-client.js'
@@ -32,6 +32,7 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
   const [milestones, setMilestones] = useState<c.Milestone[]>([])
   const [tab, setTab] = useState<AccountWorkspace>(workspace ?? 'portfolio')
   const [newOpened, setNewOpened] = useState(workspace === 'new')
+  const [detailTab, setDetailTab] = useState<DetailTab>('overview')
   const [revision, setRevision] = useState(0)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -179,7 +180,9 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
           {!loading && !opportunities.length && <p>No eligible Portfolio opportunities. Use Discover to review your working set.</p>}
           {!loading && !accounts.length && <p>No customer accounts. Use Add customer to get started.</p>}
         </section></details>
-        {selection ? <OpportunityWorkbench key={`${selection.opportunity.id}:${revision}`} client={client} selection={selection} milestones={milestones} panes={panes} onAction={action} onMeeting={onMeeting} onDraftChange={() => { dirty.current = true }} />
+        {selection ? <OpportunityWorkbench key={`${selection.opportunity.id}:${revision}`} client={client} selection={selection} opportunities={opportunities}
+          milestones={milestones} panes={panes} tab={detailTab} onTabChange={setDetailTab} onSelectOpportunity={selectOpportunity}
+          onAction={action} onMeeting={onMeeting} onDraftChange={() => { dirty.current = true }} />
           : <section className="pane"><h2>Select an opportunity</h2><p>An account may be visible without any eligible Portfolio opportunities.</p></section>}
       </div>
     </div>

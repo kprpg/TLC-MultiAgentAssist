@@ -207,8 +207,9 @@ new native/API/SPA/bot registration. It verifies the delegated source token and
 the user's own Dataverse mapping, then loads their active deal-team accounts
 automatically. Explicit `reviewed` write mode enables the same shared MSX
 operations as Desktop, with exact review, approval, concurrency checks and durable
-receipts. It does not infer FTE/publisher roles or enable optional MCP/Graph or
-shared publication. The native/hosted gates are unchanged.
+receipts. It does not infer FTE/publisher roles or enable Graph or shared
+publication. MCP is a separate, explicit owner-enabled connection, not an
+automatic consequence of MSX connectivity. The native/hosted gates are unchanged.
 
 **Engineering validation is offline only.** Do not sign in, read, create, update or
 delete real MSX/Dataverse records while validating these changes. Use the fixture
@@ -325,6 +326,38 @@ reads never fall back to sample records.
 Public CLI configuration is version **1.2**, including the explicit `writeMode`;
 native public configuration and
 the protected owner/pairing protocol remain version **1.0**.
+
+### Optional CLI MCP connection for live Plays
+
+After connecting MSX and pairing the Teams page, the owner can separately enable
+MCP using the current user's existing approved Dataverse permissions:
+
+```powershell
+.\scripts\teams-local-connection.ps1 -Action Connect -Resource mcp `
+  -WorkDirectory "$env:LOCALAPPDATA\TLC-Assist\Teams\launcher-cli"
+```
+
+Use the same custom work directory as your launcher when applicable. This command
+does not reinstall the Teams app, change registrations, grant tenant consent,
+sign in through HTTP, or reset existing MSX pairing. The CLI uses the configured
+Dataverse resource's `/.default` token path, verifies signature/tenant/audience
+and delegated subject, and requires that subject to remain the already-verified
+MSX owner. It does not borrow VS Code/native credentials or infer FTE roles.
+
+In **Plays**, select **Check MCP connection** after the owner command. Until then,
+the UI explains the missing connection and disables **Run workflow**; a direct
+start request is also rejected before costly portfolio reads. MCP token
+availability is not proof of MCP server/client allowlisting or query permission.
+Actual calls still enforce the approved registry origin, default-deny tool
+policy, query/row budgets and source-user permissions. If those grants/admission
+are absent, the workflow reports failure/unauthorized source health rather than
+pretending to complete. No source write is enabled by connecting MCP.
+
+An ordinary optional-MCP acquisition/permission failure leaves a valid MSX
+connection intact. Account changes, invalid identity, disconnect and source
+expiry still invalidate the relevant authority. No optional MCP token is
+requested before the explicit owner action, and Graph remains unavailable in
+this CLI profile.
 
 The Teams frame's initial cross-site `GET /` navigation can load the public
 HTML shell, subject to the exact loopback Host and CSP frame-ancestor checks.
@@ -1254,9 +1287,25 @@ work, Meetings, Activity and Context settings; these are not removed features.
   storage.
 - One explicit MCEM evaluation supplies the stage view and recommendation rail.
   Recommendations remain read-only, with owner roles, evidence and assumptions.
+- **MCEM Stages** uses the same shared five-column stage headings, accountable
+  roles, cards and styling as Desktop/Web. It places the authorized account's
+  opportunities by recorded stage. Select a card to retain the stage-board view
+  while changing opportunity; bound tabs cannot escape their existing scope.
+  Unevaluated cards say **Not evaluated**, not a permanent loading message.
+  Evaluation remains explicit and scoped to the selected opportunity; it does not
+  fan out model calls across every card. Adjacent stage changes retain the existing
+  reason, exact-preview and confirmation gates below the board.
 - Plays retains shared run/cancel/history semantics and displays structured
   result cards, queues, evidence and source health instead of a JSON-only result.
   Cards and notifications deep-link to the appropriate private Plays/Activity view.
+- Plays distinguishes catalog/history loading, failures, empty results and
+  workflow startup. **Starting workflow...** explains source-scope verification;
+  no completed result is implied while the request is pending. Catalog/history
+  failures have explicit retry controls, and failed runs keep their error reference.
+  Workflow scope capture now shares one portfolio snapshot across its account
+  reads instead of rereading the whole portfolio once per account. That memo is
+  local to a single capture; subsequent requests and concurrent captures still
+  recheck source visibility independently.
 - New retains sample SQLite creation and reviewed live draft export. Dashboards
   reuses the shared sample Seller Dashboard. In live Teams it reports
   `hosted-profile-denied`; being on the same laptop does not authorize a viewer

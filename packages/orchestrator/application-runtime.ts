@@ -30,6 +30,7 @@ export interface ApplicationServices {
   listTranscriptSources(opportunityId: string): Promise<MeetingTranscriptSummary[]>
   workflowScopes: Map<string, { accountIds: string[]; opportunityIds: string[] }>
   refreshSource(): void
+  withReadContext?<T>(operation: () => Promise<T>): Promise<T>
   withReviewedVersions<T>(before: unknown, operation: () => Promise<T>): Promise<T>
   dispose(): Promise<void>
 }
@@ -39,6 +40,7 @@ function assemble(msx: MsxConnector, guidance: McemGuidanceConnector, agents: Ta
     orchestrator: new ThinSliceOrchestrator(msx, guidance, agents, undefined, recordCreation),
     meetings, workflows, sellerDashboard, dispose, workflowScopes: new Map(), ...source,
     refreshSource,
+    withReadContext: (operation) => msx.withReadContext ? msx.withReadContext(operation) : operation(),
     withReviewedVersions: (before, operation) => {
       const versions = before && typeof before === 'object' && 'revisionTokens' in before
         ? z.record(z.string(), z.string()).parse(before.revisionTokens) : {}

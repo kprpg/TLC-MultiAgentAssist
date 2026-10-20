@@ -237,6 +237,7 @@ export function TeamsApp() {
         onMeeting={() => setView('meetings')} onFocus={focusPortfolio}
         {...(bindingId && preferredAccountId ? { boundAccountId: preferredAccountId, boundOpportunityId } : {})} /></div>}
       {workspaceAllowed && view === 'plays' && <WorkflowsWorkspace client={client} selection={selection} onFocus={focusPortfolio}
+        {...('authentication' in authentication.configuration ? { authentication: authentication.configuration.authentication } : {})}
         {...(linkedRunId ? { initialRunId: linkedRunId } : {})} {...(bindingId && preferredAccountId ? {
         scope: selection ? { kind: 'opportunity' as const, accountId: selection.account.id, opportunityId: selection.opportunity.id } : { kind: 'account' as const, accountId: preferredAccountId }
       } : {})} />}

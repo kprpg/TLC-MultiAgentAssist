@@ -8,16 +8,17 @@ import type { TeamsApiClient } from './data-client.js'
 import type { WorkingSelection } from './accounts.js'
 import type { PortfolioPanes } from './workspace-navigation.js'
 import { useResponsiveDisclosure } from './use-responsive-disclosure.js'
+import { TeamsMcemStageBoard } from './mcem-stage-board.js'
 
-type DetailTab = 'overview' | 'guidance' | 'stages'
+export type DetailTab = 'overview' | 'guidance' | 'stages'
 const tabs: Array<{ id: DetailTab; label: string }> = [{ id: 'overview', label: 'Overview' }, { id: 'guidance', label: 'Guidance' }, { id: 'stages', label: 'MCEM Stages' }]
 
-export function OpportunityWorkbench({ client, selection, milestones, panes, onAction, onMeeting, onDraftChange }: {
-  client: TeamsApiClient; selection: WorkingSelection; milestones: c.Milestone[]; panes: PortfolioPanes
+export function OpportunityWorkbench({ client, selection, opportunities, milestones, panes, tab, onTabChange, onSelectOpportunity, onAction, onMeeting, onDraftChange }: {
+  client: TeamsApiClient; selection: WorkingSelection; opportunities: c.Opportunity[]; milestones: c.Milestone[]; panes: PortfolioPanes
+  tab: DetailTab; onTabChange(tab: DetailTab): void; onSelectOpportunity(id: string): void
   onAction(operation: string, input: Record<string, unknown>): Promise<void>
   onMeeting(): void; onDraftChange(): void
 }) {
-  const [tab, setTab] = useState<DetailTab>('overview')
   const [notes, setNotes] = useState(selection.opportunity.comments ?? '')
   const sourceNotes = useRef(selection.opportunity.comments ?? '')
   useEffect(() => {
@@ -62,9 +63,9 @@ export function OpportunityWorkbench({ client, selection, milestones, panes, onA
       <nav className="detail-tabs" role="tablist" aria-label="Opportunity sections">
         {tabs.map((item, index) => <button key={item.id} id={`detail-tab-${item.id}`} role="tab" type="button"
           aria-selected={tab === item.id} aria-controls={`detail-${item.id}`} tabIndex={tab === item.id ? 0 : -1}
-          onClick={() => setTab(item.id)} onKeyDown={(event) => {
+          onClick={() => onTabChange(item.id)} onKeyDown={(event) => {
             const next = event.key === 'ArrowRight' ? tabs[(index + 1) % tabs.length] : event.key === 'ArrowLeft' ? tabs[(index + tabs.length - 1) % tabs.length] : event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs.at(-1) : undefined
-            if (next) { event.preventDefault(); setTab(next.id); document.getElementById(`detail-tab-${next.id}`)?.focus() }
+            if (next) { event.preventDefault(); onTabChange(next.id); document.getElementById(`detail-tab-${next.id}`)?.focus() }
           }}>{item.label}</button>)}
       </nav>
       <div onChangeCapture={(event) => { if (event.target instanceof Element && event.target.closest('.field')) onDraftChange() }}>
@@ -87,6 +88,8 @@ export function OpportunityWorkbench({ client, selection, milestones, panes, onA
           <GuidanceWorkspace client={client} selection={selection} />
         </section>
         <section id="detail-stages" role="tabpanel" aria-labelledby="detail-tab-stages" hidden={tab !== 'stages'}>
+          <TeamsMcemStageBoard accountName={selection.account.name} opportunities={opportunities} selectedId={selection.opportunity.id}
+            evaluation={evaluation} onSelect={onSelectOpportunity} />
           <h3>Stage readiness</h3>
           <p>Recorded stage {selection.opportunity.recordedStage}{evaluation ? ` | Evidence-based stage ${evaluation.evidenceBasedStage} | ${evaluation.state}` : ' | Run MCEM Coach to evaluate the current evidence.'}</p>
           <button type="button" className="primary" disabled={busy} onClick={() => { void runCoach() }}>{busy ? 'Evaluating...' : 'Run MCEM Coach'}</button>

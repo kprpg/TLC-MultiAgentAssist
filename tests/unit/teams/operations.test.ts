@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSampleApplicationServices } from '../../../packages/orchestrator/application-runtime.js'
 import { createApplicationOperations } from '../../../packages/orchestrator/operations.js'
 import { contractVersion } from '../../../packages/common/contracts/version.js'
@@ -34,6 +34,14 @@ describe('shared Teams operations and sample composition', () => {
     const run = await operations.invoke('workflows.start', { contractVersion: workflowContractVersion, scope: { kind: 'portfolio' }, workflowId: definition.id })
     expect(run).toMatchObject({ workflowId: definition.id })
     await expect(operations.invoke('workflows.start', { ...request, workflowId: 'wrong' })).rejects.toThrow()
+  })
+  it('validates a workflow start before collecting its potentially expensive source scope', async () => {
+    const { service, operations } = await fixture()
+    const accounts = vi.spyOn(service.orchestrator, 'listAccounts')
+    await expect(operations.invoke('workflows.start', {
+      contractVersion: 'wrong', workflowId: 'WF-001', scope: { kind: 'portfolio' }
+    })).rejects.toThrow()
+    expect(accounts).not.toHaveBeenCalled()
   })
   it('shares real reviewed-write and MCEM semantics with the core while retaining live-creation restrictions', async () => {
     const { service, operations } = await fixture()
