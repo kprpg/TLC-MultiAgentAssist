@@ -19,6 +19,13 @@ export function OpportunityWorkbench({ client, selection, milestones, panes, onA
 }) {
   const [tab, setTab] = useState<DetailTab>('overview')
   const [notes, setNotes] = useState(selection.opportunity.comments ?? '')
+  const sourceNotes = useRef(selection.opportunity.comments ?? '')
+  useEffect(() => {
+    const previous = sourceNotes.current
+    const next = selection.opportunity.comments ?? ''
+    sourceNotes.current = next
+    setNotes((current) => current === previous ? next : current)
+  }, [selection.opportunity.id, selection.opportunity.comments])
   const [evaluation, setEvaluation] = useState<c.McemResponse>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')

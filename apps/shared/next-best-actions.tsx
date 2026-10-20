@@ -3,7 +3,7 @@ import type { ReactElement } from 'react'
 interface ActionEvaluation {
     summary?: string
     state?: string
-    criteria?: Array<{ id: string; label: string; status: string; rationale: string; evidenceIds: string[] }>
+    criteria?: Array<{ id: string; label: string; status: string; rationale: string; evidenceIds?: string[] }>
     missingData?: string[]
     recordedStage: number
     evidenceBasedStage: number
