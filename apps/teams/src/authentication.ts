@@ -1,5 +1,5 @@
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose'
-import type { TeamsConfiguration } from './configuration.js'
+import { isLocalConfiguration, type TeamsConfiguration } from './configuration.js'
 import type { ExecutionPrincipal } from '../../../packages/orchestrator/collaboration/principal.js'
 
 export class TeamsAuthorizationError extends Error {
@@ -10,7 +10,7 @@ export class TeamsAuthorizationError extends Error {
 }
 
 export function createTeamsAuthenticator(configuration: TeamsConfiguration, resolveKey?: JWTVerifyGetKey) {
-  if (configuration.mode !== 'live') throw new Error('Live token validation requires live configuration.')
+  if (configuration.mode !== 'live' || isLocalConfiguration(configuration)) throw new Error('Hosted live token validation requires hosted configuration.')
   const issuer = `https://login.microsoftonline.com/${configuration.tenantId}/v2.0`
   const key = resolveKey ?? createRemoteJWKSet(new URL(`https://login.microsoftonline.com/${configuration.tenantId}/discovery/v2.0/keys`))
   return async (token: string): Promise<ExecutionPrincipal> => {
@@ -47,7 +47,7 @@ export type AcquireDelegatedToken = (request: { oboAssertion: string; scopes: st
 export interface DelegatedTokenProvider { getToken(resource: ResourceName): Promise<string> }
 
 export function createDelegatedTokenProvider(configuration: TeamsConfiguration, assertion: string, acquire: AcquireDelegatedToken, expiresAt = Number.POSITIVE_INFINITY): DelegatedTokenProvider {
-  if (configuration.mode !== 'live') throw new Error('Sample mode cannot acquire source tokens.')
+  if (configuration.mode !== 'live' || isLocalConfiguration(configuration)) throw new Error('OBO source tokens require hosted live configuration.')
   const resources: Record<ResourceName, string> = {
     msx: `${configuration.msxResource}/.default`,
     mcp: configuration.mcpScope,

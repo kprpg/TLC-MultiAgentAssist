@@ -1,12 +1,44 @@
 import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { get } from 'node:https'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { loadTeamsTlsConfiguration } from '../../../apps/teams/src/configuration.js'
 import { startTeamsServer } from '../../../apps/teams/src/server.js'
+import { invokeProtectedOwnerCommand, prepareOwnerDirectory } from '../../../apps/teams/src/local-owner-control.js'
+import { localConnectionVersion } from '../../../packages/common/contracts/local-connection.js'
+
+const nativeClient = vi.hoisted(() => ({
+  interactive: vi.fn(async () => { throw new Error('A TLS/bootstrap test must not trigger source sign-in.') }),
+  silent: vi.fn(async () => { throw new Error('A TLS/bootstrap test must not acquire source credentials.') }),
+  clear: vi.fn(async () => undefined)
+}))
+const cliCredential = vi.hoisted(() => ({
+  getToken: vi.fn(async () => { throw new Error('A CLI TLS/bootstrap test must not acquire a source token.') })
+}))
+const ownerStartup = vi.hoisted(() => ({ beforeReady: vi.fn(async () => undefined) }))
+vi.mock('../../../apps/teams/src/local-owner-control.js', async (original) => {
+  const actual = await original<typeof import('../../../apps/teams/src/local-owner-control.js')>()
+  return {
+    ...actual,
+    startProtectedOwnerControl: async (options: Parameters<typeof actual.startProtectedOwnerControl>[0]) => {
+      const control = await actual.startProtectedOwnerControl(options)
+      await ownerStartup.beforeReady()
+      return control
+    }
+  }
+})
+vi.mock('@azure/identity', async (original) => ({
+  ...await original<typeof import('@azure/identity')>(),
+  AzureCliCredential: class { getToken = cliCredential.getToken }
+}))
+vi.mock('../../../apps/teams/src/native-identity.js', async (original) => ({
+  ...await original<typeof import('../../../apps/teams/src/native-identity.js')>(),
+  createNativeAuthenticationClient: () => nativeClient
+}))
 
 const execute = promisify(execFile)
 let directory: string
@@ -36,6 +68,72 @@ beforeAll(async () => {
 afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }) })
 
 describe('explicit local HTTPS hosting', () => {
+  it.each(['local-interactive', 'local-azure-cli'] as const)('boots %s live hosting without bot/Foundry credentials or any MSX sign-in/read/write', async (authentication) => {
+    const reservation = createServer()
+    await new Promise<void>((ready) => reservation.listen(0, '127.0.0.1', ready))
+    const reserved = reservation.address()
+    if (!reserved || typeof reserved === 'string') throw new Error('No test port.')
+    const port = reserved.port
+    await new Promise<void>((closed, reject) => reservation.close((error) => error ? reject(error) : closed()))
+    const ownerDirectory = join(directory, `${authentication}-owner`)
+    await prepareOwnerDirectory(ownerDirectory)
+    const origin = `https://localhost:${port}`
+    let releaseOwner = () => {}
+    const gate = new Promise<void>((resolve) => { releaseOwner = resolve })
+    const waiting = new Promise<void>((resolve) => {
+      ownerStartup.beforeReady.mockImplementationOnce(async () => { resolve(); await gate })
+    })
+    const startup = startTeamsServer({
+      TLC_TEAMS_MODE: 'live', TLC_TEAMS_AUTH_MODE: authentication, TLC_TEAMS_RUNTIME_PROFILE: 'local',
+      TLC_TEAMS_ORIGIN: origin, TLC_TEAMS_HOST: '127.0.0.1', TLC_TEAMS_PORT: String(port),
+      TLC_TEAMS_TENANT_ID: '77777777-7777-4777-8777-777777777777',
+      ...(authentication === 'local-interactive' ? { TLC_TEAMS_NATIVE_CLIENT_ID: '88888888-8888-4888-8888-888888888888' } : {}),
+      TLC_TEAMS_MSX_RESOURCE: 'https://example.crm.dynamics.com', TLC_TEAMS_ENVIRONMENT_ID: 'offline-native-bootstrap',
+      TLC_TEAMS_OWNER_DIRECTORY: ownerDirectory, TLC_TEAMS_TLS_CERT_PATH: certificatePath, TLC_TEAMS_TLS_KEY_PATH: keyPath
+    })
+    try {
+      await Promise.race([waiting, startup.then(() => { throw new Error('The startup readiness gate was not reached.') })])
+      const ca = await readFile(certificatePath)
+      const status = await new Promise<number>((resolve, reject) => {
+        const response = get(`https://127.0.0.1:${port}/api/health`, { ca, headers: { host: `localhost:${port}` } }, (incoming) => {
+          incoming.resume()
+          incoming.once('end', () => resolve(incoming.statusCode ?? 0))
+        })
+        response.once('error', reject)
+      })
+      expect(status).toBe(503)
+    } catch (error) {
+      releaseOwner()
+      await (await startup).close()
+      throw error
+    } finally { releaseOwner() }
+    const application = await startup
+    try {
+      const ca = await readFile(certificatePath)
+      const request = (path: string, headers: Record<string, string> = {}) => new Promise<{ status: number; body: string }>((done, fail) => {
+        const response = get(`https://127.0.0.1:${port}${path}`, { ca, headers: { host: `localhost:${port}`, ...headers }, timeout: 5000 }, (incoming) => {
+          const chunks: Buffer[] = []
+          incoming.on('data', (chunk: Buffer) => chunks.push(chunk))
+          incoming.on('end', () => done({ status: incoming.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') }))
+        })
+        response.once('error', fail)
+        response.once('timeout', () => response.destroy(new Error('Native TLS test timed out.')))
+      })
+      expect((await request('/api/health')).status).toBe(200)
+      expect(JSON.parse((await request('/api/teams/config')).body)).toMatchObject({ mode: 'live', authentication })
+      expect((await request('/api/teams/session')).status).toBe(401)
+      const teamsNavigation = { 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'iframe', referer: 'https://teams.microsoft.com/' }
+      expect((await request('/', teamsNavigation)).status).toBe(200)
+      expect((await request('/api/teams/session', teamsNavigation)).status).toBe(403)
+      expect((await request('/', { ...teamsNavigation, origin: 'https://hostile.example.test' })).status).toBe(403)
+      const owner = await invokeProtectedOwnerCommand(ownerDirectory, { contractVersion: localConnectionVersion, action: 'status' })
+      expect(owner).toMatchObject({ ok: true, status: { state: 'sign-in-required' }, pending: [] })
+      expect(nativeClient.interactive).not.toHaveBeenCalled()
+      expect(nativeClient.silent).not.toHaveBeenCalled()
+      expect(cliCredential.getToken).not.toHaveBeenCalled()
+    } finally { await application.close() }
+    expect(application.server.listening).toBe(false)
+  }, 50_000)
   it('requires a complete certificate/key pair and an HTTPS configured origin', () => {
     expect(loadTeamsTlsConfiguration({}, 'http://127.0.0.1:3978')).toBeUndefined()
     expect(() => loadTeamsTlsConfiguration({ TLC_TEAMS_TLS_CERT_PATH: certificatePath }, 'https://localhost:3978')).toThrow(/certificate.*key/i)
@@ -53,11 +151,14 @@ describe('explicit local HTTPS hosting', () => {
       const address = application.server.address()
       if (!address || typeof address === 'string') throw new Error('No HTTPS test listener.')
       const url = `https://127.0.0.1:${address.port}/api/health`
-      const request = (ca?: Buffer) => new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const request = (ca?: Buffer) => new Promise<{ status: number; body: string; csp: string }>((resolve, reject) => {
         const response = get(url, { ...(ca ? { ca } : {}), timeout: 5_000 }, (incoming) => {
           const chunks: Buffer[] = []
           incoming.on('data', (chunk: Buffer) => chunks.push(chunk))
-          incoming.on('end', () => resolve({ status: incoming.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') }))
+          incoming.on('end', () => resolve({
+            status: incoming.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8'),
+            csp: String(incoming.headers['content-security-policy'] ?? '')
+          }))
         })
         response.once('error', reject)
         response.once('timeout', () => response.destroy(new Error('HTTPS test timed out.')))
@@ -65,6 +166,7 @@ describe('explicit local HTTPS hosting', () => {
       await expect(request()).rejects.toThrow(/self-signed|certificate/i)
       const response = await request(await readFile(certificatePath))
       expect(response.status).toBe(200)
+      expect(response.csp).toContain('https://res.cdn.office.net/teams-js/validDomains/json/validDomains.json')
       expect(JSON.parse(response.body)).toMatchObject({ status: 'ready', surface: 'teams', mode: 'sample' })
     } finally { await application.close() }
   })

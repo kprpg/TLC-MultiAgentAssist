@@ -4,16 +4,45 @@ import { describe, expect, it } from 'vitest'
 import { TeamsShell } from '../../../apps/teams/src/client/shell.js'
 import { AgentResultView } from '../../../apps/teams/src/client/result-view.js'
 import { contractVersion } from '../../../packages/common/contracts/version.js'
+import { NativeConnectionPanel } from '../../../apps/teams/src/client/native-connection-panel.js'
+import { LocalBrowserConnection } from '../../../apps/teams/src/client/local-connection.js'
+import { TeamsApiClient } from '../../../apps/teams/src/client/data-client.js'
+import { TeamsLaunchStatusPanel } from '../../../apps/teams/src/client/launch-status.js'
 
 describe('Teams-native presentation', () => {
+  it('shows a pending backend check rather than claiming Teams is already connected before initialization', () => {
+    const html = renderToStaticMarkup(createElement(TeamsLaunchStatusPanel, { authentication: undefined, client: undefined, connected: false }))
+    expect(html).toContain('Checking backend connection')
+    expect(html).toContain('Backend connection')
+    expect(html).not.toContain('Teams client and backend verified')
+  })
+  it('shows the full native capability/limitation matrix without an HTTP sign-in/approval shortcut', () => {
+    const html = renderToStaticMarkup(createElement(NativeConnectionPanel, {
+      connection: new LocalBrowserConnection(), client: new TeamsApiClient(async () => ''),
+      connected: false, onConnected: async () => undefined, onDisconnected: () => undefined
+    }))
+    for (const text of ['Request local pairing', 'protected local owner command', 'Capabilities and limitations', 'Live MSX Portfolio', 'Dataverse MCP Plays', 'Shared meeting stage', 'Live Seller Dashboard']) expect(html).toContain(text)
+    expect(html).not.toContain('Sign in with Microsoft')
+    expect(html).not.toContain('access_token')
+  })
   it('renders task-focused navigation and an explicit sample boundary without duplicating Teams chrome', () => {
     const html = renderToStaticMarkup(createElement(TeamsShell, {
-      mode: 'sample', view: 'accounts', onNavigate: () => undefined, children: createElement('p', null, 'Workspace')
+      mode: 'sample', view: 'portfolio', onNavigate: () => undefined, children: createElement('p', null, 'Workspace')
     }))
-    for (const label of ['My work', 'Accounts', 'Workflows', 'Meetings', 'Activity']) expect(html).toContain(label)
+    for (const label of ['New', 'Discover', 'Portfolio', 'Plays', 'Dashboards', 'Meetings', 'Activity']) expect(html).toContain(label)
     expect(html).toContain('Sample')
     expect(html).toContain('aria-label="TLC navigation"')
     expect(html).not.toContain('window-controls')
+  })
+  it.each(['read-only', 'reviewed'] as const)('labels the configured CLI %s capability without promising unreviewed writes', (writeMode) => {
+    const html = renderToStaticMarkup(createElement(NativeConnectionPanel, {
+      connection: new LocalBrowserConnection(), client: new TeamsApiClient(async () => ''),
+      connected: true, authentication: 'local-azure-cli', writeMode,
+      onConnected: async () => undefined, onDisconnected: () => undefined
+    }))
+    expect(html).toContain(`Live MSX - Azure CLI ${writeMode === 'reviewed' ? 'reviewed read/write' : 'read-only'}`)
+    if (writeMode === 'reviewed') expect(html).toContain('explicit review')
+    expect(html).not.toContain('access_token')
   })
   it('renders safe readable markdown and honest source state, never executable HTML or non-HTTPS evidence', () => {
     const html = renderToStaticMarkup(createElement(AgentResultView, {

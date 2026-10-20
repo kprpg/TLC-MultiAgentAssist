@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createWriteStream } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,7 +15,13 @@ export async function stageTeamsRuntime(outputDirectory = join(root, 'release-te
   let exists = true
   try { await readdir(target) } catch (error) { if (error.code !== 'ENOENT') throw error; exists = false }
   if (exists) {
-    if ((await readFile(join(target, '.generated-teams-runtime'), 'utf8')) !== marker) throw new Error('Refusing to replace a directory not owned by the Teams packager.')
+    let ownership
+    try { ownership = await readFile(join(target, '.generated-teams-runtime'), 'utf8') }
+    catch (error) {
+      if (error.code !== 'ENOENT') throw error
+      throw new Error('Refusing to replace a directory not owned by the Teams packager. The ownership marker is missing; existing files were retained. Use a fresh runtime output directory.', { cause: error })
+    }
+    if (ownership !== marker) throw new Error('Refusing to replace a directory not owned by the Teams packager.')
     await rm(target, { recursive: true, force: true })
   }
   await mkdir(target, { recursive: true })
@@ -43,6 +49,11 @@ export async function stageTeamsRuntime(outputDirectory = join(root, 'release-te
     await cp(join(sourceRoot, 'config', name), join(target, 'config', name))
   }
   await cp(join(sourceRoot, 'apps', 'teams', '.env.example'), join(target, 'runtime.env.example'))
+  await cp(join(sourceRoot, 'apps', 'teams', '.env.native.example'), join(target, 'runtime.native.env.example'))
+  await cp(join(sourceRoot, 'apps', 'teams', '.env.cli.example'), join(target, 'runtime.cli.env.example'))
+  await mkdir(join(target, 'scripts'), { recursive: true })
+  await cp(join(sourceRoot, 'scripts', 'teams-local-connection.ps1'), join(target, 'scripts', 'teams-local-connection.ps1'))
+  await cp(join(sourceRoot, 'scripts', 'teams-launch-session.ps1'), join(target, 'scripts', 'teams-launch-session.ps1'))
   await mkdir(join(target, 'docs', 'knowledge'), { recursive: true })
   await cp(join(sourceRoot, 'docs', 'knowledge', 'MCEM Overview.pdf'), join(target, 'docs', 'knowledge', 'MCEM Overview.pdf'))
   await writeFile(join(target, 'package.json'), `${JSON.stringify({
@@ -56,6 +67,30 @@ export async function stageTeamsRuntime(outputDirectory = join(root, 'release-te
     'TLC Assist Teams host runtime',
     '',
     'Run this ordinary web application yourself: local dev/test now, Azure later.',
+    'For per-user native MSX, each user operates their own Windows installation.',
+    'Use runtime.native.env.example with explicit local-interactive authentication.',
+    'Or reuse the existing CLI user with runtime.cli.env.example and explicit local-azure-cli.',
+    'The CLI profile verifies signed delegated source identity and own WhoAmI mapping,',
+    "then defaults Portfolio to that user's active deal-team accounts.",
+    'TLC_TEAMS_CLI_WRITE_MODE=reviewed enables Desktop-equivalent MSX write operations',
+    'through exact review, explicit approval, source permissions and durable action receipts.',
+    'Use read-only to block source writes; an omitted mode defaults to read-only.',
+    'CLI login does not grant FTE/publisher roles or optional MCP/Graph permissions.',
+    'The local-native Teams package declares private personal access, not cloud bots',
+    'or cross-device shared bindings/stage. The original hosted profile is separate.',
+    'Use trusted loopback HTTPS with manifest URLs and backend on the same port.',
+    'Prepare an owner/SYSTEM-only control directory without source access:',
+    'node server.js --local-owner prepare <protected-owner-directory>',
+    'Set TLC_TEAMS_OWNER_DIRECTORY to it and keep native data inside that directory.',
+    'Native ID tokens require approved IAM-backed TLC.Teams.User / Writer roles;',
+    'an email suffix or configured public client ID is not an eligibility grant.',
+    'After starting the runtime, the END USER explicitly connects and pairs:',
+    'node server.js --local-owner connect <protected-owner-directory> msx',
+    'node server.js --local-owner approve <protected-owner-directory> <page-code>',
+    'Status / disconnect use the same syntax with action status / disconnect.',
+    'Connect performs only source identity reads; no owner command writes MSX.',
+    'No source sign-in or data operation is triggered by startup or public HTTP.',
+    'All engineering validation is offline; end users exercise actual source data.',
     'This runtime ZIP is not the manifest/icons ZIP to upload into Teams.',
     'Uploading the Teams ZIP neither starts this server nor deploys Azure resources.',
     'The bundled node_modules match the packaging OS and CPU. Restore dependencies',
@@ -67,10 +102,11 @@ export async function stageTeamsRuntime(outputDirectory = join(root, 'release-te
     'The default loopback listener does not open a firewall, LAN port or tunnel.',
     'local profile: SQLite state, encrypted in live mode; no required Azure Table.',
     'Live local Foundry access uses AzureCliCredential in the configured Foundry tenant.',
-    'Azure CLI is for Foundry workload access only, NEVER a substitute for an FTE',
-    "colleague's delegated MSX/Dataverse/Graph permissions. Live app sign-in remains.",
+    'In the hosted profile Azure CLI is for Foundry workload access only, NEVER a',
+    "substitute for a colleague's delegated source permissions or FTE admission.",
     'azure profile: managed identity for workload access and configured Table Storage.',
-    'Live mode still requires approved Entra/consent/FTE/MSX/MCP/Graph/Foundry setup.',
+    'Native/hosted features retain their approved Entra/FTE and optional-resource gates.',
+    'Both CLI write modes require delegated MSX permission and protected owner pairing.',
     'runtime.env.example and config/teams-disclosure.example.json are safe templates,',
     'not working live credentials or an approved disclosure policy. They are not auto-loaded.',
     'Set TLC_TEAMS_ADMISSION=read-only to stop new work while retaining authorized reads.',
@@ -126,29 +162,36 @@ export function installTeamsRuntime(runtime, environment = process.env) {
   if (install.status !== 0) throw new Error('Runtime production dependency installation failed.')
 }
 
-export async function packageTeamsRuntime() {
-  const runtime = await stageTeamsRuntime()
-  installTeamsRuntime(runtime)
-  const output = join(root, 'release-teams', `TLC-Assist-Teams-runtime-${process.platform}-${process.arch}.zip`)
-  await new Promise((resolveZip, reject) => {
-    const destination = createWriteStream(output)
-    const archive = new ZipArchive({ forceZip64: true, zlib: { level: 1 } })
-    destination.on('close', resolveZip)
-    destination.on('error', reject)
-    archive.on('error', reject)
-    archive.on('warning', reject)
-    archive.pipe(destination)
-    archive.directory(runtime, false)
-    void archive.finalize().catch(reject)
-  })
-  const zip = await JSZip.loadAsync(await readFile(output), { checkCRC32: true })
-  for (const name of ['server.js', 'client/index.html', 'package.json', 'package-lock.json', 'node_modules/express/package.json', 'config/mcp.tool-policy.json']) {
-    if (!zip.file(name)) throw new Error(`Runtime archive is incomplete: ${name}`)
+export async function packageTeamsRuntime(outputDirectory = join(root, 'release-teams'), sourceRoot = root) {
+  const outputRoot = resolve(outputDirectory)
+  await mkdir(outputRoot, { recursive: true })
+  const staging = await mkdtemp(join(outputRoot, '.runtime-build-'))
+  try {
+    const runtime = await stageTeamsRuntime(join(staging, 'runtime'), sourceRoot)
+    installTeamsRuntime(runtime)
+    const output = join(outputRoot, `TLC-Assist-Teams-runtime-${process.platform}-${process.arch}.zip`)
+    await new Promise((resolveZip, reject) => {
+      const destination = createWriteStream(output)
+      const archive = new ZipArchive({ forceZip64: true, zlib: { level: 1 } })
+      destination.on('close', resolveZip)
+      destination.on('error', reject)
+      archive.on('error', reject)
+      archive.on('warning', reject)
+      archive.pipe(destination)
+      archive.directory(runtime, false)
+      void archive.finalize().catch(reject)
+    })
+    const zip = await JSZip.loadAsync(await readFile(output), { checkCRC32: true })
+    for (const name of ['.generated-teams-runtime', 'server.js', 'client/index.html', 'package.json', 'package-lock.json', 'node_modules/express/package.json', 'config/mcp.tool-policy.json']) {
+      if (!zip.file(name)) throw new Error(`Runtime archive is incomplete: ${name}`)
+    }
+    if (Object.keys(zip.files).some((name) => /(^|\/)(\.env($|\.)|runtime\.env$)|foundry\.environment\.json$|portfolio-preferences|\.sqlite($|-)/i.test(name))) {
+      throw new Error('Private environment or state files were included in the runtime archive.')
+    }
+    return output
+  } finally {
+    await rm(staging, { recursive: true, force: true })
   }
-  if (Object.keys(zip.files).some((name) => /(^|\/)(\.env($|\.)|runtime\.env$)|foundry\.environment\.json$|portfolio-preferences|\.sqlite($|-)/i.test(name))) {
-    throw new Error('Private environment or state files were included in the runtime archive.')
-  }
-  return output
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

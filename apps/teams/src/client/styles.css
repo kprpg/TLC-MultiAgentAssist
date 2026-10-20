@@ -1,5 +1,6 @@
 :root { font-family: "Segoe UI", system-ui, sans-serif; color-scheme: light dark; font-synthesis: none; }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; border: 1px solid var(--colorNeutralStroke1, #d1d1d1); border-radius: 5px; padding: 8px 12px; background: var(--colorNeutralBackground1, #fff); color: var(--colorNeutralForeground1, #242424); }
@@ -9,16 +10,20 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 button.primary, button.selected { background: var(--colorBrandBackground, #5b5fc7); color: var(--colorNeutralForegroundOnBrand, white); border-color: transparent; }
 button.primary:hover:not(:disabled), button.selected:hover { background: var(--colorBrandBackgroundHover, #4f52b2); }
 .subtle { border-color: transparent; background: transparent; }
-.teams-shell { min-height: 100vh; background: var(--colorNeutralBackground3, #f5f5f5); color: var(--colorNeutralForeground1, #242424); }
-.teams-header { display: flex; align-items: center; gap: 18px; padding: 16px 24px; border-bottom: 1px solid var(--colorNeutralStroke2, #e0e0e0); background: var(--colorNeutralBackground1, white); flex-wrap: wrap; }
-.brand { display: flex; align-items: center; gap: 10px; font-size: 19px; }
+.teams-shell { --tlc-accent: var(--colorBrandForeground1, #0f6cbd); --tlc-border: var(--colorNeutralStroke2, #e0e0e0); min-height: 100vh; background: var(--colorNeutralBackground3, #f5f5f5); color: var(--colorNeutralForeground1, #242424); font-size: 13px; }
+.teams-header { display: flex; align-items: center; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--tlc-border); background: var(--colorNeutralBackground1, white); flex-wrap: wrap; position: sticky; top: 0; z-index: 20; }
+.brand { color: var(--tlc-accent); font-weight: 700; font-size: 15px; }
 .brand-mark { background: var(--colorBrandBackground, #5b5fc7); color: white; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; font-weight: 700; }
 .mode-badge { border-radius: 20px; padding: 5px 12px; background: var(--colorBrandBackground2, #e8e8fb); color: var(--colorBrandForeground2, #444791); font-size: 12px; }
-.teams-header > button { margin-left: auto; }
-.teams-navigation { display: flex; gap: 6px; padding: 10px 24px; border-bottom: 1px solid var(--colorNeutralStroke2, #e0e0e0); overflow-x: auto; background: var(--colorNeutralBackground1, white); }
-.teams-navigation button { flex-shrink: 0; }
-.teams-main { max-width: 1440px; padding: 24px; margin: auto; }
-.teams-footer { padding: 18px 24px; font-size: 12px; color: var(--colorNeutralForeground3, #616161); }
+.teams-navigation { display: flex; gap: 4px; overflow-x: auto; min-width: 0; }
+.teams-navigation .tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--tlc-accent); background: transparent; flex-shrink: 0; padding: 8px 12px; }
+.teams-navigation .tab.active { border-bottom-color: var(--tlc-accent); font-weight: 600; }
+.teams-utilities { position: relative; margin: 0 0 0 auto; }
+.teams-utilities > summary { padding: 8px; }
+.utility-menu { position: absolute; right: 0; min-width: 190px; display: grid; padding: 6px; background: var(--colorNeutralBackground1, white); border: 1px solid var(--tlc-border); border-radius: 4px; box-shadow: var(--shadow8, 0 2px 8px #0003); z-index: 25; }
+.utility-menu button, .utility-menu a { text-align: left; padding: 10px; border: 0; }
+.teams-main { min-width: 0; padding: 16px; margin: 0; }
+.teams-footer { padding: 12px 16px; font-size: 11px; color: var(--colorNeutralForeground3, #616161); }
 .panel { padding: 24px; border: 1px solid var(--colorNeutralStroke2, #e0e0e0); border-radius: 10px; background: var(--colorNeutralBackground1, white); min-width: 0; }
 h1 { font-size: 26px; line-height: 1.25; margin: 0 0 16px; }
 h2 { font-size: 19px; line-height: 1.35; margin: 0 0 12px; }
@@ -60,6 +65,10 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 400px; overflo
 .activity-list li, .record-list li { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; padding: 14px 0; border-bottom: 1px solid var(--colorNeutralStroke2, #ddd); }
 .record-list strong { margin-right: auto; }
 .signin-panel { max-width: 620px; padding: 48px 24px; margin: auto; min-height: 100vh; }
+.native-connection-panel { overflow-wrap: anywhere; }
+details.native-connection-panel { padding: 8px 16px; margin: 0 0 12px; }
+.native-connection-panel code { white-space: normal; overflow-wrap: anywhere; }
+.native-connection-panel dd { margin-inline-start: 16px; }
 .stage-view { padding: 32px; min-height: 100vh; overflow-wrap: anywhere; }
 .stage-view h2 { font-size: 30px; }
 .stage-view article > p { font-size: 22px; }
@@ -76,3 +85,121 @@ summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
   .stage-view h2 { font-size: 24px; }.stage-view article > p { font-size: 18px; }
 }
 @media (forced-colors: active) { button, .mode-badge, .panel, .status-pill { border: 1px solid CanvasText; } .selected, .primary { forced-color-adjust: auto; } }
+
+.teams-main { container: workspace / inline-size; }
+.teams-header .mode-badge { font-size: 10px; padding: 4px 8px; }
+.portfolio-search { position: relative; flex: 1; min-width: 180px; max-width: 620px; }
+.portfolio-search input { width: 100%; min-width: 0; border: 1px solid var(--tlc-border); border-radius: 4px; padding: 9px 12px; font: inherit; color: var(--colorNeutralForeground1); background: var(--colorNeutralBackground3); }
+.portfolio-search-results { position: absolute; top: 100%; left: 0; width: max(100%, 280px); max-width: 90vw; padding: 6px; z-index: 30; border: 1px solid var(--tlc-border); background: var(--colorNeutralBackground1); box-shadow: var(--shadow8); }
+.portfolio-search-results [role="listbox"] { display: grid; }
+.portfolio-search-results [role="option"] { text-align: left; border: 0; border-radius: 0; }
+.portfolio-search-results [aria-selected="true"] { background: var(--colorBrandBackground2); }
+.layout-controls { display: flex; gap: 2px; }
+.layout-control { display: grid; place-items: center; padding: 7px; border-color: transparent; background: transparent; color: var(--tlc-accent); }
+.layout-control.active { background: var(--colorBrandBackground2); }
+.workspace-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.workspace-heading h1 { margin: 0; font-size: 18px; }
+.workspace-heading p { margin: 0; font-size: 11px; }
+.workspace-heading > button { margin-left: auto; }
+.portfolio-workbench { display: grid; grid-template-columns: minmax(250px, 300px) minmax(0, 1fr) minmax(250px, 300px); align-items: start; gap: 16px; }
+.portfolio-scope-disclosure, .recommendations-region { margin: 0; min-width: 0; }
+.pane-disclosure-toggle { display: none; padding: 12px; border: 1px solid var(--tlc-border); border-radius: 4px; background: var(--colorNeutralBackground1); color: var(--tlc-accent); }
+.portfolio-workbench.accounts-collapsed, .portfolio-workbench.details-collapsed { grid-template-columns: minmax(0, 1fr) minmax(250px, 300px); }
+.portfolio-workbench.actions-collapsed { grid-template-columns: minmax(250px, 300px) minmax(0, 1fr); }
+.portfolio-workbench.accounts-collapsed.actions-collapsed, .portfolio-workbench.details-collapsed.accounts-collapsed, .portfolio-workbench.details-collapsed.actions-collapsed { grid-template-columns: minmax(0, 1fr); }
+.teams-shell .pane { min-width: 0; padding: 18px; border: 1px solid var(--tlc-border); border-radius: 6px; background: var(--colorNeutralBackground1); }
+.section-label, .portfolio-scope h2, .section-heading h3 { color: var(--tlc-accent); font-size: 13px; text-transform: uppercase; letter-spacing: .035em; }
+.portfolio-scope .section-heading { gap: 6px; margin-bottom: 12px; }
+.portfolio-scope .section-heading h2 { margin: 0 auto 0 0; }
+.portfolio-scope .customer-search-trigger { padding: 4px; font-size: 12px; min-width: 0; background: transparent; color: var(--tlc-accent); border-color: transparent; }
+.inline-check { display: inline-flex; align-items: center; gap: 5px; margin: 4px 8px 8px 0; }
+.link { color: var(--tlc-accent); background: transparent; border: 0; padding: 4px; text-align: left; }
+.section-label { margin-top: 20px; }
+.toolbar label { display: flex; align-items: center; gap: 6px; font-size: 12px; flex-wrap: wrap; }
+.toolbar select { padding: 5px; min-width: 0; max-width: 100%; color: var(--colorNeutralForeground1); background: var(--colorNeutralBackground3); border: 1px solid var(--tlc-border); }
+.compact-opportunity-picker { margin-top: 0; }
+.record-table-wrap { overflow-x: auto; max-width: 100%; }
+.portfolio-records { width: 100%; border-collapse: collapse; font-size: 12px; }
+.portfolio-records th, .portfolio-records td { padding: 10px 8px; border: 1px solid var(--tlc-border); vertical-align: top; text-align: left; overflow-wrap: anywhere; }
+.portfolio-records th { font-size: 10px; color: var(--colorNeutralForeground3); text-transform: uppercase; }
+.portfolio-scope .portfolio-records { min-width: 360px; }
+.portfolio-scope .portfolio-records th, .portfolio-scope .portfolio-records td { overflow-wrap: normal; }
+.portfolio-scope .portfolio-records th:nth-child(2), .portfolio-scope .portfolio-records td:nth-child(2) { min-width: 90px; }
+.portfolio-scope .portfolio-records th:last-child, .portfolio-scope .portfolio-records td:last-child { min-width: 65px; white-space: nowrap; }
+.portfolio-records td:first-child { min-width: 100px; }
+.portfolio-records small { display: block; margin-top: 4px; color: var(--colorNeutralForeground3); }
+.record-link { border: 0; padding: 0; text-align: left; color: var(--tlc-accent); background: transparent; overflow-wrap: anywhere; }
+.selected-row { background: var(--colorBrandBackground2); }
+.selected-row .record-link { font-weight: 600; }
+.opportunity-heading h2 { font-size: 17px; overflow-wrap: anywhere; margin: 0 0 8px; }
+.opportunity-heading p { font-size: 12px; margin: 0 0 14px; }
+.detail-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--tlc-border); margin-bottom: 18px; }
+.detail-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 9px 10px; color: var(--tlc-accent); background: transparent; white-space: nowrap; }
+.detail-tabs [aria-selected="true"] { border-bottom-color: var(--tlc-accent); font-weight: 600; }
+.milestone-summary { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.milestone-summary h3 { margin: 0 auto 0 0; font-size: 14px; }
+.milestone-card > p { margin: 6px 0; font-size: 12px; }
+.milestone-card details { margin-top: 4px; }
+.milestone-card summary { color: var(--tlc-accent); font-size: 12px; }
+.next-best-actions-heading { display: flex; gap: 8px; justify-content: space-between; align-items: start; }
+.next-best-actions-heading h3 { color: var(--tlc-accent); font-size: 15px; margin: 5px 0 14px; text-transform: uppercase; }
+.next-best-actions-heading .eyebrow { font-size: 10px; }
+.badge { padding: 2px 6px; border-radius: 12px; background: var(--colorNeutralBackground4); font-size: 11px; }
+.next-best-action { padding: 12px 0; border-bottom: 1px solid var(--tlc-border); }
+.next-best-action h4 { margin: 8px 0; }
+.next-best-action p { font-size: 12px; }
+.next-best-action-meta { display: flex; gap: 8px; color: var(--tlc-accent); }
+.next-best-action-evidence { padding-left: 18px; overflow-wrap: anywhere; }
+.next-best-actions-empty { padding: 14px 0; }
+.read-only-note { border-top: 1px solid var(--tlc-border); padding-top: 12px; margin-top: 20px; color: var(--colorNeutralForeground3); font-size: 11px; }
+.criteria-list { padding-left: 20px; }
+.criteria-list > li { margin: 14px 0; }
+.plays-grid { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.play-group { margin-top: 20px; }
+.play-group h3 { text-transform: capitalize; color: var(--tlc-accent); }
+.play-group button { display: flex; flex-direction: column; gap: 6px; text-align: left; width: 100%; margin: 6px 0; }
+.selected-play { border-color: var(--tlc-accent); background: var(--colorBrandBackground2); }
+.play-metrics { display: flex; flex-wrap: wrap; gap: 20px; }
+.play-metrics dd { font-size: 24px; margin: 4px 0; font-weight: 600; }
+.play-history { border-top: 1px solid var(--tlc-border); margin-top: 22px; padding-top: 18px; }
+.play-history button { display: block; text-align: left; margin: 6px 0; width: 100%; }
+@container workspace (max-width: 1199px) {
+  .recommendations-region > .pane-disclosure-toggle { display: block; }
+  .portfolio-workbench { grid-template-columns: minmax(230px, 280px) minmax(0, 1fr); }
+  .recommendations-region { grid-column: 2; }
+  .portfolio-workbench.accounts-collapsed { grid-template-columns: minmax(0, 1fr); }
+  .accounts-collapsed .recommendations-region, .details-collapsed .recommendations-region { grid-column: auto; }
+}
+@container workspace (max-width: 899px) {
+  .portfolio-scope-disclosure > .pane-disclosure-toggle { display: block; }
+  .plays-grid { grid-template-columns: minmax(0, 1fr); }
+  .portfolio-workbench, .portfolio-workbench.accounts-collapsed, .portfolio-workbench.actions-collapsed, .portfolio-workbench.details-collapsed { grid-template-columns: minmax(0, 1fr); }
+  .recommendations-region { grid-column: auto; }
+  .portfolio-scope .record-table-wrap { max-height: 230px; overflow-y: auto; }
+}
+@media (max-width: 900px) {
+  .teams-header { gap: 8px; }
+  .teams-navigation { order: 1; flex: 1 0 100%; padding: 0; }
+  .teams-navigation .tab { padding: 9px 10px; }
+  .portfolio-search { max-width: none; }
+}
+@media (max-width: 600px) {
+  .portfolio-scope .portfolio-records { min-width: 0; }
+  .teams-header { padding: 8px; }
+  .teams-main { padding: 10px; }
+  .teams-shell .pane { padding: 12px; }
+  .brand { display: none; }
+  .teams-header .mode-badge { max-width: 135px; }
+  .layout-control, .teams-navigation .tab, .utility-menu button { min-height: 44px; min-width: 44px; }
+  .portfolio-search { flex-basis: calc(100% - 12px); }
+  .teams-header .layout-controls { order: 2; }
+  .detail-tabs { gap: 0; }
+  .detail-tabs button { padding: 10px 8px; min-height: 44px; }
+  .portfolio-records th:nth-child(2), .portfolio-records td:nth-child(2) { display: none; }
+  .workspace-heading > p { flex-basis: 100%; }
+}
+.teams-surface-panel .teams-header { position: static; }
+.teams-surface-panel .teams-main { padding: 10px; }
+.teams-surface-panel .panel { padding: 12px; }
+.teams-surface-panel h1 { font-size: 18px; }
+.meeting-panel .detail-tabs { position: sticky; top: 0; background: var(--colorNeutralBackground1); }

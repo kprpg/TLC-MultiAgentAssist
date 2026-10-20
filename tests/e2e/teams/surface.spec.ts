@@ -1,26 +1,27 @@
 import { expect, test } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
 import JSZip from 'jszip'
-import { chooseOpportunity, post } from './helpers.js'
+import { chooseOpportunity, openUtility, post } from './helpers.js'
 
 test('private work controls pause new work, retain reads and resume only with an explicit action', async ({ page, request }) => {
   await page.goto('/')
   await chooseOpportunity(page, request)
+  await page.getByRole('tab', { name: 'Guidance', exact: true }).click()
   try {
-    await page.getByRole('button', { name: 'Activity', exact: true }).click()
+    await openUtility(page, 'Activity')
     await page.getByRole('button', { name: 'Pause new work', exact: true }).click({ timeout: 5_000 })
     await expect(page.getByText('Work is paused.', { exact: true })).toBeVisible()
     const blocked = await request.post('/api/teams/operations/workflows.start', { data: {} })
     expect(blocked.status()).toBe(409)
     expect(await blocked.json()).toMatchObject({ error: 'collaboration_paused' })
-    await page.getByRole('button', { name: 'Accounts', exact: true }).click()
+    await page.getByRole('button', { name: 'Portfolio', exact: true }).click()
     await expect(page.getByLabel('Customer account', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Run guidance', exact: true }).click()
     await expect(page.getByRole('alert').filter({ hasText: 'collaboration paused' })).toBeVisible()
-    await page.getByRole('button', { name: 'Activity', exact: true }).click()
+    await openUtility(page, 'Activity')
     await page.getByRole('button', { name: 'Resume work', exact: true }).click()
     await expect(page.getByText('Work is active.', { exact: true })).toBeVisible()
-    await page.getByRole('button', { name: 'Accounts', exact: true }).click()
+    await page.getByRole('button', { name: 'Portfolio', exact: true }).click()
     await page.getByRole('button', { name: 'Run guidance', exact: true }).click()
     await expect(page.getByRole('region', { name: 'Grounded TLC response' })).toBeVisible()
   } finally {
@@ -34,6 +35,7 @@ test('personal workspace uses source data, guided prompts and grounded readable 
   await page.goto('/')
   await expect(page.getByText('Sample - no live business data', { exact: true })).toBeVisible()
   await chooseOpportunity(page, request)
+  await page.getByRole('tab', { name: 'Guidance', exact: true }).click()
   await page.getByRole('button', { name: 'Run guidance', exact: true }).click()
   await expect(page.getByRole('region', { name: 'Grounded TLC response' })).toBeVisible()
   await expect(page.getByText('Evidence and source health', { exact: true })).toBeVisible()
@@ -73,7 +75,7 @@ test('meeting transcript is acquired automatically and does not mutate source da
   await page.goto('/')
   const { opportunity } = await chooseOpportunity(page, request, true)
   const before = await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })
-  await page.getByRole('button', { name: 'Meetings', exact: true }).click()
+  await openUtility(page, 'Meetings')
   await expect(page.getByText('Authorized transcripts acquired automatically.', { exact: false })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Proposed meeting changes' })).toBeVisible()
   expect(await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })).toEqual(before)
@@ -81,13 +83,13 @@ test('meeting transcript is acquired automatically and does not mutate source da
 
 test('workflow, activity, and context configuration use shared operations', async ({ page }) => {
   await page.goto('/')
-  await page.getByRole('button', { name: 'Workflows', exact: true }).click()
+  await page.getByRole('button', { name: 'Plays', exact: true }).click()
   await page.getByLabel('Workflow').selectOption({ index: 1 })
   await page.getByRole('button', { name: 'Run workflow', exact: true }).click()
   await expect(page.getByTestId('workflow-status')).toContainText('completed')
-  await page.getByRole('button', { name: 'Activity', exact: true }).click()
+  await openUtility(page, 'Activity')
   await expect(page.getByRole('heading', { name: 'Your activity' })).toBeVisible()
-  await page.getByRole('button', { name: 'Context settings' }).click()
+  await openUtility(page, 'Context settings')
   await expect(page.getByRole('heading', { name: 'Configure a Teams context' })).toBeVisible()
 })
 

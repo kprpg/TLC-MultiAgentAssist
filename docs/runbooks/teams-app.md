@@ -1,11 +1,107 @@
 # TLC Assist for Microsoft Teams
 
-## Status and the local-now, Azure-later hosting contract
+## Recommended: guided Windows launch, installation and pairing
+
+From the repository root in PowerShell **7.4+**, with Node **22.12+**:
+
+```powershell
+.\scripts\run-teams-local.ps1 -Mode live     # Existing corporate CLI user
+# Or: .\scripts\run-teams-local.ps1 -Mode sample
+```
+
+Prepare the private CLI configuration and trusted localhost PEM certificate/key
+once as described below. The normal launcher now carries the sequence through
+**both** the backend and the installed Teams client:
+
+1. Build/test the backend and browser client, and package the Teams app for the
+   exact same origin and app ID. A normal build gets a new numeric app version so
+   Teams can update the existing app rather than silently reuse old metadata.
+   Its personal-tab URL carries that version; a cached/old installed manifest
+   cannot pass verification merely by loading a newly rebuilt backend.
+2. Start the extracted backend and verify trusted HTTPS, HTML, API, data/auth mode,
+   process ownership, unique backend run and exact browser build.
+3. Install/update the exact three-file ZIP for your signed-in Microsoft 365
+   account, then open that app's **My work** personal tab inside Teams. A failed
+   CLI upload offers retry or guided manual custom-app upload of the exact ZIP;
+   tenant policy and sign-in still require your participation.
+4. In local Live mode, type **CONNECT** in PowerShell to explicitly authorize the
+   existing read-only MSX identity checks. Nothing signs in or reads MSX merely
+   because the backend started. No setup step writes MSX.
+5. Inside **Teams**, select **Request local pairing**. Expand **Backend
+   connection**, check the displayed backend/run against PowerShell, and enter
+   that page's exact eight-character code in the guide. It never selects or
+   auto-approves some other pending page. When resuming an already paired page,
+   press Enter as offered to verify its fresh acknowledgement without reconnecting
+   or trying to approve an already consumed code.
+6. Keep the Teams app visible. The guide waits for that authenticated page to
+   acknowledge the exact backend run and compiled client build. Only then does
+   it print **VERIFIED** and **Ready: True**. An open browser preview, a successful
+   upload command, an approved-but-unredeemed code or a stale client is not success.
+   Both Teams iframe hosts and native frameless webviews use the Teams SDK
+   handshake; a native Teams window is not treated as a standalone browser.
+
+Check or finish the **same** run without rebuilding, restarting or losing pairing:
+
+```powershell
+.\scripts\run-teams-local.ps1 -Status
+.\scripts\run-teams-local.ps1 -Resume
+.\scripts\run-teams-local.ps1 -Resume -Reinstall  # Re-upload this run's exact ZIP
+.\scripts\run-teams-local.ps1 -Stop
+```
+
+Always include the original `-WorkDirectory` when you used a non-default location.
+`-Status` is read-only and works while the guide is waiting in another terminal.
+It checks the actual PID/start time and HTTPS runtime identity, not just whether
+something listens on the port. It separately reports backend readiness,
+installation state, owner/source connection and the Teams client. Client proof is
+an in-memory heartbeat, expires after 30 seconds without a visible client, and
+in local Live mode is also invalidated by page expiry/revocation or owner changes.
+An inactive/hidden Teams tab is reported as waiting, not silently assumed healthy.
+The **Backend connection** panel in Teams shows origin, mode, app version, backend
+run, client build and client host, and makes stale-build/backend failures visible.
+
+Failures and pauses leave the verified backend tracked and running. Use `-Resume`
+to continue; do not rerun a full build just to retry login, upload or pairing.
+The launcher retains a SHA-256-checked copy of the exact install ZIP beneath its
+private per-run package directory, so another build cannot change what resume
+uploads. Older launcher records without build identity require one normal rebuild;
+their owned processes can still be stopped with `-Stop`.
+
+For automation/offline checks, `-BackendOnly` (alias `-SkipTeamsUpload`) verifies
+only the backend and defers all client setup. `-NoGuide` additionally permits
+unattended package upload, but explicitly does **not** claim a rendered/paired
+Teams installation. Use `-ClientTimeoutSeconds` (default 120, maximum 600) when
+Teams takes longer to open. Hosted Live continues to use its own corporate
+browser sign-in; local-owner connection/pairing is never substituted for it.
+
+## Status and the local-owner / hosted runtime profiles
 
 The Teams surface is implemented for local development and offline validation.
 Corporate tenant admission, approved HTTPS ingress, Teams sideload/sign-in, and
 actual MSX/MCP/Graph access require the gates below. A successful build or ZIP check does
 not establish a working or production-ready Teams installation.
+
+**Per-user native topology:** `TLC_TEAMS_AUTH_MODE=local-interactive` is the explicit
+Windows-local live profile. Every user runs their own TLS backend, browser session,
+native sign-in and encrypted state on their own machine. There is no shared TLC
+backend, token broker or application-state store. Only the corporate sources and
+identity infrastructure are shared. The existing hosted API/SPA/bot/OBO profile
+remains separate; it is not a prerequisite for local native MSX.
+
+**Existing CLI sign-in:** the additional explicit `local-azure-cli` profile reuses
+the current user's Azure CLI sign-in for **private MSX access**. It needs no
+new native/API/SPA/bot registration. It verifies the delegated source token and
+the user's own Dataverse mapping, then loads their active deal-team accounts
+automatically. Explicit `reviewed` write mode enables the same shared MSX
+operations as Desktop, with exact review, approval, concurrency checks and durable
+receipts. It does not infer FTE/publisher roles or enable optional MCP/Graph or
+shared publication. The native/hosted gates are unchanged.
+
+**Engineering validation is offline only.** Do not sign in, read, create, update or
+delete real MSX/Dataverse records while validating these changes. Use the fixture
+tests with `TLC_RUN_LIVE_SMOKE=0`. End users perform actual source reads/writes
+themselves after launching, signing in and approving their page. Startup, packaging,
+health checks and owner `Status` do not establish source access or modify MSX.
 
 **Teams does not host this application's Node service or execute a bundled backend
 from an uploaded ZIP.** See Microsoft's [Teams app package guidance](https://learn.microsoft.com/microsoftteams/platform/concepts/build-and-test/apps-package).
@@ -19,7 +115,8 @@ assumed to be running it for you, and Azure hosting is not a prerequisite for lo
 development. Only credential, state, secret and origin configuration changes
 between environments; the backend/orchestrator does not fork.
 
-The audience includes other Microsoft FTE colleagues. After you start/configure
+The following shared-service description applies **only to the separate hosted
+profile**, not the per-user native topology. The audience includes other Microsoft FTE colleagues. After you start/configure
 the selected host and approved HTTPS exposure, they install the Teams package and
 sign in independently. They never inherit your MSX/Dataverse/Graph access or need
 to run a separate backend per person. Remote source and Foundry dependencies
@@ -35,6 +132,233 @@ No outer distribution ZIP is required. If an operator creates one containing bot
 archives, that **outer archive must not be uploaded into Teams**. Extract and upload
 only the three-file Teams installation ZIP. Runtime binaries, credentials, real
 Foundry configuration, private state and transcripts never belong in that package.
+
+## Per-user Windows MSX using the existing CLI user
+
+This profile addresses the default Portfolio read journey without requiring a
+manually entered user ID or account list. The existing Azure CLI must already be
+signed in as a corporate **user**, not a service principal. If it is not, the end
+user runs `az login` themselves; the page, startup and tests never invoke login.
+
+Copy [the CLI example](../../apps/teams/.env.cli.example) outside the repository
+and release folders. Supply the actual tenant ID (the cached `az account show
+--query tenantId --output tsv` metadata can identify it), existing approved MSX
+resource and a stable environment identifier. Do not copy source tokens or native
+client IDs. The package ID must match the installed/generated Teams manifest.
+
+Use the existing trusted PEM files, keep the installed tab and backend on
+`https://localhost:3978`, and stop only the previous launcher-owned runtime:
+
+```powershell
+$root = Join-Path $env:LOCALAPPDATA 'TLC-Assist\Teams'
+$config = Join-Path $root 'configuration\cli.env'
+$work = Join-Path $root 'launcher-cli'
+$certs = Join-Path $root 'certs'
+
+# Once the public CLI configuration is populated, stop the previous sample host.
+.\scripts\run-teams-local.ps1 -Stop -WorkDirectory (Join-Path $root 'launcher-3978')
+.\scripts\run-teams-local.ps1 `
+  -Mode live -AuthMode local-azure-cli `
+  -ConfigPath $config -WorkDirectory $work `
+  -Origin https://localhost:3978 `
+  -CertificatePath (Join-Path $certs 'localhost.pem') `
+  -PrivateKeyPath (Join-Path $certs 'localhost-key.pem') `
+  -SkipTeamsUpload
+```
+
+If switching from another installation, use **its actual work directory** for
+`-Stop`; never kill a foreign listener. The launcher uses an owner/SYSTEM-only
+work/control directory, private encrypted state and the personal local-live package.
+Use `--local-azure-cli` for standalone packaging. An extracted runtime includes
+`runtime.cli.env.example`. Only use `-SkipBuild` for already rebuilt/verified archives.
+The installed personal tab can reuse the same origin; install/update
+`TLC-Assist-Teams-local-live.zip` for accurate personal-only package metadata.
+
+Startup verifies HTTPS, live mode and the exact CLI public profile **without
+requesting any MSX token or records**. The **end user** then connects:
+
+```powershell
+.\scripts\teams-local-connection.ps1 -Action Connect -WorkDirectory $work
+# In Teams select "Request local pairing", then approve its actual displayed code:
+.\scripts\teams-local-connection.ps1 -Action Approve -UserCode A1B2C3D4 -WorkDirectory $work
+.\scripts\teams-local-connection.ps1 -Action Status -WorkDirectory $work
+```
+
+The code above is illustrative; never approve a code that does not match your page.
+Connect verifies a tenant-pinned signed delegated MSX token and calls `WhoAmI`,
+then verifies the enabled `systemuser` maps to that token's Entra subject. No FTE
+claim is derived from an email suffix. Pairing must match Teams' apparent tenant/user
+when supplied, and only the owner approves it. After pairing, Portfolio automatically
+uses the **Dataverse system-user ID**, not the Teams/Entra object ID, to filter
+active `msp_dealteams`, resolve active opportunities and load distinct accounts.
+Existing explicit Portfolio curation remains governed by the shared connector.
+
+The CLI subject is reverified on each source dispatch; account changes revoke old
+page access and invalidate prior reviews. The standalone runtime defaults to
+`TLC_TEAMS_CLI_WRITE_MODE=read-only` when the setting is absent. In that mode,
+both the HTTP action gate and the source transport reject writes. Set
+`TLC_TEAMS_CLI_WRITE_MODE=reviewed` or launch with `-CliWriteMode reviewed` for
+Desktop-equivalent source operations: opportunity and milestone updates, stage
+transitions, milestone activities, opportunity/milestone creation, team membership,
+and the existing reviewed meeting changes. These reuse shared orchestrator and
+connector paths, not a second Teams implementation. Native/hosted IAM role gates
+are unchanged; the private CLI capability is not a manufactured app/FTE role.
+Source row/field permissions still determine which actual operations succeed.
+Every source mutation must go through preview and explicit approval; direct
+operation calls cannot bypass review. Activity retains receipts; uncertain
+outcomes must be reconciled, not blindly retried. Optional grants are not silently
+replaced, CLI logout is never invoked by TLC disconnect, and failed/empty live
+reads never fall back to sample records.
+Public CLI configuration is version **1.2**, including the explicit `writeMode`;
+native public configuration and
+the protected owner/pairing protocol remain version **1.0**.
+
+The Teams frame's initial cross-site `GET /` navigation can load the public
+HTML shell, subject to the exact loopback Host and CSP frame-ancestor checks.
+That bootstrap is not API admission: private/config API requests retain the
+same-origin/fetch-site checks, and no pairing or source credential is granted.
+
+## Per-user Windows native MSX
+
+### Prerequisites and limits first
+
+- An **approved native/public-client registration D**, corporate tenant, native
+  loopback redirect and delegated MSX permissions. No API/SPA/bot client secret is
+  required. A public client ID being present in Desktop configuration is not proof
+  of approval. Desktop installations currently using Azure CLI do not silently
+  become interactive-native installations; this profile never borrows CLI or
+  VS Code first-party tokens.
+- The native app's signed v2 ID token must carry the IAM-backed
+  `TLC.Teams.User` eligibility role. Reviewed source effects additionally require
+  `TLC.Teams.Writer` and actual source ACLs. Email suffixes, Windows ownership,
+  unsigned Teams context and browser-supplied roles do not grant eligibility.
+- REST access is distinct from Dataverse MCP's canonical `mcp.tools` grant and
+  native-client allowlisting. Keep enabled MCP registry origins aligned with the
+  configured MSX environment; a mismatched registry is rejected, not given a token.
+- Deterministic guidance is explicitly selected by default for this new profile.
+  It uses the same live-context registry as VS Code (`guidance-live-v1`), not sample
+  agents or a claim of a Foundry response. Foundry can be explicitly configured
+  separately; its workload credential is never an MSX credential.
+- Private Portfolio, discovery, local preferences/history, MCEM, exports and
+  reviewed actions use the shared core. Optional Graph reads require their own
+  approved scopes and meeting permissions. No cloud Graph subscription is started.
+- A different device cannot resolve this device's private binding/artifact IDs.
+  Shared channels, stage/audience distribution, cloud bot/message extensions and
+  private earnings-profile access remain explicitly gated in the capability panel.
+  The local-live package advertises the personal workbench only; it does not make
+  unsupported cloud/shared-surface promises or change the separate hosted package.
+- Supported native installations use a non-reparse, owner/SYSTEM-only work/control
+  directory beneath that Windows user's LocalAppData, with no outside-user-writable
+  ancestors. Shared folders, redirected/reparse installations and central storage
+  are not supported by this profile. Native sessions/refresh tokens stay in memory;
+  the protected local state key persists separately from release binaries.
+
+### Launch without source access, then let the end user connect
+
+Copy the safe [native environment example](../../apps/teams/.env.native.example)
+to a protected local configuration file outside the repository and release folder.
+Replace its public coordinates with approved values; do not paste tokens or secrets.
+For example, use the following **after** supplying that configuration and an already
+trusted PEM pair:
+
+```powershell
+$work = Join-Path $env:LOCALAPPDATA 'TLC-Assist\Teams\launcher-native'
+$config = Join-Path $env:LOCALAPPDATA 'TLC-Assist\Teams\configuration\native.env'
+$certs = Join-Path $env:LOCALAPPDATA 'TLC-Assist\Teams\certs'
+.\scripts\run-teams-local.ps1 `
+  -Mode live -AuthMode local-interactive `
+  -ConfigPath $config -WorkDirectory $work `
+  -Origin https://localhost:3978 `
+  -CertificatePath "$certs\localhost.pem" `
+  -PrivateKeyPath "$certs\localhost-key.pem"
+```
+
+The launcher creates a fresh private work directory (or verifies an already private
+one), prepares its persistent encryption key, builds
+`TLC-Assist-Teams-local-live.zip`, and starts the matching loopback TLS runtime.
+Frontend URLs, `validDomains`, listener origin and port must agree. The **native
+OAuth callback port is separate**; do not force it onto the Teams HTTPS listener.
+No sign-in, MSX query or source write is triggered by launch.
+Use `-SkipTeamsUpload` when installation is already handled separately.
+
+**The end user, not an unattended validation job**, then runs:
+
+```powershell
+.\scripts\teams-local-connection.ps1 -Action Connect -WorkDirectory $work
+# Complete native corporate sign-in yourself. Connect verifies your own WhoAmI mapping only.
+# In the Teams page select "Request local pairing", then approve its exact public code:
+.\scripts\teams-local-connection.ps1 -Action Approve -UserCode A1B2C3D4 -WorkDirectory $work
+.\scripts\teams-local-connection.ps1 -Action Status -WorkDirectory $work
+# Optional, only after the separate native MCP grant/client allowlisting is approved:
+.\scripts\teams-local-connection.ps1 -Action Connect -Resource mcp -WorkDirectory $work
+# Optional Graph scopes must first be configured and approved:
+.\scripts\teams-local-connection.ps1 -Action Connect -Resource graph -WorkDirectory $work
+# Revoke the owner connection and all page sessions:
+.\scripts\teams-local-connection.ps1 -Action Disconnect -WorkDirectory $work
+```
+
+`A1B2C3D4` above is an example, not a working approval. The owner command communicates
+over a random local named pipe using a private owner-only control key, per-connection
+nonces and mutually authenticated HMAC messages. It does not assume Node's default
+named-pipe DACL alone is sufficient. No control key or source token is sent over HTTP.
+Owner commands never write MSX/Dataverse records.
+
+The page's memory-only S256 verifier is exchanged once after explicit owner approval
+for an opaque API capability. Pending requests are limited to three/five minutes;
+at most eight paired pages are admitted. A paired page now supports an **8-hour
+work session**, with short API leases bounded by fifteen minutes and the verified
+source credential. While the page is active, the client coalesces silent renewals
+and revalidates the same signed source identity and its own Dataverse mapping.
+Returning to an existing page after a short lease expires can renew it without
+another pairing, provided that its original eight-hour deadline and source grant
+are still valid. Renewal never opens sign-in, changes accounts, returns source
+tokens to the browser or extends that original deadline.
+
+Disconnecting, owner/account/role changes, failed source revalidation and backend
+restart invalidate admission; reaching eight hours requires a fresh pairing.
+The page token remains memory-only, with no browser storage or cross-device reuse.
+Even an expired short lease can revoke its own page; it cannot read data until
+successfully revalidated. The separate renewal contract is version **1.0**; the
+existing owner/pairing protocol remains **1.0**. Reviews bind
+the native/runtime generation; old responses and downloads cannot populate a newly
+paired page. "Disconnect this page" revokes only that capability; the owner command
+disconnects the whole installation. Reconnect/review after restart; never replay an
+unknown source outcome.
+
+An extracted runtime also includes `runtime.native.env.example` and the owner script.
+Without the repository launcher, use its bundled entrypoint directly:
+
+```powershell
+node server.js --local-owner prepare "$work\private"
+# Configure trusted TLS, exact origin/port and TLC_TEAMS_OWNER_DIRECTORY first, then start.
+node --env-file=runtime.env --experimental-sqlite server.js
+# In a second owner terminal:
+node server.js --local-owner status "$work\private"
+node server.js --local-owner connect "$work\private" msx
+node server.js --local-owner approve "$work\private" A1B2C3D4
+node server.js --local-owner disconnect "$work\private"
+```
+
+Native registration ownership, consent/Conditional Access, source grants, MCP
+allowlisting and actual two-device behavior are **not verified by mocks, TLS or ZIP
+checks**. Actual MSX read/write acceptance belongs to the end user; engineering must
+not exercise live records.
+
+## Portfolio selection and Discover responsiveness
+
+After editing notes, stage or other opportunity fields, changing customer or
+opportunity uses an **in-app** discard dialog rather than `window.confirm`, which
+can be blocked in Teams frames. **Keep editing** retains the current customer and
+draft; **Discard edits and continue** switches to the requested scope without
+sending any source write.
+
+Discover shows a loading state while its authorized source query runs, rather
+than prematurely claiming no results. Hidden Portfolio account/opportunity/
+milestone reads no longer run alongside it; a direct Discover visit makes only
+the discovery operation. Errors are distinguished from an empty result and
+**Refresh Discover** retries that query without refreshing the hidden Portfolio.
+Large live MSX searches can still take time; this change does not cache away
+source-permission checks or broaden the selected solution-domain/account scope.
 
 ## Architecture and trust boundaries
 
@@ -52,6 +376,9 @@ server-side. HTTPS reachability does not mean anonymous business-data access:
 - Corporate tenant, audience, calling client, delegated scope, expiry and
   IAM-backed FTE app-role checks are mandatory in live mode.
 - MSX REST, Dataverse MCP and Graph use separately acquired delegated tokens.
+- The CSP permits the Teams SDK's exact public trusted-domain-list JSON URL, not
+  arbitrary Office CDN connections. This bootstrap resource carries no MSX credentials
+  and is separate from native/source authentication.
 - Native record scope, MCP default-deny/query allowlists and source health remain.
 - Bot activities use current Teams SDK protocol validation before actor matching.
 - Graph callbacks validate the stored subscription/client-state hash before
@@ -84,10 +411,70 @@ Keep the existing three surfaces' launchers. The new configurations are additive
 
 ## Local runtime and F5
 
-### One-script build, run and upload
+### One-script guided build, run, install and verify
 
 Use [run-teams-local.ps1](../../scripts/run-teams-local.ps1) from PowerShell **7.4+**
-in the repository. It performs the requested sequence:
+in the repository. This is the single sample/live launcher:
+
+```powershell
+.\scripts\run-teams-local.ps1                         # Sample / Live menu
+.\scripts\run-teams-local.ps1 -Mode sample            # No menu
+.\scripts\run-teams-local.ps1 -Mode live              # Current CLI user; reviewed writes
+.\scripts\run-teams-local.ps1 -Mode live -CliWriteMode reviewed
+.\scripts\run-teams-local.ps1 -Mode live -CliWriteMode read-only
+.\scripts\run-teams-local.ps1 -Status
+.\scripts\run-teams-local.ps1 -Resume
+.\scripts\run-teams-local.ps1 -Mode sample -BackendOnly
+.\scripts\run-teams-local.ps1 -Stop
+```
+
+The menu defaults to **Sample** on Enter. Invalid choices fail explicitly; Live
+never falls back to sample when configuration or authentication is unavailable.
+After switching modes, reload or reopen the Teams tab to fetch its new
+configuration; a restarted Live runtime requires a fresh owner-approved pairing.
+Use ordinary invocation (`.\scripts\run-teams-local.ps1`) rather than dot-sourcing
+the launcher into your current PowerShell scope. `-Mode` bypasses the menu;
+`-Stop` needs neither a mode nor an origin.
+
+If PowerShell reports that `.\scripts\run-teams-local.ps1` **is not recognized**,
+check the repository location and branch before changing PowerShell settings:
+
+```powershell
+git branch --show-current
+Test-Path -LiteralPath .\scripts\run-teams-local.ps1 -PathType Leaf
+```
+
+Run from the repository root; the path check must return `True`. During Teams
+feature development, the launcher and this guide are on
+`feature/vscode-extension-Teams`; `feature/vscode-extension` does not contain
+them. If you are on that non-Teams branch, check `git status` and preserve any
+uncommitted work before running `git switch feature/vscode-extension-Teams`.
+Then rerun the launcher. A missing script is not an execution-policy,
+authentication or Live-mode failure; do not copy the launcher alone onto a
+branch without its Teams runtime dependencies.
+
+`Origin:` used to be PowerShell's prompt for a missing mandatory parameter. It is
+now optional. Resolution is **`-Origin` -> `TLC_TEAMS_ORIGIN` in the selected
+configuration/environment -> `https://localhost:3978`**. If no origin is configured,
+an explicit `-LocalPort` or configured `TLC_TEAMS_PORT` selects the default HTTPS
+port instead. Origins must still be exact HTTPS addresses without paths.
+Command parameters take precedence; environment-file values override inherited
+environment values during inspection.
+
+Live defaults to `local-azure-cli` unless `-AuthMode` or the configuration selects
+another existing profile. Without `-ConfigPath`, it looks for
+`%LOCALAPPDATA%\TLC-Assist\Teams\configuration\cli.env`. Prepare that file once
+from [the safe CLI template](../../apps/teams/.env.cli.example), outside the
+repository, and fill in the approved tenant, MSX resource and environment.
+Do not supply tokens or invent configuration coordinates. The launcher defaults
+to `reviewed` CLI write mode, honors a configured `TLC_TEAMS_CLI_WRITE_MODE`, and
+accepts `-CliWriteMode read-only` or `-CliWriteMode reviewed` as an explicit override.
+Selecting Live enables the reviewed-write capability, **not automatic writes**.
+Backend startup never connects to MSX or initiates login. The guided finish asks
+the owner for explicit CONNECT confirmation and exact page-code approval; each
+source change still needs separate review. Sample does not auto-load the live file.
+
+The launcher performs the requested sequence:
 
 1. Rebuilds the backend/browser runtime ZIP and runs the cumulative Teams tests.
 2. Rebuilds the three-file Teams installation ZIP for the **same** origin/mode.
@@ -95,9 +482,15 @@ in the repository. It performs the requested sequence:
    external data paths, starts Node, and verifies the local and trusted HTTPS UI/API.
 4. Uses `atk install` to upload/sideload that exact ZIP for your Microsoft 365
    account. Login, consent or tenant app-upload policy can still require interaction.
+5. Opens the matching installed personal app, guides explicit source connection
+   and page-code approval where applicable, and waits for its authenticated Teams
+   client/build/run acknowledgement before reporting complete.
 
-For same-laptop sample testing, supply **real, existing, trusted** localhost PEM
-certificate/key files. Paths such as `C:\YOUR_CERT_FOLDER\localhost.pem` and
+For same-laptop testing, prepare **real, existing, trusted** localhost PEM
+certificate/key files once. When both TLS paths are otherwise absent, the launcher
+discovers `%LOCALAPPDATA%\TLC-Assist\Teams\certs\localhost.pem` and
+`localhost-key.pem`. Explicit parameters or configured TLS paths still take
+precedence; partial pairs and missing paths fail. Paths such as `C:\YOUR_CERT_FOLDER\localhost.pem` and
 `C:\YOUR_KEY_FOLDER\localhost-key.pem` are placeholders, not files the runner
 creates. The runner rejects missing files or directories before building or
 starting anything.
@@ -119,8 +512,8 @@ mkcert -cert-file "$certDir\localhost.pem" -key-file "$certDir\localhost-key.pem
 if ($LASTEXITCODE -ne 0) { throw 'Creating the localhost certificate/key failed.' }
 ```
 
-With the trusted pair in that per-user directory (or replace `$certDir` with
-your actual certificate directory), launch from the repository:
+With the trusted pair in that per-user directory, the short launch commands above
+need no certificate parameters. To use another directory or port, launch explicitly:
 
 ```powershell
 $certDir = Join-Path $env:LOCALAPPDATA 'TLC-Assist\Teams\certs'
@@ -147,14 +540,15 @@ that already forwards to the selected loopback port:
   -ConfigPath .\apps\teams\.env.local
 ```
 
-With a configuration file, set its mode explicitly. Live mode additionally needs
-the existing approved credentials, disclosure/Foundry configuration, package ID
-and bot ID. Relative configuration paths are resolved against the repository
+Use the menu or `-Mode` to select the data mode. The separate **hosted-obo** live
+profile still needs the existing approved credentials, disclosure/Foundry
+configuration, package ID and bot ID; it is not the default local CLI profile.
+Relative configuration paths are resolved against the repository
 before the extracted runtime starts. The runner forces the **local** profile and
 loopback binding; source user permissions remain delegated and unchanged.
 Loopback sample testing does not establish colleague or cloud-callback reachability.
-Live Teams packages require the approved shared HTTPS origin rather than a
-development/template origin.
+Hosted live Teams packages require the approved shared HTTPS origin rather than a
+development/template origin; private CLI/native packages require loopback HTTPS.
 
 Stop a runtime started by this script:
 
@@ -167,14 +561,32 @@ Reruns replace only a verified runner-owned process after successful builds.
 It refuses occupied ports belonging to unrelated servers and refuses reused PIDs.
 Private configuration remains at the original environment-file location, never
 inside either ZIP. Data and per-run privacy-safe logs remain under
-`%LOCALAPPDATA%\TLC-Assist\Teams\launcher` unless `-WorkDirectory`/configured data
-paths override them. Old release folders are retained for inspection; remove only
+`%LOCALAPPDATA%\TLC-Assist\Teams\launcher-cli` by default for both Sample and CLI
+Live. The common owner-protected work directory lets a mode switch replace only
+the verified launcher-owned runtime on the same origin. Sample data remains in
+`data\sample`; live state stays in the protected `private` directory.
+`local-interactive` retains its separate `launcher-native` default.
+Use `-WorkDirectory`/configured data paths to override these paths. For older
+installations in `launcher` or other directories, stop them using their actual
+`-WorkDirectory`; the launcher will not kill an unrelated listener.
+Old release folders are retained for inspection; remove only
 specific stopped releases after following the backup/update procedure below.
 
 `-SkipBuild` reuses verified existing archives; optional `-RuntimeArchive` and
 `-TeamsArchive` then select explicit files. URL/domain/mode/identity consistency
 is still checked. `-SkipTeamsUpload` is for local verification and does **not**
 report a successful installation; it does not skip HTTPS validation.
+
+If a previous build failed with `ENOENT` for
+`release-teams\runtime\.generated-teams-runtime`, the legacy staging directory
+exists without the packager's ownership marker, possibly with only leftover
+`node_modules`. Do not create the marker by hand or delete unknown contents.
+The packager now uses a fresh `release-teams\.runtime-build-<unique>\runtime`
+directory for each build and removes only that build's staging when finished.
+Existing unmarked `release-teams\runtime` contents are left untouched and no
+longer block packaging. Rerun the normal launcher; the runtime ZIP name and
+Teams client/backend HTTPS origin and port are unchanged. This packaging error
+occurs before backend startup and is unrelated to MSX sign-in or Teams pairing.
 
 If `atk` is absent, the script invokes the pinned official
 `@microsoft/m365agentstoolkit-cli@1.1.18` through `npm exec` with package install
@@ -185,11 +597,39 @@ Entra registration or request a tenant-wide catalog publication. See Microsoft's
 The separately installed `teams` Developer CLI is not a substitute: its manifest
 upload command updates developer metadata rather than sideloading this ZIP.
 
+The install call uses **`--interactive false`** so ATK honors the supplied
+`--file-path`. ATK 1.1.18's interactive command mode discards this option, causing
+`MissingRequiredOptionError` for `--file-path or --xml-path` even when a path
+was passed. Non-interactive command selection does not bypass Microsoft 365
+authentication, consent or tenant sideloading policy.
+
+If an earlier launcher reached **Runtime ready** but failed at this final install
+step, leave the backend running. From the repository root, retry only installation
+of the already-built local CLI/native Live package:
+
+```powershell
+npm exec --yes --ignore-scripts --package=@microsoft/m365agentstoolkit-cli@1.1.18 -- `
+  atk install `
+  --file-path ".\release-teams\TLC-Assist-Teams-local-live.zip" `
+  --scope Personal --interactive false --telemetry false
+```
+
+Prefer `.\scripts\run-teams-local.ps1 -Resume` for the recorded run: it uses the
+retained, hash-checked ZIP and continues through opening Teams and pairing.
+The standalone command above does not rebuild, restart or stop the backend. Supply the actual matching
+Teams installation ZIP if using a different package; never upload the runtime
+ZIP. Any Microsoft 365 sign-in or tenant approval still requires the end user's
+participation. Source MSX connection and owner-approved page pairing remain
+separate security gates; the guide now leads you through both after installation.
+
 HTTPS failure stops the new runtime and prevents upload, rather than installing a
-package known to show a blank window. An upload/login/policy failure is surfaced;
-the already verified runtime remains tracked/running for inspection and can be
-stopped with `-Stop`. No success is inferred from merely opening Teams or from
-the ZIP existing. Actual rendering and corporate live access remain client gates.
+package known to show a blank window. An upload/login/policy failure is surfaced
+with retry/manual-upload guidance; the already verified runtime remains
+tracked/running for inspection and can be stopped with `-Stop`. No success is
+inferred from merely opening Teams or from the ZIP existing. The guide requires
+actual matching client acknowledgement, plus explicit owner/source confirmation
+in local Live mode, before reporting VERIFIED. Corporate tenant admission and
+real source permissions still cannot be bypassed by a launcher.
 
 ### Correct a stale Teams URL or a closed test URL
 
@@ -579,7 +1019,7 @@ MSX/MCP/Graph/Foundry credentials.
 
 ## Implemented behavior and explicit remaining gates
 
-- Personal Accounts/Discovery, agent guidance, shared workflows, milestone/task
+- Personal Portfolio/Discover, agent guidance, shared Plays, milestone/task
   edits and MCEM transitions use the existing core. Existing live record creation
   remains disabled; sample SQLite creation and reviewed live draft export remain.
 - Word export and unsent email draft use the same shared document builders as
@@ -598,6 +1038,45 @@ MSX/MCP/Graph/Foundry credentials.
   text/timestamps and never inferring speakers from `Budget: ...`.
 - Callback hints do not approve any MSX changes. A private source-checked review
   is still mandatory.
+
+### Extension-aligned workspace
+
+The personal app opens **Portfolio**, with the same **New | Discover | Portfolio |
+Plays | Dashboards** vocabulary as the VS Code extension. **Tools** retains My
+work, Meetings, Activity and Context settings; these are not removed features.
+
+- Portfolio has a sortable account/opportunity scope pane, central **Overview /
+  Guidance / MCEM Stages** detail tabs, and a role-based **Next Best Actions**
+  pane. Overview leads with milestones and reviewed field/activity controls.
+  Meeting capture opens the existing private acquisition/review workflow.
+- The header search is limited to the viewer's accessible portfolio. Its keyboard
+  suggestions select scope; it is not Teams global search. Pane buttons preserve
+  unsent work, and switching away from dirty opportunity edits requests an
+  explicit discard decision. Private drafts/results are not persisted in browser
+  storage.
+- One explicit MCEM evaluation supplies the stage view and recommendation rail.
+  Recommendations remain read-only, with owner roles, evidence and assumptions.
+- Plays retains shared run/cancel/history semantics and displays structured
+  result cards, queues, evidence and source health instead of a JSON-only result.
+  Cards and notifications deep-link to the appropriate private Plays/Activity view.
+- New retains sample SQLite creation and reviewed live draft export. Dashboards
+  reuses the shared sample Seller Dashboard. In live Teams it reports
+  `hosted-profile-denied`; being on the same laptop does not authorize a viewer
+  to read the operator's Windows earnings profile.
+- At content widths below 1200 CSS pixels, actions/evidence become a labeled
+  disclosure. Below 900 pixels, scope becomes a disclosure and content stacks.
+  Wide views use three regions without requiring draggable blade widths.
+- Bound tabs keep their account and, when present, opportunity binding. Search
+  and unrelated personal destinations do not escape that scope.
+- Meeting canvases expose **Prep / Capture / Follow-up**. SDK side-panel frames
+  use the compact private surface without the full personal navigation. Settings
+  APIs still run only in SDK settings frames. The shared stage renders only an
+  approved artifact, never the private Portfolio or raw transcript.
+
+Teams light/dark/high-contrast changes flow through Fluent tokens. The revision
+includes keyboard tab navigation, labeled pane controls, responsive fixtures and
+an isolated real-TeamsJS host handshake test; no new tenant permissions or agents
+are introduced.
 
 **Live meeting-stage business content remains blocked** without an authoritative
 current meeting-audience proof. A channel roster or meeting-chat invitation list

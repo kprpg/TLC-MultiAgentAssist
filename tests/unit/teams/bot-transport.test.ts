@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { EncryptedSdkState } from '../../../apps/teams/src/credential-state.js'
 import { registerTeamsBot } from '../../../apps/teams/src/bot.js'
 import { SqliteDocumentStore } from '../../../packages/connectors/common/scoped-document-store.js'
-import { loadTeamsConfiguration } from '../../../apps/teams/src/configuration.js'
+import { isLocalConfiguration, loadTeamsConfiguration } from '../../../apps/teams/src/configuration.js'
 
 describe('encrypted bot credential-state boundary', () => {
   it('never persists plaintext credentials, reopens with the same key, and fails closed on key mismatch', async () => {
@@ -36,7 +36,7 @@ describe('real Teams SDK ingress', () => {
       TLC_TEAMS_MSX_RESOURCE: 'https://example.crm.dynamics.com', TLC_TEAMS_MCP_SCOPE: 'https://example.crm.dynamics.com/mcp.tools',
       TLC_TEAMS_STORAGE_URL: 'https://example.table.core.windows.net', TLC_TEAMS_ENVIRONMENT_ID: 'test'
     })
-    if (configuration.mode !== 'live') throw new Error('Test configuration mismatch')
+    if (configuration.mode !== 'live' || isLocalConfiguration(configuration)) throw new Error('Hosted bot test configuration mismatch')
     const web = express()
     const store = new SqliteDocumentStore()
     const resolveServices = vi.fn()

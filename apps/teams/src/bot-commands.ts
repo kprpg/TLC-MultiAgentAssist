@@ -31,11 +31,11 @@ export async function routeTeamsCommand(
       contractVersion: workflowContractVersion, workflowId: argument, scope: { kind: 'portfolio' },
       input: { asOf: new Date().toISOString().slice(0, 10) }
     }))
-    return { text: `Workflow accepted: ${run.runId}. Open the private workbench for progress and source health.`, openUrl: handoff.openUrl }
+    return { text: `Play accepted: ${run.runId}. Open Plays for progress, evidence and source health.`, openUrl: `${destination.origin}/?view=plays&runId=${encodeURIComponent(run.runId)}` }
   }
   if (command?.toLowerCase() === 'status' && argument) {
     const view = services.workflows.get({ contractVersion: workflowContractVersion, runId: argument })
-    return { text: `Workflow ${view.run.status}${view.run.state ? ` (${view.run.state})` : ''}.`, openUrl: handoff.openUrl }
+    return { text: `Play ${view.run.status}${view.run.state ? ` (${view.run.state})` : ''}.`, openUrl: `${destination.origin}/?view=plays&runId=${encodeURIComponent(view.run.runId)}` }
   }
   if (command?.toLowerCase() === 'ask') {
     const capability = agentCapabilitySchema.parse(argument)

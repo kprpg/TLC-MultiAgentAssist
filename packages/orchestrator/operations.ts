@@ -9,6 +9,7 @@ import { workflowRunViewSchema } from './workflows/view-contracts.js'
 import type { ApplicationServices } from './application-runtime.js'
 import { workflowContractVersion } from '../common/contracts/workflows.js'
 import { canonicalJson } from './collaboration/reviewed-actions.js'
+import { sellerDashboardRequestSchema, sellerDashboardResponseSchema } from '../common/contracts/seller-dashboard.js'
 
 export class WorkflowScopeAuthorizationError extends Error {
   constructor() { super('Workflow source scope is unavailable or changed. Start a fresh workflow after verifying current access.'); this.name = 'WorkflowScopeAuthorizationError' }
@@ -33,6 +34,7 @@ export function createApplicationOperations(services: ApplicationServices) {
   const core = services.orchestrator
   const workflows = services.workflows
   const operations: Record<string, ApplicationOperation> = {
+    sellerDashboard: operation(sellerDashboardRequestSchema, sellerDashboardResponseSchema, (input) => services.sellerDashboard.invoke(input)),
     listAccounts: operation(c.accountListOptionsSchema.strict(), z.array(c.accountSchema), (input) => core.listAccounts(input)),
     searchAccounts: operation(c.accountSearchRequestSchema.strict(), z.array(c.accountCandidateSchema), (input) => core.searchAccounts(input)),
     addAccount: operation(z.object({ accountId: id }).strict(), c.accountSchema, (input) => core.addAccount(input.accountId), 'preference'),
