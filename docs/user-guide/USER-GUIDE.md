@@ -469,6 +469,12 @@ The **⋮** icon menu on each opportunity currently exposes:
 
 - **Opportunity Comments** — inline edit of the opportunity’s comment field.
 
+In the browser/Teams Portfolio, the **Opportunities** table includes a **Comments** column
+showing the current source comments. Expand **Opportunity Comments** in a row to edit them,
+then choose **Review opportunity update**. Canceling the private review leaves the source
+unchanged; only confirming the reviewed changes submits the update. This entry point remains
+available when the opportunity details and Next Best Actions panels are hidden.
+
 ---
 
 ## 5. Milestones — drilling down inside an opportunity
@@ -602,10 +608,21 @@ Every agent response follows the same contract:
 - Explicit assumptions and cautions — anything the agent could not confirm from the current evidence.
 - Citations to the underlying MSX/MCEM evidence items.
 
-Two actions sit beside a completed response:
+Two actions sit in the header of a completed response:
 
 - **Send Email** — opens a pre-populated draft in your default Outlook client. Nothing is sent automatically; you review and press *Send* yourself.
 - **Export** — downloads the same response as a formatted Word (`.docx`) document ready to attach to a review or QBR deck.
+
+In the browser/Teams **Portfolio > Guidance** response, these controls are at the top right:
+**Export Word**, **Email draft recipients**, and **Download unsent email draft**. Enter
+recipient addresses separated by commas or semicolons to download an unsent `.eml` draft;
+the browser does not send it automatically.
+
+After **Meeting Capture** analyzes a transcript, the same controls appear at the top right
+of **Follow-up > Proposed meeting changes**. The export includes the proposed field changes,
+new milestones and other signals, plus the evidence attribution and a reminder that the
+suggestions have not been applied. Downloading a document or email draft does not approve
+or apply any MSX changes.
 
 ---
 

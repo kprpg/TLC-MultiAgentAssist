@@ -24,6 +24,7 @@ import { DiscoveryControls, DiscoverySortHeader } from '../../../shared/discover
 import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportunities, toggleDiscoverySort, type DiscoveryFilters, type DiscoverySort } from '../../../shared/discovery.js'
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 import { readTranscriptFile } from '../../../shared/transcript-file.js'
+import { meetingProposalToMarkdown } from '../../../shared/meeting-proposal-markdown.js'
 import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
 import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
@@ -941,23 +942,6 @@ function toggleSet(previous: ReadonlySet<string>, id: string): Set<string> {
     if (next.has(id)) next.delete(id)
     else next.add(id)
     return next
-}
-
-/** Renders a change-set proposal as Markdown for the Email / Word export actions. */
-function meetingProposalToMarkdown(proposal: MeetingChangeSetProposalView, opportunityName: string): string {
-    const lines = [`# Meeting signals - ${opportunityName}`, '', `Meeting type: ${proposal.meetingType}`, '', '## Proposed field changes', '', '| Apply | Field | Current | Proposed | MCEM | Confidence |', '| --- | --- | --- | --- | --- | --- |']
-    for (const slot of proposal.slots) {
-        lines.push(`| ${slot.checkedByDefault && !slot.blocked ? 'yes' : 'review'} | ${slot.label} | ${slot.displayBefore ?? '(empty)'} | ${slot.displayAfter} | ${slot.mcemCriterion} | ${Math.round(slot.confidence * 100)}% |`)
-    }
-    if (proposal.newMilestones.length > 0) {
-        lines.push('', '## New milestones', '')
-        for (const milestone of proposal.newMilestones) lines.push(`- ${milestone.name}${milestone.milestoneDate ? ` (${milestone.milestoneDate})` : ''}`)
-    }
-    if (proposal.unmappedSignals.length > 0) {
-        lines.push('', '## Other signals (not injected)', '')
-        for (const signal of proposal.unmappedSignals) lines.push(`- ${signal.label}: ${signal.text}`)
-    }
-    return lines.join('\n')
 }
 
 async function readFileIntoContent(event: ChangeEvent<HTMLInputElement>, setContent: (value: string) => void, onNote: (message: string) => void): Promise<void> {

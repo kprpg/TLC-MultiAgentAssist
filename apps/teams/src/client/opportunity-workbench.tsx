@@ -3,7 +3,7 @@ import * as c from '../../../../packages/common/contracts/index.js'
 import { NextBestActions } from '../../../shared/next-best-actions.js'
 import { sortMilestones, type MilestoneSort, type SortDirection } from '../../../shared/portfolio-sorting.js'
 import { GuidanceWorkspace } from './guidance-workspace.js'
-import { MilestoneCard, StageChange } from './record-actions.js'
+import { MilestoneCard, OpportunityCommentsEditor, StageChange } from './record-actions.js'
 import type { TeamsApiClient } from './data-client.js'
 import type { WorkingSelection } from './accounts.js'
 import type { PortfolioPanes } from './workspace-navigation.js'
@@ -19,14 +19,6 @@ export function OpportunityWorkbench({ client, selection, opportunities, milesto
   onAction(operation: string, input: Record<string, unknown>): Promise<void>
   onMeeting(): void; onDraftChange(): void
 }) {
-  const [notes, setNotes] = useState(selection.opportunity.comments ?? '')
-  const sourceNotes = useRef(selection.opportunity.comments ?? '')
-  useEffect(() => {
-    const previous = sourceNotes.current
-    const next = selection.opportunity.comments ?? ''
-    sourceNotes.current = next
-    setNotes((current) => current === previous ? next : current)
-  }, [selection.opportunity.id, selection.opportunity.comments])
   const [evaluation, setEvaluation] = useState<c.McemResponse>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -79,8 +71,7 @@ export function OpportunityWorkbench({ client, selection, opportunities, milesto
           {sortMilestones(milestones, sort, direction).map((item) => <MilestoneCard key={`${item.id}:${JSON.stringify(item)}`} client={client} milestone={item} onAction={onAction} />)}
           {!milestones.length && <p>No milestones are visible in this scope.</p>}
           <details className="source-editor"><summary>Opportunity notes and reviewed updates</summary>
-            <label className="field">Opportunity notes<textarea aria-label="Opportunity notes" value={notes} maxLength={30_000} onChange={(event) => setNotes(event.target.value)} /></label>
-            <button type="button" onClick={() => { void onAction('updateOpportunity', { opportunityId: selection.opportunity.id, update: { comments: notes } }) }}>Review opportunity update</button>
+            <OpportunityCommentsEditor opportunity={selection.opportunity} onAction={onAction} onDraftChange={onDraftChange} />
             {tab !== 'stages' && <StageChange selection={selection} onAction={onAction} />}
           </details>
         </section>

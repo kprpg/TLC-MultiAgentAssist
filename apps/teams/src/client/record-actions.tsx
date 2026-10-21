@@ -1,10 +1,29 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { z } from 'zod'
 import * as c from '../../../../packages/common/contracts/index.js'
 import type { TeamsApiClient } from './data-client.js'
 import type { WorkingSelection } from './accounts.js'
 
 type RecordAction = (operation: string, input: Record<string, unknown>) => Promise<void>
+
+export function OpportunityCommentsEditor({ opportunity, onAction, onDraftChange, label = 'Opportunity notes' }: {
+  opportunity: c.Opportunity; onAction: RecordAction; onDraftChange(): void; label?: string
+}) {
+  const [comments, setComments] = useState(opportunity.comments ?? '')
+  const sourceComments = useRef(opportunity.comments ?? '')
+  useEffect(() => {
+    const previous = sourceComments.current
+    const next = opportunity.comments ?? ''
+    sourceComments.current = next
+    setComments((current) => current === previous ? next : current)
+  }, [opportunity.id, opportunity.comments])
+  return <>
+    <label className="field">{label}<textarea aria-label={label} value={comments} maxLength={30_000} onChange={(event) => {
+      setComments(event.target.value); onDraftChange()
+    }} /></label>
+    <button type="button" onClick={() => { void onAction('updateOpportunity', { opportunityId: opportunity.id, update: { comments } }) }}>Review opportunity update</button>
+  </>
+}
 
 function MilestoneActivities({ client, milestone }: { client: TeamsApiClient; milestone: c.Milestone }) {
   const [activities, setActivities] = useState<c.MilestoneActivity[]>([])

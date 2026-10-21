@@ -1,4 +1,7 @@
 import { expect, test } from '@playwright/test'
+import { readFile } from 'node:fs/promises'
+import JSZip from 'jszip'
+import { emailComposeRequestSchema, exportResponseRequestSchema } from '../../../packages/common/contracts/index.js'
 import { manualMeetingTranscriptRequestSchema } from '../../../packages/common/contracts/meeting.js'
 import { meetingResultSchema } from '../../../apps/teams/src/client/meeting-capture.js'
 import { chooseOpportunity, openUtility, post } from './helpers.js'
@@ -31,6 +34,49 @@ test('pasted transcript evidence produces a private reviewed draft without apply
   expect(result.proposals[0]?.meetingType).toBe('internal')
   await expect(page.getByRole('heading', { name: 'Proposed meeting changes', exact: true })).toBeVisible()
   await expect(page.getByText('These suggestions have not been applied.', { exact: false })).toBeVisible()
+  const followUp = page.getByRole('tabpanel', { name: 'Follow-up', exact: true })
+  const exports = followUp.locator('header').getByRole('group', { name: 'Response exports' })
+  await expect(exports).toBeVisible({ timeout: 5000 })
+  await expect(exports.getByRole('button', { name: 'Download unsent email draft' })).toBeDisabled()
+  const [wordDownload, documentResponse] = await Promise.all([
+    page.waitForEvent('download'),
+    page.waitForResponse((entry) => entry.url().endsWith('/documents/export')),
+    exports.getByRole('button', { name: 'Export Word', exact: true }).click()
+  ])
+  expect(wordDownload.suggestedFilename()).toBe('TLC-response.docx')
+  const documentInput = exportResponseRequestSchema.parse(documentResponse.request().postDataJSON().document)
+  expect(documentResponse.request().postDataJSON().opportunityId).toBe(opportunity.id)
+  expect(documentInput.generatedAt).toBe(result.status.checkedAt)
+  expect(documentInput.responseMarkdown).toContain('These suggestions have not been applied.')
+  expect(documentInput.responseMarkdown).toContain(`Evidence is ${result.status.attribution}`)
+  for (const proposal of result.proposals) {
+    for (const slot of proposal.slots) {
+      expect(documentInput.responseMarkdown).toContain(slot.label)
+      expect(documentInput.responseMarkdown).toContain(slot.displayAfter)
+    }
+  }
+  const documentPath = await wordDownload.path()
+  if (!documentPath) throw new Error('The meeting Word download was not saved.')
+  const documentXml = (await JSZip.loadAsync(await readFile(documentPath))).file('word/document.xml')
+  expect(await documentXml?.async('string')).toContain('Meeting signals -')
+  await exports.getByLabel('Email draft recipients', { exact: true }).fill('reviewer@example.com; teammate@example.com')
+  const [email, emailResponse] = await Promise.all([
+    page.waitForEvent('download'),
+    page.waitForResponse((entry) => entry.url().endsWith('/documents/email')),
+    exports.getByRole('button', { name: 'Download unsent email draft', exact: true }).click()
+  ])
+  const emailInput = emailComposeRequestSchema.parse(emailResponse.request().postDataJSON().draft)
+  expect(emailInput.responseMarkdown).toBe(documentInput.responseMarkdown)
+  expect(emailInput.recipients).toEqual(['reviewer@example.com', 'teammate@example.com'])
+  expect(emailResponse.request().postDataJSON().opportunityId).toBe(opportunity.id)
+  const emailPath = await email.path()
+  if (!emailPath) throw new Error('The meeting email draft was not saved.')
+  expect(await readFile(emailPath, 'utf8')).toContain('X-Unsent: 1')
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 })
+    await expect(exports).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  }
   expect(await post(request, 'getOpportunityContext', { opportunityId: opportunity.id })).toEqual(before)
   expect(previews).toBe(0)
   expect(commits).toBe(0)
@@ -38,6 +84,7 @@ test('pasted transcript evidence produces a private reviewed draft without apply
   await page.getByRole('textbox', { name: 'Transcript text', exact: true }).fill(`${transcript}\nSeller: A different draft.`)
   await page.getByRole('tab', { name: 'Follow-up', exact: true }).click()
   await expect(page.getByText('No acquired transcript proposal is ready. Check Capture for source status.', { exact: true })).toBeVisible()
+  await expect(followUp.getByRole('group', { name: 'Response exports' })).toHaveCount(0)
 })
 
 for (const format of ['vtt', 'txt'] as const) {

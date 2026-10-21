@@ -57,11 +57,15 @@ apps/teams/src/client/manual-transcript-input.tsx
                                      Bounded paste/upload input and scope-safe extraction
 apps/teams/src/client/meeting-capture.ts
                                      Shared capture result validation and actionable source errors
+apps/teams/src/client/response-actions.tsx
+                                     Top-right Word/unsent email downloads for Guidance and meeting proposals
 apps/teams/.env.native.example       Safe per-user native configuration, not real credentials
 apps/teams/.env.cli.example          Safe existing-user CLI configuration, not tokens/secrets
 apps/shared/                         Browser-safe prompt/Markdown and existing UI reuse
 apps/shared/transcript-file.ts       Shared UTF-8 VTT/text reader for Desktop/Web, VS Code and Teams
                                      Shared Portfolio controls, sorting and Next Best Actions
+apps/shared/meeting-proposal-markdown.ts
+                                     Shared browser-safe meeting proposal export format across surfaces
 apps/shared/mcem-stages.ts           Browser-safe stage names and accountable role metadata
 apps/shared/mcem-stage-board.tsx     Shared Desktop/Web/Teams stage columns and presentation
 apps/shared/mcem-stage-board.css     Shared stage headers, cards, selection and gate styling

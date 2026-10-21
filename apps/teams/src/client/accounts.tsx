@@ -12,6 +12,7 @@ import { DiscoveryWorkspace } from './discovery.js'
 import { defaultPortfolioPanes, type PortfolioPanes } from './workspace-navigation.js'
 import type { TeamsApiClient, ReviewAction } from './data-client.js'
 import { useResponsiveDisclosure } from './use-responsive-disclosure.js'
+import { OpportunityCommentsEditor } from './record-actions.js'
 
 export interface WorkingSelection { account: c.Account; opportunity: c.Opportunity }
 type AccountWorkspace = 'portfolio' | 'discovery' | 'new'
@@ -172,10 +173,15 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
             <button type="button" onClick={() => setDirection((current) => current === 'ascending' ? 'descending' : 'ascending')}>{direction === 'ascending' ? 'Asc' : 'Desc'}</button></div>
           <label className="field compact-opportunity-picker">Opportunity<select aria-label="Opportunity" value={selection?.opportunity.id ?? ''} disabled={Boolean(boundOpportunityId)} onChange={(event) => selectOpportunity(event.target.value)}>
             <option value="">Choose an opportunity</option>{opportunities.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-          <div className="record-table-wrap" role="region" aria-label="Opportunity list" tabIndex={0}><table className="portfolio-records"><thead><tr><th>Opportunity name</th><th>Intent</th><th>Stage</th></tr></thead>
+          <div className="record-table-wrap" role="region" aria-label="Opportunity list" tabIndex={0}><table className="portfolio-records"><thead><tr><th>Opportunity name</th><th>Intent</th><th>Stage</th><th>Comments</th></tr></thead>
             <tbody>{sortOpportunities(opportunities, sort, direction).map((item) => <tr key={item.id} className={item.id === selection?.opportunity.id ? 'selected-row' : ''}>
               <td><button type="button" className="record-link" title={item.name} onClick={() => selectOpportunity(item.id)}>{item.name}</button><small>{sellerMoney(item.value, true, item.currency)}</small></td>
               <td>{formatOpportunityIntent(item.opportunityIntent)}</td><td>Stage {item.recordedStage}</td>
+              <td className="opportunity-comments"><span className="opportunity-comments-preview">{item.comments || 'No comments recorded.'}</span>
+                <details><summary>Opportunity Comments</summary>
+                  <OpportunityCommentsEditor opportunity={item} onAction={action} onDraftChange={() => { dirty.current = true }} label={`Comments for ${item.name}`} />
+                </details>
+              </td>
             </tr>)}</tbody></table></div>
           {!loading && !opportunities.length && <p>No eligible Portfolio opportunities. Use Discover to review your working set.</p>}
           {!loading && !accounts.length && <p>No customer accounts. Use Add customer to get started.</p>}
