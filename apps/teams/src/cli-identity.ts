@@ -6,8 +6,10 @@ import { getCliCapabilities, localConnectionVersion, type NativeConnectionStatus
 import type { ExecutionPrincipal } from '../../../packages/orchestrator/collaboration/principal.js'
 import type { CliTeamsConfiguration } from './configuration.js'
 import { NativeConnectionError, type NativeIdentity } from './native-identity.js'
+import { measurePerformance, type PerformanceReporter } from '../../../packages/common/telemetry/performance.js'
 
 export class CliIdentityProvider {
+  private acquisition: { generation: number; promise: Promise<{ token: string; identity: NativeIdentity }> } | undefined
   generation = 0
   private current: NativeIdentity | undefined
   private state: NativeConnectionStatus['state'] = 'sign-in-required'
@@ -21,6 +23,7 @@ export class CliIdentityProvider {
       probeMsxIdentity(token: string, identity: ExecutionPrincipal): Promise<void>
       resolveKey?: JWTVerifyGetKey
       now?: () => number
+      performanceReporter?: PerformanceReporter
     }
   ) {
     this.now = options.now ?? Date.now
@@ -32,10 +35,19 @@ export class CliIdentityProvider {
   private assertResource(resource: NativeResource): void {
     if (resource !== 'msx' && resource !== 'mcp') throw new NativeConnectionError('native_resource_unavailable')
   }
-  private async acquire(): Promise<{ token: string; identity: NativeIdentity }> {
-    const result = await this.credential.getToken(`${this.configuration.msxResource}/.default`)
-    if (!result) throw new NativeConnectionError('native_sign_in_required')
-    return this.validate(result)
+  private acquire(): Promise<{ token: string; identity: NativeIdentity }> {
+    if (this.acquisition?.generation === this.generation) return this.acquisition.promise
+    const generation = this.generation
+    const promise = measurePerformance('credential.cli.acquire', this.options.performanceReporter, async () => {
+      const result = await this.credential.getToken(`${this.configuration.msxResource}/.default`)
+      if (!result) throw new NativeConnectionError('native_sign_in_required')
+      return this.validate(result)
+    })
+    const acquisition = { generation, promise }
+    this.acquisition = acquisition
+    const cleanup = () => { if (this.acquisition === acquisition) this.acquisition = undefined }
+    void promise.then(cleanup, cleanup)
+    return promise
   }
   private async validate(result: AccessToken): Promise<{ token: string; identity: NativeIdentity }> {
     try {
@@ -125,7 +137,7 @@ export class CliIdentityProvider {
     }
   }
   async disconnect(): Promise<void> {
-    this.generation++; this.current = undefined; this.state = 'sign-in-required'; this.mcpState = 'not-connected'
+    this.generation++; this.acquisition = undefined; this.current = undefined; this.state = 'sign-in-required'; this.mcpState = 'not-connected'
   }
   status(): NativeConnectionStatus {
     const identity = this.identity()

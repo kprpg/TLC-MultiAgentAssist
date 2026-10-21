@@ -314,7 +314,15 @@ export class MsxRequestError extends Error {
 }
 
 export class LiveMsxConnector implements MsxConnector {
-  private readonly readContext = new AsyncLocalStorage<{ portfolio?: Promise<MsxPortfolio> }>()
+  private readonly readContext = new AsyncLocalStorage<{
+    portfolio?: Promise<MsxPortfolio>
+    identity?: Promise<string>
+    template?: Promise<string>
+    memberships?: Promise<Array<{ milestoneId: string }>>
+    milestones: Map<string, Promise<MilestoneRow[]>>
+    observations: Map<string, Promise<CriterionObservation[]>>
+    signal?: AbortSignal
+  }>()
   private readonly entityVersions = new Map<string, string>()
   private readonly expectedVersions = new AsyncLocalStorage<Record<string, string>>()
   private readonly baseUrl: URL
@@ -350,6 +358,14 @@ export class LiveMsxConnector implements MsxConnector {
   async listAccounts(options: AccountListOptions = {}): Promise<Account[]> {
     const portfolio = await this.getPortfolio()
     return structuredClone(portfolio.accounts.filter((account) => options.includeHidden || account.visibility !== 'hidden'))
+  }
+
+  async getPortfolioIndex(options: AccountListOptions = {}): Promise<{ accounts: Account[]; opportunities: Opportunity[] }> {
+    const portfolio = await this.getPortfolio()
+    const accounts = portfolio.accounts.filter((account) => options.includeHidden || account.visibility !== 'hidden')
+    const groups = new Map<string, Opportunity[]>(accounts.filter((account) => account.visibility !== 'hidden').map((account) => [account.id, []]))
+    for (const opportunity of portfolio.opportunities) groups.get(opportunity.accountId)?.push(opportunity)
+    return structuredClone({ accounts, opportunities: accounts.flatMap((account) => groups.get(account.id) ?? []) })
   }
 
   async getCatalog(accountId: string): Promise<RecordCreationCatalog> {
@@ -615,6 +631,16 @@ export class LiveMsxConnector implements MsxConnector {
    * access-team template is not set up in this environment.
    */
   private async milestoneTeamMemberships(): Promise<Array<{ milestoneId: string }>> {
+    const context = this.readContext.getStore()
+    if (!context) return this.readMilestoneTeamMemberships()
+    context.memberships ??= this.readMilestoneTeamMemberships().catch((error: unknown) => {
+      delete context.memberships
+      throw error
+    })
+    return context.memberships
+  }
+
+  private async readMilestoneTeamMemberships(): Promise<Array<{ milestoneId: string }>> {
     const templateId = await this.resolveMilestoneTeamTemplateId().catch(() => undefined)
     if (!templateId) return []
     const userId = await this.getCurrentUserId()
@@ -778,18 +804,15 @@ export class LiveMsxConnector implements MsxConnector {
   /** Fetches open opportunities within the given assigned accounts, filtered by the domain clauses. */
   private async requestOpportunitiesForAccounts(accountIds: string[], domainClauses: string[]): Promise<OpportunityRow[]> {
     const select = 'opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description,msp_solutionarea,msp_technicalcapability,msp_conversation,msp_opportunitytype'
-    const rows: OpportunityRow[] = []
-    for (let offset = 0; offset < accountIds.length; offset += 40) {
-      const chunk = accountIds.slice(offset, offset + 40)
+    return this.collectChunks(accountIds, async (chunk) => {
       const accountFilter = chunk.map((id) => `_parentaccountid_value eq ${id}`).join(' or ')
       const filterClauses = ['statecode eq 0', `(${accountFilter})`, ...domainClauses]
-      rows.push(...await this.requestAll<OpportunityRow>('opportunities', {
+      return this.requestAll<OpportunityRow>('opportunities', {
         '$select': select,
         '$filter': filterClauses.join(' and '),
         '$orderby': 'name asc'
-      }))
-    }
-    return rows
+      })
+    })
   }
 
   async joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult> {
@@ -961,6 +984,14 @@ export class LiveMsxConnector implements MsxConnector {
     if (configured.templateId && guidPattern.test(configured.templateId)) {
       return Promise.resolve(configured.templateId)
     }
+    const context = this.scopedReads()
+    if (context) {
+      context.template ??= this.discoverMilestoneTeamTemplateId(configured.templateName).catch((error: unknown) => {
+        delete context.template
+        throw error
+      })
+      return context.template
+    }
     this.milestoneTeamTemplateIdPromise ??= this.discoverMilestoneTeamTemplateId(configured.templateName).catch((error: unknown) => {
       this.milestoneTeamTemplateIdPromise = undefined
       throw error
@@ -1093,6 +1124,14 @@ export class LiveMsxConnector implements MsxConnector {
 
   /** Returns the signed-in user's Dataverse systemuser id (WhoAmI UserId), cached for reuse. */
   getCurrentUserId(): Promise<string> {
+    const context = this.scopedReads()
+    if (context) {
+      context.identity ??= this.requestJson<WhoAmIResponse>('WhoAmI').then((identity) => identity.UserId).catch((error: unknown) => {
+        delete context.identity
+        throw error
+      })
+      return context.identity
+    }
     this.currentUserIdPromise ??= this.requestJson<WhoAmIResponse>('WhoAmI')
       .then((identity) => identity.UserId)
       .catch((error) => {
@@ -1121,32 +1160,34 @@ export class LiveMsxConnector implements MsxConnector {
   }
 
   private getOpportunityObservations(opportunity: Opportunity): Promise<CriterionObservation[]> {
-    let observations = this.observationPromises.get(opportunity.id)
+    const promises = this.scopedReads()?.observations ?? this.observationPromises
+    let observations = promises.get(opportunity.id)
     if (!observations) {
       observations = measurePerformance('msx.opportunity-evidence', this.performanceReporter, async () => {
         const milestones = await this.getMilestoneRows(opportunity.id)
         return mapOpportunityObservations(opportunity, milestones)
       }).catch((error: unknown) => {
-        this.observationPromises.delete(opportunity.id)
+        promises.delete(opportunity.id)
         throw error
       })
-      this.observationPromises.set(opportunity.id, observations)
+      promises.set(opportunity.id, observations)
     }
     return observations
   }
 
   private getMilestoneRows(opportunityId: string): Promise<MilestoneRow[]> {
-    let milestones = this.milestonePromises.get(opportunityId)
+    const promises = this.scopedReads()?.milestones ?? this.milestonePromises
+    let milestones = promises.get(opportunityId)
     if (!milestones) {
       milestones = this.requestAll<MilestoneRow>('msp_engagementmilestones', {
         '$select': ['msp_engagementmilestoneid', 'msp_name', '_ownerid_value', 'msp_milestonedate', 'msp_milestonestatus', 'msp_commitmentrecommendation', 'msp_monthlyuse', 'msp_forecastcomments', this.writeMetadata.riskDetailsField].filter(Boolean).join(','),
         '$filter': `statecode eq 0 and _msp_opportunityid_value eq ${opportunityId}`,
         '$orderby': 'msp_milestonedate asc'
       }).catch((error: unknown) => {
-        this.milestonePromises.delete(opportunityId)
+        promises.delete(opportunityId)
         throw error
       })
-      this.milestonePromises.set(opportunityId, milestones)
+      promises.set(opportunityId, milestones)
     }
     return milestones
   }
@@ -1165,8 +1206,19 @@ export class LiveMsxConnector implements MsxConnector {
     return this.portfolioPromise
   }
 
-  withReadContext<T>(operation: () => Promise<T>): Promise<T> {
-    return this.readContext.run({}, operation)
+  withReadContext<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted()
+    const existing = this.readContext.getStore()
+    if (existing && !signal) {
+      existing.signal?.throwIfAborted()
+      return operation()
+    }
+    return this.readContext.run({ milestones: new Map(), observations: new Map(), ...(signal ? { signal } : {}) }, operation)
+  }
+
+  private scopedReads() {
+    const context = this.readContext.getStore()
+    return this.cacheOptions.cachePortfolio === false || context?.signal ? context : undefined
   }
 
   private async loadPortfolio(): Promise<MsxPortfolio> {
@@ -1273,14 +1325,21 @@ export class LiveMsxConnector implements MsxConnector {
     ids: string[],
     select: string
   ): Promise<T[]> {
-    const rows: T[] = []
-    for (let offset = 0; offset < ids.length; offset += 40) {
-      const chunk = ids.slice(offset, offset + 40)
+    return this.collectChunks(ids, (chunk) => {
       const idFilter = chunk.map((id) => `${idField} eq ${id}`).join(' or ')
-      rows.push(...await this.requestAll<T>(entitySet, {
+      return this.requestAll<T>(entitySet, {
         '$select': select,
         '$filter': `statecode eq 0 and (${idFilter})`
-      }))
+      })
+    })
+  }
+
+  private async collectChunks<T>(ids: string[], read: (chunk: string[]) => Promise<T[]>): Promise<T[]> {
+    const rows: T[] = []
+    for (let offset = 0; offset < ids.length; offset += 80) {
+      this.readContext.getStore()?.signal?.throwIfAborted()
+      const chunks = [ids.slice(offset, offset + 40), ids.slice(offset + 40, offset + 80)].filter((chunk) => chunk.length > 0)
+      rows.push(...(await Promise.all(chunks.map(read))).flat())
     }
     return rows
   }
@@ -1292,6 +1351,7 @@ export class LiveMsxConnector implements MsxConnector {
     const rows: T[] = []
     let nextUrl: URL | undefined = firstUrl
     while (nextUrl) {
+      this.readContext.getStore()?.signal?.throwIfAborted()
       this.assertTrustedUrl(nextUrl)
       const page: ODataPage<T> = await this.requestJson<ODataPage<T>>(nextUrl)
       rows.push(...page.value)
@@ -1303,20 +1363,28 @@ export class LiveMsxConnector implements MsxConnector {
   private async requestJson<T>(pathOrUrl: string | URL): Promise<T> {
     const url = pathOrUrl instanceof URL ? pathOrUrl : new URL(pathOrUrl, this.baseUrl)
     this.assertTrustedUrl(url)
+    const signal = this.readContext.getStore()?.signal
+    signal?.throwIfAborted()
     const accessToken = await this.tokenProvider.getAccessToken()
-    const response = await this.fetchImplementation(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/json',
-        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=500'
+    signal?.throwIfAborted()
+    return measurePerformance('msx.http.read', this.performanceReporter, async () => {
+      const response = await this.fetchImplementation(url, {
+        ...(signal ? { signal } : {}),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
+          Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=500'
+        }
+      })
+      signal?.throwIfAborted()
+      if (!response.ok) {
+        throw new MsxRequestError(`MSX request failed with status ${response.status}.`, response.status)
       }
+      const result: unknown = await response.json()
+      signal?.throwIfAborted()
+      if (this.cacheOptions.requireConditionalWrites) this.rememberNativeVersions(result)
+      return result as T
     })
-    if (!response.ok) {
-      throw new MsxRequestError(`MSX request failed with status ${response.status}.`, response.status)
-    }
-    const result: unknown = await response.json()
-    if (this.cacheOptions.requireConditionalWrites) this.rememberNativeVersions(result)
-    return result as T
   }
 
   private async patch(path: string, body: Record<string, unknown>): Promise<void> {

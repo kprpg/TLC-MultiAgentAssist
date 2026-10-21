@@ -40,6 +40,7 @@ import {
     type WorkflowRun
 } from '../../../packages/common/index.js'
 import type { TokenCredential } from '@azure/core-auth'
+import { portfolioReadVersion, portfolioReadRequestSchema, portfolioIndexSchema, portfolioWorkspaceRequestSchema, portfolioWorkspaceSchema, type PortfolioReadRequest, type PortfolioIndex, type PortfolioWorkspaceRequest, type PortfolioWorkspace } from '../../../packages/common/contracts/index.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import {
@@ -93,6 +94,8 @@ export interface ExtensionDataProvider {
     readonly mode: 'sample' | 'live'
     getCurrentUserEmail(): Promise<string | undefined>
     listAccounts(options?: AccountListOptions): Promise<Account[]>
+    getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
+    getPortfolioWorkspace(request: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace>
     searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
     addAccount(accountId: string): Promise<Account>
     setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
@@ -151,8 +154,7 @@ export function createLocalStoreDataProvider(options: { foundryCredential?: Toke
     const creation = new RecordCreationService(connector, writer, { writer })
     const orchestrator = new ThinSliceOrchestrator(connector, new ExtensionMcemGuidanceConnector(), buildLiveTaskAgents(), undefined, creation)
     const host: WorkflowHost = createSampleWorkflowHost(async () => {
-        const accounts = await connector.listAccounts()
-        const opportunities = (await Promise.all(accounts.map((candidate) => connector.listOpportunities(candidate.id)))).flat()
+        const { accounts, opportunities } = await connector.getPortfolioIndex()
         return {
             accountIds: accounts.map((candidate) => candidate.id),
             opportunityIds: opportunities.map((candidate) => candidate.id)
@@ -186,6 +188,24 @@ export function createSampleDataProvider(): ExtensionDataProvider {
         sellerDashboard: createSellerDashboardHost({ mode: 'sample', resolveUserEmail: async () => undefined }),
         getCurrentUserEmail: async () => undefined,
         listAccounts: async (options) => listSampleAccounts(options),
+        getPortfolioIndex: async (input) => {
+            const request = portfolioReadRequestSchema.parse(input)
+            const accounts = listSampleAccounts({ ...(request.includeHidden === undefined ? {} : { includeHidden: request.includeHidden }) })
+            return portfolioIndexSchema.parse({ contractVersion: portfolioReadVersion, accounts,
+                opportunities: accounts.filter((account) => account.visibility !== 'hidden').flatMap((account) => listSampleOpportunities(account.id)) })
+        },
+        getPortfolioWorkspace: async (input) => {
+            const request = portfolioWorkspaceRequestSchema.parse(input)
+            const accounts = listSampleAccounts({ ...(request.includeHidden === undefined ? {} : { includeHidden: request.includeHidden }) })
+            const account = request.accountId ? accounts.find((item) => item.id === request.accountId && item.visibility !== 'hidden') : accounts.find((item) => item.visibility !== 'hidden')
+            if (request.accountId && !account) throw new Error('The selected account is not in the current visible portfolio.')
+            const opportunities = account ? listSampleOpportunities(account.id) : []
+            const opportunity = request.opportunityId ? opportunities.find((item) => item.id === request.opportunityId) : opportunities[0]
+            if (request.opportunityId && !opportunity) throw new Error('The selected opportunity is not in the selected account portfolio.')
+            return portfolioWorkspaceSchema.parse({ contractVersion: portfolioReadVersion, accounts, opportunities,
+                milestones: opportunity ? listSampleMilestones(opportunity.id) : [],
+                ...(account ? { selectedAccountId: account.id } : {}), ...(opportunity ? { selectedOpportunityId: opportunity.id } : {}) })
+        },
         searchAccounts: async (request) => searchSampleAccounts(request),
         addAccount: async (accountId) => addSampleAccount(accountId),
         setAccountVisibility: async (accountId, visibility) => setSampleAccountVisibility(accountId, visibility),

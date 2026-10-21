@@ -84,13 +84,14 @@ export function WorkflowsWorkspace({ client, scope: fixedScope, selection, onFoc
     let attempts = 0
     let timer: ReturnType<typeof setTimeout>
     const poll = async () => {
+      if (document.visibilityState === 'hidden') { timer = setTimeout(() => { void poll() }, 2000); return }
       try {
         const result = await client.operation('workflows.get', { contractVersion: workflowContractVersion, runId: run.runId }, workflowRunViewSchema, controller.signal)
         if (controller.signal.aborted) return
         setRun(result.run); setOutput(result.output ?? null)
         if (['queued', 'running'].includes(result.run.status)) {
           if (++attempts >= 60) setError('Workflow polling paused. Open Activity or cancel the run; it has not been reported complete.')
-          else timer = setTimeout(() => { void poll() }, 1000)
+          else timer = setTimeout(() => { void poll() }, Math.min(5000, 1000 * 2 ** Math.min(3, Math.floor(attempts / 3))))
         }
         } catch (cause) { if (!controller.signal.aborted) setError(String(cause)) }
     }

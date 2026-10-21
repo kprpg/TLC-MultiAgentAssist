@@ -28,6 +28,27 @@ async function fixture(changes: Record<string, unknown> = {}, issuer?: string, a
 }
 
 describe('explicit signed-in CLI source identity', () => {
+  it('coalesces concurrent credential acquisition only, rechecks the next dispatch and rejects old-owner results', async () => {
+    const { provider, credential } = await fixture()
+    await provider.connect('msx')
+    const signed = await result()
+    let release: (value: typeof signed) => void = () => {}
+    const pending = new Promise<typeof signed>((resolve) => { release = resolve })
+    credential.getToken.mockClear()
+    credential.getToken.mockImplementationOnce(() => pending)
+    const first = provider.getToken('msx')
+    const second = provider.getToken('msx')
+    expect(credential.getToken).toHaveBeenCalledOnce()
+    release(signed)
+    expect(await Promise.all([first, second])).toEqual([signed.token, signed.token])
+    await provider.getToken('msx')
+    expect(credential.getToken).toHaveBeenCalledTimes(2)
+    credential.getToken.mockImplementationOnce(() => pending)
+    const oldOwner = provider.getToken('msx')
+    await provider.disconnect()
+    await expect(oldOwner).rejects.toMatchObject({ code: 'native_connection_changed' })
+    expect(provider.identity()).toBeUndefined()
+  })
   it('renews an expired delegated token for the same explicitly connected owner without changing its generation', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     const { provider, probe } = await fixture()

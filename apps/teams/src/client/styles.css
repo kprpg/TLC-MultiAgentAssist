@@ -225,3 +225,4 @@ summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
 .data-mode-switcher small { font-size: 11px; }
 .data-mode-dialog { max-width: min(560px, 92vw); border: 1px solid var(--colorNeutralStroke1, #d1d1d1); border-radius: 6px; padding: 24px; background: var(--colorNeutralBackground1, #fff); color: var(--colorNeutralForeground1, #242424); }
 .data-mode-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+.discovery-loading { min-height: 8rem; display: flex; align-items: center; padding: 1rem; }

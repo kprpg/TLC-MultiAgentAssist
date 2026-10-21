@@ -1,10 +1,15 @@
 # Teams Live Performance Assessment
 
-**Status:** investigation and selectable recommendations; no optimizations implemented.  
+**Status:** original assessment retained below; the first implementation is recorded in [section 10](#10-implementation-status), with further shared-backend changes and measured protocol results in [section 11](#11-shared-backend-follow-up-and-performance-measurements).
 **Scope:** Teams desktop client with the local Azure CLI backend, Live mode only.  
 **Source baseline:** `c7d64dc9498601047ded528cc7c7f274d183fa59`, branch `feature/vscode-extension-Teams`.  
 **Observed runtime:** app `1.2485.4790`, `local-azure-cli`; Node `v24.11.1`, Azure Identity `4.13.2`, Teams JS `2.58.0`.  
 **Assessment date:** 2026-10-21.
+
+Sections 1-9 describe the pre-optimization source baseline above. The subsequent
+implementation started at `1b4441c9bb05c957e78ed8273d42c136ccee0e2d`; source
+line positions can move as those recommendations are applied. No implementation
+was automatically deployed into the user's running Live backend.
 
 ## 1. Executive assessment
 
@@ -675,3 +680,203 @@ financial values, transcripts or prompt/response text belong in telemetry.
 fan-out and show honest loading. Preserve Teams' stronger source/identity
 boundaries. Pursue host/rendering and larger caching changes selectively, rather
 than attributing every delay to Teams or applying a blanket cache/timeout fix.
+
+## 10. Implementation status
+
+The safe, evidence-backed variants below are implemented across the shared
+backend and applicable UI surfaces. The original assessment is not rewritten as
+a claim that native/customer-query latency was measured.
+
+| Item | Implemented variant | Preserved boundary / deliberate limit |
+| --- | --- | --- |
+| TPERF-00 | Opt-in operation, credential, source-read and agent/context timing; async HTTP correlation; technical-field-only serialization | Off by default; no customer/prompt/response/token logging. |
+| TPERF-01 | Existing bounded read contexts used by composite snapshot, MCEM, Guidance, catalog and aggregate reads | Independent captures still re-read source; no cross-request authorization/data cache. |
+| TPERF-02 | Portfolio loading covers the whole capture; explicit retry/error versus empty states; shared New account loading/error/retry; Guidance pipeline status | No invented progress percentage or successful fallback after denial. |
+| TPERF-03 | Teams search is local on focus and sends one debounced aggregate read for a query of at least two characters | Every fresh query is authorized; mode/view/disconnect clears its index. |
+| TPERF-04 | Versioned aggregate index/workspace reads exposed through Teams HTTP, Web HTTP, Desktop IPC and extension bridge | Shared-core operation semantics, strict schemas and unchanged selection/scope denial. |
+| TPERF-05 | Same-generation concurrent CLI acquisition is coalesced | Sequential dispatches still reacquire/revalidate; no expiry-only Desktop token policy copied into Teams. |
+| TPERF-06 | Identical pending reads coalesce per client with independent subscribers; stable loading area and memoized filters/sort | Live revisits continue fresh validation. No new stale-while-revalidate display or TTL. |
+| TPERF-07 | Immutable caching only for public content-hashed assets | HTML, build/config/session/private APIs stay `no-store`; pairing and build identity unchanged. |
+| TPERF-08 | Deterministically ordered source chunks run with a maximum concurrency of two | Same scoped query/fields/paging and complete result shape. New server-side filtering/pagination is not introduced. |
+| TPERF-09 | Cancelled Teams read requests and aggregate Web reads pass cancellation into source dispatch and pagination | Fresh captures own pending identity/evidence promises; one cancellation cannot poison another. Submitted workflows/writes are not cancelled by navigation. |
+| TPERF-10 | Plays uses completion-spaced adaptive polling and pauses it when hidden | Every disclosed result still performs current source-scope verification. No unchecked progress/output endpoint added. |
+| TPERF-11 | Lazy Teams workspace chunks with explicit failure recovery; on-demand MCEM board; memoized list projections in Teams/Desktop/Web/extension | Draft, focus and accessibility behavior retained. No speculative table virtualization or blanket form unmounting. |
+
+### Cross-surface improvements
+
+- Snapshot, MCEM, Guidance and creation-catalog coalescing lives in the shared
+  orchestrator, not in a Teams-only fork.
+- Desktop/Web portfolio refresh and search-index construction use one aggregate
+  read instead of per-account transport fan-out.
+- The extension's Plays name index uses the same aggregate operation rather than
+  sending one bridge call per account.
+- Desktop/Web/extension Discovery projections are memoized. Shared New account
+  loading and retry behavior is consistent on all consumers.
+- Web's documented **per-request** runtime/user isolation is retained. This change
+  does not add a cross-request runtime/token cache or copy another user's state.
+
+### Verified mechanism and remaining evidence boundary
+
+The new deterministic Live-connector regression asserts **one portfolio scan and
+seven source/token-provider calls** for a complete selected workspace and for a
+snapshot in the original one-account/no-milestone fixture. These replace the
+assessment's separate-read **17** and snapshot **11** baselines. Concurrent
+captures remain independent; denial and cancellation are tested explicitly.
+Chunk concurrency is tested at exactly two with deterministic final ordering.
+
+The new browser checks assert one aggregate Portfolio operation, zero search
+requests on focus/refocus, one index request after typing, explicit denial/retry
+without stale success, and usable navigation after a failed lazy workspace load.
+All-four-transport tests compare schema-validated aggregate outputs.
+
+No further Live source/model calls were made for implementation validation.
+Native Teams latency, tenant source timings and production percentage speedups
+remain unmeasured. Tests use canonical sanitized Sample data for UI journeys and
+the actual Live classes with injected deterministic sources for backend counts.
+
+### Final validation record
+
+| Gate | Result |
+| --- | --- |
+| `npm run validate:major` | Passed: strict typecheck; 198 test files, 1,270 tests passed and 15 opt-in tests skipped; Desktop build and desktop smoke passed. |
+| `npm run test:smoke:teams` | Passed: all 67 Teams browser journeys, including aggregate request counts, loading, source denial, lazy-load recovery, pairing and mode isolation. |
+| `npm run test:smoke:revamp` | Passed: all 110 Desktop/Web/extension journeys, including actual native Desktop and native VS Code offline-voice coverage. |
+| `npm run web:build` | Passed: shared renderer and Web host. Desktop and extension builds also passed in the revamp gate; Teams built in its smoke gate. |
+| `npm run lint -- --ignore-pattern .venv` | Passed: application and test source lint. |
+| Raw `npm run phase0:check` | Structure and Sample preflight passed; blocked by two pre-existing `no-undef` errors in pip-vendored `.venv` JavaScript. Vendored files were not changed. |
+
+The successful revamp run selected the already-installed VS Code Insiders runtime:
+
+```powershell
+$env:TLC_VSCODE_EXECUTABLE = Join-Path $env:LOCALAPPDATA 'Programs\Microsoft VS Code Insiders\Code - Insiders.exe'
+npm run test:smoke:revamp
+```
+
+The installed Stable VS Code's isolated extension-test bootstrap did not create
+its test bridge in this environment. The same native journey passed with
+Insiders, and the full 110-test suite then passed with that runtime; the native
+test was not skipped or weakened.
+
+The final built Teams entry and its two eagerly preloaded shared JS assets total
+**1,065,010 raw bytes**, compared with **1,135,758** in the assessed deployment.
+Four workspace bundles load on demand; there are seven JS assets overall.
+The initial raw-JS reduction is **70,748 bytes**. This is an artifact measurement,
+not a claimed native latency improvement; total bundle bytes and transferred/
+compressed bytes are different measurements.
+
+Implementation changes remain uncommitted. Generated tracked build/cache outputs
+are excluded from the source change. The operator's existing Live process,
+installation, source connection and tenant permissions were not changed.
+
+## 11. Shared-backend follow-up and performance measurements
+
+This follow-up explicitly changes the backends, not only presentation or loading
+indicators. It keeps one shared orchestrator and connector layer for all four
+surfaces. No production service was restarted and no tenant/model calls were
+used for the measurements below.
+
+### Additional backend changes
+
+| Backend area | Change | Verification |
+| --- | --- | --- |
+| Shared portfolio index | The orchestrator can obtain one bulk connector result instead of filtering/cloning the loaded portfolio once per account. Live indexing groups opportunities in a single pass while retaining account and within-account order. | Exact output parity and zero per-account connector calls on the optimized path. |
+| SQLite opportunity reads | Bulk index query retains the existing current-user Deal Team/milestone-team predicates and visibility filtering. Owners are joined into the query; intent labels are read once, not once per opportunity/code. | Full ordered index uses exactly four SQL queries and no per-record `get()` lookups. Existing owner/intent fields are preserved. |
+| SQLite milestones | Owners are joined into the milestone read shared by Portfolio and Discovery. | Two bulk queries plus the existing three access-check lookups for a Portfolio milestone read; no per-milestone owner query. |
+| Live milestone memberships | Memberships are reused only within the current read capture, including the no-configured-template case. A new capture rechecks them. | One membership read per capture; a changed membership is reflected in the next capture. Snapshot/workspace fixture now needs six source reads instead of the first pass's seven. |
+| Workflow scope captures | Shared scope verification and the applicable Desktop/extension/sample compositions consume the bulk index rather than recreating it through per-account reads. | Workflow source-denial, lifecycle and transport parity regressions pass. |
+
+These changes are in the [shared orchestrator](../../packages/orchestrator/index.ts),
+[workflow operation layer](../../packages/orchestrator/operations.ts),
+[Live MSX connector](../../packages/connectors/msx/live.ts) and
+[SQLite connector](../../packages/connectors/local-store/index.ts).
+Existing connector adapters without a bulk method retain the validated fallback.
+No wire shape, delegated scope, review gate or global contract version changes.
+Web continues to construct a per-request runtime; no user/token cache is shared
+between requests.
+
+### End-to-end backend benchmark
+
+Run the new reproducible check:
+
+```powershell
+npm run test:perf:backends
+```
+
+The [benchmark](../../tests/e2e/backend-performance/hosts.spec.ts) exercises:
+
+- Teams' production HTTP handler and operation dispatch.
+- Web's production HTTP handler with a new runtime per request.
+- Real Electron IPC using the production preload and aggregate IPC handlers in
+  an isolated Electron process/profile.
+- The production extension request envelopes, browser `postMessage` bridge and
+  host router. The test uses a browser-to-test-host RPC connection, not a timed
+  native VS Code extension-host process.
+
+All four use the actual Live MSX connector and shared orchestrator against a
+read-only loopback Dataverse fixture: **three accounts, nine opportunities and a
+fixed 40 ms delay per source HTTP read**. Every measured case starts with a new
+connector; the browser/native process stays running. The existing cache behavior
+is retained within each host's sequence. Three trials alternate the order of
+baseline/aggregate cases to reduce ordering bias.
+
+The baseline here is the **separate-call operation sequence on the current
+backend**, not a checkout of an older release. Each comparison asserts identical
+schema-valid data, exact logical/source/token-provider call counts, zero source
+writes, and a lower median workspace round-trip time for the aggregate variant.
+
+#### Selected-workspace results
+
+| Host | Separate-call median | Aggregate median | Source/token-provider calls | Host operation calls |
+| --- | --- | --- | --- | --- |
+| Teams | 793 ms | 307 ms | 16 -> 6 | 3 -> 1 |
+| Web | 838 ms | 298 ms | 17 -> 6 | 3 -> 1 |
+| Desktop | 441 ms | 353 ms | 7 -> 6 | 3 -> 1 |
+| VS Code bridge | 344 ms | 296 ms | 7 -> 6 | 3 -> 1 |
+
+**These are controlled protocol/backend measurements, not measured native
+Teams/customer-tenant speedups.** Identity admission is injected for the benchmark;
+real CLI acquisition, tenant authorization, TLS, model execution, native UI
+rendering and cold-process startup are not timed. The token-provider column
+counts source-token requests, not real `az` process executions. Do not rank the
+four products by their absolute numbers: the transport mechanisms and existing
+cache profiles differ.
+
+#### Index, Discovery and guidance checks
+
+| Operation / profile | Separate-call work | Aggregate/current work |
+| --- | --- | --- |
+| Portfolio index, Teams/Web | Four host calls and twenty source reads | One host call and five source reads |
+| Portfolio index, Desktop/extension | Four host calls and five source reads | One host call and five source reads |
+| Discovery, each host | Current scoped domain read | One host call and six source reads |
+| MCEM, each host | Current explicit evaluation | One host call and six source reads |
+| Deterministic account-pulse Guidance, each host | Current grounded pipeline | One host call and six source reads; no model/network invocation |
+
+For the cache-reusing Desktop/extension index, the small fixture did **not** show
+a consistent index-latency improvement despite fewer transport calls. The proven
+benefits there are less dispatch/filter/clone work and the bulk SQLite path;
+the source count was already five. This is not reported as a universal speedup.
+Discovery/MCEM/Guidance checks establish current backend work and successful
+complete responses, not a before/after model-latency claim.
+
+The backend reduction is available to every consumer of these shared operations.
+The benchmark compares operation paths; it does not claim every existing UI
+screen has been rewritten to issue the aggregate workspace operation. The full
+UI journeys below separately validate the real current screen wiring.
+
+### Follow-up validation
+
+| Gate | Result |
+| --- | --- |
+| `npm run test:perf:backends` | Four host performance cases passed, including real Electron IPC and production extension protocol routing; identical results and zero source writes asserted. |
+| `npm run validate:major` | Passed: 199 files, 1,274 tests passed and 15 opt-in tests skipped; strict typecheck, Desktop build and desktop smoke passed. |
+| Teams UI regression | All 67 browser journeys passed after the backend changes. |
+| Desktop/Web/extension UI regression | All 110 journeys passed after the backend changes, with native VS Code coverage using the installed Insiders runtime. |
+| `npm run web:build` | Updated Web host and shared renderer built successfully. Teams/Desktop/extension builds passed in their respective gates. |
+| Source lint and whitespace | Passed. The previously documented pip-vendored `.venv` errors remain outside the source change. |
+
+The benchmark produces timing-only JSON attachments under
+`test-results/backend-performance-runs`; subsequent test runs may replace them.
+Its [fixtures and build setup](../../tests/fixtures/performance/backend.ts) and
+[Playwright configuration](../../playwright.performance.config.ts) are retained
+as source files, so the check can be reproduced rather than relying on these
+one-run medians. All implementation changes remain uncommitted for review.

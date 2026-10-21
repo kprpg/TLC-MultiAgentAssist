@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { Account, DiscoverableOpportunity } from '../../../packages/common/index.js'
+import { opportunitySchema } from '../../../packages/common/contracts/index.js'
 
 const portfolioAccounts: Account[] = [
   { id: 'account-alpha', name: 'Alpha Corp', segment: 'Enterprise' },
@@ -276,6 +277,10 @@ test('filters and sorts Discovery in the web UI', async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname
     if (path === '/api/me') await route.fulfill({ json: { email: 'sample@example.test' } })
+    else if (path === '/api/portfolio/index') await route.fulfill({ json: {
+      contractVersion: '1.0', accounts: portfolioAccounts,
+      opportunities: rows.filter((item) => item.onDealTeam).map((item) => opportunitySchema.parse(item))
+    } })
     else if (path === '/api/accounts') await route.fulfill({ json: portfolioAccounts })
     else if (path.startsWith('/api/accounts/') && path.endsWith('/opportunities')) await route.fulfill({ json: rows.filter((item) => item.accountId === path.split('/')[3] && item.onDealTeam) })
     else if (path.endsWith('/milestones')) await route.fulfill({ json: [] })

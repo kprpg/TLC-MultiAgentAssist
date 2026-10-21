@@ -6,6 +6,7 @@ import { LocalPairingAuthority, LocalPairingError } from './local-pairing.js'
 import { readOwnerStateKey, startProtectedOwnerControl } from './local-owner-control.js'
 import { isCliConfiguration, type LocalTeamsConfiguration } from './configuration.js'
 import { CliIdentityProvider } from './cli-identity.js'
+import { createTeamsPerformanceReporter } from './performance.js'
 
 export async function createNativeConnection(configuration: LocalTeamsConfiguration, environment: NodeJS.ProcessEnv) {
   const configuredDirectory = environment['TLC_TEAMS_OWNER_DIRECTORY']
@@ -32,8 +33,12 @@ export async function createNativeConnection(configuration: LocalTeamsConfigurat
       await msx.assertNativeIdentity(identity.userId)
     }
   } satisfies ConstructorParameters<typeof NativeIdentityProvider>[2]
+  const performanceReporter = createTeamsPerformanceReporter(environment)
   const provider = isCliConfiguration(configuration)
-    ? new CliIdentityProvider(configuration, undefined, options)
+    ? new CliIdentityProvider(configuration, undefined, {
+      ...options,
+      ...(performanceReporter ? { performanceReporter } : {})
+    })
     : new NativeIdentityProvider(configuration, createNativeAuthenticationClient(configuration), options)
   const pairing = new LocalPairingAuthority(configuration.origin, () => provider.identity(), { allowLocalSource: isCliConfiguration(configuration) })
   return {

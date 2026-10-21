@@ -12,6 +12,7 @@ import {
     recordCreationResultSchema,
     recordCreationDraftResultSchema
 } from '../../../packages/common/index.js'
+import { portfolioIndexSchema, portfolioWorkspaceSchema } from '../../../packages/common/contracts/index.js'
 
 function extractId(raw: unknown): string {
     if (raw && typeof raw === 'object' && 'id' in raw) {
@@ -53,6 +54,10 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
                 const params = parseBridgeParams('listAccounts', parsed.data.params)
                 return successResponse(id, await provider.listAccounts(params))
             }
+            case 'getPortfolioIndex':
+                return successResponse(id, portfolioIndexSchema.parse(await provider.getPortfolioIndex(parseBridgeParams('getPortfolioIndex', parsed.data.params))))
+            case 'getPortfolioWorkspace':
+                return successResponse(id, portfolioWorkspaceSchema.parse(await provider.getPortfolioWorkspace(parseBridgeParams('getPortfolioWorkspace', parsed.data.params))))
             case 'searchAccounts': {
                 const params = parseBridgeParams('searchAccounts', parsed.data.params)
                 return successResponse(id, await provider.searchAccounts(params))

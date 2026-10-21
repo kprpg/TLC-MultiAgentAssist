@@ -82,11 +82,15 @@ import { invokeWorkflowHost, type WorkflowHost, type WorkflowHostOperation } fro
 import { createBrowserOnlyVoiceHost, type SharedVoiceInputHost } from '../../../packages/orchestrator/voice-input.js'
 import type { SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 import { RecordCreationError } from '../../../packages/orchestrator/record-creation/service.js'
+import { portfolioReadRequestSchema, portfolioIndexSchema, portfolioWorkspaceRequestSchema, portfolioWorkspaceSchema, type PortfolioReadRequest, type PortfolioIndex, type PortfolioWorkspaceRequest, type PortfolioWorkspace } from '../../../packages/common/contracts/index.js'
 
 const accountIdSchema = z.string().min(1).max(200)
 const maximumBodyBytes = 1_048_576
 
 export interface WebRuntime {
+    withReadContext?<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T>
+    getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
+    getPortfolioWorkspace(request: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace>
     listAccounts(options?: AccountListOptions): Promise<Account[]>
     searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
     addAccount(accountId: string): Promise<Account>
@@ -132,6 +136,21 @@ export interface WebApiOptions {
     onError?(error: unknown, correlationId: string): void
 }
 
+async function cancellableRead<T>(request: IncomingMessage, response: ServerResponse, runtime: WebRuntime, action: () => Promise<T>): Promise<T> {
+    const controller = new AbortController()
+    const abort = () => { if (!response.writableFinished) controller.abort() }
+    response.once('close', abort)
+    request.once('aborted', abort)
+    try {
+        const result = await (runtime.withReadContext ? runtime.withReadContext(action, controller.signal) : action())
+        controller.signal.throwIfAborted()
+        return result
+    } finally {
+        response.removeListener('close', abort)
+        request.removeListener('aborted', abort)
+    }
+}
+
 export function buildWebApiHandler(options: WebApiOptions) {
     const browserOnlyVoice = createBrowserOnlyVoiceHost()
     return async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
@@ -171,6 +190,7 @@ export function buildWebApiHandler(options: WebApiOptions) {
             }
             if (request.method === 'POST' && url.pathname.startsWith('/api/record-creation/')) {
                 const runtime = await options.createRuntime(authentication)
+
                 const operation = url.pathname.slice('/api/record-creation/'.length)
                 if (operation === 'preview') {
                     const input = recordCreationPreviewRequestSchema.parse(await readJsonBody(request))
@@ -231,6 +251,16 @@ export function buildWebApiHandler(options: WebApiOptions) {
 
             const runtime = await options.createRuntime(authentication)
 
+            if (request.method === 'POST' && url.pathname === '/api/portfolio/index') {
+                const input = portfolioReadRequestSchema.parse(await readJsonBody(request))
+                sendJson(response, 200, portfolioIndexSchema.parse(await cancellableRead(request, response, runtime, () => runtime.getPortfolioIndex(input))))
+                return true
+            }
+            if (request.method === 'POST' && url.pathname === '/api/portfolio/workspace') {
+                const input = portfolioWorkspaceRequestSchema.parse(await readJsonBody(request))
+                sendJson(response, 200, portfolioWorkspaceSchema.parse(await cancellableRead(request, response, runtime, () => runtime.getPortfolioWorkspace(input))))
+                return true
+            }
             if (request.method === 'GET' && url.pathname === '/api/accounts') {
                 const options = accountListOptionsSchema.parse({
                     ...(url.searchParams.has('includeHidden')

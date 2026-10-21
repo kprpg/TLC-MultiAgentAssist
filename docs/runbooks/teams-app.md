@@ -1416,6 +1416,57 @@ The full-suite production gate must not be declared passed on offline/package te
 - Credential state is isolated and encrypted, with a bounded OAuth-state lifetime.
   Do not confuse it with ordinary workflow/notification/audit documents.
 
+### Responsiveness and optional performance diagnostics
+
+Portfolio now loads accounts, the selected account's opportunities and the
+selected opportunity's milestones in one fresh shared-core capture. Its loading
+state remains visible until that workspace read finishes. A denied read clears
+the private result instead of falling back to previously displayed data.
+
+The header search does not query MSX on focus. Type at least two characters;
+after a short input debounce it requests one authorized portfolio index, not
+one request per account. Returning to a screen still revalidates Live source
+access. Identical concurrent browser reads can share their pending work, but
+completed Live results are not a cross-request cache.
+
+Composite snapshot, Guidance, MCEM and creation-catalog reads reuse a bounded
+source context. CLI acquisition only coalesces concurrent requests for the same
+owner generation; the next dispatch still rechecks the current CLI subject.
+Independent/cancelled reads do not share pending source evidence. Discovery
+queries use at most two 40-record chunks at once, retain deterministic order
+and keep trusted paging checks. Running Plays poll less frequently as they
+continue and do not poll while the page is hidden; every disclosed workflow
+view still verifies its source scope.
+
+Only content-hashed public assets are browser-cacheable. HTML, build identity,
+configuration and private APIs remain `no-store`. Rarely used workspace code
+loads on demand; a failed load shows explicit recovery guidance without silently
+reporting an empty result. Existing page-pairing and exact build checks remain.
+
+For an operator-controlled diagnostic run, set `TLC_TEAMS_PERFORMANCE=1` in the
+private runtime environment before launching an updated build. It is disabled
+by default. The backend emits `[teams-performance]` JSON events with only
+`operation`, `durationMs`, `outcome` and, inside an HTTP operation, its random
+`correlationId` (also returned as `x-correlation-id`). Credential acquisition,
+source HTTP reads, context/agent phases and operation totals can be correlated
+without logging prompts, responses, customer identifiers, financial values,
+transcripts or tokens. Count source-read events separately from operation
+events; their durations overlap and should not be naively added.
+
+These code/test optimizations are not a measured native Teams or tenant latency
+guarantee. See the [ranked assessment and implementation status](../engineering/Teams-Performance-Assessment.md#10-implementation-status)
+for the verified request-count reductions, cross-surface changes and intentionally
+retained security/freshness boundaries. An already-running release does not
+change until the operator explicitly rebuilds/relaunches it.
+
+The follow-up also optimizes the shared Live/SQLite backends: bulk portfolio
+indexing, joined owner lookups, once-per-read intent labels, bounded membership
+reuse and bulk workflow-scope captures. To reproduce controlled backend
+measurements across all four host transports, run `npm run test:perf:backends`.
+It uses read-only synthetic loopback sources and an isolated Electron profile,
+not your source sign-in or tenant. See the
+[backend comparison and measurement limits](../engineering/Teams-Performance-Assessment.md#11-shared-backend-follow-up-and-performance-measurements).
+
 ### Pause, disconnect, uninstall and operator retirement
 
 The private Activity screen provides **Pause new work**, **Resume work** and

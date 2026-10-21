@@ -93,6 +93,7 @@ import {
 } from '../../../../packages/common/fixtures/additional-sample-portfolio.js'
 import { withSampleOpportunityIntents } from '../../../../packages/common/fixtures/sample-opportunity-intent.js'
 import { samplePortfolioDiscoveryOpportunities } from '../../../../packages/common/fixtures/sample-discovery.js'
+import { portfolioReadVersion, portfolioReadRequestSchema, portfolioIndexSchema, portfolioWorkspaceRequestSchema, portfolioWorkspaceSchema, type PortfolioReadRequest, type PortfolioIndex, type PortfolioWorkspaceRequest, type PortfolioWorkspace } from '../../../../packages/common/contracts/index.js'
 
 export interface RevampDataClient {
     getDataMode(): Promise<'sample' | 'live'>
@@ -102,6 +103,8 @@ export interface RevampDataClient {
     exitApplication(): Promise<void>
     getCurrentUserEmail(): Promise<string | undefined>
     listAccounts(options?: AccountListOptions): Promise<Account[]>
+    getPortfolioIndex(request?: PortfolioReadRequest): Promise<PortfolioIndex>
+    getPortfolioWorkspace(request: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace>
     searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
     addAccount(accountId: string): Promise<Account>
     setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
@@ -196,6 +199,12 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
             return typeof result.email === 'string' ? result.email : undefined
         },
         listAccounts: async (options) => accountSchema.array().parse(await apiRequest(fetcher, `/api/accounts${options?.includeHidden ? '?includeHidden=true' : ''}`)),
+        getPortfolioIndex: async (request = { contractVersion: portfolioReadVersion }) => portfolioIndexSchema.parse(await apiRequest(fetcher, '/api/portfolio/index', {
+            method: 'POST', body: JSON.stringify(portfolioReadRequestSchema.parse(request))
+        })),
+        getPortfolioWorkspace: async (request) => portfolioWorkspaceSchema.parse(await apiRequest(fetcher, '/api/portfolio/workspace', {
+            method: 'POST', body: JSON.stringify(portfolioWorkspaceRequestSchema.parse(request))
+        })),
         searchAccounts: async (request) => accountCandidateSchema.array().parse(await apiRequest(fetcher, `/api/account-candidates?matchBy=${encodeURIComponent(request.matchBy)}&query=${encodeURIComponent(request.query)}`)),
         addAccount: async (accountId) => accountSchema.parse(await apiRequest(fetcher, '/api/accounts', { method: 'POST', body: JSON.stringify({ accountId }) })),
         setAccountVisibility: async (accountId, visibility) => accountSchema.parse(await apiRequest(fetcher, `/api/accounts/${encodeURIComponent(accountId)}/visibility`, { method: 'PATCH', body: JSON.stringify({ visibility }) })),
@@ -290,6 +299,8 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
 }
 
 interface DesktopBridge {
+    getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
+    getPortfolioWorkspace(request: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace>
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     exitApplication(): Promise<void>
@@ -506,6 +517,25 @@ function webClient(): RevampDataClient {
         exitApplication: async () => { await apiRequest(fetch, '/api/exit', { method: 'POST' }) },
         getCurrentUserEmail: async () => undefined,
         listAccounts: async (options) => structuredClone(sampleAccountRows(options?.includeHidden)),
+        getPortfolioIndex: async (input = { contractVersion: portfolioReadVersion }) => {
+            const request = portfolioReadRequestSchema.parse(input)
+            const accountRows = sampleAccountRows(request.includeHidden)
+            const visibleIds = new Set(accountRows.filter((item) => item.visibility !== 'hidden').map((item) => item.id))
+            return portfolioIndexSchema.parse({ contractVersion: portfolioReadVersion, accounts: accountRows,
+                opportunities: opportunities.filter((item) => visibleIds.has(item.accountId) && dealTeamOpportunityIds.has(item.id)) })
+        },
+        async getPortfolioWorkspace(input) {
+            const request = portfolioWorkspaceRequestSchema.parse(input)
+            const index = await this.getPortfolioIndex({ contractVersion: portfolioReadVersion, ...(request.includeHidden === undefined ? {} : { includeHidden: request.includeHidden }) })
+            const account = request.accountId ? index.accounts.find((item) => item.id === request.accountId && item.visibility !== 'hidden') : index.accounts.find((item) => item.visibility !== 'hidden')
+            if (request.accountId && !account) throw new Error('The selected account is not in the current visible portfolio.')
+            const items = index.opportunities.filter((item) => item.accountId === account?.id)
+            const opportunity = request.opportunityId ? items.find((item) => item.id === request.opportunityId) : items[0]
+            if (request.opportunityId && !opportunity) throw new Error('The selected opportunity is not in the selected account portfolio.')
+            return portfolioWorkspaceSchema.parse({ contractVersion: portfolioReadVersion, accounts: index.accounts, opportunities: items,
+                milestones: opportunity ? await this.listMilestones(opportunity.id) : [],
+                ...(account ? { selectedAccountId: account.id } : {}), ...(opportunity ? { selectedOpportunityId: opportunity.id } : {}) })
+        },
         searchAccounts: async (request) => {
             const query = request.query.trim().toLocaleLowerCase()
             const currentById = new Map(sampleAccountRows(true).map((account) => [account.id, account]))
@@ -699,6 +729,8 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         exitApplication: () => bridge.exitApplication(),
         getCurrentUserEmail: async () => (await bridge.getDataStatus()).auth.userEmail,
         listAccounts: (options) => bridge.listAccounts(options),
+        getPortfolioIndex: async (request = { contractVersion: portfolioReadVersion }) => portfolioIndexSchema.parse(await bridge.getPortfolioIndex(portfolioReadRequestSchema.parse(request))),
+        getPortfolioWorkspace: async (request) => portfolioWorkspaceSchema.parse(await bridge.getPortfolioWorkspace(portfolioWorkspaceRequestSchema.parse(request))),
         searchAccounts: (request) => bridge.searchAccounts(request),
         addAccount: (accountId) => bridge.addAccount(accountId),
         setAccountVisibility: (accountId, visibility) => bridge.setAccountVisibility(accountId, visibility),

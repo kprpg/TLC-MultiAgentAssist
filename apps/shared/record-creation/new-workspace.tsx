@@ -62,6 +62,9 @@ export function NewWorkspace({
   const [kind, setKind] = useState<CreationKind | null>(null)
   const [entryMode, setEntryMode] = useState<'form' | 'grid' | 'import'>('form')
   const [accounts, setAccounts] = useState<Array<{ id: string; name: string }>>([])
+  const [accountsLoading, setAccountsLoading] = useState(true)
+  const [accountsRevision, setAccountsRevision] = useState(0)
+  const [accountsError, setAccountsError] = useState('')
   const [accountId, setAccountId] = useState('')
   const [parentId, setParentId] = useState('')
   const [catalog, setCatalog] = useState<RecordCreationCatalog | null>(null)
@@ -94,11 +97,13 @@ export function NewWorkspace({
 
   useEffect(() => {
     let active = true
+    setAccountsLoading(true); setAccountsError('')
     client.listAccounts()
       .then((items) => { if (active) setAccounts(items.filter((item) => item.visibility !== 'hidden')) })
-      .catch((cause: unknown) => { if (active) setError(errorMessage(cause)) })
+      .catch((cause: unknown) => { if (active) { setAccounts([]); setAccountsError(errorMessage(cause)) } })
+      .finally(() => { if (active) setAccountsLoading(false) })
     return () => { active = false }
-  }, [client])
+  }, [client, accountsRevision])
 
   useEffect(() => {
     if (!accountId) {
@@ -318,8 +323,11 @@ export function NewWorkspace({
 
         {kind && <>
           <div className="new-record-fields new-record-context">
+            {accountsLoading && <p role="status">Loading accounts for record creation...</p>}
+            {accountsError && <p role="alert">{accountsError} <button type="button" onClick={() => setAccountsRevision((value) => value + 1)}>Retry loading accounts</button></p>}
+            {!accountsLoading && !accountsError && accounts.length === 0 && <p>No visible accounts are available. Add a customer in Portfolio first.</p>}
             <label>Account
-              <select required value={accountId} onChange={(event) => chooseAccount(event.target.value)}>
+              <select required value={accountId} disabled={accountsLoading} onChange={(event) => chooseAccount(event.target.value)}>
                 <option value="">Select Account</option>
                 {accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>

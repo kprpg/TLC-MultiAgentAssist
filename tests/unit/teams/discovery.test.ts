@@ -23,7 +23,7 @@ describe('Teams Discover presentation', () => {
     expect(html).not.toContain('Solution Engineer domain<select')
     expect(html).toContain('Loading Discover opportunities')
     expect(html).not.toContain('No eligible opportunities for this source scope and domain.')
-    if (mode === 'live') expect(html).toContain('MSX searches can take time')
+    if (mode === 'live') expect(html).toContain('Checking your current visible accounts and source opportunities')
     expect(operation).not.toHaveBeenCalled()
     expect(review).not.toHaveBeenCalled()
   })

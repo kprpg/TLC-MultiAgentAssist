@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as c from '../../../../packages/common/contracts/index.js'
 import { NextBestActions } from '../../../shared/next-best-actions.js'
 import { sortMilestones, type MilestoneSort, type SortDirection } from '../../../shared/portfolio-sorting.js'
@@ -24,6 +24,7 @@ export function OpportunityWorkbench({ client, selection, opportunities, milesto
   const [error, setError] = useState('')
   const [sort, setSort] = useState<MilestoneSort>('targetDate')
   const [direction, setDirection] = useState<SortDirection>('ascending')
+  const sortedMilestones = useMemo(() => sortMilestones(milestones, sort, direction), [milestones, sort, direction])
   const request = useRef<AbortController | null>(null)
   const actionDisclosure = useResponsiveDisclosure(1200, panes.actionsExpanded)
   useEffect(() => () => request.current?.abort(), [])
@@ -68,7 +69,7 @@ export function OpportunityWorkbench({ client, selection, opportunities, milesto
             if (value === 'targetDate' || value === 'status' || value === 'estimatedMonthlyUsage' || value === 'commitment') setSort(value)
           }}><option value="targetDate">Est. Date</option><option value="estimatedMonthlyUsage">Value</option><option value="commitment">Commitment</option><option value="status">Status</option></select></label>
             <button type="button" onClick={() => setDirection((current) => current === 'ascending' ? 'descending' : 'ascending')}>{direction === 'ascending' ? 'Asc' : 'Desc'}</button></div>
-          {sortMilestones(milestones, sort, direction).map((item) => <MilestoneCard key={`${item.id}:${JSON.stringify(item)}`} client={client} milestone={item} onAction={onAction} />)}
+          {sortedMilestones.map((item) => <MilestoneCard key={`${item.id}:${JSON.stringify(item)}`} client={client} milestone={item} onAction={onAction} />)}
           {!milestones.length && <p>No milestones are visible in this scope.</p>}
           <details className="source-editor"><summary>Opportunity notes and reviewed updates</summary>
             <OpportunityCommentsEditor opportunity={selection.opportunity} onAction={onAction} onDraftChange={onDraftChange} />
@@ -79,8 +80,8 @@ export function OpportunityWorkbench({ client, selection, opportunities, milesto
           <GuidanceWorkspace client={client} selection={selection} />
         </section>
         <section id="detail-stages" role="tabpanel" aria-labelledby="detail-tab-stages" hidden={tab !== 'stages'}>
-          <TeamsMcemStageBoard accountName={selection.account.name} opportunities={opportunities} selectedId={selection.opportunity.id}
-            evaluation={evaluation} onSelect={onSelectOpportunity} />
+          {tab === 'stages' && <TeamsMcemStageBoard accountName={selection.account.name} opportunities={opportunities} selectedId={selection.opportunity.id}
+            evaluation={evaluation} onSelect={onSelectOpportunity} />}
           <h3>Stage readiness</h3>
           <p>Recorded stage {selection.opportunity.recordedStage}{evaluation ? ` | Evidence-based stage ${evaluation.evidenceBasedStage} | ${evaluation.state}` : ' | Run MCEM Coach to evaluate the current evidence.'}</p>
           <button type="button" className="primary" disabled={busy} onClick={() => { void runCoach() }}>{busy ? 'Evaluating...' : 'Run MCEM Coach'}</button>

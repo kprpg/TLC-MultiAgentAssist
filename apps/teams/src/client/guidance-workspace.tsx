@@ -37,6 +37,7 @@ export function GuidanceWorkspace({ client, selection }: { client: TeamsApiClien
     <div className="starter-prompts">{suggestedPrompts[capability].slice(0, 4).map((item) => <button type="button" key={item} onClick={() => setPrompt(item)}>{item}</button>)}</div>
     <label className="field">Ask TLC<textarea aria-label="Ask TLC" value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={1000} /></label>
     <button type="button" className="primary" disabled={busy || prompt.trim().length < 3} onClick={() => { void run() }}>{busy ? 'Grounding response...' : 'Run guidance'}</button>
+    {busy && <p role="status">Checking current MSX evidence, milestones and MCEM guidance before preparing the response. No source records will be changed.</p>}
     {error && <p role="alert" className="error-banner">{error}</p>}
     {result && <AgentResultView result={result} actions={<ResponseActions client={client} opportunityId={selection.opportunity.id}
       title={`TLC guidance - ${selection.opportunity.name}`} markdown={formatResponseMarkdown(result.content)} generatedAt={result.generatedAt} />} />}

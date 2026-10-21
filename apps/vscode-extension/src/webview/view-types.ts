@@ -30,6 +30,18 @@ export interface OpportunityView {
     comments?: string
 }
 
+export interface PortfolioIndexView {
+    contractVersion: '1.0'
+    accounts: AccountView[]
+    opportunities: OpportunityView[]
+}
+
+export interface PortfolioWorkspaceView extends PortfolioIndexView {
+    selectedAccountId?: string
+    selectedOpportunityId?: string
+    milestones: MilestoneView[]
+}
+
 export type SeDomainView = 'infra' | 'data' | 'ai-apps' | 'security' | 'modern-work' | 'biz-apps' | 'devices' | 'services'
 
 export interface DiscoverableOpportunityView extends OpportunityView {

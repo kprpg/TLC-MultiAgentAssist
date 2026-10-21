@@ -8,6 +8,24 @@ import { teamsDataModesSchema } from '../../../packages/common/contracts/teams-d
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 describe('mode-scoped Teams clients', () => {
+  it('coalesces identical pending reads but not completed reads, and one subscriber cannot abort the other', async () => {
+    let complete: (response: Response) => void = () => {}
+    const pending = new Promise<Response>((resolve) => { complete = resolve })
+    const transport = vi.fn<typeof fetch>().mockReturnValueOnce(pending).mockImplementation(async () => Response.json(['fresh']))
+    vi.stubGlobal('fetch', transport)
+    const client = new TeamsApiClient(async () => '')
+    const controller = new AbortController()
+    const first = client.operation('discoverOpportunities', { domain: 'infra' }, z.array(z.string()), controller.signal)
+    const second = client.operation('discoverOpportunities', { domain: 'infra' }, z.array(z.string()))
+    controller.abort()
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.waitFor(() => expect(transport).toHaveBeenCalledOnce())
+    expect(transport.mock.calls[0]?.[1]?.signal?.aborted).toBe(false)
+    complete(Response.json(['shared']))
+    expect(await second).toEqual(['shared'])
+    expect(await client.operation('discoverOpportunities', { domain: 'infra' }, z.array(z.string()))).toEqual(['fresh'])
+    expect(transport).toHaveBeenCalledTimes(2)
+  })
   it('does not issue a request after its old mode is disposed while token acquisition is pending', async () => {
     let complete: ((token: string) => void) | undefined
     const token = new Promise<string>((resolve) => { complete = resolve })

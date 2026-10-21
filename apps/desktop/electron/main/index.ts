@@ -38,6 +38,7 @@ import { createVoiceIpcHandler, voiceIpcChannel } from './voice-ipc.js'
 import { createSellerDashboardHost } from '../../../../packages/orchestrator/seller-dashboard.js'
 import { createSellerDashboardIpcHandler, sellerDashboardIpcChannel } from './seller-dashboard-ipc.js'
 import { desktopWindowBounds } from './window-bounds.js'
+import { createPortfolioIpcHandlers } from './portfolio-ipc.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -215,8 +216,7 @@ const configuredWorkflowHost = dataMode === 'sample' ? undefined : createLivePla
   }
 })
 const workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost(async () => {
-  const accounts = await msxConnector.listAccounts()
-  const opportunities = (await Promise.all(accounts.map((account) => msxConnector.listOpportunities(account.id)))).flat()
+  const { accounts, opportunities } = await orchestrator.getPortfolioIndex({ contractVersion: '1.0' })
   return {
     accountIds: accounts.map((account) => account.id),
     opportunityIds: opportunities.map((opportunity) => opportunity.id)
@@ -284,6 +284,12 @@ function registerIpc(): void {
     assertTrustedSender(event)
     return orchestrator.listAccounts(accountListOptionsSchema.parse(options ?? {}))
   })
+  for (const [channel, handler] of Object.entries(createPortfolioIpcHandlers(orchestrator))) {
+    ipcMain.handle(channel, (event, request: unknown) => {
+      assertTrustedSender(event)
+      return handler(request)
+    })
+  }
   ipcMain.handle('tlc:search-accounts', (event, request: unknown) => {
     assertTrustedSender(event)
     return orchestrator.searchAccounts(accountSearchRequestSchema.parse(request))

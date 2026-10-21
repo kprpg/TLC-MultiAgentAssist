@@ -39,10 +39,11 @@ export interface StageGuidance {
 }
 
 export interface MsxConnector {
-  withReadContext?<T>(operation: () => Promise<T>): Promise<T>
+  withReadContext?<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T>
   getConcurrencyTokens?(opportunityId: string): Promise<Record<string, string>>
   withExpectedVersions?<T>(versions: Readonly<Record<string, string>>, operation: () => Promise<T>): Promise<T>
   listAccounts(options?: AccountListOptions): Promise<Account[]>
+  getPortfolioIndex?(options?: AccountListOptions): Promise<{ accounts: Account[]; opportunities: Opportunity[] }>
   searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
   addAccount(accountId: string): Promise<Account>
   setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>

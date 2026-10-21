@@ -36,6 +36,7 @@ surface adds the following focused areas while preserving one shared backend/har
 apps/teams/src/                       Teams composition, verified HTTP/bot transport
 apps/teams/src/runtime-resources.ts   Local SQLite/CLI or Azure Table/managed identity
 apps/teams/src/data-mode-router.ts    Per-page Sample/Live routes over isolated canonical services/stores
+apps/teams/src/performance.ts         Opt-in technical timing and async HTTP correlation; no payload logging
 apps/teams/src/native-identity.ts     Native SDK identity/resource tokens; no HTTP interaction
 apps/teams/src/cli-identity.ts        Verified current CLI user; private read-only MSX, no FTE inference
 apps/teams/src/native-connection.ts   Per-user native composition, private state and owner control
@@ -59,6 +60,10 @@ apps/teams/src/client/meeting-capture.ts
                                      Shared capture result validation and actionable source errors
 apps/teams/src/client/response-actions.tsx
                                      Top-right Word/unsent email downloads for Guidance and meeting proposals
+apps/teams/src/client/workspace-boundary.tsx
+                                     Explicit recovery for lazily loaded workspace failures
+apps/desktop/electron/main/portfolio-ipc.ts
+                                     Validated aggregate portfolio/index IPC over the shared orchestrator
 apps/teams/.env.native.example       Safe per-user native configuration, not real credentials
 apps/teams/.env.cli.example          Safe existing-user CLI configuration, not tokens/secrets
 apps/shared/                         Browser-safe prompt/Markdown and existing UI reuse
@@ -78,6 +83,7 @@ packages/common/contracts/teams-launch.ts
                                      Separate strict v1.0 launch/build/client-readiness contracts
 packages/common/contracts/teams-data-mode.ts
                                      Strict v1.0 runtime/initial/available modes and bounded API paths
+packages/common/contracts/index.ts   Independently versioned v1.0 portfolio index/workspace read contracts
 packages/orchestrator/application-runtime.ts
 packages/orchestrator/operations.ts   Shared composition and typed operation catalog
 packages/orchestrator/task-agents.ts  Shared Foundry/sample/deterministic-live registries
@@ -89,6 +95,9 @@ packages/connectors/common/encrypted-document-store.ts
 packages/documents/                   Shared Word/email builders, not an app dependency
 tests/unit/teams/                     Cumulative deterministic Teams slices
 tests/e2e/teams/                      Actual host/browser journeys
+tests/e2e/backend-performance/        Controlled all-four-host backend round-trip comparisons
+tests/fixtures/performance/          Read-only Live-class fixtures and isolated production-preload host
+playwright.performance.config.ts     Reproducible backend performance gate; no tenant/model calls
 release-teams/                       Ignored generated installation/runtime archives
 scripts/run-teams-local.ps1          Guided build/start/install/pair/verify; status and restart-free resume
 scripts/teams-launch-session.ps1     Owned-run checks, exact-ZIP install and finish-line verification

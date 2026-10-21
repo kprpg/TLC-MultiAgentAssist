@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { z } from 'zod'
 import * as c from '../../../../packages/common/contracts/index.js'
 import { seDomainDefinitions, seDomainIds, type SeDomainId } from '../../../../packages/common/configuration/se-domains.js'
@@ -26,7 +26,8 @@ export function DiscoveryWorkspace({ client, mode, active, searchClient, onActio
   const [filters, setFilters] = useState<DiscoveryFilters>({ include: [], exclude: [] })
   const [sort, setSort] = useState<DiscoverySort | null>(null)
   const [expandedId, setExpandedId] = useState<string>()
-  const visible = sortDiscoveryOpportunities(filterDiscoveryOpportunities(opportunities, filters), sort)
+  const visible = useMemo(() => sortDiscoveryOpportunities(filterDiscoveryOpportunities(opportunities, filters), sort), [opportunities, filters, sort])
+  const customers = useMemo(() => discoveryCustomers(opportunities), [opportunities])
 
   useEffect(() => {
     if (!active) return
@@ -73,9 +74,9 @@ export function DiscoveryWorkspace({ client, mode, active, searchClient, onActio
           onClick={() => setRefreshVersion((value) => value + 1)}>Refresh</button>
       </div>
     </header>
-    <DiscoveryControls customers={discoveryCustomers(opportunities)} filters={filters} onChange={setFilters}
+    <DiscoveryControls customers={customers} filters={filters} onChange={setFilters}
       visibleCount={visible.length} totalCount={opportunities.length} loading={loading} />
-    {loading && <p role="status">Loading Discover opportunities... {mode === 'live' ? 'MSX searches can take time; results will appear when the source responds.' : ''}</p>}
+    {loading && <div className="discovery-loading" role="status">Loading Discover opportunities... {mode === 'live' ? 'Checking your current visible accounts and source opportunities. Navigation remains available while the source responds.' : ''}</div>}
     {error && <p role="alert" className="error-banner">{error}. Use Refresh to retry.</p>}
     {!loading && !error && opportunities.length === 0 && <p>No eligible opportunities for this source scope and domain.</p>}
     {!loading && !error && opportunities.length > 0 && visible.length === 0 && <p role="status">No opportunities match your customer filters. Clear filters to show all customers.</p>}

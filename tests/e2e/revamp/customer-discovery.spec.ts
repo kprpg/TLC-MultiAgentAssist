@@ -200,6 +200,7 @@ for (const state of ['not-added', 'hidden'] as const) {
                     await route.fulfill({ json: account })
                 }
             } else if (path === '/api/me') await route.fulfill({ json: { email: 'sample@example.test' } })
+            else if (path === '/api/portfolio/index') await route.fulfill({ json: { contractVersion: '1.0', accounts: saved ? [account] : [], opportunities: [] } })
             else if (path === '/api/accounts') await route.fulfill({ json: saved ? [account] : [] })
             else if (path.endsWith('/opportunities')) await route.fulfill({ json: [] })
             else if (path.startsWith('/api/discover/')) await route.fulfill({ json: saved ? [opportunity] : [] })

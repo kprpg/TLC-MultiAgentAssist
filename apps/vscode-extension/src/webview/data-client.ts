@@ -37,6 +37,8 @@ import type {
     MilestoneUpdateInput,
     MilestoneView,
     OpportunityView,
+    PortfolioIndexView,
+    PortfolioWorkspaceView,
     SeDomainView,
     WorkflowDefinitionView,
     WorkflowRunResultView,
@@ -55,6 +57,9 @@ export const dataClient = {
     invokeVoice: async (input: VoiceRequest) => voiceResponseSchema.parse(await request('voiceInput', voiceRequestSchema.parse(input))),
     getCurrentUserEmail: () => request<string | null>('getCurrentUserEmail'),
     listAccounts: (includeHidden = false) => request<AccountView[]>('listAccounts', { includeHidden }),
+    getPortfolioIndex: (includeHidden = false) => request<PortfolioIndexView>('getPortfolioIndex', { contractVersion: '1.0', includeHidden }),
+    getPortfolioWorkspace: (input: { accountId?: string; opportunityId?: string; includeHidden?: boolean } = {}) =>
+        request<PortfolioWorkspaceView>('getPortfolioWorkspace', { contractVersion: '1.0', ...input }),
     searchAccounts: (query: string, matchBy: 'name' | 'tpid') => request<AccountCandidateView[]>('searchAccounts', { query, matchBy }),
     addAccount: (accountId: string) => request<AccountView>('addAccount', { accountId }),
     setAccountVisibility: (accountId: string, visibility: 'visible' | 'hidden') => request<AccountView>('setAccountVisibility', { accountId, visibility }),

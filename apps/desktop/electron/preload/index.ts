@@ -3,6 +3,7 @@ import type { Account, AccountCandidate, AccountListOptions, AccountSearchReques
 import type { WorkflowHostOperation } from '../../../../packages/orchestrator/workflows/index.js'
 import type { VoiceRequest, VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 import type { SellerDashboardRequest, SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
+import type { PortfolioReadRequest, PortfolioIndex, PortfolioWorkspaceRequest, PortfolioWorkspace } from '../../../../packages/common/contracts/index.js'
 
 export interface TlcDesktopApi {
   invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
@@ -11,6 +12,8 @@ export interface TlcDesktopApi {
   getDataStatus(): Promise<DesktopDataStatus>
   connectMcem(): Promise<AuthStatus>
   listAccounts(options?: AccountListOptions): Promise<Account[]>
+  getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
+  getPortfolioWorkspace(request: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace>
   searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
   addAccount(accountId: string): Promise<Account>
   setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
@@ -50,6 +53,8 @@ const api: TlcDesktopApi = {
   getDataStatus: () => ipcRenderer.invoke('tlc:get-data-status'),
   connectMcem: () => ipcRenderer.invoke('tlc:connect-mcem'),
   listAccounts: (options) => ipcRenderer.invoke('tlc:list-accounts', options),
+  getPortfolioIndex: (request) => ipcRenderer.invoke('tlc:portfolio-index', request),
+  getPortfolioWorkspace: (request) => ipcRenderer.invoke('tlc:portfolio-workspace', request),
   searchAccounts: (request) => ipcRenderer.invoke('tlc:search-accounts', request),
   addAccount: (accountId) => ipcRenderer.invoke('tlc:add-account', accountId),
   setAccountVisibility: (accountId, visibility) => ipcRenderer.invoke('tlc:set-account-visibility', accountId, visibility),

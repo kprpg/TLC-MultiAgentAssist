@@ -4,6 +4,15 @@ import {
   accountListOptionsSchema,
   accountSearchRequestSchema,
   accountVisibilitySchema,
+  portfolioReadRequestSchema,
+  portfolioIndexSchema,
+  portfolioWorkspaceRequestSchema,
+  portfolioWorkspaceSchema,
+  portfolioReadVersion,
+  type PortfolioReadRequest,
+  type PortfolioIndex,
+  type PortfolioWorkspaceRequest,
+  type PortfolioWorkspace,
   agentTaskRequestSchema,
   contractVersion,
   mcemStageTransitionRequestSchema,
@@ -90,8 +99,45 @@ export class ThinSliceOrchestrator {
     private readonly recordCreation?: RecordCreationService
   ) { }
 
+  withReadContext<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted()
+    return this.msx.withReadContext ? this.msx.withReadContext(operation, signal) : operation()
+  }
+
+  getPortfolioIndex(input: PortfolioReadRequest): Promise<PortfolioIndex> {
+    const request = portfolioReadRequestSchema.parse(input)
+    return this.withReadContext(async () => {
+      const options = { ...(request.includeHidden === undefined ? {} : { includeHidden: request.includeHidden }) }
+      if (this.msx.getPortfolioIndex) {
+        return portfolioIndexSchema.parse({ contractVersion: portfolioReadVersion, ...await this.msx.getPortfolioIndex(options) })
+      }
+      const accounts = await this.listAccounts(options)
+      const groups = await Promise.all(accounts.filter((account) => account.visibility !== 'hidden').map((account) => this.listOpportunities(account.id)))
+      return portfolioIndexSchema.parse({ contractVersion: portfolioReadVersion, accounts, opportunities: groups.flat() })
+    })
+  }
+
+  getPortfolioWorkspace(input: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace> {
+    const request = portfolioWorkspaceRequestSchema.parse(input)
+    return this.withReadContext(async () => {
+      const accounts = await this.listAccounts({ ...(request.includeHidden === undefined ? {} : { includeHidden: request.includeHidden }) })
+      const account = request.accountId ? accounts.find((item) => item.id === request.accountId && item.visibility !== 'hidden')
+        : accounts.find((item) => item.visibility !== 'hidden')
+      if (request.accountId && !account) throw new Error('The selected account is not in the current visible portfolio.')
+      const opportunities = account ? await this.listOpportunities(account.id) : []
+      const opportunity = request.opportunityId ? opportunities.find((item) => item.id === request.opportunityId) : opportunities[0]
+      if (request.opportunityId && !opportunity) throw new Error('The selected opportunity is not in the selected account portfolio.')
+      const milestones = opportunity ? await this.msx.listMilestones(opportunity.id) : []
+      return portfolioWorkspaceSchema.parse({
+        contractVersion: portfolioReadVersion, accounts, opportunities, milestones,
+        ...(account ? { selectedAccountId: account.id } : {}),
+        ...(opportunity ? { selectedOpportunityId: opportunity.id } : {})
+      })
+    })
+  }
+
   getRecordCreationCatalog(request: RecordCreationCatalogRequest): Promise<RecordCreationCatalog> {
-    return this.requireRecordCreation().getCatalog(request)
+    return this.withReadContext(() => this.requireRecordCreation().getCatalog(request))
   }
 
   previewRecordCreation(request: RecordCreationPreviewRequest): Promise<RecordCreationPreview> {
@@ -139,10 +185,12 @@ export class ThinSliceOrchestrator {
 
   async getOpportunitySnapshot(opportunityId: string): Promise<{ account: Account; opportunity: Opportunity; milestones: Milestone[]; revisionTokens?: Record<string, string> }> {
     if (!opportunityId.trim()) throw new Error('An opportunity id is required.')
-    const context = await this.msx.getOpportunityContext(opportunityId)
-    const milestones = await this.msx.listMilestones(opportunityId)
-    const revisionTokens = await this.msx.getConcurrencyTokens?.(opportunityId)
-    return { account: context.account, opportunity: context.opportunity, milestones, ...(revisionTokens ? { revisionTokens } : {}) }
+    return this.withReadContext(async () => {
+      const context = await this.msx.getOpportunityContext(opportunityId)
+      const milestones = await this.msx.listMilestones(opportunityId)
+      const revisionTokens = await this.msx.getConcurrencyTokens?.(opportunityId)
+      return { account: context.account, opportunity: context.opportunity, milestones, ...(revisionTokens ? { revisionTokens } : {}) }
+    })
   }
 
   async discoverOpportunities(domain: SeDomainId): Promise<DiscoverableOpportunity[]> {
@@ -256,57 +304,61 @@ export class ThinSliceOrchestrator {
 
   async runMcemCoach(input: McemRequest): Promise<McemResponse> {
     const request = mcemRequestSchema.parse(input)
-    const context = await this.msx.getOpportunityContext(request.opportunityId)
-    if (context.account.id !== request.accountId) {
-      throw new Error('The selected opportunity does not belong to the selected account.')
-    }
-    const milestones = await this.msx.listMilestones(request.opportunityId)
-    const guidance = await this.mcem.getStageGuidance(context.opportunity.recordedStage)
-    const localEvaluation = evaluateMcemProgress({ ...context, milestones }, guidance)
-    return localEvaluation
+    return this.withReadContext(async () => {
+      const context = await this.msx.getOpportunityContext(request.opportunityId)
+      if (context.account.id !== request.accountId) {
+        throw new Error('The selected opportunity does not belong to the selected account.')
+      }
+      const milestones = await this.msx.listMilestones(request.opportunityId)
+      const guidance = await this.mcem.getStageGuidance(context.opportunity.recordedStage)
+      const localEvaluation = evaluateMcemProgress({ ...context, milestones }, guidance)
+      return localEvaluation
+    })
   }
 
   async runAgentTask(input: AgentTaskRequest): Promise<AgentTaskResponse> {
     const request = agentTaskRequestSchema.parse(input)
-    const configuredAgent = this.taskAgents[request.capability]
-    if (!configuredAgent) {
-      throw new Error(`The ${request.capability} agent is not configured.`)
-    }
+    return this.withReadContext(async () => {
+      const configuredAgent = this.taskAgents[request.capability]
+      if (!configuredAgent) {
+        throw new Error(`The ${request.capability} agent is not configured.`)
+      }
 
-    const baseContext = await measurePerformance('agent.context.msx', this.performanceReporter, () =>
-      this.msx.getOpportunityContext(request.opportunityId))
-    if (baseContext.account.id !== request.accountId) {
-      throw new Error('The selected opportunity does not belong to the selected account.')
-    }
-    const milestones = await this.msx.listMilestones(request.opportunityId)
-    const opportunityContext = { ...baseContext, milestones }
-    const guidance = await measurePerformance('agent.context.mcem', this.performanceReporter, () =>
-      this.mcem.getStageGuidance(opportunityContext.opportunity.recordedStage))
-    const localEvaluation = evaluateMcemProgress(opportunityContext, guidance)
-    const content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke({
-      request,
-      opportunityContext,
-      guidance,
-      localEvaluation
-    }))
-    if (!content?.trim()) {
-      throw new Error(`The ${request.capability} agent returned no content.`)
-    }
+      const baseContext = await measurePerformance('agent.context.msx', this.performanceReporter, () =>
+        this.msx.getOpportunityContext(request.opportunityId))
+      if (baseContext.account.id !== request.accountId) {
+        throw new Error('The selected opportunity does not belong to the selected account.')
+      }
+      const milestones = await this.msx.listMilestones(request.opportunityId)
+      const opportunityContext = { ...baseContext, milestones }
+      const guidance = await measurePerformance('agent.context.mcem', this.performanceReporter, () =>
+        this.mcem.getStageGuidance(opportunityContext.opportunity.recordedStage))
+      const localEvaluation = evaluateMcemProgress(opportunityContext, guidance)
+      const content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke({
+        request,
+        opportunityContext,
+        guidance,
+        localEvaluation
+      }))
+      if (!content?.trim()) {
+        throw new Error(`The ${request.capability} agent returned no content.`)
+      }
 
-    const sourceHealth = [opportunityContext.sourceHealth, guidance.sourceHealth]
-    const isPartial = sourceHealth.some((source) => ['partial', 'stale', 'unavailable'].includes(source.state))
-    const responseContent = addMsxOpportunityLink(content.trim(), opportunityContext.opportunity.id)
-    return {
-      contractVersion,
-      correlationId: randomUUID(),
-      capability: request.capability,
-      agentVersion: configuredAgent.version,
-      generatedAt: new Date().toISOString(),
-      mode: opportunityContext.sourceHealth.state === 'sample' ? 'sample' : 'live',
-      state: isPartial ? 'partial' : 'complete',
-      content: responseContent,
-      sourceHealth
-    }
+      const sourceHealth = [opportunityContext.sourceHealth, guidance.sourceHealth]
+      const isPartial = sourceHealth.some((source) => ['partial', 'stale', 'unavailable'].includes(source.state))
+      const responseContent = addMsxOpportunityLink(content.trim(), opportunityContext.opportunity.id)
+      return {
+        contractVersion,
+        correlationId: randomUUID(),
+        capability: request.capability,
+        agentVersion: configuredAgent.version,
+        generatedAt: new Date().toISOString(),
+        mode: opportunityContext.sourceHealth.state === 'sample' ? 'sample' : 'live',
+        state: isPartial ? 'partial' : 'complete',
+        content: responseContent,
+        sourceHealth
+      }
+    })
   }
 }
 

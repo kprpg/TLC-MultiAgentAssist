@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, createMilestoneActivityRequestSchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, meetingTypeSchema, milestoneUpdateSchema, opportunityUpdateSchema, recordCreationCatalogRequestSchema, recordCreationPreviewRequestSchema, recordCreationCommitRequestSchema, scopeRefSchema, seDomainSchema } from '../../../packages/common/index.js'
 import { voiceRequestSchema } from '../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema } from '../../../packages/common/contracts/seller-dashboard.js'
+import { portfolioReadRequestSchema, portfolioWorkspaceRequestSchema } from '../../../packages/common/contracts/index.js'
 
 /**
  * Strict, discriminated message envelopes for the webview <-> extension-host bridge.
@@ -21,6 +22,8 @@ export const bridgeMethodSchema = z.enum([
     'voiceInput',
     'getCurrentUserEmail',
     'listAccounts',
+    'getPortfolioIndex',
+    'getPortfolioWorkspace',
     'searchAccounts',
     'addAccount',
     'setAccountVisibility',
@@ -67,6 +70,8 @@ export const bridgeParamSchemas = {
     voiceInput: voiceRequestSchema,
     getCurrentUserEmail: z.void().optional(),
     listAccounts: accountListOptionsSchema.optional(),
+    getPortfolioIndex: portfolioReadRequestSchema,
+    getPortfolioWorkspace: portfolioWorkspaceRequestSchema,
     searchAccounts: accountSearchRequestSchema,
     addAccount: z.object({ accountId: z.string().min(1).max(200) }).strict(),
     setAccountVisibility: z.object({

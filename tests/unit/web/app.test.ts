@@ -458,6 +458,8 @@ describe('hosted web API', () => {
 
 function runtime(): WebRuntime {
     return {
+        getPortfolioIndex: vi.fn(),
+        getPortfolioWorkspace: vi.fn(),
         listAccounts: vi.fn(async () => [{ id: 'account-1', name: 'Contoso', segment: 'Live MSX' }]),
         searchAccounts: vi.fn(async () => []),
         addAccount: vi.fn(),

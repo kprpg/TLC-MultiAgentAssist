@@ -54,6 +54,8 @@ export function buildLiveDataProvider(
         sellerDashboard: createSellerDashboardHost({ mode, resolveUserEmail: async () => account }),
         getCurrentUserEmail: async () => account,
         listAccounts: (options) => orchestrator.listAccounts(options),
+        getPortfolioIndex: (request) => orchestrator.getPortfolioIndex(request),
+        getPortfolioWorkspace: (request) => orchestrator.getPortfolioWorkspace(request),
         searchAccounts: (request) => orchestrator.searchAccounts(request),
         addAccount: (accountId) => orchestrator.addAccount(accountId),
         setAccountVisibility: (accountId, visibility) => orchestrator.setAccountVisibility(accountId, visibility),

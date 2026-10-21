@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z, ZodError } from 'zod'
+import { withTeamsPerformanceContext } from './performance.js'
 import { collaborationVersion, collaborationLifecycleCommandSchema, type ContextBinding } from '../../../packages/common/contracts/collaboration.js'
 import { meetingChangeSetApprovalSchema } from '../../../packages/common/contracts/meeting.js'
 import { accountCandidateSchema, emailComposeRequestSchema, exportResponseRequestSchema, workflowRunSchema } from '../../../packages/common/contracts/index.js'
@@ -81,6 +82,10 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
     const correlationId = randomUUID()
     response.setHeader('x-correlation-id', correlationId)
     response.setHeader('cache-control', 'no-store')
+    const readCancellation = new AbortController()
+    const abortRead = () => { if (!response.writableFinished) readCancellation.abort() }
+    response.once('close', abortRead)
+    request.once('aborted', abortRead)
     let authenticatedAssertion: string | undefined
     const assertCurrentCaller = () => { if (local && authenticatedAssertion !== undefined) local.pairing.authenticate(authenticatedAssertion) }
     const json = (status: number, value: unknown) => {
@@ -351,7 +356,8 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         if (operations.describe(name).effect !== 'read') throw new TeamsHttpError(403, 'review_required')
         if (operations.describe(name).startsWork) await lifecycle.assertActive(principal)
         if (operations.describe(name).startsWork) await new UserRequestBudget(options.store).consume(principal, 'agent', principal.mode === 'sample' ? 60 : 4)
-        const result = await operations.invoke(name, body)
+        const result = await withTeamsPerformanceContext(correlationId, () => operations.invoke(name, body,
+          name === 'workflows.start' || name === 'workflows.cancel' ? undefined : readCancellation.signal))
         if (['workflows.start', 'workflows.cancel'].includes(name)) await activity.record(principal, workflowRunSchema.parse(result))
         if (name === 'workflows.get') await activity.record(principal, z.object({ run: workflowRunSchema }).parse(result).run)
         json(200, result)
@@ -415,6 +421,7 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         throw new TeamsHttpError(404, 'route_not_found')
       }
     } catch (error) {
+      if (readCancellation.signal.aborted && response.destroyed) return true
       const status = error instanceof GraphMeetingError ? error.state === 'denied' || error.state === 'admin-blocked' ? 403 : error.state === 'auth-required' ? 409 : error.state === 'unsupported' ? 400 : 503
         : error instanceof ManualTranscriptError ? 400
         : error instanceof NativeConnectionError ? error.code === 'native_source_denied' ? 403 : error.code === 'native_resource_unavailable' ? 409 : 401 : error instanceof LocalPairingError ? error.status : error instanceof CollaborationAdmissionError || error instanceof ActionReviewStaleError ? 409 : error instanceof WorkflowScopeAuthorizationError ? 403 : error instanceof RequestQuotaError ? 429 : error instanceof TeamsAuthorizationError ? 401 : error instanceof TeamsHttpError ? error.status
@@ -429,6 +436,9 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
       const claims = error instanceof TeamsAuthorizationError ? error.claims : undefined
       if (claims && options.configuration.mode === 'live') response.setHeader('www-authenticate', `Bearer authorization_uri="https://login.microsoftonline.com/${options.configuration.tenantId}/oauth2/v2.0/authorize", error="insufficient_claims", claims="${Buffer.from(claims).toString('base64')}"`)
       json(status, { error: code, correlationId, ...(claims ? { claims } : {}) })
+    } finally {
+      response.removeListener('close', abortRead)
+      request.removeListener('aborted', abortRead)
     }
     return true
   }

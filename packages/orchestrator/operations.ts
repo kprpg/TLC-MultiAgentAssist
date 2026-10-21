@@ -10,6 +10,7 @@ import type { ApplicationServices } from './application-runtime.js'
 import { workflowContractVersion } from '../common/contracts/workflows.js'
 import { canonicalJson } from './collaboration/reviewed-actions.js'
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema } from '../common/contracts/seller-dashboard.js'
+import { measurePerformance } from '../common/telemetry/performance.js'
 
 export class WorkflowScopeAuthorizationError extends Error {
   constructor() { super('Workflow source scope is unavailable or changed. Start a fresh workflow after verifying current access.'); this.name = 'WorkflowScopeAuthorizationError' }
@@ -36,6 +37,8 @@ export function createApplicationOperations(services: ApplicationServices) {
   const operations: Record<string, ApplicationOperation> = {
     sellerDashboard: operation(sellerDashboardRequestSchema, sellerDashboardResponseSchema, (input) => services.sellerDashboard.invoke(input)),
     listAccounts: operation(c.accountListOptionsSchema.strict(), z.array(c.accountSchema), (input) => core.listAccounts(input)),
+    getPortfolioIndex: operation(c.portfolioReadRequestSchema, c.portfolioIndexSchema, (input) => core.getPortfolioIndex(input)),
+    getPortfolioWorkspace: operation(c.portfolioWorkspaceRequestSchema, c.portfolioWorkspaceSchema, (input) => core.getPortfolioWorkspace(input)),
     searchAccounts: operation(c.accountSearchRequestSchema.strict(), z.array(c.accountCandidateSchema), (input) => core.searchAccounts(input)),
     addAccount: operation(z.object({ accountId: id }).strict(), c.accountSchema, (input) => core.addAccount(input.accountId), 'preference'),
     setAccountVisibility: operation(z.object({ accountId: id, visibility: z.enum(['visible', 'hidden']) }).strict(), c.accountSchema, (input) => core.setAccountVisibility(input.accountId, input.visibility), 'preference'),
@@ -73,8 +76,7 @@ export function createApplicationOperations(services: ApplicationServices) {
   }
   async function workingSet() {
     const capture = async () => {
-      const accounts = await core.listAccounts()
-      const opportunities = (await Promise.all(accounts.map((account) => core.listOpportunities(account.id)))).flat()
+      const { accounts, opportunities } = await core.getPortfolioIndex({ contractVersion: c.portfolioReadVersion })
       return { accountIds: accounts.map((account) => account.id).sort(), opportunityIds: opportunities.map((opportunity) => opportunity.id).sort() }
     }
     return services.withReadContext ? services.withReadContext(capture) : capture()
@@ -89,22 +91,29 @@ export function createApplicationOperations(services: ApplicationServices) {
   return {
     describe,
     names: () => Object.keys(operations),
-    async invoke(name: string, input: unknown): Promise<unknown> {
-      services.refreshSource()
+    async invoke(name: string, input: unknown, signal?: AbortSignal): Promise<unknown> {
       const entry = describe(name)
-      if (name === 'workflows.start') {
-        const request = entry.parse(input)
-        const captured = await workingSet()
-        const run = c.workflowRunSchema.parse(await entry.run(request))
-        if (services.workflowScopes.size >= 100) services.workflowScopes.delete(services.workflowScopes.keys().next().value!)
-        services.workflowScopes.set(run.runId, captured)
-        return run
-      }
-      if (name === 'workflows.get' || name === 'workflows.guidance') {
-        const request = entry.parse(input)
-        await verifyWorkflow(String(request['runId']))
-      }
-      return entry.run(input)
+      return measurePerformance(`operation.${name}`, services.performanceReporter, async () => {
+        signal?.throwIfAborted()
+        services.refreshSource()
+        if (name === 'workflows.start') {
+          const request = entry.parse(input)
+          const captured = await workingSet()
+          const run = c.workflowRunSchema.parse(await entry.run(request))
+          if (services.workflowScopes.size >= 100) services.workflowScopes.delete(services.workflowScopes.keys().next().value!)
+          services.workflowScopes.set(run.runId, captured)
+          return run
+        }
+        const read = async () => {
+          if (name === 'workflows.get' || name === 'workflows.guidance') {
+            const request = entry.parse(input)
+            await verifyWorkflow(String(request['runId']))
+          }
+          return entry.run(input)
+        }
+        return entry.effect === 'read' && name !== 'workflows.cancel'
+          ? core.withReadContext(read, signal) : entry.run(input)
+      })
     },
     async snapshot(name: string, input: unknown): Promise<unknown> {
       services.refreshSource()

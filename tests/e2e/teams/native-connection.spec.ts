@@ -58,6 +58,12 @@ async function offlineNativeFixture(page: Page, cli = false, writeMode: CliWrite
     }
     if (path === 'local/revoke') { revoked = true; return json({ contractVersion: localConnectionVersion, state: 'disconnected' }) }
     if (cli && writeMode === 'reviewed' && /^(operations|actions)\//.test(path)) return route.continue()
+    if (path === 'operations/getPortfolioWorkspace' || path === 'operations/getPortfolioIndex') return json({
+      contractVersion: '1.0',
+      accounts: cli ? [{ id: 'cli-own-account', name: 'Offline signed-in user deal-team account', segment: 'Live MSX', provenance: 'deal-team', visibility: 'visible' }] : [],
+      opportunities: [],
+      ...(path.endsWith('getPortfolioWorkspace') ? { milestones: [], ...(cli ? { selectedAccountId: 'cli-own-account' } : {}) } : {})
+    })
     if (path === 'operations/listAccounts') return json(cli ? [{
       id: 'cli-own-account', name: 'Offline signed-in user deal-team account', segment: 'Live MSX', provenance: 'deal-team', visibility: 'visible'
     }] : [])
@@ -279,7 +285,7 @@ test('CLI live profile reuses current-user pairing and automatically displays th
   await expect(page.getByLabel('Customer account', { exact: true })).toHaveValue('cli-own-account')
   await expect(page.getByLabel('Customer account', { exact: true }).getByRole('option', { name: 'Offline signed-in user deal-team account' })).toHaveCount(1)
   await expect(page.getByText('Live MSX - Azure CLI read-only', { exact: true })).toBeVisible()
-  expect(fixture.requests).toContain('operations/listAccounts')
+  expect(fixture.requests).toContain('operations/getPortfolioWorkspace')
   expect(fixture.requests.some((path) => path.includes('connect') || path.includes('actions/'))).toBe(false)
 })
 test('native bootstrap shows truthful limits and cannot launch sign-in or expose private data before pairing', async ({ page }) => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { FluentProvider, teamsDarkTheme, teamsHighContrastTheme, teamsLightTheme } from '@fluentui/react-components'
 import { meeting } from '@microsoft/teams-js'
 import { z } from 'zod'
@@ -9,15 +9,11 @@ import { TeamsApiClient, type ReviewAction, type ReviewPreview } from './data-cl
 import { TeamsShell } from './shell.js'
 import { useWorkspaceNavigation } from './use-workspace-navigation.js'
 import { teamsSurface } from './workspace-navigation.js'
-import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
 import { sellerDashboardResponseSchema } from '../../../../packages/common/contracts/seller-dashboard.js'
 import type { SellerDashboardRequest } from '../../../../packages/common/contracts/seller-dashboard.js'
 import { PortfolioLayoutControls } from '../../../shared/portfolio-layout-controls.js'
 import { PortfolioSearch } from './portfolio-search.js'
 import { AccountsWorkspace, type WorkingSelection } from './accounts.js'
-import { WorkflowsWorkspace } from './workflows.js'
-import { MeetingsWorkspace } from './meetings.js'
-import { ActivityWorkspace } from './activity.js'
 import { ContextWorkspace, SharedStage } from './context.js'
 import { ReviewDialog } from './review-dialog.js'
 import { NativeConnectionPanel } from './native-connection-panel.js'
@@ -25,8 +21,14 @@ import { TeamsLaunchStatusPanel } from './launch-status.js'
 import { useTeamsDataMode } from './use-data-mode.js'
 import { DataModeSwitcher } from './data-mode-switcher.js'
 import type { TeamsDataMode } from '../../../../packages/common/contracts/teams-data-mode.js'
+import { WorkspaceBoundary } from './workspace-boundary.js'
 
 interface PendingReview { preview: ActionPreview; resolve(receipt: ActionReceipt): void; reject(error: Error): void }
+
+const WorkflowsWorkspace = lazy(() => import('./workflows.js').then((module) => ({ default: module.WorkflowsWorkspace })))
+const MeetingsWorkspace = lazy(() => import('./meetings.js').then((module) => ({ default: module.MeetingsWorkspace })))
+const ActivityWorkspace = lazy(() => import('./activity.js').then((module) => ({ default: module.ActivityWorkspace })))
+const DashboardWorkspace = lazy(() => import('../../../shared/dashboard-workspace.js').then((module) => ({ default: module.DashboardWorkspace })))
 
 export function TeamsApp() {
   const parameters = new URLSearchParams(location.search)
@@ -262,6 +264,7 @@ export function TeamsApp() {
         {...(view === 'new' ? { workspace: 'new' as const } : view === 'discover' ? { workspace: 'discovery' as const } : view === 'portfolio' ? { workspace: 'portfolio' as const } : {})}
         onMeeting={() => setView('meetings')} onFocus={focusPortfolio}
         {...(bindingId && preferredAccountId ? { boundAccountId: preferredAccountId, boundOpportunityId } : {})} /></div>}
+      <WorkspaceBoundary key={view}><Suspense fallback={<section className="panel" role="status">Loading workspace controls...</section>}>
       {workspaceAllowed && view === 'plays' && <WorkflowsWorkspace client={client} selection={selection} onFocus={focusPortfolio}
         {...('authentication' in authentication.configuration ? { authentication: authentication.configuration.authentication } : {})}
         {...(linkedRunId ? { initialRunId: linkedRunId } : {})} {...(bindingId && preferredAccountId ? {
@@ -276,6 +279,7 @@ export function TeamsApp() {
         pendingRef.current = null; setPending(null)
       }} />}
       {workspaceAllowed && view === 'configure' && <ContextWorkspace client={client} host={authentication.context} selection={selection} />}
+      </Suspense></WorkspaceBoundary>
     </TeamsShell>}
     <ReviewDialog preview={pending?.preview ?? null} onCancel={cancelReview} onConfirm={(reason) => { void confirmReview(reason) }} error={reviewError} busy={reviewBusy} />
   </FluentProvider>

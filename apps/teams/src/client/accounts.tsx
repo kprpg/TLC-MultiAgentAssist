@@ -28,6 +28,7 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
 }) {
   const [accounts, setAccounts] = useState<c.Account[]>([])
   const [accountId, setAccountId] = useState(selection?.account.id ?? preferredAccountId ?? '')
+  const [requestedAccountId, setRequestedAccountId] = useState(selection?.account.id ?? preferredAccountId ?? '')
   const [requestedOpportunityId, setRequestedOpportunityId] = useState(preferredOpportunityId ?? '')
   const [opportunities, setOpportunities] = useState<c.Opportunity[]>([])
   const [milestones, setMilestones] = useState<c.Milestone[]>([])
@@ -41,7 +42,6 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
   const [sort, setSort] = useState<OpportunitySort>('closeDate')
   const [direction, setDirection] = useState<SortDirection>('ascending')
   const dirty = useRef(false)
-  const accountsReady = useRef(false)
   const [pendingScope, setPendingScope] = useState<{ apply(): void; cancel?(): void }>()
   const selected = useRef(selection)
   const scopeDisclosure = useResponsiveDisclosure(900, panes.accountsExpanded)
@@ -61,57 +61,43 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
   useEffect(() => {
     if (tab !== 'portfolio') return
     const controller = new AbortController()
-    accountsReady.current = false
-    setLoading(true); setError('')
-    client.operation('listAccounts', { includeHidden: showHidden }, z.array(c.accountSchema), controller.signal).then((items) => {
+    setLoading(true); setError(''); setOpportunities([]); setMilestones([])
+    client.operation('getPortfolioWorkspace', {
+      contractVersion: c.portfolioReadVersion, includeHidden: showHidden,
+      ...(boundAccountId || requestedAccountId ? { accountId: boundAccountId || requestedAccountId } : {}),
+      ...(boundOpportunityId || requestedOpportunityId ? { opportunityId: boundOpportunityId || requestedOpportunityId } : {})
+    }, c.portfolioWorkspaceSchema, controller.signal).then((result) => {
       if (controller.signal.aborted) return
-      const scoped = boundAccountId ? items.filter((item) => item.id === boundAccountId) : items
-      accountsReady.current = true
-      setAccounts(scoped); setLoading(false)
-      setAccountId((current) => scoped.some((entry) => entry.id === current && entry.visibility !== 'hidden') ? current : scoped.find((entry) => entry.visibility !== 'hidden')?.id ?? '')
+      const scoped = boundAccountId ? result.accounts.filter((item) => item.id === boundAccountId) : result.accounts
+      const eligible = boundOpportunityId ? result.opportunities.filter((item) => item.id === boundOpportunityId) : result.opportunities
+      setAccounts(scoped); setOpportunities(eligible); setMilestones(result.milestones); setLoading(false)
+      setAccountId(result.selectedAccountId ?? '')
+      const account = scoped.find((item) => item.id === result.selectedAccountId)
+      const opportunity = eligible.find((item) => item.id === result.selectedOpportunityId)
+      onSelect(account && opportunity ? { account, opportunity } : null)
     }).catch((cause: unknown) => {
       if (!controller.signal.aborted) { setAccounts([]); setOpportunities([]); onSelect(null); setError(String(cause)); setLoading(false) }
     })
     return () => controller.abort()
-  }, [client, revision, boundAccountId, showHidden, tab])
+  }, [client, revision, boundAccountId, boundOpportunityId, requestedAccountId, requestedOpportunityId, showHidden, tab])
   useEffect(() => {
     if (!preferredAccountId || boundAccountId && boundAccountId !== preferredAccountId) return
     if (selected.current?.account.id === preferredAccountId && (!preferredOpportunityId || selected.current.opportunity.id === preferredOpportunityId)) return
     changeScope(() => {
       setRequestedOpportunityId(preferredOpportunityId ?? '')
       setAccountId(preferredAccountId)
+      setRequestedAccountId(preferredAccountId)
     }, () => { if (selected.current) onFocus(selected.current.account.id, selected.current.opportunity.id) })
   }, [preferredAccountId, preferredOpportunityId, boundAccountId])
-  useEffect(() => {
-    if (tab !== 'portfolio' || !accountsReady.current) return
-    if (!accountId) { setOpportunities([]); onSelect(null); return }
-    const controller = new AbortController()
-    setOpportunities([])
-    if (selected.current?.account.id !== accountId) onSelect(null)
-    client.operation('listOpportunities', { accountId }, z.array(c.opportunitySchema), controller.signal).then((items) => {
-      if (controller.signal.aborted) return
-      const eligible = boundOpportunityId ? items.filter((item) => item.id === boundOpportunityId) : items
-      setOpportunities(eligible)
-      const account = accounts.find((item) => item.id === accountId)
-      const opportunity = eligible.find((item) => item.id === requestedOpportunityId) ?? eligible.find((item) => item.id === selected.current?.opportunity.id) ?? eligible[0]
-      onSelect(account && opportunity ? { account, opportunity } : null)
-    }).catch((cause: unknown) => { if (!controller.signal.aborted) { setError(String(cause)); onSelect(null) } })
-    return () => controller.abort()
-  }, [client, accountId, accounts, revision, requestedOpportunityId, boundOpportunityId, tab])
-  useEffect(() => {
-    setMilestones([])
-    if (tab !== 'portfolio' || !selection) return
-    const controller = new AbortController()
-    client.operation('listMilestones', { opportunityId: selection.opportunity.id }, z.array(c.milestoneSchema), controller.signal)
-      .then((items) => { if (!controller.signal.aborted) setMilestones(items) })
-      .catch((cause: unknown) => { if (!controller.signal.aborted) setError(String(cause)) })
-    return () => controller.abort()
-  }, [client, selection?.opportunity.id, revision, tab])
   const mutate = useCallback(async (operation: string, input: Record<string, unknown>) => {
     setError('')
     const receipt = await review(operation, input)
     if (receipt.state !== 'confirmed') throw new Error('The action outcome is unconfirmed. Do not repeat it. Open Activity.')
     dirty.current = false
+    if (['leaveDealTeam', 'leaveMilestoneTeam'].includes(operation) && input['opportunityId'] === selected.current?.opportunity.id) setRequestedOpportunityId('')
+    if (operation === 'setAccountVisibility' && input['visibility'] === 'hidden' && input['accountId'] === selected.current?.account.id) {
+      setRequestedAccountId(''); setRequestedOpportunityId(''); setAccountId(''); onSelect(null)
+    }
     setRevision((value) => value + 1)
     return receipt.result
   }, [review])
@@ -141,7 +127,7 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
     if (boundOpportunityId && id !== boundOpportunityId) return
     if (id === selection?.opportunity.id) return
     changeScope(() => {
-      setRequestedOpportunityId('')
+      setRequestedOpportunityId(id)
       const account = accounts.find((item) => item.id === accountId)
       const opportunity = opportunities.find((item) => item.id === id)
       onSelect(account && opportunity ? { account, opportunity } : null)
@@ -152,14 +138,15 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
     <div hidden={tab !== 'portfolio'}>
       <div className="workspace-heading"><h1>Portfolio</h1><p className="muted">{mode === 'sample' ? 'Canonical sanitized sample data' : 'Private - your delegated source access'}</p>
         <button type="button" onClick={() => changeScope(() => setRevision((value) => value + 1))}>Refresh sources</button></div>
-      {loading && <p role="status">Loading portfolio...</p>}
+      {loading && <p role="status">Loading portfolio accounts, opportunities and milestones...</p>}
+      {error && <button type="button" onClick={() => setRevision((value) => value + 1)}>Retry Portfolio</button>}
       <div className={`portfolio-workbench${panes.accountsExpanded ? '' : ' accounts-collapsed'}${panes.detailsExpanded ? '' : ' details-collapsed'}${panes.actionsExpanded ? '' : ' actions-collapsed'}`}>
         <details className="portfolio-scope-disclosure" ref={scopeDisclosure} open hidden={!panes.accountsExpanded}><summary className="pane-disclosure-toggle">Account and opportunity scope</summary>
         <section id="portfolio-accounts-panel" className="pane portfolio-scope" hidden={!panes.accountsExpanded} aria-label="Accounts and opportunities">
-          <div className="section-heading"><h2>Accounts</h2>{!boundAccountId && <AddCustomerButton client={searchClient} dataMode={mode} onAdded={(account) => { setAccountId(account.id); setRevision((value) => value + 1) }} />}</div>
+          <div className="section-heading"><h2>Accounts</h2>{!boundAccountId && <AddCustomerButton client={searchClient} dataMode={mode} onAdded={(account) => { setAccountId(account.id); setRequestedAccountId(account.id); setRevision((value) => value + 1) }} />}</div>
           <label className="field">Customer account<select aria-label="Customer account" value={accountId} disabled={Boolean(boundAccountId)} onChange={(event) => {
             const nextAccountId = event.target.value
-            changeScope(() => { setRequestedOpportunityId(''); onSelect(null); setAccountId(nextAccountId) })
+            changeScope(() => { setRequestedOpportunityId(''); onSelect(null); setAccountId(nextAccountId); setRequestedAccountId(nextAccountId) })
           }}><option value="">Choose an account</option>{accounts.filter((item) => item.visibility !== 'hidden').map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           {!boundAccountId && <><label className="inline-check"><input type="checkbox" checked={showHidden} onChange={(event) => setShowHidden(event.target.checked)} />Show hidden</label>
             {selection && <button type="button" className="link" onClick={() => { void action('setAccountVisibility', { accountId, visibility: 'hidden' }) }}>Hide selected customer</button>}
@@ -183,13 +170,14 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
                 </details>
               </td>
             </tr>)}</tbody></table></div>
-          {!loading && !opportunities.length && <p>No eligible Portfolio opportunities. Use Discover to review your working set.</p>}
-          {!loading && !accounts.length && <p>No customer accounts. Use Add customer to get started.</p>}
+          {!loading && !error && !opportunities.length && <p>No eligible Portfolio opportunities. Use Discover to review your working set.</p>}
+          {!loading && !error && !accounts.length && <p>No customer accounts. Use Add customer to get started.</p>}
         </section></details>
         {selection ? <OpportunityWorkbench key={`${selection.opportunity.id}:${revision}`} client={client} selection={selection} opportunities={opportunities}
           milestones={milestones} panes={panes} tab={detailTab} onTabChange={setDetailTab} onSelectOpportunity={selectOpportunity}
           onAction={action} onMeeting={onMeeting} onDraftChange={() => { dirty.current = true }} />
-          : <section className="pane"><h2>Select an opportunity</h2><p>An account may be visible without any eligible Portfolio opportunities.</p></section>}
+          : <section className="pane"><h2>{loading ? 'Loading your selected workspace' : 'Select an opportunity'}</h2>
+            {!loading && !error && <p>An account may be visible without any eligible Portfolio opportunities.</p>}</section>}
       </div>
     </div>
     <DiscoveryWorkspace client={client} mode={mode} active={tab === 'discovery'} searchClient={searchClient} onAction={mutate}

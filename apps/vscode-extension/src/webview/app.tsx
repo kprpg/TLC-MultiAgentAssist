@@ -241,16 +241,12 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
         // items that only carry an opportunity id.
         void (async () => {
             try {
-                const accounts = await dataClient.listAccounts(true)
+                const portfolio = await dataClient.getPortfolioIndex(true)
+                const accounts = portfolio.accounts
                 setAccountNames(Object.fromEntries(accounts.map((account) => [account.id, account.name])))
                 accounts.forEach((account) => fetchedOppAccounts.current.add(account.id))
-                const results = await Promise.allSettled(accounts.map((account) => dataClient.listOpportunities(account.id)))
                 const index: Record<string, { name: string; accountId?: string }> = {}
-                for (const result of results) {
-                    if (result.status === 'fulfilled') {
-                        for (const opportunity of result.value) index[opportunity.id] = { name: opportunity.name, accountId: opportunity.accountId }
-                    }
-                }
+                for (const opportunity of portfolio.opportunities) index[opportunity.id] = { name: opportunity.name, accountId: opportunity.accountId }
                 if (Object.keys(index).length > 0) setOpportunityIndex((previous) => ({ ...previous, ...index }))
             } catch { /* names are best-effort labels for grouping and record tables */ }
         })()
@@ -1623,13 +1619,13 @@ function DiscoverPanel({ dataMode, onPortfolioChanged }: {
         | undefined
     >(undefined)
     const opportunities = items.data ?? []
-    const visibleOpportunities = sortDiscoveryOpportunities(filterDiscoveryOpportunities(opportunities, filters), sort)
-    const customers = discoveryCustomers([
+    const visibleOpportunities = useMemo(() => sortDiscoveryOpportunities(filterDiscoveryOpportunities(opportunities, filters), sort), [opportunities, filters, sort])
+    const customers = useMemo(() => discoveryCustomers([
         ...opportunities,
         ...accounts
             .filter((item) => item.visibility !== 'hidden')
             .map((item) => ({ accountId: item.id, accountName: item.name }))
-    ])
+    ]), [opportunities, accounts])
     const displayedDiscoverMilestones = (opportunityId: string): MilestoneView[] =>
         filterVisibleMilestones(discoverMilestones[opportunityId] ?? [])
 

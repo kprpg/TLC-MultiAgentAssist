@@ -13,6 +13,7 @@ export class TeamsRequestError extends Error {
 }
 export class TeamsApiClient {
   private readonly disposed = new AbortController()
+  private readonly reads = new Map<string, { controller: AbortController; promise: Promise<unknown>; users: number }>()
   constructor(
     private readonly getToken: () => Promise<string>,
     private readonly onAuthenticationRequired?: (claims?: string) => void,
@@ -66,7 +67,40 @@ export class TeamsApiClient {
     return session
   }
   operation<T>(name: string, input: unknown, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
-    return this.request(`operations/${encodeURIComponent(name)}`, schema, input, signal)
+    if (!['getPortfolioIndex', 'getPortfolioWorkspace', 'discoverOpportunities', 'listMilestones', 'listDiscoverableMilestones'].includes(name)) {
+      return this.request(`operations/${encodeURIComponent(name)}`, schema, input, signal)
+    }
+    if (signal?.aborted) return Promise.reject(signal.reason)
+    const key = `${name}:${JSON.stringify(input)}`
+    let pending = this.reads.get(key)
+    if (!pending) {
+      const controller = new AbortController()
+      pending = { controller, promise: this.request(`operations/${encodeURIComponent(name)}`, z.unknown(), input, controller.signal), users: 0 }
+      this.reads.set(key, pending)
+      const current = pending
+      const cleanup = () => { if (this.reads.get(key) === current) this.reads.delete(key) }
+      void pending.promise.then(cleanup, cleanup)
+    }
+    const current = pending
+    current.users++
+    return new Promise<T>((resolve, reject) => {
+      let finished = false
+      const release = () => {
+        if (finished) return false
+        finished = true; signal?.removeEventListener('abort', abort)
+        if (--current.users === 0) {
+          current.controller.abort()
+          if (this.reads.get(key) === current) this.reads.delete(key)
+        }
+        return true
+      }
+      const abort = () => { if (release()) reject(signal?.reason) }
+      signal?.addEventListener('abort', abort, { once: true })
+      void current.promise.then((value) => {
+        if (!release()) return
+        try { resolve(schema.parse(value)) } catch (error) { reject(error) }
+      }, (error: unknown) => { if (release()) reject(error) })
+    })
   }
   preview(operation: string, input: unknown): Promise<ActionPreview> {
     return this.request('actions/preview', actionPreviewSchema, { operation, input })

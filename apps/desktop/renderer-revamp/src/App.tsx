@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, DialogTrigger, DrawerBody, DrawerHeader, DrawerHeaderTitle, Field, FluentProvider, Input, Menu, MenuItem, MenuItemRadio, MenuList, MenuPopover, MenuTrigger, MessageBar, OverlayDrawer, Spinner, Textarea, Tooltip, webDarkTheme, webLightTheme } from '@fluentui/react-components'
@@ -282,15 +282,15 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const accountRequest = useRef(0)
   const detailRequest = useRef(0)
   const discoveryRequest = useRef(0)
-  const sortedOpportunities = sortOpportunities(opportunities, opportunitySort, opportunitySortDirection)
-  const sortedMilestones = sortMilestones(filterVisibleMilestones(milestones), milestoneSort, milestoneSortDirection)
-  const visibleDiscoverResults = sortDiscoveryOpportunities(filterDiscoveryOpportunities(discoverResults, discoverFilters), discoverSort)
-  const discoverCustomers = discoveryCustomers([
+  const sortedOpportunities = useMemo(() => sortOpportunities(opportunities, opportunitySort, opportunitySortDirection), [opportunities, opportunitySort, opportunitySortDirection])
+  const sortedMilestones = useMemo(() => sortMilestones(filterVisibleMilestones(milestones), milestoneSort, milestoneSortDirection), [milestones, milestoneSort, milestoneSortDirection])
+  const visibleDiscoverResults = useMemo(() => sortDiscoveryOpportunities(filterDiscoveryOpportunities(discoverResults, discoverFilters), discoverSort), [discoverResults, discoverFilters, discoverSort])
+  const discoverCustomers = useMemo(() => discoveryCustomers([
     ...discoverResults,
     ...accounts
       .filter((item) => item.visibility !== 'hidden')
       .map((item) => ({ accountId: item.id, accountName: item.name }))
-  ])
+  ]), [discoverResults, accounts])
   const displayedDiscoverMilestones = (opportunityId: string): Milestone[] =>
     filterVisibleMilestones(discoverMilestones[opportunityId] ?? [])
 
@@ -801,11 +801,11 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setLoading(true)
     setSearchLoading(true)
     try {
-      const items = (await client.listAccounts()).filter((item) => item.visibility !== 'hidden')
-      const portfolio = await Promise.all(items.map((item) => client.listOpportunities(item.id)))
+      const portfolio = await client.getPortfolioIndex()
+      const items = portfolio.accounts.filter((item) => item.visibility !== 'hidden')
       if (request !== accountRequest.current) return
       setAccounts(items)
-      setSearchOpportunities(portfolio.flat())
+      setSearchOpportunities(portfolio.opportunities)
     } catch (cause) {
       if (request === accountRequest.current) {
         setError(`${failureContext}${cause instanceof Error ? cause.message : 'The portfolio could not be refreshed.'}`)

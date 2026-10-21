@@ -31,6 +31,7 @@ import { NativeConnectionError } from './native-identity.js'
 import { TeamsLaunchMonitor } from './launch-status.js'
 import { teamsClientBuildSchema, teamsLaunchIdentitySchema, teamsLaunchVersion } from '../../../packages/common/contracts/teams-launch.js'
 import { teamsDataModeSchema } from '../../../packages/common/contracts/teams-data-mode.js'
+import { createTeamsPerformanceReporter } from './performance.js'
 import { createTeamsDataModeRouter } from './data-mode-router.js'
 
 export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.env) {
@@ -61,7 +62,8 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
       packageVersion: environment['TLC_TEAMS_PACKAGE_VERSION'], origin: configuration.origin, mode: configuration.mode,
       authentication: isLocalConfiguration(configuration) ? configuration.authentication : 'hosted-obo'
     }), native ? (code) => native.pairing.hasPage(code) : undefined) : undefined
-  const runtimeEnvironment = native?.environment ?? environment
+  const runtimeEnvironment: NodeJS.ProcessEnv = native?.environment ?? environment
+  const performanceReporter = createTeamsPerformanceReporter(runtimeEnvironment)
   const runtime = loadTeamsRuntimeConfiguration(runtimeEnvironment, configuration)
   const stateKey = configuration.mode === 'live' ? loadTeamsStateKey(runtimeEnvironment) : undefined
   const foundry = hosted || isNativeConfiguration(configuration) && configuration.guidanceMode === 'foundry'
@@ -139,6 +141,7 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
     }
     const services = createLiveApplicationServices({
       environment: runtimeEnvironment, msxResource: configuration.msxResource,
+      ...(performanceReporter ? { performanceReporter } : {}),
       ...(native ? {
         guidanceMode: isNativeConfiguration(configuration) ? configuration.guidanceMode : 'deterministic',
         fetchImplementation: async (input, init) => {
@@ -260,7 +263,14 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   web.get('/auth/callback', (_request, response) => response.type('html').send('<!doctype html><html lang="en"><head><title>Microsoft sign-in complete</title></head><body>Return to TLC Assist.</body></html>'))
   web.get('/privacy', (_request, response) => response.type('text').send('TLC Assist uses delegated source permissions. Prompts, tokens, customer details and transcripts are not operational telemetry. Contact your application owner for the approved data and audit retention policy.'))
   web.get('/terms', (_request, response) => response.type('text').send('Internal Microsoft FTE application. Source-system authorization and reviewed-action controls apply. Sample mode uses sanitized data only.'))
-  web.use(express.static(clientRoot, { index: false, dotfiles: 'deny', fallthrough: true }))
+  web.use(express.static(clientRoot, {
+    index: false, dotfiles: 'deny', fallthrough: true,
+    setHeaders: (response, path) => {
+      if (/[\\/]assets[\\/][^\\/]+-[A-Za-z0-9_-]{8,}\.(?:js|css|woff2?|png|svg)$/.test(path)) {
+        response.setHeader('cache-control', 'public, max-age=31536000, immutable')
+      }
+    }
+  }))
   web.get('/', (_request, response) => response.sendFile(resolve(clientRoot, 'index.html')))
   web.use((_request, response) => response.status(404).json({ error: 'route_not_found' }))
   const server = tls ? createHttpsServer(tls, web) : createServer(web)
