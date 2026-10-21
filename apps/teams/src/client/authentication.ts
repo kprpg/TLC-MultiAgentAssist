@@ -6,6 +6,7 @@ import {
 import { teamsPublicConfigurationSchema } from '../../../../packages/common/contracts/collaboration.js'
 import { z } from 'zod'
 import { LocalBrowserConnection } from './local-connection.js'
+import type { TeamsApiBasePath } from '../../../../packages/common/contracts/teams-data-mode.js'
 
 export interface BrowserHostContext {
   embedded: boolean
@@ -16,14 +17,13 @@ export interface BrowserHostContext {
   tenantId?: string
   userId?: string
 }
-export async function initializeBrowserAuthentication(onTheme: (theme: string) => void) {
-  const configuration = teamsPublicConfigurationSchema.parse(await (await fetch('/api/teams/config', { credentials: 'omit' })).json())
+async function readBrowserHost(onTheme: (theme: string) => void, reuseHost: boolean) {
   let context: BrowserHostContext = { embedded: false, theme: 'default', kind: 'channel' }
   let naa = false
   const nativeHost = 'nativeInterface' in window && typeof window.nativeInterface === 'object' && window.nativeInterface !== null &&
     'framelessPostMessage' in window.nativeInterface && typeof window.nativeInterface.framelessPostMessage === 'function'
   if (window.parent !== window || nativeHost) {
-    await app.initialize()
+    if (!reuseHost) await app.initialize()
     const host = await app.getContext()
     const tenantId = z.uuid().safeParse(host.user?.tenant?.id)
     const userId = z.uuid().safeParse(host.user?.id)
@@ -35,13 +35,24 @@ export async function initializeBrowserAuthentication(onTheme: (theme: string) =
       ...(host.channel?.id ? { contextId: host.channel.id } : host.chat?.id ? { contextId: host.chat.id } : {})
     }
     naa = nestedAppAuth.isNAAChannelRecommended()
-    app.registerOnThemeChangeHandler(onTheme)
+    app.registerOnThemeChangeHandler((value) => { context.theme = value; onTheme(value) })
     onTheme(context.theme)
-    app.notifySuccess()
+    if (!reuseHost) app.notifySuccess()
   }
+  return { context, naa }
+}
+const hostIdentity = (context: BrowserHostContext) => JSON.stringify([
+  context.embedded, context.frameContext, context.kind, context.contextId, context.tenantId, context.userId
+])
+
+export async function initializeBrowserAuthentication(onTheme: (theme: string) => void, apiBasePath: TeamsApiBasePath = '/api/teams', reuseHost = false) {
+  const response = await fetch(`${apiBasePath}/config`, { credentials: 'omit' })
+  if (!response.ok) throw new Error(`Data-mode configuration is unavailable (HTTP ${response.status}).`)
+  const configuration = teamsPublicConfigurationSchema.parse(await response.json())
+  const { context, naa } = await readBrowserHost(onTheme, reuseHost)
   let pca: IPublicClientApplication | undefined
   let currentClaims: string | undefined
-  const localConnection = 'authentication' in configuration ? new LocalBrowserConnection(context) : undefined
+  const localConnection = 'authentication' in configuration ? new LocalBrowserConnection(context, apiBasePath) : undefined
   if (configuration.mode === 'live' && !('authentication' in configuration)) {
     const settings = {
       auth: {
@@ -53,8 +64,15 @@ export async function initializeBrowserAuthentication(onTheme: (theme: string) =
     if (naa) pca = await createNestablePublicClientApplication(settings)
     else { pca = new PublicClientApplication(settings); await pca.initialize() }
   }
+  const clear = async () => { currentClaims = undefined; localConnection?.clear(); if (pca) await pca.clearCache() }
   return {
-    configuration, context, localConnection,
+    configuration, context, localConnection, apiBasePath,
+    async activate(onTheme: (theme: string) => void): Promise<boolean> {
+      const fresh = await readBrowserHost(onTheme, true)
+      if (hostIdentity(fresh.context) !== hostIdentity(context)) { await clear(); return false }
+      context.theme = fresh.context.theme
+      return true
+    },
     async getToken(interactive = false, claims?: string): Promise<string> {
       if (configuration.mode === 'sample') return ''
       if (localConnection) return localConnection.getToken()
@@ -74,7 +92,7 @@ export async function initializeBrowserAuthentication(onTheme: (theme: string) =
       pca.setActiveAccount(result.account)
       return result.accessToken
     },
-    async clear() { currentClaims = undefined; localConnection?.clear(); if (pca) await pca.clearCache() }
+    clear
   }
 }
 export type BrowserAuthentication = Awaited<ReturnType<typeof initializeBrowserAuthentication>>

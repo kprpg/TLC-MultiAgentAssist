@@ -1,6 +1,23 @@
 import { expect, test } from '@playwright/test'
 import { embeddedTeams } from './helpers.js'
 
+test('the mode-discard confirmation is usable inside a sandboxed Teams iframe without contacting Live before confirmation', async ({ page }) => {
+  let liveRequests = 0
+  await page.route('**/api/teams/modes', (route) => route.fulfill({
+    json: { contractVersion: '1.0', initialMode: 'sample', runtimeMode: 'sample', runtimeAuthentication: 'hosted-obo', availableModes: ['sample', 'live'] }
+  }))
+  await page.route('**/api/teams/live/**', (route) => { liveRequests++; return route.abort() })
+  const app = await embeddedTeams(page, 'content', 'default', '1.2484.12345', true)
+  await app.getByLabel('Data mode', { exact: true }).selectOption('live')
+  const dialog = app.getByRole('dialog', { name: 'Switch to Live mode?', exact: true })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByText("This clears this page's unsaved drafts, displayed results and pending reviews. Other open pages are unchanged.", { exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Keep current mode', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  await expect(app.getByLabel('Data mode', { exact: true })).toHaveValue('sample')
+  expect(liveRequests).toBe(0)
+})
+
 test('real Teams SDK handshake retains theme changes and keyboard navigation in the embedded UI', async ({ page }) => {
   const failures: string[] = []
   page.on('pageerror', (error) => failures.push(error.message))

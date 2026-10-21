@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { TeamsApiBasePath, TeamsDataMode } from '../../../../packages/common/contracts/teams-data-mode.js'
 import {
   actionApprovalSchema, actionPreviewSchema, actionReceiptSchema, collaborationVersion, teamsSessionSchema,
   type ActionPreview, type ActionReceipt
@@ -11,12 +12,16 @@ export class TeamsRequestError extends Error {
   }
 }
 export class TeamsApiClient {
+  private readonly disposed = new AbortController()
   constructor(
     private readonly getToken: () => Promise<string>,
     private readonly onAuthenticationRequired?: (claims?: string) => void,
-    private readonly isCurrentToken?: (token: string) => boolean
+    private readonly isCurrentToken?: (token: string) => boolean,
+    private readonly apiBasePath: TeamsApiBasePath = '/api/teams',
+    private readonly expectedMode?: TeamsDataMode
   ) {}
   private assertCurrentToken(token: string): void {
+    if (this.disposed.signal.aborted) throw new TeamsRequestError('data_mode_changed')
     if (this.isCurrentToken && !this.isCurrentToken(token)) throw new TeamsRequestError('local_connection_changed')
   }
   async request<T>(path: string, schema: z.ZodType<T>, input?: unknown, signal?: AbortSignal): Promise<T> {
@@ -27,14 +32,15 @@ export class TeamsApiClient {
   }
   private async fetchResponse(path: string, input?: unknown, signal?: AbortSignal): Promise<{ response: Response; token: string }> {
     const token = await this.getToken()
-    const response = await fetch(`/api/teams/${path}`, {
+    this.assertCurrentToken(token)
+    const response = await fetch(`${this.apiBasePath}/${path}`, {
       method: input === undefined ? 'GET' : 'POST', credentials: 'omit',
       headers: {
         ...(token ? { authorization: `Bearer ${token}` } : {}),
         ...(input === undefined ? {} : { 'content-type': 'application/json' })
       },
       ...(input === undefined ? {} : { body: JSON.stringify(input) }),
-      ...(signal ? { signal } : {})
+      signal: AbortSignal.any([this.disposed.signal, ...(signal ? [signal] : [])])
     })
     this.assertCurrentToken(token)
     if (!response.ok) {
@@ -54,7 +60,11 @@ export class TeamsApiClient {
     anchor.href = url; anchor.download = name; anchor.click()
     setTimeout(() => URL.revokeObjectURL(url), 0)
   }
-  session() { return this.request('session', teamsSessionSchema) }
+  async session() {
+    const session = await this.request('session', teamsSessionSchema)
+    if (this.expectedMode && session.mode !== this.expectedMode) throw new TeamsRequestError('data_mode_session_mismatch')
+    return session
+  }
   operation<T>(name: string, input: unknown, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
     return this.request(`operations/${encodeURIComponent(name)}`, schema, input, signal)
   }
@@ -65,6 +75,7 @@ export class TeamsApiClient {
     const approval = actionApprovalSchema.parse({ contractVersion: collaborationVersion, id: preview.id, digest: preview.digest, reason })
     return this.request('actions/commit', actionReceiptSchema, approval)
   }
+  dispose(): void { this.disposed.abort() }
 }
 export type ReviewAction = (operation: string, input: Record<string, unknown>) => Promise<ActionReceipt>
 export type ReviewPreview = (preview: ActionPreview) => Promise<ActionReceipt>

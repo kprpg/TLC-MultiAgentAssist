@@ -265,10 +265,20 @@ connection and verified pairing, use the single
 After one-time setup, it discovers the private live configuration at
 `%LOCALAPPDATA%\TLC-Assist\Teams\configuration\cli.env` and trusted PEM files at
 `%LOCALAPPDATA%\TLC-Assist\Teams\certs\localhost.pem` / `localhost-key.pem`.
+Starting in Sample with this approved configuration prepares the same
+Live-capable backend without connecting to MSX. In Teams **My work**, use
+**Data mode: Sample / Live** to switch in place: no backend restart, page reload
+or reinstall. Sample uses the shared sanitized SQLite services and persists
+edits separately from encrypted Live state. Confirm before discarding drafts;
+switching is blocked during write confirmation. First Live use still needs
+explicit owner connection and page pairing; a valid approval is reused only in
+the same page. Without a configured Live profile, Live stays unavailable. See
+[mode switching and storage](docs/runbooks/teams-app.md#switch-sample-and-live-inside-teams).
+
 The origin comes from `-Origin`, configured `TLC_TEAMS_ORIGIN`, or defaults to
 `https://localhost:3978`. It verifies HTTPS before sideloading and also supports
 an existing approved HTTPS ingress. It never creates/trusts certificates or
-signs in to MSX automatically. The guide asks for explicit **CONNECT** confirmation
+signs in to MSX automatically. For initial Live setup, the guide asks for explicit **CONNECT** confirmation
 and the exact code displayed by the Teams page, then requires a fresh matching
 client/build/runtime acknowledgement before printing **VERIFIED**. Upload success
 or a browser preview alone is not completion. `-BackendOnly` defers installation;

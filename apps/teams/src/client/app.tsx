@@ -4,7 +4,7 @@ import { meeting } from '@microsoft/teams-js'
 import { z } from 'zod'
 import { actionPreviewSchema, contextBindingSchema, type ActionPreview, type ActionReceipt, type TeamsSession } from '../../../../packages/common/contracts/collaboration.js'
 import { accountCandidateSchema, accountSchema, opportunitySchema, type AccountCandidate } from '../../../../packages/common/contracts/index.js'
-import { initializeBrowserAuthentication, type BrowserAuthentication } from './authentication.js'
+import type { BrowserAuthentication } from './authentication.js'
 import { TeamsApiClient, type ReviewAction, type ReviewPreview } from './data-client.js'
 import { TeamsShell } from './shell.js'
 import { useWorkspaceNavigation } from './use-workspace-navigation.js'
@@ -22,6 +22,9 @@ import { ContextWorkspace, SharedStage } from './context.js'
 import { ReviewDialog } from './review-dialog.js'
 import { NativeConnectionPanel } from './native-connection-panel.js'
 import { TeamsLaunchStatusPanel } from './launch-status.js'
+import { useTeamsDataMode } from './use-data-mode.js'
+import { DataModeSwitcher } from './data-mode-switcher.js'
+import type { TeamsDataMode } from '../../../../packages/common/contracts/teams-data-mode.js'
 
 interface PendingReview { preview: ActionPreview; resolve(receipt: ActionReceipt): void; reject(error: Error): void }
 
@@ -58,24 +61,27 @@ export function TeamsApp() {
     pendingRef.current?.reject(new Error('Reconnect and prepare a fresh review before continuing.'))
     pendingRef.current = null; setPending(null); setError(message)
   }, [bindingId])
+  const dataMode = useTeamsDataMode()
   useEffect(() => {
+    if (!dataMode.ready) return
     let alive = true
-    initializeBrowserAuthentication((value) => { if (alive) setTheme(value) }).then(async (auth) => {
+    let api: TeamsApiClient | undefined
+    dataMode.initializeAuthentication((value) => { if (alive) setTheme(value) }).then(async (auth) => {
       if (!alive) return
       setAuthentication(auth)
       const localConnection = auth.localConnection
-      const api = new TeamsApiClient(() => auth.getToken(), (claims) => {
+      api = new TeamsApiClient(() => auth.getToken(), (claims) => {
         if (!alive) return
         auth.localConnection?.clear(); setRequiredClaims(claims)
         clearPrivateWorkspace('Sign in again to satisfy current access policy. Private results were cleared; reopen any unsent review.')
-      }, localConnection ? (token) => localConnection.isCurrentToken(token) : undefined)
+      }, localConnection ? (token) => localConnection.isCurrentToken(token) : undefined, auth.apiBasePath, auth.configuration.mode)
       setClient(api)
-      if (auth.localConnection) return
+      if (auth.localConnection && !auth.localConnection.sessionExpiresAt()) return
       const identity = await api.session()
       if (alive) setSession(identity)
     }).catch((cause: unknown) => { if (alive) setError(String(cause)) })
-    return () => { alive = false }
-  }, [clearPrivateWorkspace])
+    return () => { alive = false; api?.dispose() }
+  }, [clearPrivateWorkspace, dataMode.ready, dataMode.initializeAuthentication])
   const finishLocalConnection = useCallback(async () => {
     if (!client) throw new Error('The local API client is unavailable.')
     setError(''); setRequiredClaims(undefined); setSession(await client.session())
@@ -176,6 +182,24 @@ export function TeamsApp() {
   const selectedTheme = theme === 'dark' ? teamsDarkTheme : theme === 'contrast' ? teamsHighContrastTheme : teamsLightTheme
   const workspaceAllowed = !bindingId || bindingStatus === 'ready'
   const hostSurface = teamsSurface(parameters, authentication?.context.frameContext)
+  function switchDataMode(mode: TeamsDataMode) {
+    if (reviewBusy) { setError('Wait for the current write confirmation before switching modes.'); return }
+    if (bindingId || hostSurface !== 'personal') { setError('Data-mode switching is available in the personal workbench only.'); return }
+    if (!dataMode.catalog?.availableModes.includes(mode)) { setError('That data mode is not configured for this runtime.'); return }
+    if (authentication?.localConnection && !authentication.localConnection.sessionExpiresAt()) authentication.localConnection.clear()
+    client?.dispose()
+    clearPrivateWorkspace('')
+    setClient(undefined); setAuthentication(undefined); setRequiredClaims(undefined); setReviewError('')
+    const url = new URL(location.href)
+    for (const key of ['referenceId', 'runId', 'artifactId', 'accountId', 'opportunityId']) url.searchParams.delete(key)
+    url.searchParams.set('view', 'portfolio')
+    history.replaceState(null, '', url)
+    setView('portfolio')
+    dataMode.select(mode)
+  }
+  const modeControl = hostSurface === 'personal' && !bindingId && authentication
+    ? <DataModeSwitcher catalog={dataMode.catalog} mode={authentication.configuration.mode} locked={reviewBusy}
+      error={dataMode.error} onSwitch={switchDataMode} /> : null
   const focusPortfolio = useCallback((accountId: string, opportunityId = '') => {
     setPreferredAccountId(accountId); setPreferredOpportunityId(opportunityId); setView('portfolio')
   }, [setView])
@@ -188,9 +212,10 @@ export function TeamsApp() {
     if (hostSurface === 'configure') setView('configure')
   }, [hostSurface, setView])
   return <FluentProvider theme={selectedTheme}>
-    {hostSurface === 'personal' && !bindingId && <TeamsLaunchStatusPanel authentication={authentication} client={client} connected={!!session} />}
+    {hostSurface === 'personal' && !bindingId && <TeamsLaunchStatusPanel authentication={authentication} client={client} connected={!!session} runtimeModes={dataMode.catalog} />}
     {!session || !client || !authentication ? <main className="signin-panel">
       <h1>TLC Assist for Teams</h1><p>Private, grounded account-team guidance.</p>
+      {modeControl}
       {error ? <p role="alert" className="error-banner">{error}</p> : <p role="status">{authentication?.localConnection ? 'Local runtime ready. Connect and pair this page yourself to access live MSX.' : 'Initializing your Teams workspace...'}</p>}
       {authentication?.localConnection && client ? <NativeConnectionPanel connection={authentication.localConnection} client={client}
         authentication={'authentication' in authentication.configuration ? authentication.configuration.authentication : 'local-interactive'}
@@ -199,6 +224,7 @@ export function TeamsApp() {
         : authentication?.configuration.mode === 'live' && <button type="button" className="primary" onClick={() => { void signIn() }}>Sign in with Microsoft</button>}
     </main> : surface === 'stage' ? <SharedStage client={client} artifactId={parameters.get('artifactId')} /> : <TeamsShell mode={session.mode} view={view} onNavigate={setView} surface={hostSurface}
       commands={<>
+        {modeControl}
         {hostSurface === 'personal' && <PortfolioSearch client={client} contextKey={`${session.mode}:${view}`} onSelect={focusPortfolio} />}
         {view === 'portfolio' && <PortfolioLayoutControls {...panes} onToggleAccounts={() => togglePane('accountsExpanded')}
           onToggleDetails={() => togglePane('detailsExpanded')} onToggleActions={() => togglePane('actionsExpanded')} />}

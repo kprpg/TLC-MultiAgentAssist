@@ -35,6 +35,7 @@ surface adds the following focused areas while preserving one shared backend/har
 ```text
 apps/teams/src/                       Teams composition, verified HTTP/bot transport
 apps/teams/src/runtime-resources.ts   Local SQLite/CLI or Azure Table/managed identity
+apps/teams/src/data-mode-router.ts    Per-page Sample/Live routes over isolated canonical services/stores
 apps/teams/src/native-identity.ts     Native SDK identity/resource tokens; no HTTP interaction
 apps/teams/src/cli-identity.ts        Verified current CLI user; private read-only MSX, no FTE inference
 apps/teams/src/native-connection.ts   Per-user native composition, private state and owner control
@@ -46,6 +47,9 @@ apps/teams/src/client/                Personal/channel/meeting presentation
                                      Plays/result, navigation and responsive-disclosure modules
                                      Native connection panel and memory-only local API client
 apps/teams/src/client/discovery.tsx   Domain tabs, shared customer filters/sort and reviewed memberships
+apps/teams/src/client/use-data-mode.ts
+apps/teams/src/client/data-mode-switcher.tsx
+                                     Personal mode selector, discard confirmation and memory-only auth reuse
 apps/teams/src/client/discovery.css   Teams-themed compact discovery table and responsive layout
 apps/teams/src/client/mcem-stage-board.tsx
                                      Account-scoped Teams selection over shared MCEM stage columns
@@ -68,6 +72,8 @@ packages/common/contracts/local-connection.ts
                                      and independently versioned work-session renewal v1.0
 packages/common/contracts/teams-launch.ts
                                      Separate strict v1.0 launch/build/client-readiness contracts
+packages/common/contracts/teams-data-mode.ts
+                                     Strict v1.0 runtime/initial/available modes and bounded API paths
 packages/orchestrator/application-runtime.ts
 packages/orchestrator/operations.ts   Shared composition and typed operation catalog
 packages/orchestrator/task-agents.ts  Shared Foundry/sample/deterministic-live registries

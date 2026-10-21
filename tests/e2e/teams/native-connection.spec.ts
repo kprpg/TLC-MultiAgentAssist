@@ -3,9 +3,9 @@ import { getCliCapabilities, cliPublicConfigurationVersion, localConnectionVersi
 import { chooseOpportunity, embeddedTeams, post } from './helpers.js'
 import { teamsClientReadyRequestSchema } from '../../../packages/common/contracts/teams-launch.js'
 import { meetingChangeSetResultSchema } from '../../../packages/common/contracts/meeting.js'
-import { actionReceiptSchema } from '../../../packages/common/contracts/collaboration.js'
+import { actionPreviewSchema, actionReceiptSchema } from '../../../packages/common/contracts/collaboration.js'
 
-async function offlineNativeFixture(page: Page, cli = false, writeMode: CliWriteMode = 'read-only') {
+async function offlineNativeFixture(page: Page, cli = false, writeMode: CliWriteMode = 'read-only', initialMode: 'sample' | 'live' = 'live') {
   const launch = await (await page.request.get('/api/teams/launch')).json()
   let approved = false
   let revoked = false
@@ -21,6 +21,11 @@ async function offlineNativeFixture(page: Page, cli = false, writeMode: CliWrite
     const path = new URL(route.request().url()).pathname.slice('/api/teams/'.length)
     requests.push(path)
     const json = (value: unknown, status = 200) => route.fulfill({ status, json: value })
+    if (path === 'modes') return json({
+      contractVersion: '1.0', initialMode, runtimeMode: 'live',
+      runtimeAuthentication: cli ? 'local-azure-cli' : 'local-interactive', availableModes: ['sample', 'live']
+    })
+    if (path.startsWith('sample/')) return route.continue()
     if (path === 'launch') return json({ ...launch, mode: 'live', authentication: cli ? 'local-azure-cli' : 'local-interactive' })
     if (path === 'config') return json({
       contractVersion: cli ? cliPublicConfigurationVersion : localConnectionVersion, mode: 'live',
@@ -62,6 +67,87 @@ async function offlineNativeFixture(page: Page, cli = false, writeMode: CliWrite
   })
   return { approve: () => { approved = true }, connectMcp: () => { mcpConnected = true }, invalidate: () => { unavailable = true }, requests, reports, privateRequests: () => privateRequests, token }
 }
+test('Sample can open before Live pairing and mode confirmation preserves or discards drafts explicitly', async ({ page, request }) => {
+  const fixture = await offlineNativeFixture(page, true, 'read-only', 'sample')
+  await page.goto('/')
+  await expect(page.getByText('Sample - no live business data', { exact: true })).toBeVisible()
+  expect(fixture.privateRequests()).toBe(0)
+  const { account, opportunity } = await chooseOpportunity(page, request)
+  await page.getByText('Opportunity notes and reviewed updates', { exact: true }).click()
+  const original = await page.getByLabel('Opportunity notes', { exact: true }).inputValue()
+  await page.getByLabel('Opportunity notes', { exact: true }).fill('Unsaved sample-only draft')
+  await page.getByLabel('Data mode', { exact: true }).selectOption('live')
+  const dialog = page.getByRole('dialog', { name: 'Switch to Live mode?', exact: true })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Keep current mode', exact: true }).click()
+  await expect(page.getByLabel('Opportunity notes', { exact: true })).toHaveValue('Unsaved sample-only draft')
+  expect(fixture.privateRequests()).toBe(0)
+  await page.getByLabel('Data mode', { exact: true }).selectOption('live')
+  await dialog.getByRole('button', { name: 'Switch mode and discard unsaved work', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Request local pairing', exact: true })).toBeVisible()
+  expect(fixture.privateRequests()).toBe(0)
+  await page.getByLabel('Data mode', { exact: true }).selectOption('sample')
+  await page.getByRole('dialog', { name: 'Switch to Sample mode?', exact: true })
+    .getByRole('button', { name: 'Switch mode and discard unsaved work', exact: true }).click()
+  await page.getByLabel('Customer account', { exact: true }).selectOption(account.id)
+  await page.getByLabel('Opportunity', { exact: true }).selectOption(opportunity.id)
+  await page.getByText('Opportunity notes and reviewed updates', { exact: true }).click()
+  await expect(page.getByLabel('Opportunity notes', { exact: true })).toHaveValue(original)
+  expect(fixture.requests.filter((path) => path === 'local/requests')).toHaveLength(0)
+})
+test('one paired page switches to persistent SQLite Sample and back to Live without another pairing or Live calls from Sample', async ({ page, request }) => {
+  const fixture = await offlineNativeFixture(page, true)
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Request local pairing', exact: true }).click()
+  fixture.approve()
+  await expect(page.getByLabel('Customer account', { exact: true })).toHaveValue('cli-own-account')
+  await page.getByLabel('Data mode', { exact: true }).selectOption('sample')
+  await page.getByRole('dialog', { name: 'Switch to Sample mode?', exact: true })
+    .getByRole('button', { name: 'Switch mode and discard unsaved work', exact: true }).click()
+  await expect(page.getByText('Sample - no live business data', { exact: true })).toBeVisible()
+  const privateBefore = fixture.privateRequests()
+  const { account, opportunity } = await chooseOpportunity(page, request)
+  await page.getByText('Opportunity notes and reviewed updates', { exact: true }).click()
+  const original = await page.getByLabel('Opportunity notes', { exact: true }).inputValue()
+  await page.getByLabel('Opportunity notes', { exact: true }).fill('Persisted isolated Sample mode edit')
+  await page.getByRole('button', { name: 'Review opportunity update', exact: true }).click()
+  const review = page.getByRole('dialog', { name: 'Review exact changes', exact: true })
+  await review.getByLabel('Review reason', { exact: true }).fill('Reviewed only the local Sample edit')
+  let release = () => {}
+  const blocked = new Promise<void>((resolve) => { release = resolve })
+  await page.route('**/api/teams/sample/actions/commit', async (route) => { await blocked; await route.continue() })
+  await review.getByRole('button', { name: 'Confirm selected changes', exact: true }).click()
+  await expect(page.locator('.data-mode-switcher select')).toBeDisabled()
+  release()
+  await expect(review).toBeHidden()
+  await expect(page.getByLabel('Data mode', { exact: true })).toBeEnabled()
+  expect(fixture.privateRequests()).toBe(privateBefore)
+  await page.getByLabel('Data mode', { exact: true }).selectOption('live')
+  await page.getByRole('dialog', { name: 'Switch to Live mode?', exact: true })
+    .getByRole('button', { name: 'Switch mode and discard unsaved work', exact: true }).click()
+  await expect(page.getByLabel('Customer account', { exact: true })).toHaveValue('cli-own-account')
+  expect(fixture.requests.filter((path) => path === 'local/requests')).toHaveLength(1)
+  await page.getByLabel('Data mode', { exact: true }).selectOption('sample')
+  await page.getByRole('dialog', { name: 'Switch to Sample mode?', exact: true })
+    .getByRole('button', { name: 'Switch mode and discard unsaved work', exact: true }).click()
+  await page.getByLabel('Customer account', { exact: true }).selectOption(account.id)
+  await page.getByLabel('Opportunity', { exact: true }).selectOption(opportunity.id)
+  await page.getByText('Opportunity notes and reviewed updates', { exact: true }).click()
+  await expect(page.getByLabel('Opportunity notes', { exact: true })).toHaveValue('Persisted isolated Sample mode edit')
+  fixture.invalidate()
+  await page.getByLabel('Data mode', { exact: true }).selectOption('live')
+  await page.getByRole('dialog', { name: 'Switch to Live mode?', exact: true })
+    .getByRole('button', { name: 'Switch mode and discard unsaved work', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Request local pairing', exact: true })).toBeVisible()
+  await expect(page.getByLabel('Customer account', { exact: true })).toBeHidden()
+  await expect(page.getByText('Offline signed-in user deal-team account', { exact: true })).toBeHidden()
+  const restored = actionPreviewSchema.parse(await (await request.post('/api/teams/actions/preview', {
+    data: { operation: 'updateOpportunity', input: { opportunityId: opportunity.id, update: { comments: original } } }
+  })).json())
+  expect(actionReceiptSchema.parse(await (await request.post('/api/teams/actions/commit', {
+    data: { contractVersion: '1.0', id: restored.id, digest: restored.digest, reason: 'Restore prior sanitized Sample notes after the browser regression.' }
+  })).json()).state).toBe('confirmed')
+})
 test('live Plays explains optional MCP setup, waits for owner connection and preserves the MSX page', async ({ page }) => {
   const fixture = await offlineNativeFixture(page, true, 'reviewed')
   await page.goto('/')

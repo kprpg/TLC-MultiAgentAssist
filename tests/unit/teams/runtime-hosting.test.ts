@@ -129,6 +129,15 @@ describe('one Teams runtime, local now and Azure later', () => {
     const environment = { ...liveEnvironment, TLC_TEAMS_DATA_DIR: await directory() }
     const configuration = loadTeamsConfiguration(environment)
     expect(() => loadTeamsRuntimeConfiguration({ ...environment, TLC_TEAMS_STATE_PATH: ':memory:' }, configuration)).toThrow(/durable/i)
+    const samplePath = join(environment.TLC_TEAMS_DATA_DIR, 'sample.sqlite')
+    expect(() => loadTeamsRuntimeConfiguration({
+      ...environment, TLC_TEAMS_SAMPLE_PATH: samplePath, TLC_TEAMS_STATE_PATH: `${samplePath}.state.sqlite`
+    }, configuration)).toThrow(/Live.*Sample.*distinct/i)
+    if (process.platform === 'win32') {
+      expect(() => loadTeamsRuntimeConfiguration({
+        ...environment, TLC_TEAMS_SAMPLE_PATH: samplePath, TLC_TEAMS_STATE_PATH: `${samplePath.toUpperCase()}.state.sqlite`
+      }, configuration)).toThrow(/Live.*Sample.*distinct/i)
+    }
     expect(() => loadTeamsRuntimeConfiguration({ ...environment, TLC_TEAMS_RUNTIME_PROFILE: 'typo' }, configuration)).toThrow()
     const runtime = loadTeamsRuntimeConfiguration(environment, configuration)
     await expect(createTeamsStateStore(configuration, runtime, { ...environment, TLC_TEAMS_STATE_KEY: undefined })).rejects.toThrow(/key/i)

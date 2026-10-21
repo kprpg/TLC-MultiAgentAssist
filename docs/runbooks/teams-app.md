@@ -658,10 +658,13 @@ in the repository. This is the single sample/live launcher:
 .\scripts\run-teams-local.ps1 -Stop
 ```
 
-The menu defaults to **Sample** on Enter. Invalid choices fail explicitly; Live
-never falls back to sample when configuration or authentication is unavailable.
-After switching modes, reload or reopen the Teams tab to fetch its new
-configuration; a restarted Live runtime requires a fresh owner-approved pairing.
+The menu defaults to **Sample** on Enter and chooses the initial data mode for
+new pages. Invalid choices fail explicitly; Live never falls back to Sample when
+configuration or authentication is unavailable. With an approved Live profile
+already configured, the launcher prepares one Live-capable runtime even when
+you start in Sample. Use the personal workbench's **Data mode** selector to switch
+without restarting the backend, reloading the page or reinstalling the app. A
+backend restart still requires a fresh owner-approved Live pairing.
 Use ordinary invocation (`.\scripts\run-teams-local.ps1`) rather than dot-sourcing
 the launcher into your current PowerShell scope. `-Mode` bypasses the menu;
 `-Stop` needs neither a mode nor an origin.
@@ -702,7 +705,58 @@ accepts `-CliWriteMode read-only` or `-CliWriteMode reviewed` as an explicit ove
 Selecting Live enables the reviewed-write capability, **not automatic writes**.
 Backend startup never connects to MSX or initiates login. The guided finish asks
 the owner for explicit CONNECT confirmation and exact page-code approval; each
-source change still needs separate review. Sample does not auto-load the live file.
+source change still needs separate review. Sample also discovers an existing
+private configuration so Live can be selected later in the same page; loading
+configuration is not source sign-in, pairing or permission to read/write Live
+data. The Sample-first guide skips source connection and page pairing entirely.
+With no approved Live profile, Sample remains standalone and Live is unavailable.
+
+#### Switch Sample and Live inside Teams
+
+1. Open **My work**, the personal workbench, and use **Data mode: Sample / Live**
+   in its header. The selector is also available before Live pairing, so you can
+   explore Sample without signing in to a source.
+2. Confirm **Switch mode and discard unsaved work**, or choose **Keep current
+   mode** to retain the current draft. Switching clears the page's drafts, results,
+   pending reviews and selected account/opportunity; it opens the target mode's
+   Portfolio. The control is locked while a write confirmation is in progress.
+3. Sample uses the canonical sanitized **SQLite** services shared with the other
+   clients, not browser-only mock records. Sample edits, approvals and activity
+   are separate from Live; no customer records, source credentials or Live page
+   capability are sent to Sample requests.
+4. First use of local Live still needs the configured source, explicit owner
+   **Connect**, and the current page's code approval. If needed, use
+   `teams-local-connection.ps1 -Action Connect` and `-Action Approve -UserCode`
+   with the same protected `-WorkDirectory` used by the launcher. Selecting Live
+   never performs either step on your behalf.
+5. Returning to Live in the **same page** reuses an unexpired, still-authorized
+   approval held only in memory; revoked/expired approval or a changed Teams
+   identity/context requires authorization again. No capability is persisted in
+   browser storage or a cookie. A recreated Teams webview still needs manual
+   pairing; changing data mode does not alter that security choice.
+
+The selection is per personal page, not a global switch: other pages, bound
+channel/meeting surfaces and already-dispatched operations keep their original
+mode. Switching does not cancel or undo a submitted workflow/write. Late results
+from an old-mode client are discarded rather than appearing in the new mode.
+
+The guided launcher keeps Sample records at
+`<WorkDirectory>\data\sample\sample.sqlite`, normally beneath
+`%LOCALAPPDATA%\TLC-Assist\Teams\launcher-cli`. In a Live-capable runtime, Sample
+review/activity state uses the separate `sample.sqlite.state.sqlite` file.
+These survive mode changes and backend restarts; Live state remains in its own
+encrypted store. `TLC_TEAMS_SAMPLE_PATH` can override the Sample data path; keep
+both Sample files distinct from `TLC_TEAMS_STATE_PATH`. Test-only `:memory:`
+settings are not persistent.
+
+For direct Node/configured startup, `TLC_TEAMS_MODE` remains the immutable runtime
+profile. Set optional `TLC_TEAMS_INITIAL_MODE=sample` on a configured Live runtime
+to open Sample first without source access. `GET /api/teams/modes` reports the
+versioned initial/runtime/available modes; the canonical API retains the runtime
+profile and explicit mode-prefixed routes use isolated services/stores. Backend
+connection shows runtime identity and active page data mode separately. The
+launcher's `-Status` records the initial data mode; it does not change or claim
+the current selection in other open pages.
 
 The launcher performs the requested sequence:
 

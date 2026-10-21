@@ -89,7 +89,12 @@ export function loadTeamsRuntimeConfiguration(environment: NodeJS.ProcessEnv, co
   if (configuration.mode === 'live' && configuredPath === ':memory:') throw new Error('Live laptop state must use a durable SQLite file.')
   const path = configuredPath === ':memory:' ? configuredPath : resolve(configuredPath)
   const resolvedSamplePath = samplePath === ':memory:' ? samplePath : resolve(samplePath)
-  if (path !== ':memory:' && path === resolvedSamplePath) throw new Error('Collaboration state and sample data require distinct files.')
+  const stateFile = process.platform === 'win32' ? path.toLowerCase() : path
+  const sampleFile = process.platform === 'win32' ? resolvedSamplePath.toLowerCase() : resolvedSamplePath
+  if (path !== ':memory:' && stateFile === sampleFile) throw new Error('Collaboration state and sample data require distinct files.')
+  if (configuration.mode === 'live' && resolvedSamplePath !== ':memory:' && stateFile === `${sampleFile}.state.sqlite`) {
+    throw new Error('Live collaboration state and Sample collaboration state require distinct files.')
+  }
   return { profile, state: { kind: 'sqlite', path }, samplePath: resolvedSamplePath }
 }
 

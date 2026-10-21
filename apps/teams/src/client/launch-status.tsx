@@ -2,14 +2,16 @@ import { useEffect, useState } from 'react'
 import { teamsClientReadyResultSchema, teamsLaunchStatusSchema, teamsLaunchVersion, type TeamsLaunchStatus } from '../../../../packages/common/contracts/teams-launch.js'
 import type { BrowserAuthentication } from './authentication.js'
 import type { TeamsApiClient } from './data-client.js'
+import type { TeamsDataModes } from '../../../../packages/common/contracts/teams-data-mode.js'
 
 declare const __TLC_TEAMS_CLIENT_BUILD_ID__: string
 const clientBuildId = typeof __TLC_TEAMS_CLIENT_BUILD_ID__ === 'undefined' ? undefined : __TLC_TEAMS_CLIENT_BUILD_ID__
 
-export function TeamsLaunchStatusPanel({ authentication, client, connected }: {
+export function TeamsLaunchStatusPanel({ authentication, client, connected, runtimeModes }: {
   authentication: BrowserAuthentication | undefined
   client: TeamsApiClient | undefined
   connected: boolean
+  runtimeModes?: TeamsDataModes | undefined
 }) {
   const [status, setStatus] = useState<TeamsLaunchStatus>()
   const [managed, setManaged] = useState(true)
@@ -31,8 +33,8 @@ export function TeamsLaunchStatusPanel({ authentication, client, connected }: {
         if (current.origin !== location.origin || current.clientBuildId !== clientBuildId) {
           throw new Error('This Teams client does not match the running backend build. Close this tab and run the launcher with -Resume to open the matching app.')
         }
-        if (authentication && current.mode !== authentication.configuration.mode) throw new Error('The backend mode changed. Reopen the Teams app and pair again.')
-        if (authentication && current.authentication !== ('authentication' in authentication.configuration ? authentication.configuration.authentication : 'hosted-obo')) {
+        if (authentication && current.mode !== (runtimeModes?.runtimeMode ?? authentication.configuration.mode)) throw new Error('The backend mode changed. Reopen the Teams app and pair again.')
+        if (authentication && current.authentication !== (runtimeModes?.runtimeAuthentication ?? ('authentication' in authentication.configuration ? authentication.configuration.authentication : 'hosted-obo'))) {
           throw new Error('The backend authentication profile changed. Reopen the Teams app and pair again.')
         }
         if (authentication?.context.embedded && new URLSearchParams(location.search).get('tlcAppVersion') !== current.packageVersion) {
@@ -56,7 +58,7 @@ export function TeamsLaunchStatusPanel({ authentication, client, connected }: {
     const timer = setInterval(onVisibility, 10_000)
     document.addEventListener('visibilitychange', onVisibility)
     return () => { controller.abort(); clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility) }
-  }, [authentication, client, connected])
+  }, [authentication, client, connected, runtimeModes])
   const teams = authentication?.context.embedded === true
   return <>
     {error && <p role="alert" className="error-banner">{error}</p>}
@@ -67,6 +69,7 @@ export function TeamsLaunchStatusPanel({ authentication, client, connected }: {
       {status ? <dl>
         <dt>Backend</dt><dd>{status.origin}</dd>
         <dt>Mode</dt><dd>{status.mode} / {status.authentication}</dd>
+        {authentication && <><dt>Active data mode</dt><dd>{authentication.configuration.mode === 'sample' ? 'Sample - local SQLite' : 'Live - your delegated access'}</dd></>}
         <dt>App version</dt><dd>{status.packageVersion}</dd>
         <dt>Backend run</dt><dd><code>{status.runId}</code></dd>
         <dt>Client build</dt><dd><code>{status.clientBuildId}</code></dd>

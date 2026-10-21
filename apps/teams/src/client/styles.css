@@ -207,3 +207,9 @@ summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
 .teams-mcem-board .record-table-wrap { max-height: 480px; overflow: auto; }
 .teams-mcem-board .mcem-card { cursor: pointer; touch-action: auto; user-select: text; }
 .teams-mcem-board .mcem-column { min-height: 220px; }
+.data-mode-switcher { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; max-width: 300px; }
+.data-mode-switcher > label { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.data-mode-switcher select { padding: 7px; border: 1px solid var(--tlc-border, #d1d1d1); border-radius: 4px; color: var(--colorNeutralForeground1, #242424); background: var(--colorNeutralBackground1, #fff); }
+.data-mode-switcher small { font-size: 11px; }
+.data-mode-dialog { max-width: min(560px, 92vw); border: 1px solid var(--colorNeutralStroke1, #d1d1d1); border-radius: 6px; padding: 24px; background: var(--colorNeutralBackground1, #fff); color: var(--colorNeutralForeground1, #242424); }
+.data-mode-dialog::backdrop { background: rgb(0 0 0 / 45%); }

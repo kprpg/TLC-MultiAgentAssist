@@ -227,6 +227,19 @@ describe('one local build/configure/run/Teams-upload entrypoint', () => {
     expect(result.stdout).toContain('sign-in has NOT occurred')
     expect(JSON.stringify(await data.calls())).not.toContain('"connect"')
   }, 60_000)
+  it('opens Sample first while preparing the configured Live profile for a later in-app switch without source sign-in', async () => {
+    const data = await fixture('cli', 'https://localhost:49199')
+    const tls = { certificate: join(data.folder, 'certificate.pem'), privateKey: join(data.folder, 'key.pem') }
+    await writeFile(tls.certificate, 'fixture certificate')
+    await writeFile(tls.privateKey, 'fixture key')
+    const result = await data.run(undefined, tls, { mode: 'sample', authMode: 'auto' })
+    const record = JSON.parse(await readFile(join(data.folder, 'owned', 'current-run.json'), 'utf8'))
+    expect(record).toMatchObject({ mode: 'live', initialDataMode: 'sample', authentication: 'local-azure-cli' })
+    expect((await data.calls()).find((entry) => entry.phase === 'start')).toMatchObject({ mode: 'live', authentication: 'local-azure-cli' })
+    expect(result.stdout).toContain('Initial data mode: sample')
+    expect(result.stdout).toContain('Sample setup requires no source connection or pairing')
+    expect(JSON.stringify(await data.calls())).not.toContain('"connect"')
+  }, 60_000)
   it.each(['parameter', 'configuration'] as const)('honors read-only CLI mode from %s without silently enabling writes', async (source) => {
     const data = await fixture('cli', 'https://localhost:49199')
     const tls = { certificate: join(data.folder, 'certificate.pem'), privateKey: join(data.folder, 'key.pem') }
