@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { realpathSync } from 'node:fs'
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -8,6 +9,8 @@ import JSZip from 'jszip'
 import { createTeamsManifest } from '../../../scripts/package-teams.mjs'
 
 const execute = promisify(execFile)
+// Windows temp paths are 8.3 short (RUNNER~1); the PowerShell scripts under test expand them via GetFullPath.
+const temporaryRoot = realpathSync.native(tmpdir())
 const root = resolve(import.meta.dirname, '../../..')
 const script = join(root, 'scripts', 'run-teams-local.ps1')
 const folders: string[] = []
@@ -16,7 +19,7 @@ afterEach(async () => { for (const folder of folders.splice(0)) await rm(folder,
 async function fixture(scenario = 'success', origin = 'https://tlc.testing.contoso.net') {
   const native = ['native', 'cli'].includes(scenario)
   const authentication = scenario === 'cli' ? 'local-azure-cli' : 'local-interactive'
-  const folder = await mkdtemp(join(tmpdir(), 'tlc-teams-runner-'))
+  const folder = await mkdtemp(join(temporaryRoot, 'tlc-teams-runner-'))
   folders.push(folder)
   const runtime = new JSZip()
   runtime.file('server.js', native
