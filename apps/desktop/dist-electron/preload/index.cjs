@@ -4478,6 +4478,21 @@ electron.contextBridge.exposeInMainWorld("tlc", {
 	runMcemCoach: (request) => electron.ipcRenderer.invoke("tlc:run-mcem-coach", request),
 	transitionOpportunityStage: (request) => electron.ipcRenderer.invoke("tlc:transition-opportunity-stage", request),
 	runAgentTask: (request) => electron.ipcRenderer.invoke("tlc:run-agent-task", request),
+	runAgentTaskStream: (request, onEvent) => {
+		const streamId = globalThis.crypto.randomUUID();
+		const listener = (_event, message) => {
+			if (message?.streamId === streamId) onEvent(message.event);
+		};
+		electron.ipcRenderer.on("tlc:agent-task-event", listener);
+		return {
+			cancel: () => {
+				electron.ipcRenderer.invoke("tlc:cancel-agent-task-stream", streamId);
+			},
+			done: electron.ipcRenderer.invoke("tlc:run-agent-task-stream", request, streamId).finally(() => {
+				electron.ipcRenderer.removeListener("tlc:agent-task-event", listener);
+			})
+		};
+	},
 	openEmailCompose: (request) => electron.ipcRenderer.invoke("tlc:open-email-compose", request),
 	exportAgentResponse: (request) => electron.ipcRenderer.invoke("tlc:export-agent-response", request),
 	openEvidence: (url) => electron.ipcRenderer.invoke("tlc:open-evidence", url),

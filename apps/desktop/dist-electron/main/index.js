@@ -1890,7 +1890,7 @@ var agentTaskRequestSchema = z.object({
 	opportunityId: z.string().min(1),
 	prompt: z.string().min(3).max(1e3)
 });
-z.object({
+var agentTaskResponseSchema = z.object({
 	contractVersion: z.literal("1.2"),
 	correlationId: z.string().uuid(),
 	capability: agentCapabilitySchema,
@@ -1905,6 +1905,32 @@ z.object({
 	content: z.string().min(1),
 	sourceHealth: z.array(sourceHealthSchema).min(1)
 });
+z.discriminatedUnion("type", [
+	z.object({
+		type: z.literal("context"),
+		streamVersion: z.literal("1.0"),
+		capability: agentCapabilitySchema,
+		instantDraft: z.string().min(1),
+		sourceHealth: z.array(sourceHealthSchema).min(1)
+	}).strict(),
+	z.object({
+		type: z.literal("delta"),
+		text: z.string().min(1)
+	}).strict(),
+	z.object({
+		type: z.literal("complete"),
+		response: agentTaskResponseSchema
+	}).strict(),
+	z.object({
+		type: z.literal("error"),
+		code: z.enum([
+			"failed",
+			"timeout",
+			"cancelled"
+		]),
+		message: z.string().min(1).max(500)
+	}).strict()
+]);
 var emailComposeRequestSchema = z.object({
 	contractVersion: z.literal("1.2"),
 	recipients: z.array(z.string().email()).min(1).max(20),
@@ -2242,6 +2268,17 @@ function addMsxOpportunityLink(content, opportunityId) {
 }
 //#endregion
 //#region packages/common/telemetry/performance.ts
+/** Reports a counter-only event (no timing span) such as token usage; failures never reach the caller. */
+function reportMetrics(reporter, operation, durationMs, outcome, metrics) {
+	try {
+		reporter?.({
+			operation,
+			durationMs: Math.round(durationMs * 10) / 10,
+			outcome,
+			metrics
+		});
+	} catch {}
+}
 async function measurePerformance(operation, reporter, action) {
 	const startedAt = globalThis.performance.now();
 	try {
@@ -2877,6 +2914,10 @@ var foundryEnvironmentSchema = z.object({
 	foundry: z.object({
 		projectEndpoint: z.string().url().refine((value) => !value.includes("YOUR-FOUNDRY-ACCOUNT") && !value.includes("/YOUR-PROJECT"), "Replace the template endpoint with the Microsoft Foundry project endpoint."),
 		requestTimeoutMs: z.number().int().min(1e3).max(3e5),
+		/** Abort a streamed model call that has produced no text by this point, then retry once. */
+		firstTokenTimeoutMs: z.number().int().min(1e3).max(12e4).optional(),
+		/** Upper bound on generated tokens (includes reasoning tokens for reasoning models). */
+		maxOutputTokens: z.number().int().min(256).max(32e3).optional(),
 		agents: z.object({
 			mcemCoach: foundryAgentSchema,
 			riskSolutionPlay: foundryAgentSchema,
@@ -3744,6 +3785,7 @@ var LiveMsxConnector = class {
 		return structuredClone(opportunity);
 	}
 	async getOpportunityContext(opportunityId) {
+		if (guidPattern.test(opportunityId)) this.getMilestoneRows(opportunityId).catch(() => void 0);
 		const portfolio = await this.getPortfolio();
 		const opportunity = portfolio.opportunities.find((candidate) => candidate.id === opportunityId);
 		if (!opportunity) throw new Error("The opportunity is not in the signed-in user’s active MSX portfolio.");
@@ -4237,12 +4279,14 @@ var LiveMsxConnector = class {
 	}
 	async loadPortfolio() {
 		const userId = await measurePerformance("msx.identity", this.performanceReporter, () => this.getCurrentUserId());
-		const preferences = await this.preferenceStore.read(userId);
-		const dealTeamRows = await measurePerformance("msx.deal-team", this.performanceReporter, () => this.requestAll("msp_dealteams", {
-			"$select": "_msp_parentopportunityid_value",
-			"$filter": `statecode eq 0 and _msp_dealteamuserid_value eq ${userId}`
-		}));
-		const milestoneOpportunityIds = await this.milestoneTeamOpportunityIds();
+		const [preferences, dealTeamRows, milestoneOpportunityIds] = await Promise.all([
+			this.preferenceStore.read(userId),
+			measurePerformance("msx.deal-team", this.performanceReporter, () => this.requestAll("msp_dealteams", {
+				"$select": "_msp_parentopportunityid_value",
+				"$filter": `statecode eq 0 and _msp_dealteamuserid_value eq ${userId}`
+			})),
+			measurePerformance("msx.milestone-team", this.performanceReporter, () => this.milestoneTeamOpportunityIds())
+		]);
 		const dealTeamOpportunityIds = new Set(dealTeamRows.map((row) => row._msp_parentopportunityid_value).filter(isPresent));
 		const opportunityIds = unique([...dealTeamOpportunityIds, ...milestoneOpportunityIds]);
 		const activeOpportunities = (await measurePerformance("msx.opportunities", this.performanceReporter, () => this.requestByIds("opportunities", "opportunityid", opportunityIds, "opportunityid,statecode,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,msp_forecastcomments,msp_opportunitytype"))).filter((row) => row._parentaccountid_value && (row.statecode === void 0 || row.statecode === 0));
@@ -9690,6 +9734,16 @@ var LocalPdfMcemGuidanceConnector = class {
 function createFoundryOpenAIClient(projectEndpoint, credential) {
 	return new AIProjectClient(projectEndpoint, credential).getOpenAIClient();
 }
+var FirstTokenTimeoutError = class extends Error {
+	constructor() {
+		super("The Foundry agent produced no output before the first-token timeout.");
+		this.name = "FirstTokenTimeoutError";
+	}
+};
+function isStreamingUnsupported(error) {
+	const status = error !== null && typeof error === "object" && "status" in error ? error.status : void 0;
+	return status === 400 || status === 404 || status === 405 || status === 501;
+}
 var FoundryPromptAgent = class {
 	options;
 	openAIClient;
@@ -9701,7 +9755,10 @@ var FoundryPromptAgent = class {
 		const abortController = new AbortController();
 		const timeout = setTimeout(() => abortController.abort(), this.options.requestTimeoutMs);
 		try {
-			const response = await this.openAIClient.responses.create({ input: JSON.stringify(context) }, {
+			const response = await this.openAIClient.responses.create({
+				input: JSON.stringify(context),
+				...this.outputLimit()
+			}, {
 				body: { agent_reference: {
 					name: this.options.agentName,
 					type: "agent_reference"
@@ -9712,6 +9769,84 @@ var FoundryPromptAgent = class {
 			return response.output_text.trim();
 		} finally {
 			clearTimeout(timeout);
+		}
+	}
+	/** Streams model text through `handlers.onDelta`; resolves to the full trimmed text. */
+	async stream(context, handlers) {
+		let attempt = 0;
+		for (;;) {
+			attempt++;
+			try {
+				return await this.streamOnce(context, handlers, attempt);
+			} catch (error) {
+				if (error instanceof FirstTokenTimeoutError && attempt === 1 && !handlers.signal?.aborted) continue;
+				if (isStreamingUnsupported(error) && !handlers.signal?.aborted) {
+					const text = await this.invoke(context);
+					handlers.onDelta(text);
+					return text;
+				}
+				throw error;
+			}
+		}
+	}
+	outputLimit() {
+		return this.options.maxOutputTokens === void 0 ? {} : { max_output_tokens: this.options.maxOutputTokens };
+	}
+	async streamOnce(context, handlers, attempt) {
+		const controller = new AbortController();
+		const startedAt = globalThis.performance.now();
+		let firstTokenTimedOut = false;
+		let text = "";
+		let firstTokenMs;
+		let usage;
+		const relayAbort = () => controller.abort();
+		handlers.signal?.addEventListener("abort", relayAbort, { once: true });
+		if (handlers.signal?.aborted) controller.abort();
+		const total = setTimeout(() => controller.abort(), this.options.requestTimeoutMs);
+		const firstToken = setTimeout(() => {
+			firstTokenTimedOut = true;
+			controller.abort();
+		}, this.options.firstTokenTimeoutMs ?? 6e4);
+		let outcome = "failure";
+		try {
+			const events = await this.openAIClient.responses.create({
+				input: JSON.stringify(context),
+				stream: true,
+				...this.outputLimit()
+			}, {
+				body: { agent_reference: {
+					name: this.options.agentName,
+					type: "agent_reference"
+				} },
+				signal: controller.signal
+			});
+			for await (const event of events) if (event.type === "response.output_text.delta" && event.delta) {
+				if (firstTokenMs === void 0) {
+					firstTokenMs = globalThis.performance.now() - startedAt;
+					clearTimeout(firstToken);
+				}
+				text += event.delta;
+				handlers.onDelta(event.delta);
+			} else if (event.type === "response.completed") usage = event.response?.usage;
+			else if (event.type === "response.failed" || event.type === "error") throw new Error(`Foundry agent ${this.options.agentName} failed while streaming.`);
+			if (!text.trim()) throw new Error(`Foundry agent ${this.options.agentName} returned no text output.`);
+			outcome = "success";
+			return text.trim();
+		} catch (error) {
+			if (firstTokenTimedOut && firstTokenMs === void 0 && !handlers.signal?.aborted) throw new FirstTokenTimeoutError();
+			throw error;
+		} finally {
+			clearTimeout(total);
+			clearTimeout(firstToken);
+			handlers.signal?.removeEventListener("abort", relayAbort);
+			reportMetrics(this.options.performanceReporter, "agent.foundry.stream", globalThis.performance.now() - startedAt, outcome, {
+				attempt,
+				...firstTokenMs === void 0 ? {} : { firstTokenMs: Math.round(firstTokenMs) },
+				outputChars: text.length,
+				...usage?.input_tokens === void 0 ? {} : { inputTokens: usage.input_tokens },
+				...usage?.output_tokens === void 0 ? {} : { outputTokens: usage.output_tokens },
+				...usage?.output_tokens_details?.reasoning_tokens === void 0 ? {} : { reasoningTokens: usage.output_tokens_details.reasoning_tokens }
+			});
 		}
 	}
 };
@@ -10249,6 +10384,50 @@ function evaluateMcemProgress(context, guidance, correlationId = randomUUID()) {
 	});
 }
 //#endregion
+//#region packages/orchestrator/instant-draft.ts
+/** Deterministic, evidence-only guidance built from the local MCEM evaluation. No model call; renders instantly. */
+function formatLiveAgentGuidance(capability, context) {
+	const evaluation = context.localEvaluation;
+	const opportunity = context.opportunityContext.opportunity;
+	const headline = {
+		"account-pulse": `Focus for ${opportunity.name}: close the highest-priority Stage ${evaluation.recordedStage} evidence gaps and confirm the next customer commitment.`,
+		"mcem-coach": evaluation.summary,
+		"pursuit-executive": `Prepare the pursuit for ${opportunity.name} around its Stage ${evaluation.recordedStage} gaps, decision team, and customer commitments.`,
+		"risk-solution-play": `${opportunity.name} has ${evaluation.recommendations.length} progression risk${evaluation.recommendations.length === 1 ? "" : "s"} to resolve before Stage ${evaluation.evidenceBasedStage}.`
+	};
+	const criteria = evaluation.criteria.map((criterion) => `- **${criterion.label}: ${criterion.status}** — ${criterion.rationale}`).join("\n");
+	const recommendations = evaluation.recommendations.map((recommendation) => `| ${recommendation.ownerRole} | ${recommendation.action} | ${recommendation.confidence} |`).join("\n");
+	const missing = evaluation.missingData.length > 0 ? evaluation.missingData.map((item) => `- ${item}`).join("\n") : "- All current-stage exit criteria have supporting evidence.";
+	return [
+		"## Summary",
+		"",
+		headline[capability],
+		"",
+		`> Requested: ${context.request.prompt}`,
+		"",
+		"## Context used",
+		"",
+		`**Opportunity:** ${opportunity.name}`,
+		`**Owner:** ${opportunity.owner ?? "Account team"}`,
+		`**Recorded / evidence-based stage:** ${evaluation.recordedStage} / ${evaluation.evidenceBasedStage}`,
+		`**MCEM guidance:** ${context.guidance.title}`,
+		"",
+		"## Exit criteria",
+		"",
+		criteria,
+		"",
+		"## Recommended actions",
+		"",
+		"| Owner | Action | Confidence |",
+		"| --- | --- | --- |",
+		recommendations,
+		"",
+		"## Assumptions and missing information",
+		"",
+		missing
+	].join("\n");
+}
+//#endregion
 //#region packages/orchestrator/record-creation/digest.ts
 var signingKey = randomBytes(32);
 function creationPreviewDigest(input) {
@@ -10596,6 +10775,18 @@ function authorizeMcpTool(policy, request) {
 		if (entry.approval === "confirm-with-reason" && !request.approval.reason?.trim()) throw new McpToolAuthorizationError("approval_required", "MCP tool invocation requires an approval reason.");
 	}
 	return entry;
+}
+//#endregion
+//#region packages/orchestrator/prewarm.ts
+/**
+* Moves first-use costs (Foundry token acquisition, MCEM guidance parsing) off the first agent click.
+* Best effort: failures are ignored here and surface normally when the agent is actually used.
+*/
+function prewarmAgentDependencies(options) {
+	const { credential, scopes, guidance } = options;
+	return measurePerformance("agent.prewarm", options.performanceReporter, async () => {
+		await Promise.allSettled([credential && scopes?.length ? credential.getToken([...scopes]) : void 0, guidance?.getStageGuidance(1)]);
+	});
 }
 //#endregion
 //#region packages/orchestrator/progress/run-history.ts
@@ -13345,47 +13536,131 @@ var ThinSliceOrchestrator = class {
 			}, guidance);
 		});
 	}
-	async runAgentTask(input) {
-		const request = agentTaskRequestSchema.parse(input);
-		return measurePerformance(`agent.task.${request.capability}`, this.performanceReporter, () => this.withFreshReadContext(async () => {
-			const configuredAgent = this.taskAgents[request.capability];
-			if (!configuredAgent) throw new Error(`The ${request.capability} agent is not configured.`);
-			const baseContext = await measurePerformance("agent.context.msx", this.performanceReporter, () => this.msx.getOpportunityContext(request.opportunityId));
-			if (baseContext.account.id !== request.accountId) throw new Error("The selected opportunity does not belong to the selected account.");
-			const [milestones, guidance] = await Promise.all([measurePerformance("agent.context.milestones", this.performanceReporter, () => this.msx.listMilestones(request.opportunityId)), measurePerformance("agent.context.mcem", this.performanceReporter, () => this.mcem.getStageGuidance(baseContext.opportunity.recordedStage))]);
-			const opportunityContext = {
-				...baseContext,
-				milestones
-			};
-			const localEvaluation = evaluateMcemProgress(opportunityContext, guidance);
-			const content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke({
+	async prepareAgentTask(request) {
+		const configuredAgent = this.taskAgents[request.capability];
+		if (!configuredAgent) throw new Error(`The ${request.capability} agent is not configured.`);
+		const baseContext = await measurePerformance("agent.context.msx", this.performanceReporter, () => this.msx.getOpportunityContext(request.opportunityId));
+		if (baseContext.account.id !== request.accountId) throw new Error("The selected opportunity does not belong to the selected account.");
+		const [milestones, guidance] = await Promise.all([measurePerformance("agent.context.milestones", this.performanceReporter, () => this.msx.listMilestones(request.opportunityId)), measurePerformance("agent.context.mcem", this.performanceReporter, () => this.mcem.getStageGuidance(baseContext.opportunity.recordedStage))]);
+		const opportunityContext = {
+			...baseContext,
+			milestones
+		};
+		return {
+			configuredAgent,
+			context: {
 				request,
 				opportunityContext,
 				guidance,
-				localEvaluation
-			}));
+				localEvaluation: evaluateMcemProgress(opportunityContext, guidance)
+			}
+		};
+	}
+	buildAgentResponse(request, configuredAgent, context, content, fallback) {
+		const { opportunityContext, guidance } = context;
+		const sourceHealth = [opportunityContext.sourceHealth, guidance.sourceHealth];
+		const isPartial = fallback !== void 0 || sourceHealth.some((source) => [
+			"partial",
+			"stale",
+			"unavailable"
+		].includes(source.state));
+		const responseContent = addMsxOpportunityLink(content.trim(), opportunityContext.opportunity.id);
+		return {
+			contractVersion: "1.2",
+			correlationId: randomUUID(),
+			capability: request.capability,
+			agentVersion: fallback === void 0 ? configuredAgent.version : `${configuredAgent.version}+${fallback}`,
+			generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+			mode: opportunityContext.sourceHealth.state === "sample" ? "sample" : "live",
+			state: isPartial ? "partial" : "complete",
+			content: responseContent,
+			sourceHealth
+		};
+	}
+	async runAgentTask(input) {
+		const request = agentTaskRequestSchema.parse(input);
+		return measurePerformance(`agent.task.${request.capability}`, this.performanceReporter, () => this.withFreshReadContext(async () => {
+			const { configuredAgent, context } = await this.prepareAgentTask(request);
+			const content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke(context));
 			if (!content?.trim()) throw new Error(`The ${request.capability} agent returned no content.`);
-			const sourceHealth = [opportunityContext.sourceHealth, guidance.sourceHealth];
-			const isPartial = sourceHealth.some((source) => [
-				"partial",
-				"stale",
-				"unavailable"
-			].includes(source.state));
-			const responseContent = addMsxOpportunityLink(content.trim(), opportunityContext.opportunity.id);
-			return {
-				contractVersion: "1.2",
-				correlationId: randomUUID(),
-				capability: request.capability,
-				agentVersion: configuredAgent.version,
-				generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-				mode: opportunityContext.sourceHealth.state === "sample" ? "sample" : "live",
-				state: isPartial ? "partial" : "complete",
-				content: responseContent,
-				sourceHealth
-			};
+			return this.buildAgentResponse(request, configuredAgent, context, content);
 		}));
 	}
+	/**
+	* Progressive variant of `runAgentTask`. Emits an instant deterministic draft as soon as evidence is
+	* loaded, then model text as it streams, then the authoritative response. A model failure falls back to
+	* the labelled deterministic draft; cancellation and context failures emit a terminal `error` event.
+	* Never throws: every outcome is delivered through `onEvent`.
+	*/
+	async runAgentTaskStream(input, onEvent, signal) {
+		const request = agentTaskRequestSchema.parse(input);
+		const emit = (event) => {
+			try {
+				onEvent(event);
+			} catch {}
+		};
+		const fail = (error) => {
+			const cancelled = signal?.aborted === true;
+			emit({
+				type: "error",
+				code: cancelled ? "cancelled" : "failed",
+				message: cancelled ? "The request was cancelled." : errorMessage(error)
+			});
+		};
+		try {
+			await measurePerformance(`agent.task.${request.capability}`, this.performanceReporter, () => this.withFreshReadContext(async () => {
+				const { configuredAgent, context } = await this.prepareAgentTask(request);
+				signal?.throwIfAborted();
+				const instantDraft = formatLiveAgentGuidance(request.capability, context);
+				emit({
+					type: "context",
+					streamVersion: "1.0",
+					capability: request.capability,
+					instantDraft,
+					sourceHealth: [context.opportunityContext.sourceHealth, context.guidance.sourceHealth]
+				});
+				let content;
+				let fallback;
+				try {
+					content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, async () => {
+						const streamed = configuredAgent.agent.stream ? await configuredAgent.agent.stream(context, {
+							signal,
+							onDelta: (text) => emit({
+								type: "delta",
+								text
+							})
+						}) : await configuredAgent.agent.invoke(context);
+						if (!streamed?.trim()) throw new Error(`The ${request.capability} agent returned no content.`);
+						return streamed;
+					});
+				} catch (error) {
+					if (signal?.aborted) throw error;
+					content = `${instantDraft}\n\n> AI enhancement is unavailable (${errorMessage(error)}). This is the evidence-based draft from the local MCEM evaluation.`;
+					fallback = "local-fallback";
+				}
+				emit({
+					type: "complete",
+					response: this.buildAgentResponse(request, configuredAgent, context, content, fallback)
+				});
+			}, signal));
+		} catch (error) {
+			fail(error);
+		}
+	}
 };
+function errorMessage(error) {
+	return ((error instanceof Error ? error.message : String(error)).trim() || "The agent request failed.").slice(0, 400);
+}
+//#endregion
+//#region packages/orchestrator/task-agents.ts
+/** Optional latency controls shared by every host that builds Foundry prompt agents. */
+function foundryAgentTuning(environment, performanceReporter) {
+	return {
+		firstTokenTimeoutMs: environment.foundry.firstTokenTimeoutMs,
+		maxOutputTokens: environment.foundry.maxOutputTokens,
+		performanceReporter
+	};
+}
 //#endregion
 //#region apps/desktop/electron/main/azure-cli-token-provider.ts
 var refreshBufferMs = 3e5;
@@ -17682,7 +17957,8 @@ var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object
 			agentName: binding.name,
 			requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
 			credential: credentials.foundry,
-			openAIClient: foundryOpenAIClient
+			openAIClient: foundryOpenAIClient,
+			...foundryAgentTuning(runtimeEnvironment, reportPerformance)
 		})
 	}];
 })), reportPerformance, recordCreation);
@@ -17782,6 +18058,8 @@ var workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost(asyn
 		opportunityIds: opportunities.map((opportunity) => opportunity.id)
 	};
 });
+var agentPrewarmed = false;
+var agentStreams = /* @__PURE__ */ new Map();
 async function getDataStatus() {
 	if (dataMode === "sample") return {
 		mode: "sample",
@@ -17790,9 +18068,19 @@ async function getDataStatus() {
 			detail: "Automated fixture mode is active."
 		}
 	};
+	const auth = await tokenProvider.getAuthStatus();
+	if (auth.state === "ready" && !agentPrewarmed && runtimeEnvironment) {
+		agentPrewarmed = true;
+		prewarmAgentDependencies({
+			credential: credentials.foundry,
+			scopes: runtimeEnvironment.authentication.scopes.foundry,
+			guidance: mcemConnector,
+			performanceReporter: reportPerformance
+		});
+	}
 	return {
 		mode: "live",
-		auth: await tokenProvider.getAuthStatus()
+		auth
 	};
 }
 async function connectMcem() {
@@ -17983,6 +18271,27 @@ function registerIpc() {
 	ipcMain.handle("tlc:run-agent-task", (event, request) => {
 		assertTrustedSender(event);
 		return orchestrator.runAgentTask(agentTaskRequestSchema.parse(request));
+	});
+	ipcMain.handle("tlc:run-agent-task-stream", async (event, request, streamId) => {
+		assertTrustedSender(event);
+		const id = z.string().uuid().parse(streamId);
+		const parsed = agentTaskRequestSchema.parse(request);
+		const controller = new AbortController();
+		agentStreams.set(id, controller);
+		try {
+			await orchestrator.runAgentTaskStream(parsed, (agentEvent) => {
+				if (!event.sender.isDestroyed()) event.sender.send("tlc:agent-task-event", {
+					streamId: id,
+					event: agentEvent
+				});
+			}, controller.signal);
+		} finally {
+			agentStreams.delete(id);
+		}
+	});
+	ipcMain.handle("tlc:cancel-agent-task-stream", (event, streamId) => {
+		assertTrustedSender(event);
+		agentStreams.get(z.string().uuid().parse(streamId))?.abort();
 	});
 	ipcMain.handle("tlc:open-email-compose", async (event, rawRequest) => {
 		assertTrustedSender(event);
