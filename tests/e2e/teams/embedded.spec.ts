@@ -1,6 +1,27 @@
 import { expect, test } from '@playwright/test'
 import { embeddedTeams } from './helpers.js'
 
+test('opens the focused opportunity in MSX through the embedded Teams SDK and reports failures', async ({ page }) => {
+  const app = await embeddedTeams(page, 'content', 'default', '1.2484.12345', true)
+  const selection = app.getByLabel('Opportunity', { exact: true })
+  await expect(selection).not.toHaveValue('')
+  const opportunityId = await selection.inputValue()
+  const heading = app.locator('#portfolio-details-panel .opportunity-heading h2')
+  const link = heading.getByRole('link')
+  const expectedUrl = `https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=opportunity&id=${encodeURIComponent(opportunityId)}`
+  await expect(link).toHaveAttribute('href', expectedUrl)
+  await link.evaluate(() => { window.open = () => { throw new Error('Embedded links must use the Teams SDK.') } })
+  await link.click()
+  await expect(page.locator('body')).toHaveAttribute('data-opened-external-link', expectedUrl)
+  await expect(selection).toHaveValue(opportunityId)
+  await expect(heading).toBeVisible()
+
+  await page.locator('body').evaluate((element) => { element.dataset.externalLinkFailure = 'Browser opening denied.' })
+  await link.focus()
+  await link.press('Enter')
+  await expect(app.locator('#portfolio-details-panel').getByRole('alert')).toHaveText('Browser opening denied.')
+})
+
 test('the mode-discard confirmation is usable inside a sandboxed Teams iframe without contacting Live before confirmation', async ({ page }) => {
   let liveRequests = 0
   await page.route('**/api/teams/modes', (route) => route.fulfill({

@@ -449,6 +449,13 @@ Each row summarizes one active opportunity with:
 
 Hovering an opportunity shows a full tooltip with the stage owner and additional context.
 
+Select an opportunity in the list to focus it in the middle Guidance/details pane. Its title in that
+pane is an **MSX hyperlink**: click it, or focus it and press **Enter**, to open that opportunity in your
+browser without leaving TLC or changing the selected opportunity. This works in Desktop, Web,
+the VS Code webview, and Teams. List clicks still select opportunities; they do not launch MSX.
+MSX requires your usual sign-in and record access. Sample-mode links use sanitized sample IDs,
+not real MSX records.
+
 ### 4.1 Sorting opportunities
 
 Click the sort icon (⇅) in the Opportunities blade header. A menu lets you sort by:

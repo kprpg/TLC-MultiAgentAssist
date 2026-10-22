@@ -24,6 +24,10 @@ export async function embeddedTeams(page: Page, frameContext: 'content' | 'setti
             hostClientType: 'web', hostName: 'teams', entityId: 'sanitized-tab',
             appSessionId: '11111111-1111-4111-8111-111111111111'
           }];
+          if (message.func === 'executeDeepLink') {
+            document.body.dataset.openedExternalLink = message.args[0];
+            args = document.body.dataset.externalLinkFailure ? [false, document.body.dataset.externalLinkFailure] : [true];
+          }
           if (args) event.source.postMessage({ id: message.id, uuid: message.uuid, args }, appOrigin);
         });
       </script></body></html>`

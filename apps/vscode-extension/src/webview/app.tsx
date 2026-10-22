@@ -29,6 +29,7 @@ import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
 import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
+import { MsxOpportunityLink } from '../../../shared/msx-opportunity-link.js'
 import { workflowGuidanceCapability } from '../../../shared/workflow-guidance.js'
 import { AddCustomerButton, type CustomerAccount, type CustomerSearchClient } from '../../../shared/add-customer.js'
 import { RemoveCustomerButton } from '../../../shared/remove-customer.js'
@@ -1556,7 +1557,7 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
             {detailsExpanded && <section id="portfolio-details-panel" className="pane portfolio-details-pane">
                 {selectedOpportunity ? (
                     <div>
-                        <h3>{selectedOpportunity.name}</h3>
+                        <h3><MsxOpportunityLink opportunity={selectedOpportunity} onOpen={dataClient.openEvidence} onError={setNote} /></h3>
                         <p className="muted">Owner: {selectedOpportunity.owner ?? 'Account team'} - Stage {selectedOpportunity.recordedStage} - Close: {selectedOpportunity.closeDate}</p>
                         <nav className="subtabs" role="tablist">
                             <button role="tab" aria-selected={sub === 'overview'} className={sub === 'overview' ? 'tab active' : 'tab'} onClick={() => setSub('overview')}>Overview</button>

@@ -54,6 +54,7 @@ import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
 import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
+import { MsxOpportunityLink } from '../../../shared/msx-opportunity-link.js'
 import { AddCustomerButton, type CustomerAccount } from '../../../shared/add-customer.js'
 import { RemoveCustomerButton } from '../../../shared/remove-customer.js'
 import { McemStageColumns } from '../../../shared/mcem-stage-board.js'
@@ -1467,7 +1468,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         {opportunity && <>
           <header className="workbench-header">
             <button className="icon-button mobile-only" onClick={() => setMobileBlade('opportunities')} title="Back to opportunities" aria-label="Back to opportunities"><ChevronLeft20Regular /></button>
-            <div><p className="eyebrow">{account?.name}</p><h1>{opportunity.name}</h1><span>{opportunity.owner ?? 'Owner not assigned'} · Stage {opportunity.recordedStage} · {formatMoney(opportunity.value, opportunity.currency)} · closes {opportunity.closeDate}</span></div>
+            <div><p className="eyebrow">{account?.name}</p><h1><MsxOpportunityLink opportunity={opportunity} onOpen={client.openEvidence} onError={setError} /></h1><span>{opportunity.owner ?? 'Owner not assigned'} · Stage {opportunity.recordedStage} · {formatMoney(opportunity.value, opportunity.currency)} · closes {opportunity.closeDate}</span></div>
           </header>
           <div className="center-tabs" role="tablist" aria-label="Opportunity view">
             <button role="tab" aria-selected={centerTab === 'msx'} onClick={() => setCenterTab('msx')}>MSX</button>

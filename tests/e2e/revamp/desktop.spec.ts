@@ -8,6 +8,42 @@ import { expectCompleteSamplePortfolio } from './sample-portfolio.js'
 import { expectOpportunityAndMilestoneRemoval } from './membership-removal.js'
 import { expectOpportunitiesToFillCollapsedWorkspace } from './opportunities-layout.js'
 
+test('opens the focused opportunity in MSX through the Desktop browser bridge', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-opportunity-link-'))
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_UI_MODE: '' }
+    })
+
+    try {
+        await app.evaluate(({ shell }) => {
+            delete process.env.TLC_TEST_OPENED_MSX_URL
+            shell.openExternal = async (url) => { process.env.TLC_TEST_OPENED_MSX_URL = url }
+        })
+        const window = await app.firstWindow()
+        await window.setViewportSize({ width: 1600, height: 900 })
+        await window.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'Portfolio', exact: true }).click()
+        await window.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
+        const opportunities = window.getByRole('table', { name: 'Contoso Energy opportunities' })
+        await opportunities.getByRole('button', { name: /^Grid operations modernization / }).click()
+        expect(await app.evaluate(() => process.env.TLC_TEST_OPENED_MSX_URL)).toBeUndefined()
+        await expect(opportunities.getByRole('link')).toHaveCount(0)
+
+        const heading = window.getByRole('region', { name: 'Opportunity workbench' }).getByRole('heading', { name: 'Grid operations modernization', exact: true })
+        const link = heading.getByRole('link')
+        const expectedUrl = 'https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=opportunity&id=opp-grid-modernization'
+        await expect(link).toHaveAttribute('href', expectedUrl)
+        await link.focus()
+        await link.press('Enter')
+        await expect.poll(() => app.evaluate(() => process.env.TLC_TEST_OPENED_MSX_URL)).toBe(expectedUrl)
+        await expect(heading).toBeVisible()
+        await expect(opportunities.locator('tr.selected')).toContainText('Grid operations modernization')
+    } finally {
+        await app.close()
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
 test('opens a dedicated New pane before Discover in Desktop', async () => {
     const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-new-tab-'))
     const app = await electron.launch({

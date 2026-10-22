@@ -201,6 +201,34 @@ async function mountWebview(page: Page): Promise<void> {
     await expect(page.locator('#portfolio-details-panel').getByRole('heading', { name: 'Alpha analysis', exact: true })).toBeVisible()
 }
 
+test('opens the focused opportunity in MSX through the VS Code host and tracks selection changes', async ({ page }) => {
+    await mountWebview(page)
+    const details = page.locator('#portfolio-details-panel')
+    const opportunities = page.locator('#portfolio-accounts-panel .opportunity-table')
+    const openedLinks = () => page.evaluate(() => window.portfolioTest.requests
+        .filter((request) => request.method === 'openEvidence').map((request) => request.params?.url))
+    await opportunities.getByRole('row').filter({ hasText: 'Alpha renewal' }).locator('.record-link').click()
+    expect(await openedLinks()).toEqual([])
+    await expect(opportunities.getByRole('link')).toHaveCount(0)
+    const renewalLink = details.getByRole('heading', { name: 'Alpha renewal', exact: true }).getByRole('link')
+    const renewalUrl = 'https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=opportunity&id=alpha-two'
+    await expect(renewalLink).toHaveAttribute('href', renewalUrl)
+    await renewalLink.click()
+    await expect.poll(openedLinks).toEqual([renewalUrl])
+
+    await opportunities.getByRole('row').filter({ hasText: 'Alpha analysis' }).locator('.record-link').click()
+    const analysisLink = details.getByRole('heading', { name: 'Alpha analysis', exact: true }).getByRole('link')
+    const analysisUrl = 'https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=opportunity&id=alpha-one'
+    await expect(analysisLink).toHaveAttribute('href', analysisUrl)
+    await analysisLink.focus()
+    await analysisLink.press('Enter')
+    await expect.poll(openedLinks).toEqual([renewalUrl, analysisUrl])
+
+    await page.evaluate(() => { window.portfolioTest.rejectEvidence = true })
+    await analysisLink.click()
+    await expect(details.getByText('Evidence opening denied.', { exact: true })).toBeVisible()
+})
+
 test('opens a dedicated New pane before Discover in the VS Code webview', async ({ page }) => {
     await mountWebview(page)
     await expect(page.locator('.app-header .tabs button')).toHaveText(['New', 'Discover', 'Portfolio', 'Plays', 'Dashboards'])

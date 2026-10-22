@@ -144,6 +144,7 @@ summary { cursor: pointer; font-weight: 600; padding: 8px 0; }
 .selected-row { background: var(--colorBrandBackground2); }
 .selected-row .record-link { font-weight: 600; }
 .opportunity-heading h2 { font-size: 17px; overflow-wrap: anywhere; margin: 0 0 8px; }
+.msx-opportunity-link { color: var(--tlc-accent); }
 .opportunity-heading p { font-size: 12px; margin: 0 0 14px; }
 .detail-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--tlc-border); margin-bottom: 18px; }
 .detail-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 9px 10px; color: var(--tlc-accent); background: transparent; white-space: nowrap; }
