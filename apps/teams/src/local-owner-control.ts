@@ -115,7 +115,8 @@ export async function sendOwnerCommand(options: { key: Buffer; record: LocalOwne
 const directoryPolicy = String.raw`
 $ErrorActionPreference = 'Stop'
 $path = [IO.Path]::GetFullPath($env:TLC_OWNER_DIRECTORY)
-$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$sid = $identity.User
 $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
 $base = [IO.Path]::GetFullPath([Environment]::GetFolderPath('LocalApplicationData'))
 $prefix = $base.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
@@ -151,10 +152,11 @@ while ($null -ne $ancestor) {
 $acl = Get-Acl -LiteralPath $path
 if (!$acl.AreAccessRulesProtected -or $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { throw 'owner_directory_not_private' }
 $allowed = @($sid.Value, $system.Value)
+$owners = @($sid.Value, $identity.Owner.Value)
 foreach ($item in @($directory) + @(Get-ChildItem -LiteralPath $path -Force -Recurse)) {
   if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'owner_reparse_point_denied' }
   $itemAcl = Get-Acl -LiteralPath $item.FullName
-  if ($itemAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { throw 'owner_file_owner_mismatch' }
+  if ($itemAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $owners) { throw 'owner_file_owner_mismatch' }
   foreach ($rule in $itemAcl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
     if ($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Value -notin $allowed) { throw 'owner_directory_not_private' }
   }
@@ -166,7 +168,10 @@ async function checkDirectory(directory: string, prepare: boolean): Promise<void
     await promisify(execFile)('pwsh', ['-NoProfile', '-NonInteractive', '-Command', directoryPolicy], {
       env: { ...process.env, TLC_OWNER_DIRECTORY: resolve(directory), TLC_OWNER_PREPARE: prepare ? '1' : '0' }, timeout: 30_000
     })
-  } catch { throw new Error('The native owner directory must be an owner/SYSTEM-only non-reparse directory. Prepare it with the local owner command.') }
+  } catch (error) {
+    const reason = /\bowner_[a-z_]+\b/.exec(String((error as { stderr?: unknown }).stderr ?? ''))?.[0]
+    throw new Error(`The native owner directory must be an owner/SYSTEM-only non-reparse directory. Prepare it with the local owner command.${reason ? ` (${reason})` : ''}`, { cause: error })
+  }
 }
 export async function prepareOwnerDirectory(directory: string): Promise<void> {
   await checkDirectory(directory, true)

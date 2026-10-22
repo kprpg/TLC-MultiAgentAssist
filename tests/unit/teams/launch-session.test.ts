@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { randomInt } from 'node:crypto'
+import { realpathSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -7,12 +8,14 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const execute = promisify(execFile)
+// Windows temp paths are 8.3 short (RUNNER~1); the PowerShell scripts under test expand them via GetFullPath.
+const temporaryRoot = realpathSync.native(tmpdir())
 const helper = resolve(import.meta.dirname, '../../../scripts/teams-launch-session.ps1')
 const folders: string[] = []
 afterEach(async () => { for (const folder of folders.splice(0)) await rm(folder, { recursive: true, force: true }) })
 
 async function fixture(scenario = 'live', code = 'A1B2C3D4') {
-  const folder = await mkdtemp(join(tmpdir(), 'tlc-teams-guided-'))
+  const folder = await mkdtemp(join(temporaryRoot, 'tlc-teams-guided-'))
   folders.push(folder)
   const work = join(folder, 'work')
   const runId = '1'.repeat(32)
