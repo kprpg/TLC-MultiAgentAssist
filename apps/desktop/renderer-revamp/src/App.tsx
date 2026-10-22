@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, DialogTrigger, DrawerBody, DrawerHeader, DrawerHeaderTitle, Field, FluentProvider, Input, Menu, MenuItem, MenuItemRadio, MenuList, MenuPopover, MenuTrigger, MessageBar, OverlayDrawer, Spinner, Textarea, Tooltip, webDarkTheme, webLightTheme } from '@fluentui/react-components'
+import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, DialogTrigger, DrawerBody, DrawerHeader, DrawerHeaderTitle, Field, FluentProvider, Input, Menu, MenuItem, MenuItemRadio, MenuList, MenuPopover, MenuTrigger, MessageBar, OverlayDrawer, Spinner, Textarea, Tooltip } from '@fluentui/react-components'
 import {
   Apps20Regular,
   Add20Regular,
@@ -50,6 +50,7 @@ import { FeedbackButton } from '../../../shared/feedback-button.js'
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 import type { PortfolioSearchResult } from '../../../shared/portfolio-search.js'
 import { PortfolioSearch } from './portfolio-search.js'
+import { scaledDarkTheme, scaledLightTheme } from './scaled-theme.js'
 import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
 import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
@@ -1900,7 +1901,7 @@ function WorkflowResult({
 
 export function RevampApp() {
   const shell = document.documentElement.dataset['shell'] === 'desktop' ? 'desktop' : 'web'
-  const theme = document.documentElement.dataset['theme'] === 'dark' ? webDarkTheme : webLightTheme
+  const theme = document.documentElement.dataset['theme'] === 'dark' ? scaledDarkTheme : scaledLightTheme
   const [client] = useState(() => createDataClient(shell))
   return <FluentProvider className="fluent-provider" theme={theme}>
     <div className="fluent-root">

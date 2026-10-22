@@ -951,15 +951,15 @@ test('uses Fluent theme tokens and readable compact typography', async ({ page }
     })
 
     expect(styles.backgroundToken).not.toBe('')
-    expect(styles.bodyFontSize).toBe('12px')
-    expect(styles.introFontSize).toBe('11px')
+    expect(parseFloat(styles.bodyFontSize)).toBeCloseTo(11.4, 3)
+    expect(parseFloat(styles.introFontSize)).toBeCloseTo(10.45, 3)
     expect(styles.overflowX).toBe('auto')
     expect(styles.shellRows.split(' ')[0]).toBe('44px')
     expect(styles.bladeHeaderMinHeight).toBe('52px')
-    expect(styles.bladeTitleFontSize).toBe('14px')
+    expect(parseFloat(styles.bladeTitleFontSize)).toBeCloseTo(13.3, 3)
     expect(styles.accountPadding).toBe('7px 8px')
-    expect(styles.accountTitleFontSize).toBe('12px')
-    expect(styles.fluentButtonFontSize).toBe('12px')
+    expect(parseFloat(styles.accountTitleFontSize)).toBeCloseTo(11.4, 3)
+    expect(parseFloat(styles.fluentButtonFontSize)).toBeCloseTo(11.4, 3)
 })
 
 test('resizes blades by dragging and restores persisted widths after collapse and reload', async ({ page }) => {
