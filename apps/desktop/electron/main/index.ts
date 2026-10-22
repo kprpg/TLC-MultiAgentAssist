@@ -19,7 +19,8 @@ import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/s
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../../packages/connectors/foundry/index.js'
 import { createFoundryMeetingExtractor } from '../../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
 import { parseTranscriptContent } from '../../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
-import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
+import { ThinSliceOrchestrator, prewarmAgentDependencies, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
+import { foundryAgentTuning } from '../../../../packages/orchestrator/task-agents.js'
 import { RecordCreationService } from '../../../../packages/orchestrator/record-creation/service.js'
 import { createLivePlayWorkflowHost, createSampleWorkflowHost } from '../../../../packages/orchestrator/workflows/index.js'
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
@@ -180,7 +181,8 @@ const taskAgents: TaskAgentRegistry = Object.fromEntries(
         agentName: binding.name,
         requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
         credential: credentials.foundry,
-        openAIClient: foundryOpenAIClient
+        openAIClient: foundryOpenAIClient,
+        ...foundryAgentTuning(runtimeEnvironment, reportPerformance)
       })
     }]
   })
@@ -281,6 +283,8 @@ const workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost(as
   }
 })
 
+let agentPrewarmed = false
+const agentStreams = new Map<string, AbortController>()
 async function getDataStatus(): Promise<DesktopDataStatus> {
   if (dataMode === 'sample') {
     return {
@@ -288,7 +292,15 @@ async function getDataStatus(): Promise<DesktopDataStatus> {
       auth: { state: 'ready', detail: 'Automated fixture mode is active.' }
     }
   }
-  return { mode: 'live', auth: await tokenProvider.getAuthStatus() }
+  const auth = await tokenProvider.getAuthStatus()
+  if (auth.state === 'ready' && !agentPrewarmed && runtimeEnvironment) {
+    agentPrewarmed = true
+    void prewarmAgentDependencies({
+      credential: credentials.foundry, scopes: runtimeEnvironment.authentication.scopes.foundry,
+      guidance: mcemConnector, performanceReporter: reportPerformance
+    })
+  }
+  return { mode: 'live', auth }
 }
 
 async function connectMcem(): Promise<AuthStatus> {
@@ -491,6 +503,24 @@ function registerIpc(): void {
   ipcMain.handle('tlc:run-agent-task', (event, request: unknown) => {
     assertTrustedSender(event)
     return orchestrator.runAgentTask(agentTaskRequestSchema.parse(request))
+  })
+  ipcMain.handle('tlc:run-agent-task-stream', async (event, request: unknown, streamId: unknown) => {
+    assertTrustedSender(event)
+    const id = z.string().uuid().parse(streamId)
+    const parsed = agentTaskRequestSchema.parse(request)
+    const controller = new AbortController()
+    agentStreams.set(id, controller)
+    try {
+      await orchestrator.runAgentTaskStream(parsed, (agentEvent) => {
+        if (!event.sender.isDestroyed()) event.sender.send('tlc:agent-task-event', { streamId: id, event: agentEvent })
+      }, controller.signal)
+    } finally {
+      agentStreams.delete(id)
+    }
+  })
+  ipcMain.handle('tlc:cancel-agent-task-stream', (event, streamId: unknown) => {
+    assertTrustedSender(event)
+    agentStreams.get(z.string().uuid().parse(streamId))?.abort()
   })
   ipcMain.handle('tlc:open-email-compose', async (event, rawRequest: unknown) => {
     assertTrustedSender(event)

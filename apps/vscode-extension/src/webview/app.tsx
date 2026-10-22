@@ -36,10 +36,10 @@ import { RemoveCustomerButton } from '../../../shared/remove-customer.js'
 import { usePortfolioRefresh } from './use-portfolio-refresh.js'
 import { SourceSyncStatus } from '../../../shared/sync-status.js'
 import { usePresentationSession } from '../../../shared/presentation-hooks.js'
+import { useAgentRun } from '../../../shared/use-agent-run.js'
 import type {
     AccountView,
     AgentCapability,
-    AgentTaskView,
     DiscoverableOpportunityView,
     McemView,
     MeetingChangeSetProposalView,
@@ -566,20 +566,23 @@ function ResponseActions({ title, markdown, onNote }: { title: string; markdown:
 function GuidancePane({ accountId, opportunityId, opportunityName, onNote }: { accountId: string; opportunityId: string; opportunityName: string; onNote: (message: string) => void }): ReactElement {
     const [capability, setCapability] = useState<AgentCapability>('account-pulse')
     const [taskPrompt, setTaskPrompt] = useState('')
-    const [agent, setAgent] = useState<Loadable<AgentTaskView>>({ status: 'idle' })
+    const [agentError, setAgentError] = useState('')
+    const { agentResult, agentLoading, agentPhase, runAgent, cancelAgent } = useAgentRun(
+        (agentCapability, agentAccountId, agentOpportunityId, prompt, onProgress, signal) =>
+            dataClient.runAgentTaskStream(agentCapability, agentAccountId, agentOpportunityId, prompt, onProgress, signal))
 
-    useEffect(() => { setAgent({ status: 'idle' }); setTaskPrompt('') }, [capability, opportunityId])
+    useEffect(() => { cancelAgent(); setAgentError(''); setTaskPrompt('') }, [capability, opportunityId, cancelAgent])
 
     const runAgentPrompt = useCallback(async (prompt?: string) => {
         const finalPrompt = (prompt ?? taskPrompt).trim()
         if (finalPrompt.length < 3) return
-        setAgent({ status: 'loading' })
+        setAgentError('')
         try {
-            setAgent({ status: 'ready', data: await dataClient.runAgentTask(capability, accountId, opportunityId, finalPrompt) })
+            await runAgent(capability, accountId, opportunityId, finalPrompt)
         } catch (error) {
-            setAgent({ status: 'error', error: (error as Error).message })
+            setAgentError((error as Error).message)
         }
-    }, [capability, accountId, opportunityId, taskPrompt])
+    }, [capability, accountId, opportunityId, taskPrompt, runAgent])
 
     const label = agentCapabilities.find((item) => item.id === capability)?.label ?? 'Guidance'
 
@@ -588,25 +591,28 @@ function GuidancePane({ accountId, opportunityId, opportunityName, onNote }: { a
             <GuidanceAgentTabs capability={capability} onSelect={setCapability} />
             <div className="prompt-suggestions" aria-label={`${label} suggested prompts`}>
                 {suggestedPrompts[capability].map((prompt) => (
-                    <button key={prompt} type="button" className="prompt-chip" disabled={agent.status === 'loading'} onClick={() => selectGuidancePrompt(prompt, setTaskPrompt, (selectedPrompt) => void runAgentPrompt(selectedPrompt))}>{prompt}</button>
+                    <button key={prompt} type="button" className="prompt-chip" disabled={agentLoading} onClick={() => selectGuidancePrompt(prompt, setTaskPrompt, (selectedPrompt) => void runAgentPrompt(selectedPrompt))}>{prompt}</button>
                 ))}
             </div>
             <div className="agent-composer">
                 <textarea aria-label="Agent task" placeholder="Ask a different question..." rows={2} value={taskPrompt} onChange={(event) => setTaskPrompt(event.target.value)} />
-                <button className="primary" disabled={agent.status === 'loading' || taskPrompt.trim().length < 3} onClick={() => void runAgentPrompt()}>{agent.status === 'loading' ? 'Analyzing...' : 'Send'}</button>
+                <button className="primary" disabled={agentLoading || taskPrompt.trim().length < 3} onClick={() => void runAgentPrompt()}>{agentLoading ? 'Analyzing...' : 'Send'}</button>
             </div>
-            {agent.status === 'loading' && <p className="muted">Running {label}...</p>}
-            {agent.status === 'error' && <p className="error">{agent.error}</p>}
-            {agent.status === 'ready' && agent.data && ((data: AgentTaskView) => (
+            {agentLoading && <p className="muted" role="status">
+                {agentPhase === 'streaming' ? `Receiving ${label} response...` : agentPhase === 'draft' ? 'Evidence-based draft shown; the AI response is in progress...' : `Running ${label}...`}
+                {' '}<button type="button" className="action-button" onClick={cancelAgent}>Cancel</button>
+            </p>}
+            {agentError && <p className="error">{agentError}</p>}
+            {agentResult && (
                 <article className="agent-response">
                     <header className="agent-response-header">
                         <span className="eyebrow">{label}</span>
-                        <ResponseActions title={`Guidance - ${opportunityName}`} markdown={data.content} onNote={onNote} />
+                        {!agentLoading && <ResponseActions title={`Guidance - ${opportunityName}`} markdown={agentResult.content} onNote={onNote} />}
                     </header>
-                    <AgentMarkdown content={data.content} />
+                    <AgentMarkdown content={agentResult.content} />
                 </article>
-            ))(agent.data)}
-            {agent.status === 'idle' && <p className="muted">Choose a suggested prompt or ask a different question.</p>}
+            )}
+            {!agentLoading && !agentResult && !agentError && <p className="muted">Choose a suggested prompt or ask a different question.</p>}
         </div>
     )
 }

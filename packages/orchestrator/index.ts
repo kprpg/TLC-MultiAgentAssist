@@ -21,6 +21,8 @@ import {
   type PortfolioWorkspaceRequest,
   type PortfolioWorkspace,
   agentTaskRequestSchema,
+  agentTaskStreamVersion,
+  type AgentTaskStreamEvent,
   contractVersion,
   mcemStageTransitionRequestSchema,
   mcemStageTransitionResultSchema,
@@ -62,6 +64,7 @@ import {
   type RecordCreationResult
 } from '../common/index.js'
 import { evaluateMcemProgress } from '../agents/mcem-coach/index.js'
+import { formatLiveAgentGuidance } from './instant-draft.js'
 import type {
   McemGuidanceConnector,
   MsxConnector,
@@ -77,8 +80,15 @@ export interface McemAgentContext {
   localEvaluation: McemResponse
 }
 
+export interface AgentStreamHandlers {
+  onDelta(text: string): void
+  signal?: AbortSignal | undefined
+}
+
 export interface AgentInvoker<TContext> {
   invoke(context: TContext): Promise<string | void>
+  /** Optional progressive variant; resolves to the full text after every delta was delivered. */
+  stream?(context: TContext, handlers: AgentStreamHandlers): Promise<string>
 }
 
 export type McemAgent = AgentInvoker<McemAgentContext>
@@ -387,57 +397,123 @@ export class ThinSliceOrchestrator {
     })
   }
 
+  private async prepareAgentTask(request: AgentTaskRequest): Promise<{ configuredAgent: ConfiguredTaskAgent; context: AgentTaskContext }> {
+    const configuredAgent = this.taskAgents[request.capability]
+    if (!configuredAgent) {
+      throw new Error(`The ${request.capability} agent is not configured.`)
+    }
+
+    const baseContext = await measurePerformance('agent.context.msx', this.performanceReporter, () =>
+      this.msx.getOpportunityContext(request.opportunityId))
+    if (baseContext.account.id !== request.accountId) {
+      throw new Error('The selected opportunity does not belong to the selected account.')
+    }
+    const [milestones, guidance] = await Promise.all([
+      measurePerformance('agent.context.milestones', this.performanceReporter, () =>
+        this.msx.listMilestones(request.opportunityId)),
+      measurePerformance('agent.context.mcem', this.performanceReporter, () =>
+        this.mcem.getStageGuidance(baseContext.opportunity.recordedStage))
+    ])
+    const opportunityContext = { ...baseContext, milestones }
+    const localEvaluation = evaluateMcemProgress(opportunityContext, guidance)
+    return { configuredAgent, context: { request, opportunityContext, guidance, localEvaluation } }
+  }
+
+  private buildAgentResponse(
+    request: AgentTaskRequest,
+    configuredAgent: ConfiguredTaskAgent,
+    context: AgentTaskContext,
+    content: string,
+    fallback?: string
+  ): AgentTaskResponse {
+    const { opportunityContext, guidance } = context
+    const sourceHealth = [opportunityContext.sourceHealth, guidance.sourceHealth]
+    const isPartial = fallback !== undefined || sourceHealth.some((source) => ['partial', 'stale', 'unavailable'].includes(source.state))
+    const responseContent = addMsxOpportunityLink(content.trim(), opportunityContext.opportunity.id)
+    return {
+      contractVersion,
+      correlationId: randomUUID(),
+      capability: request.capability,
+      agentVersion: fallback === undefined ? configuredAgent.version : `${configuredAgent.version}+${fallback}`,
+      generatedAt: new Date().toISOString(),
+      mode: opportunityContext.sourceHealth.state === 'sample' ? 'sample' : 'live',
+      state: isPartial ? 'partial' : 'complete',
+      content: responseContent,
+      sourceHealth
+    }
+  }
+
   async runAgentTask(input: AgentTaskRequest): Promise<AgentTaskResponse> {
     const request = agentTaskRequestSchema.parse(input)
     return measurePerformance(`agent.task.${request.capability}`, this.performanceReporter, () => this.withFreshReadContext(async () => {
-      const configuredAgent = this.taskAgents[request.capability]
-      if (!configuredAgent) {
-        throw new Error(`The ${request.capability} agent is not configured.`)
-      }
-
-      const baseContext = await measurePerformance('agent.context.msx', this.performanceReporter, () =>
-        this.msx.getOpportunityContext(request.opportunityId))
-      if (baseContext.account.id !== request.accountId) {
-        throw new Error('The selected opportunity does not belong to the selected account.')
-      }
-      const [milestones, guidance] = await Promise.all([
-        measurePerformance('agent.context.milestones', this.performanceReporter, () =>
-          this.msx.listMilestones(request.opportunityId)),
-        measurePerformance('agent.context.mcem', this.performanceReporter, () =>
-          this.mcem.getStageGuidance(baseContext.opportunity.recordedStage))
-      ])
-      const opportunityContext = { ...baseContext, milestones }
-      const localEvaluation = evaluateMcemProgress(opportunityContext, guidance)
-      const content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke({
-        request,
-        opportunityContext,
-        guidance,
-        localEvaluation
-      }))
+      const { configuredAgent, context } = await this.prepareAgentTask(request)
+      const content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke(context))
       if (!content?.trim()) {
         throw new Error(`The ${request.capability} agent returned no content.`)
       }
-
-      const sourceHealth = [opportunityContext.sourceHealth, guidance.sourceHealth]
-      const isPartial = sourceHealth.some((source) => ['partial', 'stale', 'unavailable'].includes(source.state))
-      const responseContent = addMsxOpportunityLink(content.trim(), opportunityContext.opportunity.id)
-      return {
-        contractVersion,
-        correlationId: randomUUID(),
-        capability: request.capability,
-        agentVersion: configuredAgent.version,
-        generatedAt: new Date().toISOString(),
-        mode: opportunityContext.sourceHealth.state === 'sample' ? 'sample' : 'live',
-        state: isPartial ? 'partial' : 'complete',
-        content: responseContent,
-        sourceHealth
-      }
+      return this.buildAgentResponse(request, configuredAgent, context, content)
     }))
   }
+
+  /**
+   * Progressive variant of `runAgentTask`. Emits an instant deterministic draft as soon as evidence is
+   * loaded, then model text as it streams, then the authoritative response. A model failure falls back to
+   * the labelled deterministic draft; cancellation and context failures emit a terminal `error` event.
+   * Never throws: every outcome is delivered through `onEvent`.
+   */
+  async runAgentTaskStream(input: AgentTaskRequest, onEvent: (event: AgentTaskStreamEvent) => void, signal?: AbortSignal): Promise<void> {
+    const request = agentTaskRequestSchema.parse(input)
+    const emit = (event: AgentTaskStreamEvent) => {
+      try { onEvent(event) } catch { /* a closed consumer must not break the run */ }
+    }
+    const fail = (error: unknown) => {
+      const cancelled = signal?.aborted === true
+      emit({
+        type: 'error',
+        code: cancelled ? 'cancelled' : 'failed',
+        message: cancelled ? 'The request was cancelled.' : errorMessage(error)
+      })
+    }
+    try {
+      await measurePerformance(`agent.task.${request.capability}`, this.performanceReporter, () => this.withFreshReadContext(async () => {
+        const { configuredAgent, context } = await this.prepareAgentTask(request)
+        signal?.throwIfAborted()
+        const instantDraft = formatLiveAgentGuidance(request.capability, context)
+        emit({
+          type: 'context', streamVersion: agentTaskStreamVersion, capability: request.capability, instantDraft,
+          sourceHealth: [context.opportunityContext.sourceHealth, context.guidance.sourceHealth]
+        })
+        let content: string
+        let fallback: string | undefined
+        try {
+          content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, async () => {
+            const streamed = configuredAgent.agent.stream
+              ? await configuredAgent.agent.stream(context, { signal, onDelta: (text) => emit({ type: 'delta', text }) })
+              : await configuredAgent.agent.invoke(context)
+            if (!streamed?.trim()) throw new Error(`The ${request.capability} agent returned no content.`)
+            return streamed
+          })
+        } catch (error) {
+          if (signal?.aborted) throw error
+          content = `${instantDraft}\n\n> AI enhancement is unavailable (${errorMessage(error)}). This is the evidence-based draft from the local MCEM evaluation.`
+          fallback = 'local-fallback'
+        }
+        emit({ type: 'complete', response: this.buildAgentResponse(request, configuredAgent, context, content, fallback) })
+      }, signal))
+    } catch (error) {
+      fail(error)
+    }
+  }
+}
+
+function errorMessage(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error)
+  return (text.trim() || 'The agent request failed.').slice(0, 400)
 }
 
 export { addMsxOpportunityLink }
 export * from './policies/mcp-tool-authorization.js'
+export * from './prewarm.js'
 export * from './progress/index.js'
 export * from './routing/mcp-tool-broker.js'
 export * from './workflows/index.js'

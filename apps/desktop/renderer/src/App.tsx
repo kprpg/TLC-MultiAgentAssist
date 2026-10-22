@@ -44,6 +44,8 @@ import {
 } from '@fluentui/react-icons'
 import { agentCapabilities, contractVersion, type Account, type AgentCapability, type AgentTaskResponse, type DesktopDataStatus, type McemResponse, type Opportunity } from '../../../../packages/common/index.js'
 import { getDataModeLabel } from './data-mode-label.js'
+import { agentTaskStreamEventSchema } from '../../../../packages/common/contracts/index.js'
+import { createAgentStreamAccumulator, progressToResponse } from '../../../shared/agent-stream.js'
 
 const prompt = 'How do we move this opportunity to the next MCEM stage?'
 const agentTasks: Record<AgentCapability, { label: string; prompts: readonly string[] }> = {
@@ -247,20 +249,27 @@ export function App() {
     if (submittedPrompt.length < 3) return
     setTaskPrompt(selectedPrompt)
     setAgentStatus('running')
+    setAgentResult(null)
     setAgentError('')
     setShareStatus('ready')
     setShareMessage('')
     try {
-      const response = await window.tlc.runAgentTask({
+      const accumulator = createAgentStreamAccumulator((progress) => setAgentResult(progressToResponse(progress, capability)))
+      let failure: unknown
+      await window.tlc.runAgentTaskStream({
         contractVersion,
         capability,
         accountId,
         opportunityId,
         prompt: submittedPrompt
-      })
-      setAgentResult(response)
+      }, (raw) => {
+        try { accumulator.push(agentTaskStreamEventSchema.parse(raw)) } catch (error) { failure = error }
+      }).done
+      if (failure) throw failure
+      setAgentResult(accumulator.result())
       setAgentStatus('ready')
     } catch (cause) {
+      setAgentResult(null)
       setAgentError(cause instanceof Error ? cause.message : 'The agent task could not be completed.')
       setAgentStatus('error')
     }
@@ -533,7 +542,7 @@ export function App() {
               </div>
               {agentStatus === 'error' && <MessageBar intent="error">{agentError}</MessageBar>}
               {agentStatus === 'running' && <Spinner label={`Running ${agentTasks[capability].label}`} />}
-              {agentResult && agentStatus !== 'running' && <article className="agent-synthesis">
+              {agentResult && <article className="agent-synthesis">
                 <div className="agent-synthesis-meta">
                   <div className="agent-synthesis-identity">
                     <strong>{agentTasks[agentResult.capability].label}</strong>

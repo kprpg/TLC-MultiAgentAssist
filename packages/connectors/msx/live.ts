@@ -769,6 +769,9 @@ export class LiveMsxConnector implements MsxConnector {
   }
 
   async getOpportunityContext(opportunityId: string): Promise<OpportunityContext> {
+    // Milestone rows do not depend on the portfolio read, so start them together; they are discarded
+    // (and their failure swallowed) when the access gate below rejects the opportunity.
+    if (guidPattern.test(opportunityId)) this.getMilestoneRows(opportunityId).catch(() => undefined)
     const portfolio = await this.getPortfolio()
     const opportunity = portfolio.opportunities.find((candidate) => candidate.id === opportunityId)
     if (!opportunity) throw new Error('The opportunity is not in the signed-in user’s active MSX portfolio.')
@@ -1292,12 +1295,14 @@ export class LiveMsxConnector implements MsxConnector {
 
   private async loadPortfolio(): Promise<MsxPortfolio> {
     const userId = await measurePerformance('msx.identity', this.performanceReporter, () => this.getCurrentUserId())
-    const preferences = await this.preferenceStore.read(userId)
-    const dealTeamRows = await measurePerformance('msx.deal-team', this.performanceReporter, () => this.requestAll<DealTeamRow>('msp_dealteams', {
-      '$select': '_msp_parentopportunityid_value',
-      '$filter': `statecode eq 0 and _msp_dealteamuserid_value eq ${userId}`
-    }))
-    const milestoneOpportunityIds = await this.milestoneTeamOpportunityIds()
+    const [preferences, dealTeamRows, milestoneOpportunityIds] = await Promise.all([
+      this.preferenceStore.read(userId),
+      measurePerformance('msx.deal-team', this.performanceReporter, () => this.requestAll<DealTeamRow>('msp_dealteams', {
+        '$select': '_msp_parentopportunityid_value',
+        '$filter': `statecode eq 0 and _msp_dealteamuserid_value eq ${userId}`
+      })),
+      measurePerformance('msx.milestone-team', this.performanceReporter, () => this.milestoneTeamOpportunityIds())
+    ])
     const dealTeamOpportunityIds = new Set(dealTeamRows.map((row) => row._msp_parentopportunityid_value).filter(isPresent))
     const opportunityIds = unique([
       ...dealTeamOpportunityIds,

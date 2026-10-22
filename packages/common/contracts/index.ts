@@ -301,6 +301,30 @@ export const agentTaskResponseSchema = z.object({
   sourceHealth: z.array(sourceHealthSchema).min(1)
 })
 
+export const agentTaskStreamVersion = '1.0' as const
+
+/**
+ * Progressive agent response. `context` carries an instant deterministic draft grounded in the same
+ * evidence as the model call; `delta` carries model text; `complete` always carries the full authoritative
+ * response; `error` ends the stream without a response.
+ */
+export const agentTaskStreamEventSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('context'),
+    streamVersion: z.literal(agentTaskStreamVersion),
+    capability: agentCapabilitySchema,
+    instantDraft: z.string().min(1),
+    sourceHealth: z.array(sourceHealthSchema).min(1)
+  }).strict(),
+  z.object({ type: z.literal('delta'), text: z.string().min(1) }).strict(),
+  z.object({ type: z.literal('complete'), response: agentTaskResponseSchema }).strict(),
+  z.object({
+    type: z.literal('error'),
+    code: z.enum(['failed', 'timeout', 'cancelled']),
+    message: z.string().min(1).max(500)
+  }).strict()
+])
+
 export const emailComposeRequestSchema = z.object({
   contractVersion: z.literal(contractVersion),
   recipients: z.array(z.string().email()).min(1).max(20),
@@ -374,6 +398,7 @@ export type McemResponse = z.infer<typeof mcemResponseSchema>
 export type AgentCapability = z.infer<typeof agentCapabilitySchema>
 export type AgentTaskRequest = z.infer<typeof agentTaskRequestSchema>
 export type AgentTaskResponse = z.infer<typeof agentTaskResponseSchema>
+export type AgentTaskStreamEvent = z.infer<typeof agentTaskStreamEventSchema>
 export type EmailComposeRequest = z.infer<typeof emailComposeRequestSchema>
 export type EmailComposeResult = z.infer<typeof emailComposeResultSchema>
 export type ExportResponseRequest = z.infer<typeof exportResponseRequestSchema>

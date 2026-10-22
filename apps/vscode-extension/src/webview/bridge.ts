@@ -32,6 +32,25 @@ export function request<T>(method: string, params?: unknown): Promise<T> {
     })
 }
 
+const streams = new Map<string, (event: unknown) => void>()
+
+window.addEventListener('message', (event: MessageEvent) => {
+    const data = event.data as { kind?: string; id?: string; event?: unknown } | null
+    if (!data || data.kind !== 'stream-event' || typeof data.id !== 'string') return
+    streams.get(data.id)?.(data.event)
+})
+
+/** Start a progressive host request. `onEvent` receives raw events (validated by the caller); `cancel` aborts host-side. */
+export function streamRequest(method: 'runAgentTaskStream', params: unknown, onEvent: (event: unknown) => void): { cancel(): void; end(): void } {
+    const id = `stream-${counter += 1}`
+    streams.set(id, onEvent)
+    vscodeApi.postMessage({ kind: 'stream-request', id, method, params })
+    return {
+        cancel: () => vscodeApi.postMessage({ kind: 'stream-cancel', id }),
+        end: () => { streams.delete(id) }
+    }
+}
+
 export type HostEventMessage = { kind: 'event'; type: 'init' | 'modeChanged' | 'refresh'; payload: { mode: 'sample' | 'live'; userEmail?: string } }
 export type HostFocusMessage = { kind: 'focus'; accountId?: string; opportunityId?: string }
 export type HostRunPlayMessage = { kind: 'runPlay'; workflowId: string; token: number }

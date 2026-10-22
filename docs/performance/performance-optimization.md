@@ -1,5 +1,7 @@
 # Performance Optimization
 
+> Agent latency (streaming, instant draft, first-token timeout, MSX read concurrency) is covered in [Agentic-Performance.md](./Agentic-Performance.md).
+
 ## Summary
 
 This pass addressed two reported latency areas: initial MSX population and explicit Microsoft Foundry workflows. It used a conservative approach that removes avoidable work, reuses existing clients, and adds phase-level measurements without changing the user-facing workflow.

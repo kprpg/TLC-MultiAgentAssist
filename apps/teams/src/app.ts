@@ -4,7 +4,7 @@ import { z, ZodError } from 'zod'
 import { withTeamsPerformanceContext } from './performance.js'
 import { collaborationVersion, collaborationLifecycleCommandSchema, type ContextBinding } from '../../../packages/common/contracts/collaboration.js'
 import { meetingChangeSetApprovalSchema } from '../../../packages/common/contracts/meeting.js'
-import { accountCandidateSchema, emailComposeRequestSchema, exportResponseRequestSchema, workflowRunSchema } from '../../../packages/common/contracts/index.js'
+import { accountCandidateSchema, agentTaskRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, workflowRunSchema } from '../../../packages/common/contracts/index.js'
 import { createOutlookDraftMessage } from '../../../packages/documents/outlook-compose.js'
 import { createResponseDocumentBuffer } from '../../../packages/documents/response-document.js'
 import type { ScopedDocumentStore } from '../../../packages/connectors/common/scoped-document-store.js'
@@ -402,6 +402,27 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         response.setHeader('content-type', 'message/rfc822')
         response.setHeader('content-disposition', 'attachment; filename="TLC-reviewed-draft.eml"')
         response.end(createOutlookDraftMessage(input.draft))
+      } else if (url.pathname === '/api/teams/agent-stream') {
+        await new UserRequestBudget(options.store).consume(principal, 'agent', principal.mode === 'sample' ? 60 : 4)
+        const input = agentTaskRequestSchema.strict().parse(body)
+        assertCurrentCaller()
+        response.statusCode = 200
+        response.setHeader('content-type', 'application/x-ndjson; charset=utf-8')
+        response.setHeader('cache-control', 'no-store, no-transform')
+        response.setHeader('x-accel-buffering', 'no')
+        response.flushHeaders()
+        const heartbeat = setInterval(() => { if (!response.writableEnded) response.write('\n') }, 15_000)
+        try {
+          await withTeamsPerformanceContext(correlationId, () => operations.streamAgentTask(input, (event) => {
+            try { assertCurrentCaller() } catch { readCancellation.abort(); return }
+            if (!response.writableEnded) response.write(`${JSON.stringify(event)}\n`)
+          }, readCancellation.signal))
+        } catch {
+          if (!response.writableEnded) response.write(`${JSON.stringify({ type: 'error', code: 'failed', message: 'The request could not be completed.' })}\n`)
+        } finally {
+          clearInterval(heartbeat)
+          response.end()
+        }
       } else if (url.pathname.startsWith('/api/teams/operations/')) {
         const name = decodeURIComponent(url.pathname.slice('/api/teams/operations/'.length))
         if (!operations.names().includes(name)) throw new TeamsHttpError(404, 'unknown_operation')

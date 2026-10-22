@@ -1,7 +1,7 @@
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as vscode from 'vscode'
-import { routeBridgeMessage } from './host-router.js'
+import { createAgentStreamRouter, routeBridgeMessage } from './host-router.js'
 import { exportBlockedReason, sanitizeFileName } from './export-document.js'
 import { hostEventSchema, type HostEvent } from './message-contracts.js'
 import { contractVersion } from '../../../packages/common/index.js'
@@ -28,6 +28,7 @@ export class WorkbenchPanel {
     private readonly disposables: vscode.Disposable[] = []
     private ready = false
     private readonly voiceHost: SharedVoiceInputHost
+    private readonly agentStreams = createAgentStreamRouter(() => this.getProvider(), (message) => { void this.panel.webview.postMessage(message) })
     private pending: { kind: 'focus'; accountId?: string; opportunityId?: string } | { kind: 'runPlay'; workflowId: string; token: number } | undefined
 
     private constructor(
@@ -40,6 +41,7 @@ export class WorkbenchPanel {
             () => this.panel.visible && this.panel.active && vscode.window.state.focused
         )
         this.panel.webview.onDidReceiveMessage((message) => void this.onMessage(message), undefined, this.disposables)
+        this.disposables.push({ dispose: () => this.agentStreams.dispose() })
         this.panel.onDidDispose(() => this.dispose(), undefined, this.disposables)
         this.panel.onDidChangeViewState(() => {
             if (!this.panel.visible || !this.panel.active) this.voiceHost.cancel()
@@ -118,6 +120,10 @@ export class WorkbenchPanel {
         if (kind === 'ready') {
             this.ready = true
             this.flushPending()
+            return
+        }
+        if (this.agentStreams.handles(message)) {
+            await this.agentStreams.handle(message)
             return
         }
         if (message && typeof message === 'object' && (message as { method?: unknown }).method === 'voiceInput') {

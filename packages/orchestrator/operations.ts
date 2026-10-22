@@ -103,6 +103,13 @@ export function createApplicationOperations(services: ApplicationServices) {
   return {
     describe,
     names: () => Object.keys(operations),
+    /** Progressive agent run; parses the request, validates every emitted event, and never throws for run outcomes. */
+    async streamAgentTask(input: unknown, onEvent: (event: c.AgentTaskStreamEvent) => void, signal?: AbortSignal): Promise<void> {
+      const request = c.agentTaskRequestSchema.strict().parse(input)
+      services.refreshSource()
+      await measurePerformance('operation.runAgentTaskStream', services.performanceReporter,
+        () => core.runAgentTaskStream(request, (event) => onEvent(c.agentTaskStreamEventSchema.parse(event)), signal))
+    },
     async invoke(name: string, input: unknown, signal?: AbortSignal): Promise<unknown> {
       const entry = describe(name)
       return measurePerformance(`operation.${name}`, services.performanceReporter, async () => {

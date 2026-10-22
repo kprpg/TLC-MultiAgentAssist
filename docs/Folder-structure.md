@@ -99,6 +99,11 @@ packages/common/contracts/index.ts   Independently versioned v1.0 Portfolio inde
 packages/orchestrator/application-runtime.ts
 packages/orchestrator/operations.ts   Shared composition and typed operation catalog
 packages/orchestrator/task-agents.ts  Shared Foundry/sample/deterministic-live registries
+packages/orchestrator/instant-draft.ts
+                                     Deterministic evidence-based draft shown instantly while the model runs
+packages/orchestrator/prewarm.ts      Best-effort Foundry token and MCEM guidance pre-warm
+apps/shared/agent-stream.ts           Browser-safe agent stream accumulator and NDJSON reader (all UIs)
+apps/shared/use-agent-run.ts          Shared React hook: instant draft, streamed text, final response, cancel
 packages/orchestrator/collaboration/  Reviewed actions, bindings, events, state admission
 packages/orchestrator/mutations/     Immediate confirmed admission, protected journal, actor/version and effect tracking
 packages/connectors/graph/            Delegated meeting/transcript/subscription access

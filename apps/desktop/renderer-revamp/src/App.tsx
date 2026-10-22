@@ -62,6 +62,7 @@ import { McemStageColumns } from '../../../shared/mcem-stage-board.js'
 import { WorkbenchPane } from './workbench-pane.js'
 import { SourceSyncStatus } from '../../../shared/sync-status.js'
 import { usePresentationSession } from '../../../shared/presentation-hooks.js'
+import { useAgentRun } from '../../../shared/use-agent-run.js'
 
 type Shell = 'desktop' | 'web'
 type WorkspaceView = 'accounts' | 'workflows' | 'discover' | 'dashboard' | 'new'
@@ -213,8 +214,11 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [centerTab, setCenterTab] = useState<CenterTab>('msx')
   const [capability, setCapability] = useState<AgentCapability>('account-pulse')
   const [taskPrompt, setTaskPrompt] = useState('')
-  const [agentResult, setAgentResult] = useState<AgentTaskResponse | null>(null)
-  const [agentLoading, setAgentLoading] = useState(false)
+  const { agentResult, setAgentResult, agentLoading, setAgentLoading, agentPhase, runAgent, cancelAgent } = useAgentRun(
+    (agentCapability, accountId, opportunityId, prompt, onProgress, signal) => client.runAgentTaskStream
+      ? client.runAgentTaskStream(agentCapability, accountId, opportunityId, prompt, onProgress, signal)
+      : client.runAgentTask(agentCapability, accountId, opportunityId, prompt)
+  )
   const [emailDialogOpen, setEmailDialogOpen] = useState(false)
   const [emailRecipients, setEmailRecipients] = useState('')
   const [emailSubject, setEmailSubject] = useState('')
@@ -444,12 +448,9 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setWorkflowError('')
     try {
       const handoff = await client.prepareWorkflowGuidance(selectedWorkflowRun.runId, queueItemId, nextCapability)
-      const response = await client.runAgentTask(
-        handoff.capability,
-        handoff.scope.accountId,
-        handoff.scope.opportunityId,
-        handoff.prompt
-      )
+      const response = await (client.runAgentTaskStream
+        ? client.runAgentTaskStream(handoff.capability, handoff.scope.accountId, handoff.scope.opportunityId, handoff.prompt)
+        : client.runAgentTask(handoff.capability, handoff.scope.accountId, handoff.scope.opportunityId, handoff.prompt))
       const resultKey = `${selectedWorkflowRun.runId}:${queueItemId}`
       setWorkflowGuidanceResults((current) => ({ ...current, [resultKey]: response }))
     } catch (cause) {
@@ -737,18 +738,13 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     const request = detailRequest.current
     setCapability(selectedCapability)
     setTaskPrompt(selectedPrompt)
-    setAgentResult(null)
-    setAgentLoading(true)
     setError('')
     setShareStatus('ready')
     setShareMessage('')
     try {
-      const response = await client.runAgentTask(selectedCapability, account.id, opportunity.id, prompt)
-      if (request === detailRequest.current) setAgentResult(response)
+      await runAgent(selectedCapability, account.id, opportunity.id, prompt, () => request === detailRequest.current)
     } catch (cause) {
       if (request === detailRequest.current) handleError(cause)
-    } finally {
-      if (request === detailRequest.current) setAgentLoading(false)
     }
   }
 
@@ -1081,10 +1077,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       if (resultOutcome.status === 'rejected' && milestonesOutcome.status === 'rejected') handleError(resultOutcome.reason)
       else if (resultOutcome.status === 'rejected') setError(`MCEM guidance is unavailable: ${resultOutcome.reason instanceof Error ? resultOutcome.reason.message : String(resultOutcome.reason)}`)
       else if (milestonesOutcome.status === 'rejected') setError(`Milestones are unavailable: ${milestonesOutcome.reason instanceof Error ? milestonesOutcome.reason.message : String(milestonesOutcome.reason)}`)
-      if (centerTab === 'guidance' && taskPrompt.trim().length >= 3) {
-        const response = await client.runAgentTask(capability, account.id, opportunity.id, taskPrompt.trim())
-        if (request === detailRequest.current) setAgentResult(response)
-      }
+      if (centerTab === 'guidance' && taskPrompt.trim().length >= 3) void runAgentPrompt(taskPrompt.trim())
     } catch (cause) {
       if (request === detailRequest.current) handleError(cause)
     } finally {
@@ -1100,8 +1093,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setExpandedOpportunityId(null)
     setMilestones([])
     setResult(null)
-    setAgentResult(null)
-    setAgentLoading(false)
+    cancelAgent()
     setTaskPrompt('')
     setMilestoneEdit(null)
     setOpportunityCommentsOpen(false)
@@ -1506,14 +1498,17 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
               <Textarea aria-label="Agent task" placeholder="Ask a different question..." resize="vertical" rows={2} value={taskPrompt} onChange={(_, data) => setTaskPrompt(data.value)} />
               <Button appearance="primary" disabled={agentLoading || taskPrompt.trim().length < 3} onClick={() => void runAgentPrompt()}>{agentLoading ? 'Analyzing...' : 'Send'}</Button>
             </div>
-            {agentLoading && <Spinner label={`Running ${agentCapabilities.find((item) => item.id === capability)?.label}`} />}
-            {agentResult && !agentLoading ? <article className="agent-response">
+            {agentLoading && <div className="agent-run-status">
+              <Spinner size="tiny" label={agentPhase === 'streaming' ? `Receiving ${agentCapabilities.find((item) => item.id === capability)?.label} response` : agentPhase === 'draft' ? 'Evidence-based draft shown; AI response in progress' : `Running ${agentCapabilities.find((item) => item.id === capability)?.label}`} />
+              <Button size="small" onClick={() => cancelAgent()}>Cancel</Button>
+            </div>}
+            {agentResult ? <article className="agent-response">
               <header className="agent-response-header">
                 <div><p className="eyebrow">{agentCapabilities.find((item) => item.id === agentResult.capability)?.label}</p><small>Agent {agentResult.agentVersion}</small></div>
                 <div className="response-actions" aria-label="Response actions">
                   <Dialog open={emailDialogOpen} onOpenChange={(_, data) => setEmailDialogOpen(data.open)}>
                     <DialogTrigger disableButtonEnhancement>
-                      <Button icon={<Mail20Regular />} disabled={shareStatus === 'running'}>Send Email</Button>
+                      <Button icon={<Mail20Regular />} disabled={shareStatus === 'running' || agentLoading}>Send Email</Button>
                     </DialogTrigger>
                     <DialogSurface><DialogBody><DialogTitle>{client.mode === 'desktop' ? 'Open email message' : 'Download email draft'}</DialogTitle><DialogContent className="email-draft-form">
                       <p>{client.mode === 'desktop' ? 'The prepared message opens in your default mail application for review before sending.' : 'A rich Outlook email draft downloads for review before sending.'}</p>
@@ -1525,7 +1520,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                       <Button appearance="primary" icon={<Mail20Regular />} disabled={shareStatus === 'running' || !emailRecipients.trim() || !emailSubject.trim()} onClick={() => void openEmailCompose()}>{shareStatus === 'running' ? (client.mode === 'desktop' ? 'Opening...' : 'Preparing...') : (client.mode === 'desktop' ? 'Open Email' : 'Download Draft')}</Button>
                     </DialogActions></DialogBody></DialogSurface>
                   </Dialog>
-                  <Button icon={<ArrowDownload20Regular />} disabled={shareStatus === 'running'} onClick={() => void exportAgentResponse()}>Export</Button>
+                  <Button icon={<ArrowDownload20Regular />} disabled={shareStatus === 'running' || agentLoading} onClick={() => void exportAgentResponse()}>Export</Button>
                 </div>
               </header>
               {shareMessage && <MessageBar intent={shareStatus === 'error' ? 'error' : 'success'}>{shareMessage}</MessageBar>}

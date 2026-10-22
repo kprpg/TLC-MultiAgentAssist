@@ -48,6 +48,8 @@ export interface TlcDesktopApi {
   runMcemCoach(request: McemRequest): Promise<McemResponse>
   transitionOpportunityStage(request: McemStageTransitionRequest): Promise<McemStageTransitionResult>
   runAgentTask(request: AgentTaskRequest): Promise<AgentTaskResponse>
+  /** Progressive run; events are delivered in order and always end with `complete` or `error`. Events are validated by the renderer. */
+  runAgentTaskStream(request: AgentTaskRequest, onEvent: (event: unknown) => void): { cancel(): void; done: Promise<void> }
   openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
   exportAgentResponse(request: ExportResponseRequest): Promise<ExportResponseResult>
   openEvidence(url: string): Promise<void>
@@ -97,6 +99,16 @@ const api: TlcDesktopApi = {
   runMcemCoach: (request) => ipcRenderer.invoke('tlc:run-mcem-coach', request),
   transitionOpportunityStage: (request) => ipcRenderer.invoke('tlc:transition-opportunity-stage', request),
   runAgentTask: (request) => ipcRenderer.invoke('tlc:run-agent-task', request),
+  runAgentTaskStream: (request, onEvent) => {
+    const streamId = globalThis.crypto.randomUUID()
+    const listener = (_event: Electron.IpcRendererEvent, message: { streamId?: string; event?: unknown }) => {
+      if (message?.streamId === streamId) onEvent(message.event)
+    }
+    ipcRenderer.on('tlc:agent-task-event', listener)
+    const done = (ipcRenderer.invoke('tlc:run-agent-task-stream', request, streamId) as Promise<void>)
+      .finally(() => { ipcRenderer.removeListener('tlc:agent-task-event', listener) })
+    return { cancel: () => { void ipcRenderer.invoke('tlc:cancel-agent-task-stream', streamId) }, done }
+  },
   openEmailCompose: (request) => ipcRenderer.invoke('tlc:open-email-compose', request),
   exportAgentResponse: (request) => ipcRenderer.invoke('tlc:export-agent-response', request),
   openEvidence: (url) => ipcRenderer.invoke('tlc:open-evidence', url),
