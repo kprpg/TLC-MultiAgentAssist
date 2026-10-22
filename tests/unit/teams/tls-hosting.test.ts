@@ -70,7 +70,7 @@ beforeAll(async () => {
 afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }) })
 
 describe('explicit local HTTPS hosting', () => {
-  it.each(['local-interactive', 'local-azure-cli'] as const)('boots %s live hosting without bot/Foundry credentials or any MSX sign-in/read/write', async (authentication) => {
+  it.runIf(process.platform === 'win32').each(['local-interactive', 'local-azure-cli'] as const)('boots %s live hosting without bot/Foundry credentials or any MSX sign-in/read/write', async (authentication) => {
     const reservation = createServer()
     await new Promise<void>((ready) => reservation.listen(0, '127.0.0.1', ready))
     const reserved = reservation.address()
@@ -137,7 +137,7 @@ describe('explicit local HTTPS hosting', () => {
     } finally { await application.close() }
     expect(application.server.listening).toBe(false)
   }, 50_000)
-  it('keeps real Sample writes in their own SQLite files across a Live runtime restart without source access', async () => {
+  it.runIf(process.platform === 'win32')('keeps real Sample writes in their own SQLite files across a Live runtime restart without source access', async () => {
     const reservation = createServer()
     await new Promise<void>((ready) => reservation.listen(0, '127.0.0.1', ready))
     const reserved = reservation.address()

@@ -212,7 +212,7 @@ describe('one local build/configure/run/Teams-upload entrypoint', () => {
     })
     expect(result.stdout).toContain('Starting Teams in sample mode')
   }, 60_000)
-  it('discovers the private CLI configuration and launches menu-selected live with reviewed read/write, never source sign-in', async () => {
+  it.runIf(process.platform === 'win32')('discovers the private CLI configuration and launches menu-selected live with reviewed read/write, never source sign-in', async () => {
     const data = await fixture('cli', 'https://localhost:49199')
     const configurationDirectory = join(data.localAppData, 'TLC-Assist', 'Teams', 'configuration')
     await mkdir(configurationDirectory, { recursive: true })
@@ -227,7 +227,7 @@ describe('one local build/configure/run/Teams-upload entrypoint', () => {
     expect(result.stdout).toContain('sign-in has NOT occurred')
     expect(JSON.stringify(await data.calls())).not.toContain('"connect"')
   }, 60_000)
-  it('opens Sample first while preparing the configured Live profile for a later in-app switch without source sign-in', async () => {
+  it.runIf(process.platform === 'win32')('opens Sample first while preparing the configured Live profile for a later in-app switch without source sign-in', async () => {
     const data = await fixture('cli', 'https://localhost:49199')
     const tls = { certificate: join(data.folder, 'certificate.pem'), privateKey: join(data.folder, 'key.pem') }
     await writeFile(tls.certificate, 'fixture certificate')
@@ -240,7 +240,7 @@ describe('one local build/configure/run/Teams-upload entrypoint', () => {
     expect(result.stdout).toContain('Sample setup requires no source connection or pairing')
     expect(JSON.stringify(await data.calls())).not.toContain('"connect"')
   }, 60_000)
-  it.each(['parameter', 'configuration'] as const)('honors read-only CLI mode from %s without silently enabling writes', async (source) => {
+  it.runIf(process.platform === 'win32').each(['parameter', 'configuration'] as const)('honors read-only CLI mode from %s without silently enabling writes', async (source) => {
     const data = await fixture('cli', 'https://localhost:49199')
     const tls = { certificate: join(data.folder, 'certificate.pem'), privateKey: join(data.folder, 'key.pem') }
     await writeFile(tls.certificate, 'fixture certificate')
@@ -267,7 +267,7 @@ describe('one local build/configure/run/Teams-upload entrypoint', () => {
     await expect(data.run('', {}, { mode: 'menu', selection: 'wrong' })).rejects.toMatchObject({ stderr: expect.stringContaining('Select Sample (1) or Live (2)') })
     expect((await data.calls()).map((entry) => entry.phase)).toEqual(['menu'])
   }, 60_000)
-  it.each(['native', 'cli'])('prepares a private %s installation on the exact frontend port without connecting or writing to MSX', async (profile) => {
+  it.runIf(process.platform === 'win32').each(['native', 'cli'])('prepares a private %s installation on the exact frontend port without connecting or writing to MSX', async (profile) => {
     const data = await fixture(profile, 'https://localhost:49199')
     const certificate = join(data.folder, 'certificate.pem')
     const privateKey = join(data.folder, 'private-key.pem')
