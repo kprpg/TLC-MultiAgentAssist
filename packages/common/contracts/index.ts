@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { workflowAgentCapabilityValues } from './workflows.js'
 import { seDomainSchema } from '../configuration/se-domains.js'
 import { contractVersion } from './version.js'
+import { accountSchema } from './portfolio.js'
 
 export { contractVersion } from './version.js'
 export * from './mcp.js'
@@ -11,6 +12,7 @@ export * from './meeting.js'
 export * from './voice.js'
 export * from './seller-dashboard.js'
 export * from './record-creation.js'
+export * from './cache-sync.js'
 
 export const dataModeSchema = z.enum(['sample', 'live'])
 export const sourceStateSchema = z.enum([
@@ -49,7 +51,7 @@ export const opportunitySchema = z.object({
   owner: z.string().min(1).optional(),
   opportunityIntent: z.array(z.string().trim().min(1)).max(10).optional(),
   recordedStage: z.number().int().min(1).max(5),
-  value: z.number().nonnegative(),
+  value: z.number().finite(),
   currency: z.string().length(3),
   closeDate: z.string().date(),
   comments: z.string().optional()
@@ -73,6 +75,30 @@ export const milestoneSchema = z.object({
    */
   onMilestoneTeam: z.boolean().optional()
 })
+
+export const portfolioReadVersion = '1.0' as const
+export const portfolioReadRequestSchema = z.object({
+  contractVersion: z.literal(portfolioReadVersion),
+  includeHidden: z.boolean().optional()
+}).strict()
+export const portfolioIndexSchema = z.object({
+  contractVersion: z.literal(portfolioReadVersion),
+  accounts: z.array(accountSchema.strict()),
+  opportunities: z.array(opportunitySchema.strict())
+}).strict()
+export const portfolioWorkspaceRequestSchema = portfolioReadRequestSchema.extend({
+  accountId: z.string().min(1).max(200).optional(),
+  opportunityId: z.string().min(1).max(200).optional()
+}).strict()
+export const portfolioWorkspaceSchema = portfolioIndexSchema.extend({
+  selectedAccountId: z.string().min(1).optional(),
+  selectedOpportunityId: z.string().min(1).optional(),
+  milestones: z.array(milestoneSchema.strict())
+}).strict()
+export type PortfolioReadRequest = z.infer<typeof portfolioReadRequestSchema>
+export type PortfolioIndex = z.infer<typeof portfolioIndexSchema>
+export type PortfolioWorkspaceRequest = z.infer<typeof portfolioWorkspaceRequestSchema>
+export type PortfolioWorkspace = z.infer<typeof portfolioWorkspaceSchema>
 
 export const milestoneStatusSchema = z.enum([
   'On Track',
@@ -173,6 +199,21 @@ export const discoverableOpportunitySchema = opportunitySchema.extend({
   technicalCapability: z.string().min(1).optional(),
   onDealTeam: z.boolean()
 })
+
+export const discoverySnapshotVersion = '1.0' as const
+export const discoverySnapshotRequestSchema = z.object({
+  contractVersion: z.literal(discoverySnapshotVersion)
+}).strict()
+export const discoverySnapshotSchema = z.object({
+  contractVersion: z.literal(discoverySnapshotVersion),
+  generatedAt: z.string().datetime(),
+  accounts: z.array(accountSchema.strict()),
+  portfolioOpportunities: z.array(opportunitySchema.strict()),
+  opportunities: z.array(discoverableOpportunitySchema.strict()),
+  milestoneTeamOpportunityIds: z.array(z.string().min(1))
+}).strict()
+export type DiscoverySnapshotRequest = z.infer<typeof discoverySnapshotRequestSchema>
+export type DiscoverySnapshot = z.infer<typeof discoverySnapshotSchema>
 
 export const mcemStageTransitionRequestSchema = z.object({
   contractVersion: z.literal(contractVersion),

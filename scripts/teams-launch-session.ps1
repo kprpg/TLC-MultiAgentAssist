@@ -60,12 +60,20 @@ function Invoke-TeamsRunOwner {
     return & (Join-Path $PSScriptRoot 'teams-local-connection.ps1') @arguments
 }
 
+function Get-TeamsRunDataMode {
+    param([object] $Record)
+    $mode = if ($Record.PSObject.Properties['initialDataMode']) { $Record.initialDataMode } else { $Record.mode }
+    if ($mode -notin @('sample', 'live')) { throw 'The recorded initial data mode is invalid.' }
+    return $mode
+}
+
 function Get-TeamsRunStatus {
     param([string] $WorkDirectory)
     $record = (Get-OwnedTeamsRun -WorkDirectory $WorkDirectory).Record
     $status = Read-TeamsLaunchStatus -Record $record
-    $native = $record.authentication -in @('local-interactive', 'local-azure-cli')
-    $source = if ($record.mode -eq 'sample') { 'not-required' } elseif ($native) {
+    $dataMode = Get-TeamsRunDataMode -Record $record
+    $native = $dataMode -eq 'live' -and $record.authentication -in @('local-interactive', 'local-azure-cli')
+    $source = if ($dataMode -eq 'sample') { 'not-required' } elseif ($native) {
         $owner = Invoke-TeamsRunOwner -WorkDirectory $WorkDirectory -Action Status
         if ($owner.status.state -eq 'connected' -and @($owner.status.resources | Where-Object { $_.resource -eq 'msx' -and $_.state -eq 'connected' }).Count -gt 0) { 'connected' }
         elseif ($owner.status.state -eq 'connected') { 'msx-not-connected' }
@@ -78,7 +86,7 @@ function Get-TeamsRunStatus {
     })
     $installed = $record.installation -in @('command-succeeded', 'manually-confirmed', 'verified')
     return [pscustomobject]@{
-        Backend = 'ready'; Origin = $record.origin; Mode = $record.mode; Authentication = $record.authentication
+        Backend = 'ready'; Origin = $record.origin; Mode = $record.mode; InitialDataMode = $dataMode; Authentication = $record.authentication
         RunId = $record.runId; ClientBuild = $record.clientBuildId; AppVersion = $record.packageVersion
         Installation = $record.installation; Source = $source; TeamsClient = $(if ($clients.Count) { 'verified' } else { 'waiting' })
         Ready = ($installed -and $clients.Count -gt 0 -and (-not $native -or $source -eq 'connected'))
@@ -88,12 +96,12 @@ function Get-TeamsRunStatus {
 
 function Show-TeamsRunStatus {
     param([object] $Status)
-    $Status | Format-List Backend, Origin, Mode, Authentication, AppVersion, RunId, ClientBuild, Installation, Source, TeamsClient, Ready, CheckedAt, Logs | Out-Host
+    $Status | Format-List Backend, Origin, Mode, InitialDataMode, Authentication, AppVersion, RunId, ClientBuild, Installation, Source, TeamsClient, Ready, CheckedAt, Logs | Out-Host
     if (-not $Status.Ready) { Write-Warning 'Setup is incomplete. Keep Teams open and use -Resume with the same work directory; this does not restart the backend.' }
 }
 
 function Install-TeamsRunClient {
-    param([string] $WorkDirectory, [object] $Record, [switch] $NoGuide, [switch] $Reinstall)
+    param([string] $WorkDirectory, [object] $Record, [switch] $NoGuide, [switch] $Reinstall, [switch] $ManualUpload)
     $packageRoot = [IO.Path]::GetFullPath((Join-Path $WorkDirectory "packages\$($Record.runId)")) + [IO.Path]::DirectorySeparatorChar
     $archive = [IO.Path]::GetFullPath([string] $Record.teamsArchive)
     if (-not $archive.StartsWith($packageRoot, [StringComparison]::OrdinalIgnoreCase) -or
@@ -101,13 +109,27 @@ function Install-TeamsRunClient {
         (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $Record.teamsArchiveSha256) {
         throw 'The recorded Teams installation ZIP is missing, changed or outside this run. Rebuild normally; do not upload an unverified ZIP.'
     }
-    if (-not $Reinstall -and $Record.installation -in @('command-succeeded', 'manually-confirmed', 'verified')) {
+    if (-not $Reinstall -and -not $ManualUpload -and $Record.installation -in @('command-succeeded', 'manually-confirmed', 'verified')) {
         Write-Host 'Reusing this run''s recorded installation. Use -Resume -Reinstall to upload the exact package again.'
         return
     }
     while ($true) {
+        Write-Host "[4/7] Installing/updating Teams personal app version $($Record.packageVersion). Exact ZIP: $archive"
+        if ($ManualUpload) {
+            $Record.installation = 'not-started'
+            Write-TeamsRunRecord -WorkDirectory $WorkDirectory -Record $Record
+            Write-Host 'Manual upload selected. No Agents Toolkit CLI sign-in will be attempted; tenant custom-app upload policy still applies.'
+            Write-Host "In your signed-in Teams desktop client: Apps > Manage your apps > Upload an app > Upload a custom app. Select ONLY: $archive"
+            Start-Process -FilePath (Split-Path -Parent $archive)
+            if ((Read-Host 'After Teams accepts that exact ZIP, type INSTALLED; anything else pauses setup').Trim() -cne 'INSTALLED') {
+                throw 'Setup paused before installation confirmation. The backend is still running; use -Resume -Reinstall -ManualUpload with the same -WorkDirectory.'
+            }
+            $Record.installation = 'manually-confirmed'
+            Write-TeamsRunRecord -WorkDirectory $WorkDirectory -Record $Record
+            return
+        }
         try {
-            Write-Host "[4/7] Installing/updating Teams personal app version $($Record.packageVersion). Exact ZIP: $archive"
+            Write-Host 'If CLI sign-in is blocked by token protection (AADSTS530084) or keeps prompting, cancel with Ctrl+C and use -Resume -Reinstall -ManualUpload with the same -WorkDirectory.'
             $installArguments = @('install', '--file-path', $archive, '--scope', 'Personal', '--interactive', 'false', '--telemetry', 'false')
             if (Get-Command atk -ErrorAction SilentlyContinue) {
                 & atk @installArguments | Out-Host
@@ -124,18 +146,9 @@ function Install-TeamsRunClient {
             Write-TeamsRunRecord -WorkDirectory $WorkDirectory -Record $Record
             Write-Warning "Teams upload/install did not complete. The verified backend remains running. $($_.Exception.Message)"
             if ($NoGuide) { throw }
-            Write-Host "Manual route: Teams > Apps > Manage your apps > Upload an app > Upload a custom app. Select ONLY: $archive"
             switch ((Read-Host 'R = retry installation, M = use manual upload, Q/Enter = pause and resume later').Trim().ToUpperInvariant()) {
                 'R' { continue }
-                'M' {
-                    Start-Process -FilePath (Split-Path -Parent $archive)
-                    if ((Read-Host 'After Teams accepts that exact ZIP, type INSTALLED; anything else pauses setup').Trim() -cne 'INSTALLED') {
-                        throw 'Setup paused before installation confirmation. The backend is still running; use -Resume.'
-                    }
-                    $Record.installation = 'manually-confirmed'
-                    Write-TeamsRunRecord -WorkDirectory $WorkDirectory -Record $Record
-                    return
-                }
+                'M' { $ManualUpload = $true; continue }
                 default { throw 'Setup paused: Teams installation is incomplete. The backend is still running; use -Resume.' }
             }
         }
@@ -143,10 +156,10 @@ function Install-TeamsRunClient {
 }
 
 function Complete-TeamsRunSetup {
-    param([string] $WorkDirectory, [switch] $NoGuide, [switch] $Reinstall, [int] $ClientTimeoutSeconds = 120)
+    param([string] $WorkDirectory, [switch] $NoGuide, [switch] $Reinstall, [switch] $ManualUpload, [int] $ClientTimeoutSeconds = 120)
     $record = (Get-OwnedTeamsRun -WorkDirectory $WorkDirectory).Record
     Read-TeamsLaunchStatus -Record $record | Out-Null
-    Install-TeamsRunClient -WorkDirectory $WorkDirectory -Record $record -NoGuide:$NoGuide -Reinstall:$Reinstall
+    Install-TeamsRunClient -WorkDirectory $WorkDirectory -Record $record -NoGuide:$NoGuide -Reinstall:$Reinstall -ManualUpload:$ManualUpload
     if ($NoGuide) {
         Write-Host 'Teams upload/install command completed. Rendering, source connection and page pairing are NOT verified (-NoGuide). Use -Resume to finish.'
         return
@@ -164,7 +177,7 @@ function Complete-TeamsRunSetup {
     Write-Host "[5/7] Opening the installed TLC personal app in Teams: $link"
     Write-Host "Expected backend: $($record.origin). App version: $($record.packageVersion). Backend run: $($record.runId)."
     Start-Process -FilePath $link
-    $native = $record.authentication -in @('local-interactive', 'local-azure-cli')
+    $native = (Get-TeamsRunDataMode -Record $record) -eq 'live' -and $record.authentication -in @('local-interactive', 'local-azure-cli')
     if ($native) {
         if ($initial.Source -ne 'connected') {
             Write-Host '[6/7] Explicit source connection. This verifies your own MSX identity; it does not write source records.'
@@ -189,7 +202,7 @@ function Complete-TeamsRunSetup {
         $record.setup = 'waiting-for-client'
         Write-TeamsRunRecord -WorkDirectory $WorkDirectory -Record $record
     } else {
-        Write-Host '[6/7] Keep the app open inside Teams. For hosted Live, complete corporate sign-in in that app.'
+        Write-Host '[6/7] Keep the app open inside Teams. Sample uses local SQLite without source sign-in or pairing. For hosted Live, complete corporate sign-in in that app.'
     }
     Write-Host '[7/7] Waiting for the matching, visible Teams client to acknowledge this exact backend and build...'
     $deadline = [DateTime]::UtcNow.AddSeconds($ClientTimeoutSeconds)

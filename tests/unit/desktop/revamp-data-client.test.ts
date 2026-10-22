@@ -1,11 +1,65 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createDataClient, createWebApiClient } from '../../../apps/desktop/renderer-revamp/src/data-client.js'
+import { createDataClient, createWebApiClient, withSessionPortfolio } from '../../../apps/desktop/renderer-revamp/src/data-client.js'
 import { contractVersion, workflowContractVersion } from '../../../packages/common/index.js'
 import { LocalStore } from '../../../packages/connectors/local-store/index.js'
 import { LocalStoreRecordCreation } from '../../../packages/connectors/local-store/record-creation.js'
 import { SAMPLE_USER_ID } from '../../../packages/connectors/local-store/seed.js'
 
 describe('revamp live web data client', () => {
+    it('does not refetch a host mirror for focus-only metadata, but revalidates on a read-model revision', async () => {
+        const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({ contractVersion: '1.0', accounts: [], opportunities: [] }))
+        const raw = createWebApiClient(fetcher)
+        let changed: ((state: import('../../../packages/common/contracts/cache-sync.js').CacheReadState) => void) | undefined
+        raw.onSourceCacheChanged = (listener) => { changed = listener; return () => {} }
+        raw.setActiveReads = () => {}
+        const client = withSessionPortfolio(raw)
+        await client.getPortfolioIndex()
+        changed?.({ revision: 1, dataRevision: 1, generation: 0, refreshing: false, stale: false })
+        changed?.({ revision: 2, dataRevision: 1, generation: 0, refreshing: false, stale: false })
+        await client.getPortfolioIndex()
+        expect(fetcher).toHaveBeenCalledOnce()
+        changed?.({ revision: 3, dataRevision: 2, generation: 0, refreshing: false, stale: false })
+        await client.getPortfolioIndex()
+        expect(fetcher).toHaveBeenCalledTimes(2)
+    })
+    it('retains confirmed browsing values when a write is forbidden but reads remain authorized', async () => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(Response.json({ contractVersion: '1.0', accounts: [{ id: 'one', name: 'Synthetic account', segment: 'test' }], opportunities: [] }))
+            .mockResolvedValueOnce(Response.json({ error: 'Write access denied' }, { status: 403 }))
+        const raw = createWebApiClient(fetcher)
+        const client = withSessionPortfolio(raw)
+        await client.listAccounts()
+        await expect(raw.leaveDealTeam('one')).rejects.toMatchObject({ status: 403 })
+        expect(client.cacheSession?.cache.has('portfolio')).toBe(true)
+    })
+    it('purges the browser cache when a trusted response identifies a different source actor', async () => {
+        const fetcher = vi.fn<typeof fetch>()
+            .mockResolvedValueOnce(Response.json({ contractVersion: '1.0', accounts: [{ id: 'one', name: 'Synthetic account', segment: 'test' }], opportunities: [] },
+                { headers: { 'x-tlc-source-scope': 'a'.repeat(64) } }))
+            .mockResolvedValueOnce(Response.json({ email: 'another@example.test' }, { headers: { 'x-tlc-source-scope': 'b'.repeat(64) } }))
+        const raw = createWebApiClient(fetcher)
+        const client = withSessionPortfolio(raw)
+        await client.listAccounts()
+        expect(client.cacheSession?.cache.has('portfolio')).toBe(true)
+        await expect(raw.getCurrentUserEmail()).rejects.toMatchObject({ status: 401 })
+        expect(client.cacheSession?.cache.has('portfolio')).toBe(false)
+        await expect(client.listAccounts()).rejects.toMatchObject({ status: 401 })
+        expect(fetcher).toHaveBeenCalledTimes(2)
+    })
+    it('rejects an already-ready response if source identity changes while its body is read', async () => {
+        let complete!: (value: unknown) => void
+        const delayed = Response.json([], { headers: { 'x-tlc-source-scope': 'a'.repeat(64) } })
+        vi.spyOn(delayed, 'json').mockImplementation(() => new Promise((resolve) => { complete = resolve }))
+        const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(delayed)
+            .mockResolvedValueOnce(Response.json({ email: 'another@example.test' }, { headers: { 'x-tlc-source-scope': 'b'.repeat(64) } }))
+        const client = createWebApiClient(fetcher)
+        const original = client.listAccounts()
+        const rejected = expect(original).rejects.toMatchObject({ status: 401 })
+        await vi.waitFor(() => expect(delayed.json).toHaveBeenCalledOnce())
+        await expect(client.getCurrentUserEmail()).rejects.toMatchObject({ status: 401 })
+        complete([{ id: 'old', name: 'Old source', segment: 'test' }])
+        await rejected
+    })
     it('reports the search data mode from the existing host configuration', async () => {
         await expect(createWebApiClient().getDataMode()).resolves.toBe('live')
         const bridge = { getDataStatus: vi.fn().mockResolvedValue({ mode: 'sample', auth: { state: 'ready' } }) }
@@ -208,7 +262,7 @@ describe('revamp live web data client', () => {
         const appendChild = vi.fn()
         const createObjectURL = vi.fn(() => 'blob:email-draft')
         const revokeObjectURL = vi.fn()
-        vi.stubGlobal('document', { createElement: vi.fn(() => anchor), body: { appendChild } })
+        vi.stubGlobal('document', { querySelector: vi.fn(() => null), createElement: vi.fn(() => anchor), body: { appendChild } })
         vi.stubGlobal('URL', { createObjectURL, revokeObjectURL })
         const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('MIME-Version: 1.0', {
             status: 200,
@@ -241,7 +295,7 @@ describe('revamp live web data client', () => {
         const appendChild = vi.fn()
         const createObjectURL = vi.fn(() => 'blob:word-document')
         const revokeObjectURL = vi.fn()
-        vi.stubGlobal('document', { createElement: vi.fn(() => anchor), body: { appendChild } })
+        vi.stubGlobal('document', { querySelector: vi.fn(() => null), createElement: vi.fn(() => anchor), body: { appendChild } })
         vi.stubGlobal('URL', { createObjectURL, revokeObjectURL })
         const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response('document bytes', {
             status: 200,

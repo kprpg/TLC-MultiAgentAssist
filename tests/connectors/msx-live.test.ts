@@ -36,7 +36,8 @@ describe('LiveMsxConnector', () => {
               msp_consumptionconsumedrecurring: 275000,
               msp_opportunitytype: '606820001',
               'msp_opportunitytype@OData.Community.Display.V1.FormattedValue': 'Consumption',
-              description: null
+              description: 'Customer need, not opportunity comments.',
+              msp_forecastcomments: null
             },
             { opportunityid: 'opp-2', _parentaccountid_value: 'account-a', name: 'First opportunity', msp_activesalesstage: 2, estimatedvalue: 1500000, description: null }
           ]
@@ -135,7 +136,7 @@ describe('LiveMsxConnector', () => {
             msp_forecastcomments: 'Reviewed with the account team.'
           })
         } else if (url.pathname.endsWith('/opportunities(opp-1)')) {
-          expect(JSON.parse(String(init.body))).toEqual({ description: 'Updated opportunity comment' })
+          expect(JSON.parse(String(init.body))).toEqual({ msp_forecastcomments: 'Updated opportunity comment' })
           comments = 'Updated opportunity comment'
         } else {
           throw new Error(`Unexpected PATCH: ${url}`)
@@ -144,7 +145,7 @@ describe('LiveMsxConnector', () => {
       }
       if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
       if (url.pathname.endsWith('/msp_dealteams')) return json({ value: [{ _msp_parentopportunityid_value: 'opp-1' }] })
-      if (url.pathname.endsWith('/opportunities')) return json({ value: [{ opportunityid: 'opp-1', _parentaccountid_value: 'account-1', name: 'Opportunity', estimatedvalue: 100, description: comments }] })
+      if (url.pathname.endsWith('/opportunities')) return json({ value: [{ opportunityid: 'opp-1', _parentaccountid_value: 'account-1', name: 'Opportunity', estimatedvalue: 100, description: 'Preserve the customer need.', msp_forecastcomments: comments }] })
       if (url.pathname.endsWith('/accounts')) return json({ value: [{ accountid: 'account-1', name: 'Account' }] })
       if (url.pathname.endsWith('/msp_engagementmilestones')) {
         milestoneRead += 1
@@ -190,6 +191,7 @@ describe('LiveMsxConnector', () => {
 
   it('writes configured tenant stage codes and refuses unconfigured live stage writes', async () => {
     let activeStage = 2
+    let comments = 'Existing forecast comments.'
     const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input))
       if (init?.method === 'PATCH') {
@@ -197,14 +199,15 @@ describe('LiveMsxConnector', () => {
         expect(new Headers(init.headers).get('If-Match')).toBe('*')
         expect(JSON.parse(String(init.body))).toEqual({
           msp_activesalesstage: 861980013,
-          description: 'Advanced from Stage 2 to Stage 3. Gates passed.'
+          msp_forecastcomments: 'Existing forecast comments.\n\nAdvanced from Stage 2 to Stage 3. Gates passed.'
         })
         activeStage = 3
+        comments = 'Existing forecast comments.\n\nAdvanced from Stage 2 to Stage 3. Gates passed.'
         return new Response(null, { status: 204 })
       }
       if (url.pathname.endsWith('/WhoAmI')) return json({ UserId: 'user-id' })
       if (url.pathname.endsWith('/msp_dealteams')) return json({ value: [{ _msp_parentopportunityid_value: 'opp-1' }] })
-      if (url.pathname.endsWith('/opportunities')) return json({ value: [{ opportunityid: 'opp-1', _parentaccountid_value: 'account-1', name: 'Opportunity', msp_activesalesstage: activeStage, estimatedvalue: 100 }] })
+      if (url.pathname.endsWith('/opportunities')) return json({ value: [{ opportunityid: 'opp-1', _parentaccountid_value: 'account-1', name: 'Opportunity', msp_activesalesstage: activeStage, estimatedvalue: 100, description: 'Preserve the customer need.', msp_forecastcomments: comments }] })
       if (url.pathname.endsWith('/accounts')) return json({ value: [{ accountid: 'account-1', name: 'Account' }] })
       throw new Error(`Unexpected request: ${url}`)
     })

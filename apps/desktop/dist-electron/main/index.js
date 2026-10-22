@@ -1,9 +1,9 @@
 import { createRequire } from "node:module";
-import { BrowserWindow, app, dialog, ipcMain, screen, shell } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, safeStorage, screen, shell } from "electron";
 import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
-import { mkdirSync } from "node:fs";
-import { access, copyFile, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { existsSync, mkdirSync } from "node:fs";
+import { access, copyFile, mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
@@ -473,6 +473,49 @@ function getSeDomainDefinition(id) {
 	return seDomainDefinitions[id];
 }
 //#endregion
+//#region packages/common/contracts/portfolio.ts
+var accountProvenanceSchema = z.enum([
+	"deal-team",
+	"manual",
+	"both"
+]);
+var accountVisibilitySchema = z.enum(["visible", "hidden"]);
+var accountSchema$1 = z.object({
+	id: z.string().min(1),
+	name: z.string().min(1),
+	segment: z.string().min(1),
+	tpid: z.string().min(1).optional(),
+	provenance: accountProvenanceSchema.optional(),
+	visibility: accountVisibilitySchema.optional()
+});
+var accountSearchRequestSchema = z.object({
+	query: z.string().trim().min(1).max(120),
+	matchBy: z.enum(["name", "tpid"])
+}).strict().superRefine((value, context) => {
+	if (value.matchBy === "name" && value.query.length < 2) context.addIssue({
+		code: "custom",
+		path: ["query"],
+		message: "Account name searches require at least two characters."
+	});
+});
+var accountCandidateSchema = accountSchema$1.extend({ state: z.enum([
+	"not-added",
+	"visible",
+	"hidden"
+]) }).strict();
+var accountListOptionsSchema = z.object({ includeHidden: z.boolean().optional() }).strict();
+z.object({ visibility: accountVisibilitySchema }).strict();
+var dealTeamJoinResultSchema = z.object({
+	opportunityId: z.string().min(1),
+	onDealTeam: z.literal(true),
+	alreadyMember: z.boolean()
+}).strict();
+var dealTeamLeaveResultSchema = z.object({
+	opportunityId: z.string().min(1),
+	onDealTeam: z.literal(false),
+	alreadyAbsent: z.boolean()
+}).strict();
+//#endregion
 //#region packages/common/contracts/mcp.ts
 var canonicalFieldSchema = z.string().regex(/^[a-z][a-zA-Z0-9]*$/);
 var guardedQueryValueSchema = z.union([
@@ -518,49 +561,6 @@ function isUnique(values) {
 	return new Set(values).size === values.length;
 }
 //#endregion
-//#region packages/common/contracts/portfolio.ts
-var accountProvenanceSchema = z.enum([
-	"deal-team",
-	"manual",
-	"both"
-]);
-var accountVisibilitySchema = z.enum(["visible", "hidden"]);
-var accountSchema$1 = z.object({
-	id: z.string().min(1),
-	name: z.string().min(1),
-	segment: z.string().min(1),
-	tpid: z.string().min(1).optional(),
-	provenance: accountProvenanceSchema.optional(),
-	visibility: accountVisibilitySchema.optional()
-});
-var accountSearchRequestSchema = z.object({
-	query: z.string().trim().min(1).max(120),
-	matchBy: z.enum(["name", "tpid"])
-}).strict().superRefine((value, context) => {
-	if (value.matchBy === "name" && value.query.length < 2) context.addIssue({
-		code: "custom",
-		path: ["query"],
-		message: "Account name searches require at least two characters."
-	});
-});
-accountSchema$1.extend({ state: z.enum([
-	"not-added",
-	"visible",
-	"hidden"
-]) }).strict();
-var accountListOptionsSchema = z.object({ includeHidden: z.boolean().optional() }).strict();
-z.object({ visibility: accountVisibilitySchema }).strict();
-z.object({
-	opportunityId: z.string().min(1),
-	onDealTeam: z.literal(true),
-	alreadyMember: z.boolean()
-}).strict();
-z.object({
-	opportunityId: z.string().min(1),
-	onDealTeam: z.literal(false),
-	alreadyAbsent: z.boolean()
-}).strict();
-//#endregion
 //#region packages/common/contracts/meeting.ts
 /**
 * Contracts for the meeting-signal extraction → review → injection flow.
@@ -574,6 +574,17 @@ var meetingSourceSchema = z.enum([
 	"upload",
 	"paste"
 ]);
+var transcriptMaximumCharacters = 15e4;
+var transcriptMaximumBytes = 512e3;
+var transcriptContentSchema = z.string().trim().min(11, "Paste at least 11 characters of transcript text.").max(transcriptMaximumCharacters, "Transcript text must not exceed 150,000 characters.").refine((value) => !value.includes("\0"), "Use a UTF-8 text transcript, not a binary file.").refine((value) => new TextEncoder().encode(value).byteLength <= transcriptMaximumBytes, "Transcript text must not exceed 500 KiB.");
+z.object({
+	contractVersion: z.literal("1.0"),
+	opportunityId: z.string().min(1).max(200),
+	meetingType: meetingTypeSchema,
+	source: z.enum(["paste", "upload"]),
+	content: transcriptContentSchema,
+	format: z.enum(["vtt", "text"]).optional()
+}).strict();
 var meetingTargetKindSchema = z.enum([
 	"opportunity",
 	"milestone",
@@ -753,9 +764,9 @@ var voiceSourceEventSchema = z.discriminatedUnion("type", [
 		message: z.string().min(1).max(400)
 	}).strict()
 ]);
-var envelope = { contractVersion: z.literal("1.0") };
+var envelope$1 = { contractVersion: z.literal("1.0") };
 var voiceStartRequestSchema = z.object({
-	...envelope,
+	...envelope$1,
 	operation: z.literal("start"),
 	sessionId: z.string().uuid(),
 	locale: z.literal("en-US"),
@@ -764,12 +775,12 @@ var voiceStartRequestSchema = z.object({
 }).strict();
 var voiceRequestSchema = z.discriminatedUnion("operation", [
 	z.object({
-		...envelope,
+		...envelope$1,
 		operation: z.literal("availability")
 	}).strict(),
 	voiceStartRequestSchema,
 	z.object({
-		...envelope,
+		...envelope$1,
 		operation: z.enum([
 			"read",
 			"stop",
@@ -779,7 +790,7 @@ var voiceRequestSchema = z.discriminatedUnion("operation", [
 	}).strict()
 ]);
 var voiceSessionSchema = z.object({
-	...envelope,
+	...envelope$1,
 	kind: z.literal("session"),
 	sessionId: z.string().uuid(),
 	status: z.enum([
@@ -795,13 +806,13 @@ var voiceSessionSchema = z.object({
 	errorCode: voiceErrorCodeSchema.optional()
 }).strict();
 var voiceResponseSchema = z.discriminatedUnion("kind", [z.object({
-	...envelope,
+	...envelope$1,
 	kind: z.literal("availability"),
 	availability: voiceAvailabilitySchema
 }).strict(), voiceSessionSchema]);
 var text$1 = z.string().max(3e4);
 var name = z.string().min(1).max(500);
-var identifier = z.string().min(1).max(200);
+var identifier$2 = z.string().min(1).max(200);
 var tpid = z.string().regex(/^[1-9][0-9]{0,19}$/);
 var amount = z.number().finite();
 var nonnegative = amount.nonnegative();
@@ -876,7 +887,7 @@ var accountSchema = z.object({
 	nextAction: text$1
 }).strict();
 var opportunitySchema$1 = z.object({
-	id: identifier,
+	id: identifier$2,
 	number: text$1,
 	tpid,
 	account: name,
@@ -899,9 +910,9 @@ var opportunitySchema$1 = z.object({
 	estimatedSqlRevenue: amount.nullable().optional()
 }).strict();
 var milestoneSchema$1 = z.object({
-	id: identifier,
+	id: identifier$2,
 	number: text$1,
-	opportunityId: identifier,
+	opportunityId: identifier$2,
 	opportunityName: name,
 	tpid,
 	account: name,
@@ -1097,7 +1108,7 @@ var sellerDashboardSupplementSchema = z.object({
 			}).strict()).max(100)
 		}).strict()).max(200),
 		services: z.array(z.object({
-			id: identifier,
+			id: identifier$2,
 			tpid,
 			name,
 			pillar: name,
@@ -1106,14 +1117,14 @@ var sellerDashboardSupplementSchema = z.object({
 			isNew: z.boolean()
 		}).strict()).max(5e4),
 		subscriptions: z.array(z.object({
-			id: identifier,
+			id: identifier$2,
 			tpid,
 			name,
 			created: date$1,
 			averageDaily: nonnegative
 		}).strict()).max(5e4),
 		sqlReclassification: z.array(z.object({
-			id: identifier,
+			id: identifier$2,
 			tpid,
 			workload: name,
 			monthlyOpportunity: nonnegative,
@@ -1435,6 +1446,157 @@ z.object({
 	message: z.string().min(1),
 	path: z.array(z.union([z.string(), z.number()])).optional()
 }).strict();
+var cachePolicySchema = z.object({
+	mutableFreshMs: z.number().int().positive().default(3e5),
+	referenceFreshMs: z.number().int().positive().default(18e5),
+	maxInactiveEntries: z.number().int().min(1).max(1e3).default(100),
+	maxSerializedBytes: z.number().int().min(1024).default(67108864),
+	readRetries: z.number().int().min(0).max(2).default(2),
+	maxConcurrentWrites: z.number().int().min(1).max(2).default(2),
+	confirmedRetentionMs: z.number().int().positive().default(2592e6)
+}).strict();
+var defaultCachePolicy = Object.freeze(cachePolicySchema.parse({}));
+var cacheReadStateSchema = z.object({
+	revision: z.number().int().nonnegative(),
+	dataRevision: z.number().int().nonnegative().optional(),
+	generation: z.number().int().nonnegative(),
+	fetchedAt: z.number().finite().nonnegative().optional(),
+	validatedAt: z.number().finite().nonnegative().optional(),
+	refreshing: z.boolean(),
+	stale: z.boolean(),
+	error: z.string().optional()
+}).strict();
+var readKey = z.string().min(1).max(500).regex(/^(portfolio|discovery|(?:milestones|activities|catalog|search):.+)$/);
+var cacheControlRequestSchema = z.discriminatedUnion("operation", [
+	z.object({
+		contractVersion: z.literal("1.0"),
+		operation: z.literal("interest"),
+		keys: z.array(readKey).max(100),
+		active: z.boolean(),
+		consumer: z.string().min(1).max(100).optional()
+	}).strict(),
+	z.object({
+		contractVersion: z.literal("1.0"),
+		operation: z.literal("refresh"),
+		opportunityId: z.string().min(1).max(200).optional()
+	}).strict(),
+	z.object({
+		contractVersion: z.literal("1.0"),
+		operation: z.literal("state")
+	}).strict()
+]);
+var cacheControlResponseSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	state: cacheReadStateSchema
+}).strict();
+var syncMutationOperationSchema = z.enum([
+	"addAccount",
+	"setAccountVisibility",
+	"joinDealTeam",
+	"leaveDealTeam",
+	"joinMilestoneTeam",
+	"leaveMilestoneTeam",
+	"updateOpportunity",
+	"updateMilestone",
+	"createMilestoneActivity",
+	"transitionOpportunityStage",
+	"commitRecordCreation",
+	"applyMeetingChangeSet"
+]);
+var mutationStateSchema = z.enum([
+	"accepted",
+	"dispatching",
+	"confirmed",
+	"failed-before-send",
+	"conflict",
+	"effect-unknown",
+	"reconciled-current-state"
+]);
+var mutationFailureCodeSchema = z.enum([
+	"validation",
+	"access-denied",
+	"auth-required",
+	"source-conflict",
+	"source-unavailable",
+	"outcome-unconfirmed",
+	"capacity",
+	"session-changed",
+	"storage-unavailable",
+	"review-expired",
+	"review-changed",
+	"unsupported"
+]);
+var identifier$1 = z.string().min(1).max(500);
+var digest$1 = z.string().regex(/^[a-f0-9]{64}$/);
+var envelope = z.object({ contractVersion: z.literal("1.0") });
+var mutationCapabilitiesSchema = envelope.extend({
+	available: z.boolean(),
+	recoveryAvailable: z.boolean().optional(),
+	readCacheOwner: z.enum(["host", "client"]),
+	operations: z.array(syncMutationOperationSchema),
+	reason: z.string().min(1).optional()
+}).strict();
+var mutationReviewSchema = envelope.extend({
+	id: z.string().uuid(),
+	operation: syncMutationOperationSchema,
+	input: z.record(z.string(), z.unknown()),
+	digest: digest$1,
+	expiresAt: z.string().datetime(),
+	before: z.unknown().optional(),
+	recordKeys: z.array(identifier$1).min(1).max(100)
+}).strict();
+var mutationReceiptSchema = envelope.extend({
+	id: z.string().uuid(),
+	operation: syncMutationOperationSchema,
+	state: mutationStateSchema,
+	acceptedAt: z.string().datetime(),
+	updatedAt: z.string().datetime(),
+	recordKeys: z.array(identifier$1).min(1).max(100),
+	code: mutationFailureCodeSchema.optional(),
+	result: z.unknown().optional()
+}).strict();
+var mutationSyncRequestSchema = z.discriminatedUnion("operation", [
+	envelope.extend({ operation: z.literal("capabilities") }).strict(),
+	envelope.extend({
+		operation: z.literal("prepare"),
+		mutation: syncMutationOperationSchema,
+		input: z.record(z.string(), z.unknown())
+	}).strict(),
+	envelope.extend({
+		operation: z.literal("submit"),
+		id: z.string().uuid(),
+		digest: digest$1,
+		reason: z.string().trim().min(3).max(1e3),
+		confirmed: z.literal(true)
+	}).strict(),
+	envelope.extend({
+		operation: z.literal("status"),
+		id: z.string().uuid()
+	}).strict(),
+	envelope.extend({ operation: z.literal("pending") }).strict(),
+	envelope.extend({
+		operation: z.literal("reconcile"),
+		id: z.string().uuid()
+	}).strict()
+]);
+var mutationSyncResponseSchema = z.discriminatedUnion("kind", [
+	envelope.extend({
+		kind: z.literal("capabilities"),
+		capabilities: mutationCapabilitiesSchema
+	}).strict(),
+	envelope.extend({
+		kind: z.literal("review"),
+		review: mutationReviewSchema
+	}).strict(),
+	envelope.extend({
+		kind: z.literal("receipt"),
+		receipt: mutationReceiptSchema
+	}).strict(),
+	envelope.extend({
+		kind: z.literal("pending"),
+		receipts: z.array(mutationReceiptSchema).max(100)
+	}).strict()
+]);
 //#endregion
 //#region packages/common/contracts/index.ts
 var dataModeSchema = z.enum(["sample", "live"]);
@@ -1484,7 +1646,7 @@ var opportunitySchema = z.object({
 	owner: z.string().min(1).optional(),
 	opportunityIntent: z.array(z.string().trim().min(1)).max(10).optional(),
 	recordedStage: z.number().int().min(1).max(5),
-	value: z.number().nonnegative(),
+	value: z.number().finite(),
 	currency: z.string().length(3),
 	closeDate: z.string().date(),
 	comments: z.string().optional()
@@ -1507,6 +1669,24 @@ var milestoneSchema = z.object({
 	*/
 	onMilestoneTeam: z.boolean().optional()
 });
+var portfolioReadRequestSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	includeHidden: z.boolean().optional()
+}).strict();
+var portfolioIndexSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	accounts: z.array(accountSchema$1.strict()),
+	opportunities: z.array(opportunitySchema.strict())
+}).strict();
+var portfolioWorkspaceRequestSchema = portfolioReadRequestSchema.extend({
+	accountId: z.string().min(1).max(200).optional(),
+	opportunityId: z.string().min(1).max(200).optional()
+}).strict();
+var portfolioWorkspaceSchema = portfolioIndexSchema.extend({
+	selectedAccountId: z.string().min(1).optional(),
+	selectedOpportunityId: z.string().min(1).optional(),
+	milestones: z.array(milestoneSchema.strict())
+}).strict();
 var milestoneStatusSchema = z.enum([
 	"On Track",
 	"At Risk",
@@ -1525,13 +1705,19 @@ var milestoneUpdateSchema = z.object({
 	comments: z.string().max(3e4).optional()
 }).refine((value) => Object.keys(value).length > 0, "At least one milestone field is required.");
 var opportunityUpdateSchema = z.object({ comments: z.string().max(3e4) });
-z.object({
+/**
+* Result of adding the signed-in user to a milestone team. Mirrors the
+* opportunity Deal Team join result but is scoped to a single milestone and is
+* fully independent of Deal Team membership.
+*/
+var milestoneTeamJoinResultSchema = z.object({
 	opportunityId: z.string().min(1),
 	milestoneId: z.string().min(1),
 	onMilestoneTeam: z.literal(true),
 	alreadyMember: z.boolean()
 }).strict();
-z.object({
+/** Result of removing only the signed-in user from a milestone team. */
+var milestoneTeamLeaveResultSchema = z.object({
 	opportunityId: z.string().min(1),
 	milestoneId: z.string().min(1),
 	onMilestoneTeam: z.literal(false),
@@ -1573,7 +1759,8 @@ var taskCategorySchema = z.enum([
 	"Technical Workshop",
 	"Workshop"
 ]);
-z.object({
+/** An Activity (Task) associated with a milestone via the activity's `regardingobjectid`. */
+var milestoneActivitySchema = z.object({
 	id: z.string().min(1),
 	milestoneId: z.string().min(1),
 	opportunityId: z.string().min(1),
@@ -1610,6 +1797,15 @@ var discoverableOpportunitySchema = opportunitySchema.extend({
 	technicalCapability: z.string().min(1).optional(),
 	onDealTeam: z.boolean()
 });
+var discoverySnapshotRequestSchema = z.object({ contractVersion: z.literal("1.0") }).strict();
+var discoverySnapshotSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	generatedAt: z.string().datetime(),
+	accounts: z.array(accountSchema$1.strict()),
+	portfolioOpportunities: z.array(opportunitySchema.strict()),
+	opportunities: z.array(discoverableOpportunitySchema.strict()),
+	milestoneTeamOpportunityIds: z.array(z.string().min(1))
+}).strict();
 var mcemStageTransitionRequestSchema = z.object({
 	contractVersion: z.literal("1.2"),
 	accountId: z.string().min(1),
@@ -3140,9 +3336,13 @@ function msxWriteMetadataFromEnvironment(environment) {
 }
 var MsxRequestError = class extends Error {
 	status;
-	constructor(message, status) {
+	retryAfterMs;
+	effect;
+	constructor(message, status, retryAfterMs, effect) {
 		super(message);
 		this.status = status;
+		this.retryAfterMs = retryAfterMs;
+		this.effect = effect;
 		this.name = "MsxRequestError";
 	}
 };
@@ -3153,6 +3353,7 @@ var LiveMsxConnector = class {
 	writeMetadata;
 	preferenceStore;
 	cacheOptions;
+	readContext = new AsyncLocalStorage();
 	entityVersions = /* @__PURE__ */ new Map();
 	expectedVersions = new AsyncLocalStorage();
 	baseUrl;
@@ -3180,6 +3381,24 @@ var LiveMsxConnector = class {
 	async listAccounts(options = {}) {
 		const portfolio = await this.getPortfolio();
 		return structuredClone(portfolio.accounts.filter((account) => options.includeHidden || account.visibility !== "hidden"));
+	}
+	async getPortfolioIndex(options = {}) {
+		const portfolio = await this.getPortfolio();
+		const accounts = portfolio.accounts.filter((account) => options.includeHidden || account.visibility !== "hidden");
+		const groups = new Map(accounts.filter((account) => account.visibility !== "hidden").map((account) => [account.id, []]));
+		for (const opportunity of portfolio.opportunities) groups.get(opportunity.accountId)?.push(opportunity);
+		return structuredClone({
+			accounts,
+			opportunities: accounts.flatMap((account) => groups.get(account.id) ?? [])
+		});
+	}
+	async conditionalWriteOperations() {
+		const [opportunity, milestone] = await Promise.all([this.requestJson("EntityDefinitions(LogicalName='opportunity')?$select=IsOptimisticConcurrencyEnabled"), this.requestJson("EntityDefinitions(LogicalName='msp_engagementmilestone')?$select=IsOptimisticConcurrencyEnabled")]);
+		return [
+			...opportunity.IsOptimisticConcurrencyEnabled === true ? ["updateOpportunity"] : [],
+			...opportunity.IsOptimisticConcurrencyEnabled === true && this.writeMetadata.stageCodes ? ["transitionOpportunityStage"] : [],
+			...milestone.IsOptimisticConcurrencyEnabled === true ? ["updateMilestone"] : []
+		];
 	}
 	async getCatalog(accountId) {
 		const account = (await this.listAccounts()).find((item) => item.id === accountId);
@@ -3434,6 +3653,15 @@ var LiveMsxConnector = class {
 	* access-team template is not set up in this environment.
 	*/
 	async milestoneTeamMemberships() {
+		const context = this.readContext.getStore();
+		if (!context) return this.readMilestoneTeamMemberships();
+		context.memberships ??= this.readMilestoneTeamMemberships().catch((error) => {
+			delete context.memberships;
+			throw error;
+		});
+		return context.memberships;
+	}
+	async readMilestoneTeamMemberships() {
 		const templateId = await this.resolveMilestoneTeamTemplateId().catch(() => void 0);
 		if (!templateId) return [];
 		const userId = await this.getCurrentUserId();
@@ -3481,28 +3709,35 @@ var LiveMsxConnector = class {
 	async updateOpportunity(opportunityId, input) {
 		const update = opportunityUpdateSchema.parse(input);
 		await this.assertOpportunityAccess(opportunityId);
-		await this.patch(`opportunities(${opportunityId})`, { description: update.comments });
-		this.portfolioPromise = void 0;
-		const opportunity = (await this.getPortfolio()).opportunities.find((candidate) => candidate.id === opportunityId);
-		if (!opportunity) throw new Error("MSX updated the opportunity but it could not be reloaded.");
-		return structuredClone(opportunity);
+		await this.patch(`opportunities(${opportunityId})`, { msp_forecastcomments: update.comments });
+		const opportunity = await this.reloadUpdatedOpportunity(opportunityId);
+		if ((opportunity.comments ?? "") !== update.comments) throw new MsxRequestError("MSX did not confirm the saved opportunity comments. Refresh the opportunity in MSX before retrying.", void 0, void 0, "unknown");
+		return opportunity;
 	}
 	async updateOpportunityStage(opportunityId, targetStage, auditNote) {
 		if (!Number.isInteger(targetStage) || targetStage < 1 || targetStage > 5) throw new Error("The target MCEM stage must be between 1 and 5.");
 		const stageCode = this.writeMetadata.stageCodes?.[targetStage];
-		if (stageCode === void 0) throw new Error(`Live MSX stage ${targetStage} writes require TLC_MSX_STAGE_${targetStage} to contain the tenant option code.`);
+		if (stageCode === void 0) throw new MsxRequestError(`Live MSX stage ${targetStage} writes require TLC_MSX_STAGE_${targetStage} to contain the tenant option code.`, void 0, void 0, "not-dispatched");
 		await this.assertOpportunityAccess(opportunityId);
 		const current = (await this.getPortfolio()).opportunities.find((candidate) => candidate.id === opportunityId);
 		if (!current) throw new Error("The opportunity is not in the signed-in user’s active MSX portfolio.");
-		const description = [current.comments, auditNote].filter(Boolean).join("\n\n");
+		const comments = [current.comments, auditNote].filter(Boolean).join("\n\n");
 		await this.patch(`opportunities(${opportunityId})`, {
 			msp_activesalesstage: stageCode,
-			description
+			msp_forecastcomments: comments
 		});
+		return this.reloadUpdatedOpportunity(opportunityId);
+	}
+	async reloadUpdatedOpportunity(opportunityId) {
 		this.portfolioPromise = void 0;
 		this.observationPromises.delete(opportunityId);
+		const context = this.readContext.getStore();
+		if (context) {
+			delete context.portfolio;
+			context.observations.delete(opportunityId);
+		}
 		const opportunity = (await this.getPortfolio()).opportunities.find((candidate) => candidate.id === opportunityId);
-		if (!opportunity) throw new Error("MSX updated the stage but the opportunity could not be reloaded.");
+		if (!opportunity) throw new MsxRequestError("MSX accepted the opportunity update but it could not be reloaded. Check the record in MSX before retrying.", void 0, void 0, "unknown");
 		return structuredClone(opportunity);
 	}
 	async getOpportunityContext(opportunityId) {
@@ -3534,37 +3769,53 @@ var LiveMsxConnector = class {
 		const accountNameById = new Map(portfolio.accounts.filter((account) => account.visibility !== "hidden").map((account) => [account.id, account.name]));
 		const assignedAccountIds = [...accountNameById.keys()];
 		if (assignedAccountIds.length === 0) return [];
-		return (await measurePerformance("msx.discover-opportunities", this.performanceReporter, () => this.requestOpportunitiesForAccounts(assignedAccountIds, domainClauses))).filter((row) => row._parentaccountid_value && accountNameById.has(row._parentaccountid_value)).map((row) => {
-			const accountName = accountNameById.get(row._parentaccountid_value) ?? formattedValue(row, "_parentaccountid_value");
-			const solutionArea = formattedValue(row, "msp_solutionarea");
-			const technicalCapability = formattedValue(row, "msp_technicalcapability");
+		return (await measurePerformance("msx.discover-opportunities", this.performanceReporter, () => this.requestOpportunitiesForAccounts(assignedAccountIds, domainClauses))).filter((row) => row._parentaccountid_value && accountNameById.has(row._parentaccountid_value)).map((row) => this.mapDiscoverableOpportunity(row, domain, accountNameById, portfolio.dealTeamOpportunityIds)).sort((left, right) => left.name.localeCompare(right.name));
+	}
+	getDiscoverySnapshot() {
+		return this.withReadContext(async () => {
+			const portfolio = await this.getPortfolio();
+			const accountNames = new Map(portfolio.accounts.filter((account) => account.visibility !== "hidden").map((account) => [account.id, account.name]));
+			const opportunities = (accountNames.size === 0 ? [] : await measurePerformance("msx.discovery-snapshot", this.performanceReporter, () => this.requestOpportunitiesForAccounts([...accountNames.keys()], []))).filter((row) => row._parentaccountid_value && accountNames.has(row._parentaccountid_value)).flatMap((row) => seDomainIds.flatMap((domain) => {
+				const definition = getSeDomainDefinition(domain);
+				if (!(typeof row.msp_technicalcapability === "number" && definition.technicalCapabilityCodes.includes(row.msp_technicalcapability) || typeof row.msp_conversation === "number" && definition.conversationCodes.includes(row.msp_conversation))) return [];
+				return [this.mapDiscoverableOpportunity(row, domain, accountNames, portfolio.dealTeamOpportunityIds)];
+			})).sort((left, right) => left.name.localeCompare(right.name));
 			return {
-				...this.mapOpportunity(row),
-				domain,
-				...accountName ? { accountName } : {},
-				...solutionArea ? { solutionArea } : {},
-				...technicalCapability ? { technicalCapability } : {},
-				onDealTeam: portfolio.dealTeamOpportunityIds.has(row.opportunityid)
+				accounts: structuredClone(portfolio.accounts),
+				portfolioOpportunities: structuredClone(portfolio.opportunities),
+				opportunities,
+				milestoneTeamOpportunityIds: portfolio.milestoneTeamOpportunityIds.filter((id) => portfolio.opportunities.some((opportunity) => opportunity.id === id))
 			};
-		}).sort((left, right) => left.name.localeCompare(right.name));
+		});
+	}
+	mapDiscoverableOpportunity(row, domain, accountNames, dealTeamOpportunityIds) {
+		const accountName = accountNames.get(row._parentaccountid_value) ?? formattedValue(row, "_parentaccountid_value");
+		const solutionArea = formattedValue(row, "msp_solutionarea");
+		const technicalCapability = formattedValue(row, "msp_technicalcapability");
+		return {
+			...this.mapOpportunity(row),
+			domain,
+			...accountName ? { accountName } : {},
+			...solutionArea ? { solutionArea } : {},
+			...technicalCapability ? { technicalCapability } : {},
+			onDealTeam: dealTeamOpportunityIds.has(row.opportunityid)
+		};
 	}
 	/** Fetches open opportunities within the given assigned accounts, filtered by the domain clauses. */
 	async requestOpportunitiesForAccounts(accountIds, domainClauses) {
-		const select = "opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description,msp_solutionarea,msp_technicalcapability,msp_conversation,msp_opportunitytype";
-		const rows = [];
-		for (let offset = 0; offset < accountIds.length; offset += 40) {
+		const select = "opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,msp_forecastcomments,msp_solutionarea,msp_technicalcapability,msp_conversation,msp_opportunitytype";
+		return this.collectChunks(accountIds, async (chunk) => {
 			const filterClauses = [
 				"statecode eq 0",
-				`(${accountIds.slice(offset, offset + 40).map((id) => `_parentaccountid_value eq ${id}`).join(" or ")})`,
+				`(${chunk.map((id) => `_parentaccountid_value eq ${id}`).join(" or ")})`,
 				...domainClauses
 			];
-			rows.push(...await this.requestAll("opportunities", {
+			return this.requestAll("opportunities", {
 				"$select": select,
 				"$filter": filterClauses.join(" and "),
 				"$orderby": "name asc"
-			}));
-		}
-		return rows;
+			});
+		});
 	}
 	async joinDealTeam(opportunityId) {
 		if (!guidPattern.test(opportunityId)) throw new Error("The opportunity id must be a valid MSX GUID.");
@@ -3745,6 +3996,14 @@ var LiveMsxConnector = class {
 	resolveMilestoneTeamTemplateId() {
 		const configured = resolveMilestoneTeamAccessMetadata(this.writeMetadata.milestoneTeam);
 		if (configured.templateId && guidPattern.test(configured.templateId)) return Promise.resolve(configured.templateId);
+		const context = this.scopedReads();
+		if (context) {
+			context.template ??= this.discoverMilestoneTeamTemplateId(configured.templateName).catch((error) => {
+				delete context.template;
+				throw error;
+			});
+			return context.template;
+		}
 		this.milestoneTeamTemplateIdPromise ??= this.discoverMilestoneTeamTemplateId(configured.templateName).catch((error) => {
 			this.milestoneTeamTemplateIdPromise = void 0;
 			throw error;
@@ -3826,22 +4085,26 @@ var LiveMsxConnector = class {
 		this.observationPromises.clear();
 		this.milestonePromises.clear();
 		this.currentUserIdPromise = void 0;
-		this.entityVersions.clear();
 	}
 	async getConcurrencyTokens(opportunityId) {
 		const milestones = await this.getMilestoneRows(opportunityId);
 		const paths = [`opportunities(${opportunityId})`, ...milestones.map((row) => `msp_engagementmilestones(${row.msp_engagementmilestoneid})`)];
 		const result = {};
 		for (const path of paths) {
-			const token = this.entityVersions.get(path.toLowerCase());
+			const token = (this.readContext.getStore()?.versions ?? this.entityVersions).get(path.toLowerCase());
 			if (token) result[path.toLowerCase()] = token;
 		}
 		return result;
 	}
-	withExpectedVersions(versions, operation) {
-		return this.expectedVersions.run({ ...versions }, operation);
+	withExpectedVersions(versions, operation, verifyAccessToken, onDispatch) {
+		return this.expectedVersions.run({
+			versions: { ...versions },
+			...verifyAccessToken ? { verifyAccessToken } : {},
+			...onDispatch ? { onDispatch } : {}
+		}, operation);
 	}
 	rememberNativeVersions(value) {
+		const versions = this.readContext.getStore()?.versions ?? this.entityVersions;
 		const remember = (row) => {
 			if (!isObjectRecord(row)) return;
 			const records = [
@@ -3853,8 +4116,8 @@ var LiveMsxConnector = class {
 				const id = row[field];
 				if (typeof id !== "string" || !guidPattern.test(id)) continue;
 				const path = `${set}(${id})`.toLowerCase();
-				this.entityVersions.delete(path);
-				if ("@odata.etag" in row && typeof row["@odata.etag"] === "string" && /^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(row["@odata.etag"])) this.entityVersions.set(path, row["@odata.etag"]);
+				versions.delete(path);
+				if ("@odata.etag" in row && typeof row["@odata.etag"] === "string" && /^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(row["@odata.etag"])) versions.set(path, row["@odata.etag"]);
 			}
 		};
 		if (value && typeof value === "object" && "value" in value && Array.isArray(value.value)) value.value.forEach(remember);
@@ -3862,6 +4125,14 @@ var LiveMsxConnector = class {
 	}
 	/** Returns the signed-in user's Dataverse systemuser id (WhoAmI UserId), cached for reuse. */
 	getCurrentUserId() {
+		const context = this.scopedReads();
+		if (context) {
+			context.identity ??= this.requestJson("WhoAmI").then((identity) => identity.UserId).catch((error) => {
+				delete context.identity;
+				throw error;
+			});
+			return context.identity;
+		}
 		this.currentUserIdPromise ??= this.requestJson("WhoAmI").then((identity) => identity.UserId).catch((error) => {
 			this.currentUserIdPromise = void 0;
 			throw error;
@@ -3879,20 +4150,22 @@ var LiveMsxConnector = class {
 		if (!(await this.getPortfolio()).opportunities.some((opportunity) => opportunity.id === opportunityId)) throw new Error("The opportunity is not in the signed-in user’s active MSX portfolio.");
 	}
 	getOpportunityObservations(opportunity) {
-		let observations = this.observationPromises.get(opportunity.id);
+		const promises = this.scopedReads()?.observations ?? this.observationPromises;
+		let observations = promises.get(opportunity.id);
 		if (!observations) {
 			observations = measurePerformance("msx.opportunity-evidence", this.performanceReporter, async () => {
 				return mapOpportunityObservations(opportunity, await this.getMilestoneRows(opportunity.id));
 			}).catch((error) => {
-				this.observationPromises.delete(opportunity.id);
+				promises.delete(opportunity.id);
 				throw error;
 			});
-			this.observationPromises.set(opportunity.id, observations);
+			promises.set(opportunity.id, observations);
 		}
 		return observations;
 	}
 	getMilestoneRows(opportunityId) {
-		let milestones = this.milestonePromises.get(opportunityId);
+		const promises = this.scopedReads()?.milestones ?? this.milestonePromises;
+		let milestones = promises.get(opportunityId);
 		if (!milestones) {
 			milestones = this.requestAll("msp_engagementmilestones", {
 				"$select": [
@@ -3909,20 +4182,55 @@ var LiveMsxConnector = class {
 				"$filter": `statecode eq 0 and _msp_opportunityid_value eq ${opportunityId}`,
 				"$orderby": "msp_milestonedate asc"
 			}).catch((error) => {
-				this.milestonePromises.delete(opportunityId);
+				promises.delete(opportunityId);
 				throw error;
 			});
-			this.milestonePromises.set(opportunityId, milestones);
+			promises.set(opportunityId, milestones);
 		}
 		return milestones;
 	}
 	getPortfolio() {
-		if (this.cacheOptions.cachePortfolio === false) return this.loadPortfolio();
+		if (this.cacheOptions.cachePortfolio === false || this.readContext.getStore()?.fresh) {
+			const context = this.readContext.getStore();
+			if (!context) return this.loadPortfolio();
+			context.portfolio ??= this.loadPortfolio();
+			return context.portfolio;
+		}
 		this.portfolioPromise ??= this.loadPortfolio().catch((error) => {
 			this.portfolioPromise = void 0;
 			throw error;
 		});
 		return this.portfolioPromise;
+	}
+	withReadContext(operation, signal) {
+		signal?.throwIfAborted();
+		const existing = this.readContext.getStore();
+		if (existing && !signal) {
+			existing.signal?.throwIfAborted();
+			return operation();
+		}
+		return this.readContext.run({
+			milestones: /* @__PURE__ */ new Map(),
+			observations: /* @__PURE__ */ new Map(),
+			versions: /* @__PURE__ */ new Map(),
+			...signal ? { signal } : {}
+		}, operation);
+	}
+	withFreshReadContext(operation, signal) {
+		signal?.throwIfAborted();
+		const existing = this.readContext.getStore();
+		if (existing?.fresh && !signal) return operation();
+		return this.readContext.run({
+			fresh: true,
+			milestones: /* @__PURE__ */ new Map(),
+			observations: /* @__PURE__ */ new Map(),
+			versions: /* @__PURE__ */ new Map(),
+			...signal ? { signal } : existing?.signal ? { signal: existing.signal } : {}
+		}, operation);
+	}
+	scopedReads() {
+		const context = this.readContext.getStore();
+		return this.cacheOptions.cachePortfolio === false || context?.signal || context?.fresh ? context : void 0;
 	}
 	async loadPortfolio() {
 		const userId = await measurePerformance("msx.identity", this.performanceReporter, () => this.getCurrentUserId());
@@ -3934,7 +4242,7 @@ var LiveMsxConnector = class {
 		const milestoneOpportunityIds = await this.milestoneTeamOpportunityIds();
 		const dealTeamOpportunityIds = new Set(dealTeamRows.map((row) => row._msp_parentopportunityid_value).filter(isPresent));
 		const opportunityIds = unique([...dealTeamOpportunityIds, ...milestoneOpportunityIds]);
-		const activeOpportunities = (await measurePerformance("msx.opportunities", this.performanceReporter, () => this.requestByIds("opportunities", "opportunityid", opportunityIds, "opportunityid,statecode,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description,msp_opportunitytype"))).filter((row) => row._parentaccountid_value && (row.statecode === void 0 || row.statecode === 0));
+		const activeOpportunities = (await measurePerformance("msx.opportunities", this.performanceReporter, () => this.requestByIds("opportunities", "opportunityid", opportunityIds, "opportunityid,statecode,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,msp_forecastcomments,msp_opportunitytype"))).filter((row) => row._parentaccountid_value && (row.statecode === void 0 || row.statecode === 0));
 		const dealTeamAccountIds = unique(activeOpportunities.map((row) => row._parentaccountid_value).filter(isPresent));
 		const accountIds = unique([
 			...dealTeamAccountIds,
@@ -3950,7 +4258,8 @@ var LiveMsxConnector = class {
 		return {
 			accounts,
 			opportunities: activeOpportunities.filter((row) => row._parentaccountid_value && visibleAccountIds.has(row._parentaccountid_value)).map((row) => this.mapOpportunity(row)).sort((left, right) => left.name.localeCompare(right.name)),
-			dealTeamOpportunityIds
+			dealTeamOpportunityIds,
+			milestoneTeamOpportunityIds: milestoneOpportunityIds
 		};
 	}
 	mapAccount(row, preferences = {
@@ -3991,17 +4300,24 @@ var LiveMsxConnector = class {
 			value: row.estimatedvalue || row.msp_consumptionconsumedrecurring || 0,
 			currency: "USD",
 			closeDate: closeDate?.slice(0, 10) ?? "1970-01-01",
-			...typeof row.description === "string" ? { comments: row.description } : {}
+			...typeof row.msp_forecastcomments === "string" ? { comments: row.msp_forecastcomments } : {}
 		};
 	}
 	async requestByIds(entitySet, idField, ids, select) {
-		const rows = [];
-		for (let offset = 0; offset < ids.length; offset += 40) {
-			const idFilter = ids.slice(offset, offset + 40).map((id) => `${idField} eq ${id}`).join(" or ");
-			rows.push(...await this.requestAll(entitySet, {
+		return this.collectChunks(ids, (chunk) => {
+			const idFilter = chunk.map((id) => `${idField} eq ${id}`).join(" or ");
+			return this.requestAll(entitySet, {
 				"$select": select,
 				"$filter": `statecode eq 0 and (${idFilter})`
-			}));
+			});
+		});
+	}
+	async collectChunks(ids, read) {
+		const rows = [];
+		for (let offset = 0; offset < ids.length; offset += 80) {
+			this.readContext.getStore()?.signal?.throwIfAborted();
+			const chunks = [ids.slice(offset, offset + 40), ids.slice(offset + 40, offset + 80)].filter((chunk) => chunk.length > 0);
+			rows.push(...(await Promise.all(chunks.map(read))).flat());
 		}
 		return rows;
 	}
@@ -4011,6 +4327,7 @@ var LiveMsxConnector = class {
 		const rows = [];
 		let nextUrl = firstUrl;
 		while (nextUrl) {
+			this.readContext.getStore()?.signal?.throwIfAborted();
 			this.assertTrustedUrl(nextUrl);
 			const page = await this.requestJson(nextUrl);
 			rows.push(...page.value);
@@ -4021,24 +4338,40 @@ var LiveMsxConnector = class {
 	async requestJson(pathOrUrl) {
 		const url = pathOrUrl instanceof URL ? pathOrUrl : new URL(pathOrUrl, this.baseUrl);
 		this.assertTrustedUrl(url);
+		const signal = this.readContext.getStore()?.signal;
+		signal?.throwIfAborted();
 		const accessToken = await this.tokenProvider.getAccessToken();
-		const response = await this.fetchImplementation(url, { headers: {
-			Authorization: `Bearer ${accessToken}`,
-			Accept: "application/json",
-			Prefer: "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\",odata.maxpagesize=500"
-		} });
-		if (!response.ok) throw new MsxRequestError(`MSX request failed with status ${response.status}.`, response.status);
-		const result = await response.json();
-		if (this.cacheOptions.requireConditionalWrites) this.rememberNativeVersions(result);
-		return result;
+		signal?.throwIfAborted();
+		return measurePerformance("msx.http.read", this.performanceReporter, async () => {
+			const response = await this.fetchImplementation(url, {
+				...signal ? { signal } : {},
+				headers: {
+					Authorization: `Bearer ${accessToken}`,
+					Accept: "application/json",
+					Prefer: "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\",odata.maxpagesize=500"
+				}
+			});
+			signal?.throwIfAborted();
+			if (!response.ok) {
+				const retry = response.headers.get("retry-after");
+				const retryAfterMs = retry === null ? void 0 : /^\d+$/.test(retry) ? Number(retry) * 1e3 : Math.max(0, Date.parse(retry) - Date.now());
+				throw new MsxRequestError(`MSX request failed with status ${response.status}.`, response.status, retryAfterMs !== void 0 && Number.isFinite(retryAfterMs) ? retryAfterMs : void 0);
+			}
+			const result = await response.json();
+			signal?.throwIfAborted();
+			this.rememberNativeVersions(result);
+			return result;
+		});
 	}
 	async patch(path, body) {
 		const url = new URL(path, this.baseUrl);
 		this.assertTrustedUrl(url);
 		const expected = this.expectedVersions.getStore();
-		const version = this.cacheOptions.requireConditionalWrites ? expected?.[path.toLowerCase()] : "*";
-		if (!version || this.cacheOptions.requireConditionalWrites && !/^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(version)) throw new Error("A reviewed native concurrency token is required before this update.");
-		const accessToken = await this.tokenProvider.getAccessToken();
+		const conditional = this.cacheOptions.requireConditionalWrites || expected !== void 0;
+		const version = conditional ? expected?.versions[path.toLowerCase()] : "*";
+		if (!version || conditional && !/^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(version)) throw new MsxRequestError("A reviewed native concurrency token is required before this update.", void 0, void 0, "not-dispatched");
+		const accessToken = await this.writeAccessToken();
+		this.expectedVersions.getStore()?.onDispatch?.();
 		const response = await this.fetchImplementation(url, {
 			method: "PATCH",
 			headers: {
@@ -4050,16 +4383,17 @@ var LiveMsxConnector = class {
 			body: JSON.stringify(body)
 		});
 		if (!response.ok) throw new MsxRequestError(`MSX update failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status);
-		if (this.cacheOptions.requireConditionalWrites && expected) {
+		if (conditional && expected) {
 			const next = response.headers.get("etag");
-			if (next && /^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(next)) expected[path.toLowerCase()] = next;
-			else delete expected[path.toLowerCase()];
+			if (next && /^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(next)) expected.versions[path.toLowerCase()] = next;
+			else delete expected.versions[path.toLowerCase()];
 		}
 	}
 	async post(path, body) {
 		const url = new URL(path, this.baseUrl);
 		this.assertTrustedUrl(url);
-		const accessToken = await this.tokenProvider.getAccessToken();
+		const accessToken = await this.writeAccessToken();
+		this.expectedVersions.getStore()?.onDispatch?.();
 		const response = await this.fetchImplementation(url, {
 			method: "POST",
 			headers: {
@@ -4075,7 +4409,8 @@ var LiveMsxConnector = class {
 	async postReturningEntity(path, body, operation = "create") {
 		const url = new URL(path, this.baseUrl);
 		this.assertTrustedUrl(url);
-		const accessToken = await this.tokenProvider.getAccessToken();
+		const accessToken = operation === "search" ? await this.tokenProvider.getAccessToken() : await this.writeAccessToken();
+		if (operation === "create") this.expectedVersions.getStore()?.onDispatch?.();
 		const response = await this.fetchImplementation(url, {
 			method: "POST",
 			headers: {
@@ -4095,9 +4430,12 @@ var LiveMsxConnector = class {
 	async delete(path) {
 		const url = new URL(path, this.baseUrl);
 		this.assertTrustedUrl(url);
-		const version = this.cacheOptions.requireConditionalWrites ? this.entityVersions.get(path.toLowerCase()) : "*";
-		if (!version) throw new Error("A verified native membership concurrency token is required before removal.");
-		const accessToken = await this.tokenProvider.getAccessToken();
+		const expected = this.expectedVersions.getStore();
+		const conditional = this.cacheOptions.requireConditionalWrites || expected !== void 0;
+		const version = conditional ? expected?.versions[path.toLowerCase()] ?? (this.readContext.getStore()?.versions ?? this.entityVersions).get(path.toLowerCase()) : "*";
+		if (!version || conditional && !/^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(version)) throw new MsxRequestError("A verified native membership concurrency token is required before removal.", void 0, void 0, "not-dispatched");
+		const accessToken = await this.writeAccessToken();
+		this.expectedVersions.getStore()?.onDispatch?.();
 		const response = await this.fetchImplementation(url, {
 			method: "DELETE",
 			headers: {
@@ -4107,6 +4445,11 @@ var LiveMsxConnector = class {
 			}
 		});
 		if (!response.ok) throw new MsxRequestError(`MSX delete failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status);
+	}
+	async writeAccessToken() {
+		const token = await this.tokenProvider.getAccessToken();
+		this.expectedVersions.getStore()?.verifyAccessToken?.(token);
+		return token;
 	}
 	assertTrustedUrl(url) {
 		if (url.origin !== this.baseUrl.origin || !url.pathname.startsWith(this.baseUrl.pathname)) throw new MsxRequestError("MSX returned an untrusted continuation URL.");
@@ -8004,7 +8347,7 @@ CREATE TABLE creation_batch_item (
 `;
 //#endregion
 //#region packages/connectors/local-store/local-store.ts
-var requireModule = createRequire(import.meta.url);
+var requireModule$1 = createRequire(import.meta.url);
 /**
 * A persistent, relational local test-data store backed by `node:sqlite` (built in; no
 * extra dependency). Applies the schema and seed, and exposes small typed query/mutation
@@ -8014,7 +8357,7 @@ var requireModule = createRequire(import.meta.url);
 var LocalStore = class {
 	db;
 	constructor(options = {}) {
-		const { DatabaseSync } = requireModule("node:sqlite");
+		const { DatabaseSync } = requireModule$1("node:sqlite");
 		this.db = new DatabaseSync(options.path ?? ":memory:");
 		try {
 			this.db.exec("PRAGMA foreign_keys = ON");
@@ -8373,10 +8716,10 @@ var LocalStoreMsxConnector = class {
 			visibility: str(row["visibility"]) === "hidden" ? "hidden" : "visible"
 		});
 	}
-	toOpportunity(row) {
-		const owner = this.ownerName(row["owner_id"]);
+	toOpportunity(row, references) {
+		const owner = references ? references.owner : this.ownerName(row["owner_id"]);
 		const comments = str(row["description"]);
-		const intent = (str(row["opportunity_intent_codes"])?.split(",") ?? []).map((code) => str(this.store.get("SELECT label FROM option_value WHERE option_set = ? AND code = ?", "msp_opportunitytype", Number(code))?.["label"])).filter((value) => value !== void 0);
+		const intent = (str(row["opportunity_intent_codes"])?.split(",") ?? []).map((code) => references ? references.intents.get(Number(code)) : str(this.store.get("SELECT label FROM option_value WHERE option_set = ? AND code = ?", "msp_opportunitytype", Number(code))?.["label"])).filter((value) => value !== void 0);
 		return opportunitySchema.parse({
 			id: String(row["id"]),
 			accountId: String(row["account_id"]),
@@ -8390,8 +8733,20 @@ var LocalStoreMsxConnector = class {
 			...comments ? { comments } : {}
 		});
 	}
-	toMilestone(row) {
-		const owner = this.ownerName(row["owner_id"]);
+	mapOpportunities(rows) {
+		if (rows.length === 0) return [];
+		const intents = /* @__PURE__ */ new Map();
+		for (const row of this.store.all("SELECT code, label FROM option_value WHERE option_set = ?", "msp_opportunitytype")) {
+			const label = str(row["label"]);
+			if (label !== void 0) intents.set(Number(row["code"]), label);
+		}
+		return rows.map((row) => this.toOpportunity(row, {
+			owner: str(row["portfolio_owner_name"]),
+			intents
+		}));
+	}
+	toMilestone(row, references) {
+		const owner = references ? references.owner : this.ownerName(row["owner_id"]);
 		const status = MILESTONE_STATUS[num(row["status"]) ?? -1] ?? "On Track";
 		const commitmentCode = num(row["commitment"]);
 		const commitment = commitmentCode === void 0 ? void 0 : COMMITMENT[commitmentCode];
@@ -8453,27 +8808,46 @@ var LocalStoreMsxConnector = class {
 	}
 	async listOpportunities(accountId) {
 		if (str(this.store.get("SELECT visibility FROM account WHERE id = ?", accountId)?.["visibility"]) === "hidden") return [];
-		return this.store.all(`SELECT o.* FROM opportunity o
+		return this.mapOpportunities(this.store.all(`SELECT o.*, u.fullname AS portfolio_owner_name FROM opportunity o
+       LEFT JOIN systemuser u ON u.id = o.owner_id
        WHERE o.account_id = ? AND (
          EXISTS (SELECT 1 FROM opportunity_dealteam dt WHERE dt.opportunity_id = o.id AND dt.systemuser_id = ?)
          OR EXISTS (SELECT 1 FROM milestone_team_member mt WHERE mt.opportunity_id = o.id AND mt.systemuser_id = ?)
        )
-       ORDER BY o.estimated_close_date`, accountId, this.currentUserId, this.currentUserId).map((row) => this.toOpportunity(row));
+       ORDER BY o.estimated_close_date`, accountId, this.currentUserId, this.currentUserId));
+	}
+	async getPortfolioIndex(options = {}) {
+		const accounts = await this.listAccounts(options);
+		const groups = new Map(accounts.filter((account) => account.visibility !== "hidden").map((account) => [account.id, []]));
+		const opportunities = this.mapOpportunities(this.store.all(`SELECT o.*, u.fullname AS portfolio_owner_name FROM opportunity o
+       JOIN account a ON a.id = o.account_id
+       LEFT JOIN systemuser u ON u.id = o.owner_id
+       WHERE a.visibility <> 'hidden' AND (
+         EXISTS (SELECT 1 FROM opportunity_dealteam dt WHERE dt.opportunity_id = o.id AND dt.systemuser_id = ?)
+         OR EXISTS (SELECT 1 FROM milestone_team_member mt WHERE mt.opportunity_id = o.id AND mt.systemuser_id = ?)
+       )
+       ORDER BY o.estimated_close_date`, this.currentUserId, this.currentUserId));
+		for (const opportunity of opportunities) groups.get(opportunity.accountId)?.push(opportunity);
+		return {
+			accounts,
+			opportunities: accounts.flatMap((account) => groups.get(account.id) ?? [])
+		};
 	}
 	async listMilestones(opportunityId) {
 		this.assertOpportunityAccess(opportunityId);
+		return this.readMilestones(opportunityId);
+	}
+	readMilestones(opportunityId) {
 		const memberMilestoneIds = new Set(this.store.all("SELECT milestone_id FROM milestone_team_member WHERE opportunity_id = ? AND systemuser_id = ?", opportunityId, this.currentUserId).map((row) => String(row["milestone_id"])));
-		return this.store.all("SELECT * FROM engagement_milestone WHERE opportunity_id = ? ORDER BY milestone_date", opportunityId).map((row) => ({
-			...this.toMilestone(row),
+		return this.store.all(`SELECT m.*, u.fullname AS portfolio_owner_name FROM engagement_milestone m
+       LEFT JOIN systemuser u ON u.id = m.owner_id
+       WHERE m.opportunity_id = ? ORDER BY m.milestone_date`, opportunityId).map((row) => ({
+			...this.toMilestone(row, { owner: str(row["portfolio_owner_name"]) }),
 			onMilestoneTeam: memberMilestoneIds.has(String(row["id"]))
 		}));
 	}
 	async listDiscoverableMilestones(opportunityId) {
-		const memberMilestoneIds = new Set(this.store.all("SELECT milestone_id FROM milestone_team_member WHERE opportunity_id = ? AND systemuser_id = ?", opportunityId, this.currentUserId).map((row) => String(row["milestone_id"])));
-		return this.store.all("SELECT * FROM engagement_milestone WHERE opportunity_id = ? ORDER BY milestone_date", opportunityId).map((row) => ({
-			...this.toMilestone(row),
-			onMilestoneTeam: memberMilestoneIds.has(String(row["id"]))
-		}));
+		return this.readMilestones(opportunityId);
 	}
 	toMilestoneActivity(row) {
 		const owner = this.ownerName(row["owner_id"]);
@@ -11408,7 +11782,7 @@ function parseRetryAfter(value, now = Date.now()) {
 	const retryAt = Date.parse(value);
 	return Number.isFinite(retryAt) ? Math.max(0, retryAt - now) : 0;
 }
-async function waitForRetry(delayMs, signal) {
+async function waitForRetry$1(delayMs, signal) {
 	if (delayMs === 0) return;
 	await new Promise((resolve, reject) => {
 		const timer = setTimeout(resolve, delayMs);
@@ -11497,7 +11871,7 @@ var McpHttpClient = class {
 			if (response.status === 429) {
 				const retryDelay = Math.min(parseRetryAfter(response.headers.get("retry-after")), maxRetryAfterMs);
 				await response.body?.cancel();
-				await waitForRetry(retryDelay, init?.signal);
+				await waitForRetry$1(retryDelay, init?.signal);
 				response = await fetchImplementation(input, requestInit);
 				if (response.status === 429) {
 					await response.body?.cancel();
@@ -12724,6 +13098,7 @@ var ThinSliceOrchestrator = class {
 	taskAgents;
 	performanceReporter;
 	recordCreation;
+	mutationListeners = /* @__PURE__ */ new Set();
 	constructor(msx, mcem, taskAgents = {}, performanceReporter, recordCreation) {
 		this.msx = msx;
 		this.mcem = mcem;
@@ -12731,14 +13106,103 @@ var ThinSliceOrchestrator = class {
 		this.performanceReporter = performanceReporter;
 		this.recordCreation = recordCreation;
 	}
+	withReadContext(operation, signal) {
+		signal?.throwIfAborted();
+		return this.msx.withReadContext ? this.msx.withReadContext(operation, signal) : operation();
+	}
+	subscribeMutations(listener) {
+		this.mutationListeners.add(listener);
+		return () => this.mutationListeners.delete(listener);
+	}
+	conditionalWriteOperations() {
+		return this.msx.conditionalWriteOperations ? this.msx.conditionalWriteOperations() : Promise.resolve([]);
+	}
+	notifyMutation(operation, result, input) {
+		for (const listener of this.mutationListeners) try {
+			listener(operation, result, input);
+		} catch {
+			console.warn("[cache-sync] source-acknowledged-view-update-failed");
+		}
+	}
+	async acknowledged(operation, input, work) {
+		const result = await work();
+		this.notifyMutation(operation, result, input);
+		return result;
+	}
+	withFreshReadContext(operation, signal) {
+		return this.msx.withFreshReadContext ? this.msx.withFreshReadContext(operation, signal) : this.withReadContext(operation, signal);
+	}
+	withReviewedVersions(versions, operation, verifyAccessToken, onDispatch) {
+		return this.msx.withExpectedVersions ? this.msx.withExpectedVersions(versions, () => this.withFreshReadContext(operation), verifyAccessToken, onDispatch) : operation();
+	}
+	getPortfolioIndex(input) {
+		const request = portfolioReadRequestSchema.parse(input);
+		return this.withFreshReadContext(async () => {
+			const options = { ...request.includeHidden === void 0 ? {} : { includeHidden: request.includeHidden } };
+			if (this.msx.getPortfolioIndex) return portfolioIndexSchema.parse({
+				contractVersion: "1.0",
+				...await this.msx.getPortfolioIndex(options)
+			});
+			const accounts = await this.listAccounts(options);
+			const groups = await Promise.all(accounts.filter((account) => account.visibility !== "hidden").map((account) => this.listOpportunities(account.id)));
+			return portfolioIndexSchema.parse({
+				contractVersion: "1.0",
+				accounts,
+				opportunities: groups.flat()
+			});
+		});
+	}
+	getPortfolioWorkspace(input) {
+		const request = portfolioWorkspaceRequestSchema.parse(input);
+		return this.withFreshReadContext(async () => {
+			const accounts = await this.listAccounts({ ...request.includeHidden === void 0 ? {} : { includeHidden: request.includeHidden } });
+			const account = request.accountId ? accounts.find((item) => item.id === request.accountId && item.visibility !== "hidden") : accounts.find((item) => item.visibility !== "hidden");
+			if (request.accountId && !account) throw new Error("The selected account is not in the current visible portfolio.");
+			const opportunities = account ? await this.listOpportunities(account.id) : [];
+			const opportunity = request.opportunityId ? opportunities.find((item) => item.id === request.opportunityId) : opportunities[0];
+			if (request.opportunityId && !opportunity) throw new Error("The selected opportunity is not in the selected account portfolio.");
+			const milestones = opportunity ? await this.msx.listMilestones(opportunity.id) : [];
+			return portfolioWorkspaceSchema.parse({
+				contractVersion: "1.0",
+				accounts,
+				opportunities,
+				milestones,
+				...account ? { selectedAccountId: account.id } : {},
+				...opportunity ? { selectedOpportunityId: opportunity.id } : {}
+			});
+		});
+	}
+	getDiscoverySnapshot(input) {
+		discoverySnapshotRequestSchema.parse(input);
+		return this.withFreshReadContext(async () => {
+			if (this.msx.getDiscoverySnapshot) return discoverySnapshotSchema.parse({
+				...await this.msx.getDiscoverySnapshot(),
+				contractVersion: "1.0",
+				generatedAt: (/* @__PURE__ */ new Date()).toISOString()
+			});
+			const accounts = await this.listAccounts({ includeHidden: true });
+			const visible = new Set(accounts.filter((account) => account.visibility !== "hidden").map((account) => account.id));
+			const [groups, portfolios] = await Promise.all([Promise.all(seDomainIds.map((domain) => this.msx.discoverOpportunities(domain))), Promise.all([...visible].map((accountId) => this.msx.listOpportunities(accountId)))]);
+			const portfolioOpportunities = portfolios.flat();
+			const memberships = await Promise.all(portfolioOpportunities.map(async (opportunity) => (await this.msx.listMilestones(opportunity.id)).some((milestone) => milestone.onMilestoneTeam) ? [opportunity.id] : []));
+			return discoverySnapshotSchema.parse({
+				contractVersion: "1.0",
+				generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+				accounts,
+				portfolioOpportunities,
+				opportunities: groups.flat().filter((opportunity) => visible.has(opportunity.accountId)),
+				milestoneTeamOpportunityIds: memberships.flat()
+			});
+		});
+	}
 	getRecordCreationCatalog(request) {
-		return this.requireRecordCreation().getCatalog(request);
+		return this.withReadContext(() => this.requireRecordCreation().getCatalog(request));
 	}
 	previewRecordCreation(request) {
 		return this.requireRecordCreation().preview(request);
 	}
 	commitRecordCreation(request) {
-		return this.requireRecordCreation().commit(request);
+		return this.acknowledged("commitRecordCreation", request, () => this.withFreshReadContext(() => this.requireRecordCreation().commit(request)));
 	}
 	exportRecordCreationDraft(request) {
 		return this.requireRecordCreation().exportDraft(request);
@@ -12755,47 +13219,58 @@ var ThinSliceOrchestrator = class {
 	}
 	async addAccount(accountId) {
 		if (typeof accountId !== "string" || accountId.trim().length === 0) throw new Error("An account id is required.");
-		return this.msx.addAccount(accountId);
+		return this.acknowledged("addAccount", { accountId }, () => this.msx.addAccount(accountId));
 	}
 	async setAccountVisibility(accountId, visibility) {
 		if (typeof accountId !== "string" || accountId.trim().length === 0) throw new Error("An account id is required.");
-		return this.msx.setAccountVisibility(accountId, accountVisibilitySchema.parse(visibility));
+		return this.acknowledged("setAccountVisibility", {
+			accountId,
+			visibility
+		}, () => this.msx.setAccountVisibility(accountId, accountVisibilitySchema.parse(visibility)));
 	}
 	listOpportunities(accountId) {
 		return this.msx.listOpportunities(accountId);
 	}
 	async getOpportunitySnapshot(opportunityId) {
 		if (!opportunityId.trim()) throw new Error("An opportunity id is required.");
-		const context = await this.msx.getOpportunityContext(opportunityId);
-		const milestones = await this.msx.listMilestones(opportunityId);
-		const revisionTokens = await this.msx.getConcurrencyTokens?.(opportunityId);
-		return {
-			account: context.account,
-			opportunity: context.opportunity,
-			milestones,
-			...revisionTokens ? { revisionTokens } : {}
-		};
+		return this.withReadContext(async () => {
+			const context = await this.msx.getOpportunityContext(opportunityId);
+			const milestones = await this.msx.listMilestones(opportunityId);
+			const revisionTokens = await this.msx.getConcurrencyTokens?.(opportunityId);
+			return {
+				account: context.account,
+				opportunity: context.opportunity,
+				milestones,
+				...revisionTokens ? { revisionTokens } : {}
+			};
+		});
 	}
 	async discoverOpportunities(domain) {
 		return this.msx.discoverOpportunities(seDomainSchema.parse(domain));
 	}
 	async joinDealTeam(opportunityId) {
 		if (typeof opportunityId !== "string" || opportunityId.trim().length === 0) throw new Error("An opportunity id is required to join a deal team.");
-		return this.msx.joinDealTeam(opportunityId);
+		return this.acknowledged("joinDealTeam", { opportunityId }, () => this.msx.joinDealTeam(opportunityId));
 	}
 	async leaveDealTeam(opportunityId) {
 		if (typeof opportunityId !== "string" || opportunityId.trim().length === 0) throw new Error("An opportunity id is required to leave a deal team.");
-		return this.msx.leaveDealTeam(opportunityId);
+		return this.acknowledged("leaveDealTeam", { opportunityId }, () => this.msx.leaveDealTeam(opportunityId));
 	}
 	async joinMilestoneTeam(opportunityId, milestoneId) {
 		if (typeof opportunityId !== "string" || opportunityId.trim().length === 0) throw new Error("An opportunity id is required to join a milestone team.");
 		if (typeof milestoneId !== "string" || milestoneId.trim().length === 0) throw new Error("A milestone id is required to join a milestone team.");
-		return this.msx.joinMilestoneTeam(opportunityId, milestoneId);
+		return this.acknowledged("joinMilestoneTeam", {
+			opportunityId,
+			milestoneId
+		}, () => this.msx.joinMilestoneTeam(opportunityId, milestoneId));
 	}
 	async leaveMilestoneTeam(opportunityId, milestoneId) {
 		if (typeof opportunityId !== "string" || opportunityId.trim().length === 0) throw new Error("An opportunity id is required to leave a milestone team.");
 		if (typeof milestoneId !== "string" || milestoneId.trim().length === 0) throw new Error("A milestone id is required to leave a milestone team.");
-		return this.msx.leaveMilestoneTeam(opportunityId, milestoneId);
+		return this.acknowledged("leaveMilestoneTeam", {
+			opportunityId,
+			milestoneId
+		}, () => this.msx.leaveMilestoneTeam(opportunityId, milestoneId));
 	}
 	listMilestones(opportunityId) {
 		return this.msx.listMilestones(opportunityId);
@@ -12812,13 +13287,24 @@ var ThinSliceOrchestrator = class {
 	createMilestoneActivity(opportunityId, milestoneId, request) {
 		if (typeof opportunityId !== "string" || opportunityId.trim().length === 0) throw new Error("An opportunity id is required to create a milestone activity.");
 		if (typeof milestoneId !== "string" || milestoneId.trim().length === 0) throw new Error("A milestone id is required to create a milestone activity.");
-		return this.msx.createMilestoneActivity(opportunityId, milestoneId, createMilestoneActivityRequestSchema.parse(request));
+		return this.acknowledged("createMilestoneActivity", {
+			opportunityId,
+			milestoneId,
+			request
+		}, () => this.msx.createMilestoneActivity(opportunityId, milestoneId, createMilestoneActivityRequestSchema.parse(request)));
 	}
 	updateMilestone(opportunityId, milestoneId, update) {
-		return this.msx.updateMilestone(opportunityId, milestoneId, update);
+		return this.acknowledged("updateMilestone", {
+			opportunityId,
+			milestoneId,
+			update
+		}, () => this.msx.updateMilestone(opportunityId, milestoneId, update));
 	}
 	updateOpportunity(opportunityId, update) {
-		return this.msx.updateOpportunity(opportunityId, update);
+		return this.acknowledged("updateOpportunity", {
+			opportunityId,
+			update
+		}, () => this.msx.updateOpportunity(opportunityId, update));
 	}
 	async transitionOpportunityStage(input) {
 		const request = mcemStageTransitionRequestSchema.parse(input);
@@ -12834,63 +13320,67 @@ var ThinSliceOrchestrator = class {
 		const detail = unmetCriteria.length > 0 ? ` Unmet criteria: ${unmetCriteria.map((criterion) => `${criterion.label} (${criterion.status})`).join("; ")}.` : "";
 		const auditNote = `[MCEM stage transition ${timestamp}] Stage ${previousStage} -> Stage ${request.targetStage}; disposition: ${disposition}.${detail}${request.reason ? ` Reason: ${request.reason}` : ""}`;
 		const opportunity = await this.msx.updateOpportunityStage(request.opportunityId, request.targetStage, auditNote);
-		return mcemStageTransitionResultSchema.parse({
+		const result = mcemStageTransitionResultSchema.parse({
 			opportunity,
 			previousStage,
 			targetStage: request.targetStage,
 			disposition,
 			auditNote
 		});
+		this.notifyMutation("transitionOpportunityStage", result, request);
+		return result;
 	}
 	async runMcemCoach(input) {
 		const request = mcemRequestSchema.parse(input);
-		const context = await this.msx.getOpportunityContext(request.opportunityId);
-		if (context.account.id !== request.accountId) throw new Error("The selected opportunity does not belong to the selected account.");
-		const milestones = await this.msx.listMilestones(request.opportunityId);
-		const guidance = await this.mcem.getStageGuidance(context.opportunity.recordedStage);
-		return evaluateMcemProgress({
-			...context,
-			milestones
-		}, guidance);
+		return this.withFreshReadContext(async () => {
+			const context = await this.msx.getOpportunityContext(request.opportunityId);
+			if (context.account.id !== request.accountId) throw new Error("The selected opportunity does not belong to the selected account.");
+			const [milestones, guidance] = await Promise.all([this.msx.listMilestones(request.opportunityId), this.mcem.getStageGuidance(context.opportunity.recordedStage)]);
+			return evaluateMcemProgress({
+				...context,
+				milestones
+			}, guidance);
+		});
 	}
 	async runAgentTask(input) {
 		const request = agentTaskRequestSchema.parse(input);
-		const configuredAgent = this.taskAgents[request.capability];
-		if (!configuredAgent) throw new Error(`The ${request.capability} agent is not configured.`);
-		const baseContext = await measurePerformance("agent.context.msx", this.performanceReporter, () => this.msx.getOpportunityContext(request.opportunityId));
-		if (baseContext.account.id !== request.accountId) throw new Error("The selected opportunity does not belong to the selected account.");
-		const milestones = await this.msx.listMilestones(request.opportunityId);
-		const opportunityContext = {
-			...baseContext,
-			milestones
-		};
-		const guidance = await measurePerformance("agent.context.mcem", this.performanceReporter, () => this.mcem.getStageGuidance(opportunityContext.opportunity.recordedStage));
-		const localEvaluation = evaluateMcemProgress(opportunityContext, guidance);
-		const content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke({
-			request,
-			opportunityContext,
-			guidance,
-			localEvaluation
+		return measurePerformance(`agent.task.${request.capability}`, this.performanceReporter, () => this.withFreshReadContext(async () => {
+			const configuredAgent = this.taskAgents[request.capability];
+			if (!configuredAgent) throw new Error(`The ${request.capability} agent is not configured.`);
+			const baseContext = await measurePerformance("agent.context.msx", this.performanceReporter, () => this.msx.getOpportunityContext(request.opportunityId));
+			if (baseContext.account.id !== request.accountId) throw new Error("The selected opportunity does not belong to the selected account.");
+			const [milestones, guidance] = await Promise.all([measurePerformance("agent.context.milestones", this.performanceReporter, () => this.msx.listMilestones(request.opportunityId)), measurePerformance("agent.context.mcem", this.performanceReporter, () => this.mcem.getStageGuidance(baseContext.opportunity.recordedStage))]);
+			const opportunityContext = {
+				...baseContext,
+				milestones
+			};
+			const localEvaluation = evaluateMcemProgress(opportunityContext, guidance);
+			const content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke({
+				request,
+				opportunityContext,
+				guidance,
+				localEvaluation
+			}));
+			if (!content?.trim()) throw new Error(`The ${request.capability} agent returned no content.`);
+			const sourceHealth = [opportunityContext.sourceHealth, guidance.sourceHealth];
+			const isPartial = sourceHealth.some((source) => [
+				"partial",
+				"stale",
+				"unavailable"
+			].includes(source.state));
+			const responseContent = addMsxOpportunityLink(content.trim(), opportunityContext.opportunity.id);
+			return {
+				contractVersion: "1.2",
+				correlationId: randomUUID(),
+				capability: request.capability,
+				agentVersion: configuredAgent.version,
+				generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+				mode: opportunityContext.sourceHealth.state === "sample" ? "sample" : "live",
+				state: isPartial ? "partial" : "complete",
+				content: responseContent,
+				sourceHealth
+			};
 		}));
-		if (!content?.trim()) throw new Error(`The ${request.capability} agent returned no content.`);
-		const sourceHealth = [opportunityContext.sourceHealth, guidance.sourceHealth];
-		const isPartial = sourceHealth.some((source) => [
-			"partial",
-			"stale",
-			"unavailable"
-		].includes(source.state));
-		const responseContent = addMsxOpportunityLink(content.trim(), opportunityContext.opportunity.id);
-		return {
-			contractVersion: "1.2",
-			correlationId: randomUUID(),
-			capability: request.capability,
-			agentVersion: configuredAgent.version,
-			generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
-			mode: opportunityContext.sourceHealth.state === "sample" ? "sample" : "live",
-			state: isPartial ? "partial" : "complete",
-			content: responseContent,
-			sourceHealth
-		};
 	}
 };
 //#endregion
@@ -14912,6 +15402,2188 @@ function desktopWindowBounds(workArea) {
 	};
 }
 //#endregion
+//#region apps/desktop/electron/main/portfolio-ipc.ts
+function createMutationSyncIpcHandler(session) {
+	return async (input) => mutationSyncResponseSchema.parse(await session.invoke(mutationSyncRequestSchema.parse(input)));
+}
+function createPortfolioIpcHandlers(core) {
+	return {
+		"tlc:portfolio-index": async (input) => portfolioIndexSchema.parse(await core.getPortfolioIndex(portfolioReadRequestSchema.parse(input))),
+		"tlc:portfolio-workspace": async (input) => portfolioWorkspaceSchema.parse(await core.getPortfolioWorkspace(portfolioWorkspaceRequestSchema.parse(input))),
+		"tlc:discovery-snapshot": async (input) => discoverySnapshotSchema.parse(await core.getDiscoverySnapshot(discoverySnapshotRequestSchema.parse(input)))
+	};
+}
+//#endregion
+//#region apps/shared/session-cache.ts
+var CacheCapacityError = class extends Error {
+	constructor() {
+		super("The complete source snapshot exceeds the supported memory cache. Reduce the source scope before retrying.");
+		this.name = "CacheCapacityError";
+	}
+};
+var aborted = () => new DOMException("The source session changed.", "AbortError");
+var status = (error) => error !== null && typeof error === "object" && "status" in error && typeof error.status === "number" ? error.status : void 0;
+var waitForRetry = (delay, signal) => new Promise((resolve, reject) => {
+	const stop = () => {
+		clearTimeout(timer);
+		reject(signal.reason);
+	};
+	const timer = setTimeout(() => {
+		signal.removeEventListener("abort", stop);
+		resolve();
+	}, Math.max(1, delay));
+	timer.unref?.();
+	signal.addEventListener("abort", stop, { once: true });
+	if (signal.aborted) stop();
+});
+var SessionCache = class {
+	policy;
+	now;
+	generation = 0;
+	revision = 0;
+	dataRevision = 0;
+	state = {
+		revision: 0,
+		dataRevision: 0,
+		generation: 0,
+		refreshing: false,
+		stale: false
+	};
+	entries = /* @__PURE__ */ new Map();
+	listeners = /* @__PURE__ */ new Set();
+	active;
+	activeKeys = /* @__PURE__ */ new Set();
+	pinnedKeys = /* @__PURE__ */ new Set();
+	timer;
+	refreshJob;
+	disposed = false;
+	batchDepth = 0;
+	batchChanged = false;
+	scopeError;
+	lifetime = new AbortController();
+	sourceState;
+	constructor(options = {}) {
+		this.policy = cachePolicySchema.parse(options.policy ?? {});
+		this.now = options.now ?? Date.now;
+		this.active = options.active ?? false;
+	}
+	subscribe = (listener) => {
+		this.listeners.add(listener);
+		return () => this.listeners.delete(listener);
+	};
+	getRevision = () => this.revision;
+	getState = () => this.state;
+	value(key, reference = false) {
+		const existing = this.entries.get(key);
+		if (existing) return existing;
+		const entry = new SessionCacheValue(this, key, reference);
+		this.entries.set(key, entry);
+		this.admit(entry, 0);
+		return entry;
+	}
+	existing(key) {
+		return this.entries.get(key);
+	}
+	setActive(active) {
+		this.active = active;
+		this.changed();
+	}
+	setActiveKeys(keys) {
+		this.activeKeys = new Set(keys);
+		this.changed();
+	}
+	setPinnedKeys(keys) {
+		this.pinnedKeys = new Set(keys);
+		this.changed();
+	}
+	has(key) {
+		return this.entries.get(key)?.loaded ?? false;
+	}
+	invalidate(key) {
+		this.entries.get(key)?.invalidate();
+	}
+	updateMatching(prefix, update) {
+		this.batch(() => {
+			for (const entry of this.entries.values()) if (entry.key.startsWith(prefix) && (entry.loaded || entry.refreshing)) entry.update(update);
+		});
+	}
+	invalidateAll() {
+		this.batch(() => {
+			for (const entry of this.entries.values()) entry.invalidate();
+		});
+	}
+	clear(error) {
+		this.generation++;
+		this.lifetime.abort(aborted());
+		this.lifetime = new AbortController();
+		this.scopeError = error;
+		this.sourceState = void 0;
+		for (const entry of this.entries.values()) entry.clear();
+		this.dataChanged();
+	}
+	dispose() {
+		this.disposed = true;
+		this.clear();
+		this.listeners.clear();
+		if (this.timer) clearTimeout(this.timer);
+	}
+	changed() {
+		if (this.batchDepth) {
+			this.batchChanged = true;
+			return;
+		}
+		const entries = [...this.entries.values()];
+		const fetched = entries.flatMap((entry) => entry.fetchedAt === void 0 ? [] : [entry.fetchedAt]);
+		const error = this.scopeError ?? this.sourceState?.error ?? entries.find((entry) => entry.error)?.error;
+		this.state = {
+			revision: ++this.revision,
+			dataRevision: this.dataRevision,
+			generation: this.generation,
+			refreshing: this.sourceState?.refreshing === true || entries.some((entry) => entry.refreshing),
+			stale: this.sourceState?.stale ?? entries.some((entry) => entry.loaded && entry.isStale()),
+			...this.sourceState?.validatedAt !== void 0 ? {
+				validatedAt: this.sourceState.validatedAt,
+				...this.sourceState.fetchedAt === void 0 ? {} : { fetchedAt: this.sourceState.fetchedAt }
+			} : fetched.length ? {
+				fetchedAt: Math.max(...fetched),
+				validatedAt: Math.max(...fetched)
+			} : {},
+			...error ? { error: error instanceof Error ? error.message : "Source refresh failed." } : {}
+		};
+		for (const listener of this.listeners) listener();
+		this.schedule();
+	}
+	recovered() {
+		this.scopeError = void 0;
+	}
+	dataChanged() {
+		this.dataRevision++;
+		this.changed();
+	}
+	reportError(error) {
+		this.scopeError = error;
+		this.changed();
+	}
+	observeSourceState(state) {
+		this.sourceState = state;
+		this.changed();
+	}
+	batch(action) {
+		this.batchDepth++;
+		try {
+			action();
+		} finally {
+			this.batchDepth--;
+			if (!this.batchDepth && this.batchChanged) {
+				this.batchChanged = false;
+				this.changed();
+			}
+		}
+	}
+	admit(entry, bytes) {
+		const candidates = [...this.entries.values()].filter((item) => item !== entry && !item.refreshing && !this.activeKeys.has(item.key) && !this.pinnedKeys.has(item.key) && !["portfolio", "discovery"].includes(item.key)).sort((a, b) => a.accessedAt - b.accessedAt);
+		let total = [...this.entries.values()].reduce((sum, item) => sum + (item === entry ? bytes : entry.derivedKeys.includes(item.key) ? 0 : item.bytes), 0);
+		let inactive = candidates.length + Number(!this.activeKeys.has(entry.key) && !["portfolio", "discovery"].includes(entry.key));
+		for (const candidate of candidates) {
+			if (total <= this.policy.maxSerializedBytes && inactive <= this.policy.maxInactiveEntries) break;
+			total -= candidate.bytes;
+			inactive--;
+			candidate.clear();
+			this.entries.delete(candidate.key);
+		}
+		if (total > this.policy.maxSerializedBytes) throw new CacheCapacityError();
+	}
+	canRefresh(key, derivedKeys) {
+		return this.active && !this.disposed && (this.activeKeys.has(key) || derivedKeys.some((value) => this.activeKeys.has(value)));
+	}
+	async runRead(load, options = {}) {
+		const generation = this.generation;
+		const signal = this.lifetime.signal;
+		for (let attempt = 0;; attempt++) {
+			if (this.disposed || generation !== this.generation) throw aborted();
+			const notBefore = options.notBefore?.() ?? 0;
+			if (notBefore > this.now()) await waitForRetry(notBefore - this.now(), signal);
+			if (options.retryAllowed && !options.retryAllowed()) throw aborted();
+			try {
+				return await load();
+			} catch (error) {
+				const code = status(error);
+				if (code === 401 || code === 403) {
+					this.clear(error);
+					throw error;
+				}
+				if (!(code === 429 || code !== void 0 && code >= 500 || error instanceof TypeError)) throw error;
+				const retry = error !== null && typeof error === "object" && "retryAfterMs" in error && typeof error.retryAfterMs === "number" ? error.retryAfterMs : 500 * 2 ** attempt;
+				if (!Number.isFinite(retry) || retry > 2147483647) throw error;
+				options.onRetryDelay?.(Math.max(1, retry));
+				if (attempt >= this.policy.readRetries) throw error;
+				await waitForRetry(retry, signal);
+			}
+		}
+	}
+	schedule() {
+		if (this.timer) clearTimeout(this.timer);
+		this.timer = void 0;
+		if (!this.active || this.disposed || this.refreshJob) return;
+		const entries = [...this.entries.values()];
+		const eligible = entries.filter((entry) => entry.loaded && !entry.refreshing && (this.activeKeys.has(entry.key) || entry.derivedKeys.some((key) => this.activeKeys.has(key))) && !entries.some((parent) => parent !== entry && parent.loaded && parent.derivedKeys.includes(entry.key)));
+		const due = Math.min(...eligible.map((entry) => entry.nextDue()));
+		if (!Number.isFinite(due)) return;
+		this.timer = setTimeout(() => {
+			this.timer = void 0;
+			const pending = eligible.filter((entry) => entry.loaded && entry.isStale() && entry.nextDue() <= this.now());
+			this.refreshJob = (async () => {
+				for (const entry of pending) {
+					if (!this.active || this.disposed) break;
+					if (!this.activeKeys.has(entry.key) && !entry.derivedKeys.some((key) => this.activeKeys.has(key))) continue;
+					try {
+						await entry.revalidate(true);
+					} catch {}
+				}
+			})();
+			this.refreshJob.finally(() => {
+				this.refreshJob = void 0;
+				this.schedule();
+			});
+		}, Math.max(10, due - this.now()));
+		this.timer.unref?.();
+	}
+};
+var SessionCacheValue = class {
+	owner;
+	key;
+	reference;
+	value;
+	pending;
+	load;
+	generation = 0;
+	updates = [];
+	forced = false;
+	requested = false;
+	failedAt;
+	retryNotBefore = 0;
+	fetchedAt;
+	accessedAt = 0;
+	bytes = 0;
+	error;
+	onLoad;
+	derivedKeys = [];
+	get loaded() {
+		return this.value !== void 0;
+	}
+	get refreshing() {
+		return this.pending !== void 0;
+	}
+	constructor(owner, key, reference = false) {
+		this.owner = owner;
+		this.key = key;
+		this.reference = reference;
+	}
+	peek() {
+		return this.value;
+	}
+	isStale() {
+		return this.forced || this.fetchedAt !== void 0 && this.owner.now() >= this.fetchedAt + this.ttl();
+	}
+	nextDue() {
+		return Math.max(this.forced ? this.owner.now() : (this.fetchedAt ?? this.owner.now()) + this.ttl(), this.failedAt === void 0 ? 0 : this.failedAt + 3e4, this.retryNotBefore);
+	}
+	ttl() {
+		return this.reference ? this.owner.policy.referenceFreshMs : this.owner.policy.mutableFreshMs;
+	}
+	read(load) {
+		this.load = load;
+		this.accessedAt = this.owner.now();
+		if (this.value !== void 0 && !this.forced && !this.requested) {
+			const generation = this.generation, scope = this.owner.generation;
+			return Promise.resolve().then(() => {
+				if (generation !== this.generation || scope !== this.owner.generation || this.value === void 0) throw aborted();
+				return structuredClone(this.value);
+			});
+		}
+		const generation = this.generation, scope = this.owner.generation;
+		if (this.forced && this.pending) return this.revalidate().then(() => this.read(load));
+		return this.revalidate().catch((error) => {
+			if (generation === this.generation && scope === this.owner.generation) this.forced = true;
+			throw error;
+		});
+	}
+	revalidate(background = false) {
+		const generation = this.generation, scope = this.owner.generation;
+		if (this.pending) return this.pending.then((value) => {
+			if (generation !== this.generation || scope !== this.owner.generation) throw aborted();
+			return structuredClone(this.value ?? value);
+		});
+		if (!this.load) return Promise.reject(/* @__PURE__ */ new Error("This dataset has not been loaded."));
+		this.forced = false;
+		const promise = this.owner.runRead(this.load, {
+			...background ? { retryAllowed: () => this.owner.canRefresh(this.key, this.derivedKeys) } : {},
+			notBefore: () => this.retryNotBefore,
+			onRetryDelay: (delay) => {
+				this.retryNotBefore = this.owner.now() + delay;
+			}
+		}).then((value) => {
+			if (generation !== this.generation || scope !== this.owner.generation) throw aborted();
+			const updated = this.updates.reduce((current, update) => update(current), value);
+			const json = JSON.stringify(updated);
+			if (json === void 0) throw new Error("The source returned no cacheable JSON data.");
+			const bytes = new TextEncoder().encode(json).byteLength;
+			this.owner.admit(this, bytes);
+			this.owner.batch(() => {
+				this.value = updated;
+				this.bytes = bytes;
+				this.fetchedAt = this.owner.now();
+				if (!this.forced) this.requested = false;
+				this.error = void 0;
+				this.failedAt = void 0;
+				this.retryNotBefore = 0;
+				this.updates = [];
+				this.owner.recovered();
+				this.onLoad?.(updated, value);
+				this.owner.dataChanged();
+			});
+			return updated;
+		}).catch((error) => {
+			if (generation === this.generation && scope === this.owner.generation) {
+				if (background && error instanceof DOMException && error.name === "AbortError") {
+					this.forced = true;
+					this.failedAt = void 0;
+				} else {
+					this.error = error;
+					this.failedAt = this.owner.now();
+				}
+				this.updates = [];
+			}
+			throw error;
+		}).finally(() => {
+			if (this.pending === promise) {
+				this.pending = void 0;
+				this.owner.changed();
+			}
+		});
+		this.pending = promise;
+		this.owner.changed();
+		return promise.then((value) => {
+			if (generation !== this.generation || scope !== this.owner.generation) throw aborted();
+			return structuredClone(this.value ?? value);
+		});
+	}
+	update(update) {
+		const loaded = this.value !== void 0;
+		if (this.value !== void 0) {
+			const next = update(this.value);
+			const bytes = new TextEncoder().encode(JSON.stringify(next)).byteLength;
+			this.owner.admit(this, bytes);
+			this.value = next;
+			this.bytes = bytes;
+		}
+		if (this.pending) this.updates.push(update);
+		if (loaded) this.owner.dataChanged();
+		else this.owner.changed();
+	}
+	seed(value) {
+		if (this.value === void 0 && !this.pending) {
+			const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
+			this.owner.admit(this, bytes);
+			this.value = structuredClone(value);
+			this.bytes = bytes;
+			this.fetchedAt = this.owner.now();
+			this.owner.dataChanged();
+		}
+	}
+	replace(value) {
+		this.update(() => structuredClone(value));
+		this.seed(value);
+	}
+	replaceDerived(value, current = true) {
+		if (this.pending) this.updates.push(() => value);
+		this.value = value;
+		this.bytes = 0;
+		this.fetchedAt = this.owner.now();
+		if (current) {
+			this.forced = false;
+			this.requested = false;
+			this.error = void 0;
+			this.failedAt = void 0;
+		}
+		this.owner.dataChanged();
+	}
+	invalidate() {
+		this.forced = true;
+		this.requested = true;
+		this.failedAt = void 0;
+		this.owner.dataChanged();
+	}
+	clear() {
+		this.generation++;
+		this.value = void 0;
+		this.pending = void 0;
+		this.updates = [];
+		this.forced = false;
+		this.requested = false;
+		this.bytes = 0;
+		this.fetchedAt = void 0;
+		this.failedAt = void 0;
+		this.retryNotBefore = 0;
+		this.error = void 0;
+	}
+};
+//#endregion
+//#region apps/shared/session-portfolio.ts
+var SessionPortfolio = class {
+	source;
+	portfolio;
+	discovery;
+	cache;
+	refreshRequested = false;
+	draftFields = /* @__PURE__ */ new Map();
+	draftBytes = 0;
+	draftOverflow = false;
+	capturedVisibleAccounts = /* @__PURE__ */ new Set();
+	get generation() {
+		return this.cache.generation;
+	}
+	constructor(source, options = {}) {
+		this.source = source;
+		this.cache = new SessionCache(options);
+		this.portfolio = this.cache.value("portfolio");
+		this.discovery = this.cache.value("discovery");
+		this.discovery.derivedKeys = ["portfolio"];
+		this.discovery.onLoad = (snapshot, source) => {
+			this.capturedVisibleAccounts.clear();
+			for (const account of source.accounts) if (account.visibility !== "hidden") this.capturedVisibleAccounts.add(account.id);
+			this.portfolio.replaceDerived({
+				contractVersion: "1.0",
+				accounts: snapshot.accounts,
+				opportunities: snapshot.portfolioOpportunities
+			}, !this.discovery.isStale());
+		};
+		let generation = this.cache.generation;
+		this.cache.subscribe(() => {
+			if (generation === this.cache.generation) return;
+			generation = this.cache.generation;
+			this.resetDrafts();
+			this.capturedVisibleAccounts.clear();
+		});
+	}
+	subscribe = (listener) => this.cache.subscribe(listener);
+	getRevision = () => this.cache.getRevision();
+	getState = () => this.cache.getState();
+	setActive(active) {
+		this.cache.setActive(active);
+	}
+	setActiveKeys(keys) {
+		this.cache.setActiveKeys(this.discovery.loaded && keys.includes("portfolio") ? [.../* @__PURE__ */ new Set([...keys.filter((key) => key !== "portfolio"), "discovery"])] : keys);
+	}
+	dispose() {
+		this.cache.dispose();
+	}
+	readDataset(key, load, options = {}) {
+		return this.cache.value(key, options.reference).read(load);
+	}
+	invalidateDataset(key) {
+		this.cache.invalidate(key);
+	}
+	clear() {
+		this.cache.clear();
+		this.resetDrafts();
+		this.capturedVisibleAccounts.clear();
+		this.refreshRequested = false;
+		this.portfolio.clear();
+		this.discovery.clear();
+	}
+	milestoneValue(opportunityId) {
+		return this.cache.value(`milestones:${opportunityId}`);
+	}
+	captureDraft(opportunityId) {
+		const opportunity = this.portfolio.peek()?.opportunities.find((item) => item.id === opportunityId) ?? this.discovery.peek()?.opportunities.find((item) => item.id === opportunityId);
+		if (opportunity) for (const field of ["comments", "recordedStage"]) {
+			const key = `opportunity:${opportunityId}:${field}`;
+			if (!this.putDraft(key, opportunity[field] ?? "")) return;
+		}
+		for (const milestone of this.cache.existing(`milestones:${opportunityId}`)?.peek() ?? []) for (const field of [
+			"comments",
+			"status",
+			"targetDate",
+			"commitment",
+			"riskDetails"
+		]) {
+			const key = `milestone:${opportunityId}:${milestone.id}:${field}`;
+			if (!this.putDraft(key, milestone[field] ?? "")) return;
+		}
+	}
+	captureField(opportunityId, field, observed, options = {}) {
+		const name = field === "customerCommitment" ? "commitment" : field;
+		if (!(options.milestoneId ? [
+			"comments",
+			"status",
+			"targetDate",
+			"commitment",
+			"riskDetails"
+		] : ["comments", "recordedStage"]).includes(name)) {
+			this.draftOverflow = true;
+			this.cache.reportError(/* @__PURE__ */ new Error("This editor has no valid source-field context. Review current source values before confirming its changes."));
+			return;
+		}
+		const key = options.milestoneId ? `milestone:${opportunityId}:${options.milestoneId}:${name}` : `opportunity:${opportunityId}:${name}`;
+		if (options.reset) this.deleteDraft(key);
+		this.putDraft(key, observed ?? "");
+	}
+	putDraft(key, value) {
+		if (this.draftFields.has(key)) return true;
+		const bytes = new TextEncoder().encode(JSON.stringify([key, value])).byteLength;
+		if (this.draftFields.size >= this.cache.policy.maxInactiveEntries * 10 || this.draftBytes + bytes > this.cache.policy.maxSerializedBytes) {
+			this.draftOverflow = true;
+			this.cache.reportError(/* @__PURE__ */ new Error("Unsent draft memory is full. Keep existing drafts and use the current-source review before submitting another edit."));
+			return false;
+		}
+		this.draftFields.set(key, value);
+		this.draftBytes += bytes;
+		return true;
+	}
+	deleteDraft(key) {
+		if (!this.draftFields.has(key)) return;
+		this.draftBytes -= new TextEncoder().encode(JSON.stringify([key, this.draftFields.get(key)])).byteLength;
+		this.draftFields.delete(key);
+	}
+	resetDrafts() {
+		this.draftFields.clear();
+		this.draftBytes = 0;
+		this.draftOverflow = false;
+	}
+	captureReview(operation, input) {
+		if (![
+			"updateOpportunity",
+			"updateMilestone",
+			"transitionOpportunityStage"
+		].includes(operation)) return void 0;
+		const generation = this.generation;
+		const opportunityId = String(input["opportunityId"]);
+		const opportunity = this.portfolio.peek()?.opportunities.find((item) => item.id === opportunityId) ?? this.discovery.peek()?.opportunities.find((item) => item.id === opportunityId);
+		const milestone = this.cache.existing(`milestones:${opportunityId}`)?.peek()?.find((item) => item.id === input["milestoneId"]);
+		const prefix = operation === "updateMilestone" ? `milestone:${opportunityId}:${String(input["milestoneId"])}:` : `opportunity:${opportunityId}:`;
+		const baseline = {
+			fields: new Map([...this.draftFields].filter(([key]) => key.startsWith(prefix))),
+			...opportunity ? { opportunity } : {},
+			...milestone ? { milestone } : {}
+		};
+		const needed = operation === "updateMilestone" ? Object.keys(milestoneUpdateSchema.parse(input["update"])).map((field) => `${prefix}${field === "customerCommitment" ? "commitment" : field}`) : [`${prefix}${operation === "transitionOpportunityStage" ? "recordedStage" : "comments"}`];
+		const unverified = this.draftOverflow && needed.some((key) => !baseline.fields.has(key));
+		return (review) => {
+			this.assertGeneration(generation);
+			if (unverified) throw new Error("The original edit base could not be retained. Review current source values before explicitly confirming this draft.");
+			this.validateMutationReview(review, baseline);
+		};
+	}
+	discardDraft(opportunityId) {
+		for (const key of this.draftFields.keys()) if (key.startsWith(`opportunity:${opportunityId}:`) || key.startsWith(`milestone:${opportunityId}:`)) this.deleteDraft(key);
+	}
+	validateMutationReview(review, baseline) {
+		if (![
+			"updateOpportunity",
+			"updateMilestone",
+			"transitionOpportunityStage"
+		].includes(review.operation)) return;
+		const input = review.input;
+		const fields = baseline?.fields ?? this.draftFields;
+		const opportunityId = String(input["opportunityId"]);
+		const envelope = review.before !== null && typeof review.before === "object" && "source" in review.before ? review.before.source : review.before;
+		const before = envelope !== null && typeof envelope === "object" ? envelope : void 0;
+		if (!before) throw new Error("Current source values must be reviewed before background saving.");
+		if (review.operation === "updateMilestone") {
+			const source = ("milestones" in before ? milestoneSchema.array().parse(before.milestones) : []).find((item) => item.id === input["milestoneId"]);
+			const cached = baseline ? baseline.milestone : this.cache.existing(`milestones:${opportunityId}`)?.peek()?.find((item) => item.id === input["milestoneId"]);
+			if (!source || !cached) throw new Error("Refresh this milestone and review its current values before saving.");
+			for (const field of Object.keys(milestoneUpdateSchema.parse(input["update"]))) {
+				const key = field === "customerCommitment" ? "commitment" : field;
+				const value = (item) => key === "comments" ? item.comments : key === "status" ? item.status : key === "targetDate" ? item.targetDate : key === "commitment" ? item.commitment : item.riskDetails;
+				const original = fields.has(`milestone:${opportunityId}:${cached.id}:${key}`) ? fields.get(`milestone:${opportunityId}:${cached.id}:${key}`) : value(cached) ?? "";
+				if ((value(source) ?? "") !== original) throw new Error("The source changed while you were editing. Keep your draft and review the latest milestone before saving.");
+			}
+		} else {
+			const source = "opportunity" in before ? opportunitySchema.parse(before.opportunity) : void 0;
+			const cached = baseline ? baseline.opportunity : this.portfolio.peek()?.opportunities.find((item) => item.id === opportunityId) ?? this.discovery.peek()?.opportunities.find((item) => item.id === opportunityId);
+			if (!source || !cached) throw new Error("Refresh this opportunity and review current source values before saving.");
+			const field = review.operation === "updateOpportunity" ? "comments" : "recordedStage";
+			const key = `opportunity:${opportunityId}:${field}`;
+			const original = fields.has(key) ? fields.get(key) : cached[field] ?? "";
+			if ((source[field] ?? "") !== original) throw new Error("The source changed while you were editing. Keep your draft and review current opportunity values before saving.");
+		}
+	}
+	finishDraft(operation, input) {
+		if (operation === "updateOpportunity") this.deleteDraft(`opportunity:${String(input["opportunityId"])}:comments`);
+		if (operation === "transitionOpportunityStage") this.deleteDraft(`opportunity:${String(input["opportunityId"])}:recordedStage`);
+		if (operation === "updateMilestone") for (const field of Object.keys(milestoneUpdateSchema.parse(input["update"]))) this.deleteDraft(`milestone:${String(input["opportunityId"])}:${String(input["milestoneId"])}:${field === "customerCommitment" ? "commitment" : field}`);
+	}
+	assertGeneration(generation) {
+		if (generation !== this.generation) throw new DOMException("The source session was refreshed.", "AbortError");
+	}
+	refresh(opportunityId) {
+		if (opportunityId) {
+			this.cache.existing(`milestones:${opportunityId}`)?.invalidate();
+			return;
+		}
+		this.refreshRequested = true;
+		this.cache.invalidateAll();
+	}
+	async getDiscoverySnapshot() {
+		const generation = this.generation;
+		const snapshot = await this.discovery.read(async () => discoverySnapshotSchema.parse(await this.source.getDiscoverySnapshot()));
+		this.assertGeneration(generation);
+		if (!this.discovery.isStale()) this.refreshRequested = false;
+		const visible = new Set(snapshot.accounts.filter((account) => account.visibility !== "hidden").map((account) => account.id));
+		return {
+			...snapshot,
+			opportunities: snapshot.opportunities.filter((opportunity) => visible.has(opportunity.accountId)),
+			portfolioOpportunities: snapshot.portfolioOpportunities.filter((opportunity) => visible.has(opportunity.accountId))
+		};
+	}
+	async getPortfolioIndex(includeHidden = false) {
+		const generation = this.generation;
+		const index = await this.portfolio.read(async () => {
+			if (this.refreshRequested) {
+				const snapshot = await this.getDiscoverySnapshot();
+				return {
+					contractVersion: "1.0",
+					accounts: snapshot.accounts,
+					opportunities: snapshot.portfolioOpportunities
+				};
+			}
+			return portfolioIndexSchema.parse(await this.source.getPortfolioIndex());
+		});
+		this.assertGeneration(generation);
+		const visible = new Set(index.accounts.filter((account) => account.visibility !== "hidden").map((account) => account.id));
+		return {
+			...index,
+			accounts: includeHidden ? index.accounts : index.accounts.filter((account) => visible.has(account.id)),
+			opportunities: index.opportunities.filter((opportunity) => visible.has(opportunity.accountId))
+		};
+	}
+	async listAccounts(includeHidden = false) {
+		const generation = this.generation;
+		const index = await this.getPortfolioIndex(includeHidden);
+		this.assertGeneration(generation);
+		return index.accounts;
+	}
+	async listOpportunities(accountId) {
+		const generation = this.generation;
+		const index = await this.getPortfolioIndex();
+		this.assertGeneration(generation);
+		return index.opportunities.filter((opportunity) => opportunity.accountId === accountId);
+	}
+	async getPortfolioWorkspace(input) {
+		const generation = this.generation;
+		const request = portfolioWorkspaceRequestSchema.parse(input);
+		const index = await this.getPortfolioIndex(request.includeHidden);
+		this.assertGeneration(generation);
+		const account = request.accountId ? index.accounts.find((item) => item.id === request.accountId && item.visibility !== "hidden") : index.accounts.find((item) => item.visibility !== "hidden");
+		if (request.accountId && !account) throw new Error("The selected account is not in the current visible portfolio.");
+		const opportunities = index.opportunities.filter((item) => item.accountId === account?.id);
+		const opportunity = request.opportunityId ? opportunities.find((item) => item.id === request.opportunityId) : opportunities[0];
+		if (request.opportunityId && !opportunity) throw new Error("The selected opportunity is not in the selected account portfolio.");
+		const milestones = opportunity ? await this.listMilestones(opportunity.id) : [];
+		this.assertGeneration(generation);
+		return {
+			contractVersion: "1.0",
+			accounts: index.accounts,
+			opportunities,
+			milestones,
+			...account ? { selectedAccountId: account.id } : {},
+			...opportunity ? { selectedOpportunityId: opportunity.id } : {}
+		};
+	}
+	async discoverOpportunities(domain) {
+		const generation = this.generation;
+		const snapshot = await this.getDiscoverySnapshot();
+		this.assertGeneration(generation);
+		const visible = new Set(snapshot.accounts.filter((account) => account.visibility !== "hidden").map((account) => account.id));
+		return snapshot.opportunities.filter((opportunity) => opportunity.domain === domain && visible.has(opportunity.accountId));
+	}
+	listMilestones(opportunityId, discoverable = false) {
+		return this.milestoneValue(opportunityId).read(async () => milestoneSchema.array().parse(await (discoverable ? this.source.listDiscoverableMilestones(opportunityId) : this.source.listMilestones(opportunityId))));
+	}
+	applyMutation(operation, result) {
+		switch (operation) {
+			case "addAccount":
+			case "setAccountVisibility": {
+				const account = accountSchema$1.parse(result);
+				const expandedScope = account.visibility !== "hidden" && (this.discovery.loaded || this.discovery.refreshing) && !this.capturedVisibleAccounts.has(account.id);
+				const update = (accounts) => [...accounts.filter((item) => item.id !== account.id), account].sort((left, right) => left.name.localeCompare(right.name));
+				this.portfolio.update((index) => ({
+					...index,
+					accounts: update(index.accounts)
+				}));
+				this.discovery.update((snapshot) => ({
+					...snapshot,
+					accounts: update(snapshot.accounts)
+				}));
+				this.cache.updateMatching("search:", (value) => accountCandidateSchema.array().parse(value).map((candidate) => candidate.id === account.id ? {
+					...candidate,
+					state: account.visibility === "hidden" ? "hidden" : "visible"
+				} : candidate));
+				if (expandedScope) {
+					this.refreshRequested = true;
+					this.discovery.invalidate();
+					this.portfolio.invalidate();
+				}
+				break;
+			}
+			case "joinDealTeam":
+			case "leaveDealTeam": {
+				const membership = operation === "joinDealTeam" ? dealTeamJoinResultSchema.parse(result) : dealTeamLeaveResultSchema.parse(result);
+				this.discovery.update((snapshot) => {
+					const discovered = snapshot.opportunities.find((item) => item.id === membership.opportunityId);
+					return {
+						...snapshot,
+						opportunities: snapshot.opportunities.map((item) => item.id === membership.opportunityId ? {
+							...item,
+							onDealTeam: membership.onDealTeam
+						} : item),
+						portfolioOpportunities: membership.onDealTeam && discovered && !snapshot.portfolioOpportunities.some((item) => item.id === membership.opportunityId) ? [...snapshot.portfolioOpportunities, opportunitySchema.parse(discovered)] : !membership.onDealTeam && !snapshot.milestoneTeamOpportunityIds.includes(membership.opportunityId) ? snapshot.portfolioOpportunities.filter((item) => item.id !== membership.opportunityId) : snapshot.portfolioOpportunities
+					};
+				});
+				this.updatePortfolioMembership(membership.opportunityId, membership.onDealTeam, "deal-team");
+				break;
+			}
+			case "joinMilestoneTeam":
+			case "leaveMilestoneTeam": {
+				const membership = operation === "joinMilestoneTeam" ? milestoneTeamJoinResultSchema.parse(result) : milestoneTeamLeaveResultSchema.parse(result);
+				this.cache.existing(`milestones:${membership.opportunityId}`)?.update((items) => items.map((item) => item.id === membership.milestoneId ? {
+					...item,
+					onMilestoneTeam: membership.onMilestoneTeam
+				} : item));
+				const otherMembership = this.cache.existing(`milestones:${membership.opportunityId}`)?.peek()?.some((item) => item.onMilestoneTeam);
+				this.discovery.update((snapshot) => {
+					const discovered = snapshot.opportunities.find((item) => item.id === membership.opportunityId);
+					return {
+						...snapshot,
+						milestoneTeamOpportunityIds: membership.onMilestoneTeam || otherMembership ? [.../* @__PURE__ */ new Set([...snapshot.milestoneTeamOpportunityIds, membership.opportunityId])] : otherMembership === false ? snapshot.milestoneTeamOpportunityIds.filter((id) => id !== membership.opportunityId) : snapshot.milestoneTeamOpportunityIds,
+						portfolioOpportunities: membership.onMilestoneTeam && discovered && !snapshot.portfolioOpportunities.some((item) => item.id === membership.opportunityId) ? [...snapshot.portfolioOpportunities, opportunitySchema.parse(discovered)] : !membership.onMilestoneTeam && otherMembership === false && discovered?.onDealTeam === false ? snapshot.portfolioOpportunities.filter((item) => item.id !== membership.opportunityId) : snapshot.portfolioOpportunities
+					};
+				});
+				this.updatePortfolioMembership(membership.opportunityId, membership.onMilestoneTeam || otherMembership === true, "milestone-team");
+				break;
+			}
+			case "updateOpportunity":
+			case "transitionOpportunityStage": {
+				const opportunity = operation === "updateOpportunity" ? opportunitySchema.parse(result) : mcemStageTransitionResultSchema.parse(result).opportunity;
+				this.portfolio.update((index) => ({
+					...index,
+					opportunities: index.opportunities.map((item) => item.id === opportunity.id ? opportunity : item)
+				}));
+				this.discovery.update((snapshot) => ({
+					...snapshot,
+					portfolioOpportunities: snapshot.portfolioOpportunities.map((item) => item.id === opportunity.id ? opportunity : item),
+					opportunities: snapshot.opportunities.map((item) => item.id === opportunity.id ? {
+						...item,
+						...opportunity
+					} : item)
+				}));
+				break;
+			}
+			case "updateMilestone": {
+				const milestone = milestoneSchema.parse(result);
+				this.cache.existing(`milestones:${milestone.opportunityId}`)?.update((items) => items.map((item) => item.id === milestone.id ? milestone : item));
+				break;
+			}
+			case "commitRecordCreation":
+				if (recordCreationResultSchema.parse(result).state === "committed") this.refresh();
+				break;
+			case "applyMeetingChangeSet": if (meetingChangeSetResultSchema.parse(result).state === "applied") this.refresh();
+		}
+	}
+	updatePortfolioMembership(opportunityId, joining, kind) {
+		const snapshot = this.discovery.peek();
+		const discovered = snapshot?.opportunities.find((item) => item.id === opportunityId);
+		const milestones = this.cache.existing(`milestones:${opportunityId}`)?.peek();
+		const retained = kind === "deal-team" ? milestones?.some((item) => item.onMilestoneTeam) ?? snapshot?.milestoneTeamOpportunityIds.includes(opportunityId) : discovered?.onDealTeam;
+		if (!joining && retained === void 0) {
+			this.portfolio.clear();
+			return;
+		}
+		const opportunity = discovered ? opportunitySchema.parse(discovered) : void 0;
+		this.portfolio.update((index) => ({
+			...index,
+			opportunities: joining && opportunity && !index.opportunities.some((item) => item.id === opportunityId) ? [...index.opportunities, opportunity].sort((left, right) => left.name.localeCompare(right.name)) : !joining && retained === false ? index.opportunities.filter((item) => item.id !== opportunityId) : index.opportunities
+		}));
+	}
+};
+//#endregion
+//#region apps/shared/presentation-owner.ts
+function createPresentationOwner(core) {
+	const session = new SessionPortfolio({
+		getPortfolioIndex: () => core.getPortfolioIndex({
+			contractVersion: "1.0",
+			includeHidden: true
+		}),
+		getDiscoverySnapshot: () => core.getDiscoverySnapshot({ contractVersion: "1.0" }),
+		listMilestones: (id) => core.withFreshReadContext(() => core.listMilestones(id)),
+		listDiscoverableMilestones: (id) => core.withFreshReadContext(() => core.listDiscoverableMilestones(id))
+	});
+	const consumers = /* @__PURE__ */ new Map();
+	const suspended = /* @__PURE__ */ new Set();
+	const publish = () => {
+		const active = [...consumers].filter(([name, item]) => item.active && ![...suspended].some((prefix) => name === prefix || name.startsWith(`${prefix}:`)));
+		session.setActiveKeys([...new Set(active.flatMap(([, item]) => item.keys))]);
+		session.setActive(active.length > 0);
+	};
+	const stop = core.subscribeMutations((operation, result, input) => {
+		session.applyMutation(operation, result);
+		session.finishDraft(operation, input);
+		if (operation === "createMilestoneActivity") session.invalidateDataset(`activities:${String(input["opportunityId"])}:${String(input["milestoneId"])}`);
+	});
+	return {
+		session,
+		interest(consumer, keys, active) {
+			if (!active && !keys.length) consumers.delete(consumer);
+			else consumers.set(consumer, {
+				keys,
+				active
+			});
+			publish();
+		},
+		suspend(prefix, paused) {
+			if (suspended.has(prefix) === paused) return;
+			if (paused) suspended.add(prefix);
+			else suspended.delete(prefix);
+			publish();
+		},
+		forget(prefix) {
+			for (const key of consumers.keys()) if (key === prefix || key.startsWith(`${prefix}:`)) consumers.delete(key);
+			suspended.delete(prefix);
+			publish();
+		},
+		dispose() {
+			stop();
+			session.dispose();
+			consumers.clear();
+		}
+	};
+}
+//#endregion
+//#region packages/connectors/common/scoped-document-store.ts
+function serializeDocument(value, maxDocumentBytes = 48e3) {
+	const json = JSON.stringify(value);
+	if (!json || Buffer.byteLength(json, "utf8") > maxDocumentBytes) throw new Error("The private state document exceeds its supported size.");
+	return json;
+}
+var requireModule = createRequire(import.meta.url);
+var SqliteDocumentStore = class {
+	db;
+	maxDocumentBytes;
+	constructor(path = ":memory:", options = {}) {
+		this.maxDocumentBytes = options.maxDocumentBytes ?? 48e3;
+		if (!Number.isInteger(this.maxDocumentBytes) || this.maxDocumentBytes < 1 || this.maxDocumentBytes > 72e3) throw new Error("The SQLite document storage limit is invalid.");
+		const { DatabaseSync } = requireModule("node:sqlite");
+		this.db = new DatabaseSync(path);
+		this.db.exec("PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS scoped_documents (partition TEXT NOT NULL, key TEXT NOT NULL, revision INTEGER NOT NULL, json TEXT NOT NULL, PRIMARY KEY(partition,key));");
+	}
+	async read(partition, key) {
+		const row = this.db.prepare("SELECT revision,json FROM scoped_documents WHERE partition=? AND key=?").get(partition, key);
+		return row ? {
+			revision: Number(row["revision"]),
+			value: JSON.parse(String(row["json"]))
+		} : void 0;
+	}
+	async insert(partition, key, value) {
+		return this.db.prepare("INSERT OR IGNORE INTO scoped_documents VALUES(?,?,1,?)").run(partition, key, serializeDocument(value, this.maxDocumentBytes)).changes === 1;
+	}
+	async replace(partition, key, expectedRevision, value) {
+		return this.db.prepare("UPDATE scoped_documents SET revision=revision+1,json=? WHERE partition=? AND key=? AND revision=?").run(serializeDocument(value, this.maxDocumentBytes), partition, key, expectedRevision).changes === 1;
+	}
+	async delete(partition, key, expectedRevision) {
+		return this.db.prepare("DELETE FROM scoped_documents WHERE partition=? AND key=? AND revision=?").run(partition, key, expectedRevision).changes === 1;
+	}
+	async list(partition, prefix, limit) {
+		if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("State list limit must be between 1 and 100.");
+		return this.db.prepare("SELECT key,revision,json FROM scoped_documents WHERE partition=? AND substr(key,1,?)=? ORDER BY key DESC LIMIT ?").all(partition, prefix.length, prefix, limit).map((row) => ({
+			key: String(row["key"]),
+			revision: Number(row["revision"]),
+			value: JSON.parse(String(row["json"]))
+		}));
+	}
+	close() {
+		this.db.close();
+	}
+};
+//#endregion
+//#region packages/connectors/common/encrypted-document-store.ts
+var envelopeSchema = z.object({
+	version: z.literal(1),
+	iv: z.string(),
+	tag: z.string(),
+	ciphertext: z.string()
+}).strict();
+var EncryptedDocumentStore = class {
+	store;
+	key;
+	constructor(store, key) {
+		this.store = store;
+		if (key.length !== 32) throw new Error("Local state encryption requires a 32-byte key.");
+		this.key = Buffer.from(hkdfSync("sha256", key, Buffer.alloc(0), "tlc-local-documents-v1", 32));
+	}
+	encrypt(partition, key, revision, value) {
+		const plaintext = serializeDocument(value);
+		const iv = randomBytes(12);
+		const cipher = createCipheriv("aes-256-gcm", this.key, iv);
+		cipher.setAAD(Buffer.from(JSON.stringify([
+			partition,
+			key,
+			revision
+		])));
+		const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+		return {
+			version: 1,
+			iv: iv.toString("base64"),
+			tag: cipher.getAuthTag().toString("base64"),
+			ciphertext: ciphertext.toString("base64")
+		};
+	}
+	decrypt(partition, key, row) {
+		try {
+			const envelope = envelopeSchema.parse(row.value);
+			const decipher = createDecipheriv("aes-256-gcm", this.key, Buffer.from(envelope.iv, "base64"));
+			decipher.setAAD(Buffer.from(JSON.stringify([
+				partition,
+				key,
+				row.revision
+			])));
+			decipher.setAuthTag(Buffer.from(envelope.tag, "base64"));
+			const plaintext = Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, "base64")), decipher.final()]);
+			return {
+				revision: row.revision,
+				value: JSON.parse(plaintext.toString("utf8"))
+			};
+		} catch (cause) {
+			throw new Error("Local state could not authenticate its encryption key or document. Restore the matching key and backup.", { cause });
+		}
+	}
+	async read(partition, key) {
+		const row = await this.store.read(partition, key);
+		return row ? this.decrypt(partition, key, row) : void 0;
+	}
+	async insert(partition, key, value) {
+		return this.store.insert(partition, key, this.encrypt(partition, key, 1, value));
+	}
+	async replace(partition, key, expectedRevision, value) {
+		return this.store.replace(partition, key, expectedRevision, this.encrypt(partition, key, expectedRevision + 1, value));
+	}
+	async list(partition, prefix, limit) {
+		return (await this.store.list(partition, prefix, limit)).map((row) => ({
+			key: row.key,
+			...this.decrypt(partition, row.key, row)
+		}));
+	}
+	async delete(partition, key, expectedRevision) {
+		if (!this.store.delete) throw new Error("Conditional deletion is unavailable for the protected state store.");
+		return this.store.delete(partition, key, expectedRevision);
+	}
+};
+//#endregion
+//#region packages/connectors/common/mutation-state.ts
+async function protectedMutationKey(options) {
+	const decode = (value) => {
+		const key = Buffer.from(value, "base64");
+		if (key.length !== 32) throw new Error("The protected mutation-state key is invalid.");
+		return key;
+	};
+	const existing = await options.read();
+	if (existing) return decode(existing);
+	await mkdir(dirname(options.lockPath), { recursive: true });
+	for (let attempt = 0; attempt < 40; attempt++) {
+		let lock;
+		try {
+			lock = await open(options.lockPath, "wx");
+		} catch (error) {
+			if (!(error !== null && typeof error === "object" && "code" in error && error.code === "EEXIST")) throw error;
+			const current = await options.read();
+			if (current) return decode(current);
+			await new Promise((resolve) => setTimeout(resolve, 50));
+			continue;
+		}
+		try {
+			const current = await options.read();
+			if (current) return decode(current);
+			const key = randomBytes(32);
+			await options.write(key.toString("base64"));
+			return key;
+		} finally {
+			await lock.close();
+			await unlink(options.lockPath);
+		}
+	}
+	throw new Error("Protected mutation state is being initialized by another window. Reconnect before enabling background writes.");
+}
+async function localMutationState(path, key) {
+	await mkdir(dirname(path), { recursive: true });
+	const sqlite = new SqliteDocumentStore(path, { maxDocumentBytes: key ? 72e3 : 48e3 });
+	const store = key ? new EncryptedDocumentStore(sqlite, key) : sqlite;
+	try {
+		const check = await store.read("mutation-state:v1", "key-check");
+		if (check ? check.value !== "tlc-mutation-state-v1" : !await store.insert("mutation-state:v1", "key-check", "tlc-mutation-state-v1") && (await store.read("mutation-state:v1", "key-check"))?.value !== "tlc-mutation-state-v1") throw new Error("The mutation-state encryption key check failed. Restore the original protected key.");
+		return {
+			store,
+			durable: true,
+			close: () => sqlite.close()
+		};
+	} catch (error) {
+		sqlite.close();
+		throw error;
+	}
+}
+var base$1 = z.object({ contractVersion: z.literal("1.0") });
+var localCapabilitySchema = z.object({
+	id: z.string().min(1).max(80),
+	title: z.string().min(1).max(120),
+	state: z.enum([
+		"available",
+		"requires-source-grant",
+		"requires-configuration",
+		"requires-redesign",
+		"unavailable-local"
+	]),
+	detail: z.string().min(1).max(1e3)
+}).strict();
+var nativeCapabilities = [
+	{
+		id: "msx",
+		title: "Live MSX Portfolio",
+		state: "requires-source-grant",
+		detail: "Connect your approved native identity and verify your own Dataverse access."
+	},
+	{
+		id: "mcp",
+		title: "Dataverse MCP Plays",
+		state: "requires-source-grant",
+		detail: "REST access does not establish the native client MCP scope or allowlisting."
+	},
+	{
+		id: "reviewed-writes",
+		title: "Reviewed source changes",
+		state: "requires-source-grant",
+		detail: "Requires native writer eligibility, source permission, exact review and native concurrency evidence."
+	},
+	{
+		id: "guidance",
+		title: "MCEM and live guidance",
+		state: "available",
+		detail: "Deterministic guidance over your live source context; no claim of a Foundry model response."
+	},
+	{
+		id: "foundry",
+		title: "Foundry agents",
+		state: "requires-configuration",
+		detail: "An optional approved workload credential and project are separate from MSX connectivity."
+	},
+	{
+		id: "graph",
+		title: "Meeting transcripts",
+		state: "requires-source-grant",
+		detail: "Optional delegated Graph reads require separate grants and actual meeting access; local foreground acquisition only."
+	},
+	{
+		id: "shared-contexts",
+		title: "Shared channel and chat bindings",
+		state: "requires-redesign",
+		detail: "Another device cannot resolve this installation’s private binding IDs. No shared TLC store is assumed."
+	},
+	{
+		id: "stage",
+		title: "Shared meeting stage",
+		state: "requires-redesign",
+		detail: "Approved artifact distribution and current audience admission remain required; private source access is not publication authority."
+	},
+	{
+		id: "bot",
+		title: "Cloud bot and message extensions",
+		state: "unavailable-local",
+		detail: "Microsoft cloud callbacks cannot reach another user’s private localhost listener."
+	},
+	{
+		id: "notifications",
+		title: "Notifications and Activity",
+		state: "available",
+		detail: "Private local Activity is available. Proactive Teams delivery is not implied."
+	},
+	{
+		id: "seller-dashboard",
+		title: "Live Seller Dashboard",
+		state: "requires-redesign",
+		detail: "Native MSX connection does not authorize reading a Windows earnings profile; the existing privacy denial is retained."
+	}
+];
+var nativePublicConfigurationSchema = base$1.extend({
+	mode: z.literal("live"),
+	authentication: z.literal("local-interactive"),
+	capabilities: z.array(localCapabilitySchema).min(1)
+}).strict();
+var cliWriteModeSchema = z.enum(["read-only", "reviewed"]);
+nativeCapabilities.map((capability) => {
+	if (capability.id === "msx") return {
+		...capability,
+		detail: "Use the current Azure CLI user, verify their Dataverse identity and load their active deal-team accounts. Source access is read-only."
+	};
+	if (capability.id === "reviewed-writes") return {
+		...capability,
+		state: "unavailable-local",
+		detail: "This CLI connection is read-only. Enable explicit reviewed-write mode to review source changes under your own MSX permissions."
+	};
+	if (capability.id === "graph") return {
+		...capability,
+		title: "Automatic Teams transcripts",
+		state: "unavailable-local",
+		detail: "This CLI profile does not request Graph meeting access. Use Paste / upload for a transcript you are authorized to provide, or an approved profile with separate Graph grants."
+	};
+	if (capability.id === "mcp") return {
+		...capability,
+		state: "requires-source-grant",
+		detail: "Optional: explicitly connect MCP through the protected owner command using the current CLI user. Existing Dataverse permissions, MCP admission and read-query policy remain mandatory."
+	};
+	if (capability.id === "foundry") return {
+		...capability,
+		state: "unavailable-local",
+		detail: "This CLI profile does not request this optional resource grant. Use an approved native profile for separately granted capabilities."
+	};
+	return { ...capability };
+});
+var cliPublicConfigurationSchema = z.object({
+	contractVersion: z.literal("1.2"),
+	mode: z.literal("live"),
+	authentication: z.literal("local-azure-cli"),
+	writeMode: cliWriteModeSchema,
+	capabilities: z.array(localCapabilitySchema).min(1)
+}).strict();
+base$1.extend({
+	challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+	contextTenantId: z.uuid().optional(),
+	contextUserId: z.uuid().optional()
+}).strict();
+base$1.extend({
+	requestId: z.uuid(),
+	userCode: z.string().regex(/^[A-F0-9]{8}$/),
+	expiresAt: z.iso.datetime(),
+	state: z.literal("pending-owner-approval")
+}).strict();
+base$1.extend({
+	requestId: z.uuid(),
+	verifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/)
+}).strict();
+z.discriminatedUnion("state", [base$1.extend({
+	state: z.literal("pending-owner-approval"),
+	expiresAt: z.iso.datetime()
+}).strict(), base$1.extend({
+	state: z.literal("paired"),
+	token: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+	expiresAt: z.iso.datetime()
+}).strict()]);
+base$1.strict();
+base$1.extend({ state: z.literal("disconnected") }).strict();
+var nativeResourceSchema = z.enum([
+	"msx",
+	"mcp",
+	"graph"
+]);
+var nativeConnectionStatusSchema = base$1.extend({
+	state: z.enum([
+		"sign-in-required",
+		"connecting",
+		"connected",
+		"reconnect-required",
+		"blocked"
+	]),
+	detail: z.string().min(1).max(1e3),
+	account: z.string().max(500).optional(),
+	resources: z.array(z.object({
+		resource: nativeResourceSchema,
+		state: z.enum([
+			"not-connected",
+			"connected",
+			"consent-required",
+			"denied",
+			"unavailable"
+		]),
+		detail: z.string().min(1).max(1e3)
+	}).strict()),
+	capabilities: z.array(localCapabilitySchema)
+}).strict();
+z.discriminatedUnion("action", [
+	base$1.extend({ action: z.literal("status") }).strict(),
+	base$1.extend({
+		action: z.literal("connect"),
+		resource: nativeResourceSchema
+	}).strict(),
+	base$1.extend({
+		action: z.literal("approve"),
+		userCode: z.string().regex(/^[A-F0-9]{8}$/)
+	}).strict(),
+	base$1.extend({ action: z.literal("disconnect") }).strict()
+]);
+z.discriminatedUnion("ok", [base$1.extend({
+	ok: z.literal(true),
+	status: nativeConnectionStatusSchema,
+	pending: z.array(z.object({
+		userCode: z.string().regex(/^[A-F0-9]{8}$/),
+		expiresAt: z.iso.datetime(),
+		approved: z.boolean()
+	}).strict()).max(3)
+}).strict(), base$1.extend({
+	ok: z.literal(false),
+	error: z.string().regex(/^[a-z_]{1,100}$/)
+}).strict()]);
+base$1.extend({
+	instanceId: z.uuid(),
+	processId: z.int().positive(),
+	origin: z.url()
+}).strict();
+z.object({ contractVersion: z.literal("1.0") }).strict();
+z.object({
+	contractVersion: z.literal("1.0"),
+	expiresAt: z.iso.datetime(),
+	sessionExpiresAt: z.iso.datetime()
+}).strict().refine((value) => Date.parse(value.expiresAt) <= Date.parse(value.sessionExpiresAt));
+var identifier = z.string().min(1).max(500);
+var digest = z.string().regex(/^[a-f0-9]{64}$/);
+var base = z.object({ contractVersion: z.literal("1.0") });
+base.extend({
+	id: identifier,
+	kind: z.enum([
+		"channel",
+		"chat",
+		"meeting"
+	]),
+	accountId: identifier,
+	opportunityId: identifier.optional(),
+	contextId: identifier,
+	revision: z.number().int().positive()
+}).strict();
+var actionPreviewSchema = base.extend({
+	id: identifier,
+	operation: identifier,
+	digest,
+	expiresAt: z.iso.datetime(),
+	input: z.record(z.string(), z.unknown()),
+	before: z.unknown().optional(),
+	state: z.literal("awaiting-approval")
+}).strict();
+var actionApprovalSchema = base.extend({
+	id: identifier,
+	digest,
+	reason: z.string().trim().min(3).max(1e3)
+}).strict();
+var actionReceiptSchema = base.extend({
+	id: identifier,
+	operation: identifier,
+	state: z.enum([
+		"confirmed",
+		"failed-before-send",
+		"effect-unknown"
+	]),
+	occurredAt: z.iso.datetime(),
+	result: z.unknown().optional()
+}).strict();
+base.extend({
+	id: identifier,
+	state: z.enum([
+		"ready",
+		"waiting",
+		"denied",
+		"admin-blocked",
+		"auth-required",
+		"unsupported",
+		"paused"
+	]),
+	meetingId: identifier,
+	transcriptIds: z.array(identifier),
+	attribution: z.enum([
+		"attributed",
+		"unattributed",
+		"unknown"
+	]),
+	detail: z.string().min(1),
+	checkedAt: z.iso.datetime()
+}).strict();
+base.extend({
+	id: identifier,
+	category: z.enum([
+		"action",
+		"workflow",
+		"acquisition",
+		"publication",
+		"notification"
+	]),
+	state: identifier,
+	title: identifier,
+	occurredAt: z.iso.datetime()
+}).strict();
+base.extend({
+	mode: z.enum(["sample", "live"]),
+	roles: z.array(z.string()),
+	displayName: z.string().min(1)
+}).strict();
+z.union([
+	z.object({ mode: z.literal("sample") }).strict(),
+	z.object({
+		mode: z.literal("live"),
+		tenantId: z.uuid(),
+		spaClientId: z.uuid(),
+		apiScope: z.string().min(1)
+	}).strict(),
+	nativePublicConfigurationSchema,
+	cliPublicConfigurationSchema
+]);
+base.extend({ command: z.enum([
+	"pause",
+	"resume",
+	"retire"
+]) }).strict();
+base.extend({
+	state: z.enum([
+		"active",
+		"paused",
+		"retired"
+	]),
+	generation: z.number().int().nonnegative(),
+	acceptingNewWork: z.boolean()
+}).strict();
+//#endregion
+//#region packages/orchestrator/collaboration/reviewed-actions.ts
+function canonicalJson(value) {
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+	if (value !== null && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+	const json = JSON.stringify(value);
+	if (json === void 0) throw new Error("A reviewed value is not serializable.");
+	return json;
+}
+z.object({
+	preview: actionPreviewSchema,
+	before: z.unknown(),
+	claimed: z.boolean(),
+	claimedAt: z.iso.datetime().optional(),
+	approval: actionApprovalSchema.optional(),
+	receipt: actionReceiptSchema.optional()
+}).strict();
+//#endregion
+//#region packages/orchestrator/operations.ts
+var id = z.string().min(1).max(200);
+var opportunity = z.object({ opportunityId: id }).strict();
+var milestone = opportunity.extend({ milestoneId: id }).strict();
+function operation(input, output, invoke, effect = "read", startsWork = false) {
+	return {
+		effect,
+		startsWork,
+		parse: (raw) => input.parse(raw),
+		run: async (raw) => output.parse(await invoke(input.parse(raw)))
+	};
+}
+function createCoreMutationOperations(core, applyMeeting) {
+	return {
+		addAccount: operation(z.object({ accountId: id }).strict(), accountSchema$1, (input) => core.addAccount(input.accountId), "preference"),
+		setAccountVisibility: operation(z.object({
+			accountId: id,
+			visibility: z.enum(["visible", "hidden"])
+		}).strict(), accountSchema$1, (input) => core.setAccountVisibility(input.accountId, input.visibility), "preference"),
+		joinDealTeam: operation(opportunity.extend({ domain: seDomainSchema.optional() }).strict(), dealTeamJoinResultSchema, (input) => core.joinDealTeam(input.opportunityId), "source"),
+		leaveDealTeam: operation(opportunity, dealTeamLeaveResultSchema, (input) => core.leaveDealTeam(input.opportunityId), "source"),
+		joinMilestoneTeam: operation(milestone.extend({ domain: seDomainSchema.optional() }).strict(), milestoneTeamJoinResultSchema, (input) => core.joinMilestoneTeam(input.opportunityId, input.milestoneId), "source"),
+		leaveMilestoneTeam: operation(milestone, milestoneTeamLeaveResultSchema, (input) => core.leaveMilestoneTeam(input.opportunityId, input.milestoneId), "source"),
+		updateOpportunity: operation(opportunity.extend({ update: opportunityUpdateSchema.strict() }).strict(), opportunitySchema, (input) => core.updateOpportunity(input.opportunityId, input.update), "source"),
+		updateMilestone: operation(milestone.extend({ update: milestoneUpdateSchema }).strict(), milestoneSchema, (input) => core.updateMilestone(input.opportunityId, input.milestoneId, input.update), "source"),
+		createMilestoneActivity: operation(milestone.extend({ request: createMilestoneActivityRequestSchema }).strict(), milestoneActivitySchema, (input) => core.createMilestoneActivity(input.opportunityId, input.milestoneId, input.request), "source"),
+		transitionOpportunityStage: operation(mcemStageTransitionRequestSchema, mcemStageTransitionResultSchema, (input) => core.transitionOpportunityStage(input), "source"),
+		commitRecordCreation: operation(recordCreationCommitRequestSchema, recordCreationResultSchema, (input) => core.commitRecordCreation(input), "source"),
+		applyMeetingChangeSet: operation(z.object({
+			proposal: meetingChangeSetProposalSchema,
+			approval: meetingChangeSetApprovalSchema
+		}).strict(), meetingChangeSetResultSchema, (input) => {
+			if (!applyMeeting) throw new Error("Meeting writes are unavailable in this source profile.");
+			return applyMeeting(input);
+		}, "source")
+	};
+}
+//#endregion
+//#region packages/orchestrator/mutations/journal.ts
+var recordSchema = z.object({
+	review: mutationReviewSchema.omit({ before: true }),
+	beforeDigest: z.string().regex(/^[a-f0-9]{64}$/),
+	revisionTokens: z.record(z.string(), z.string()),
+	claimed: z.boolean(),
+	approval: z.object({
+		reason: z.string().trim().min(3).max(1e3),
+		confirmedAt: z.string().datetime()
+	}).strict().optional(),
+	receipt: mutationReceiptSchema.optional()
+}).strict();
+var activeSchema = z.array(z.object({
+	id: z.string().uuid(),
+	recordKeys: z.array(z.string())
+}).strict()).max(100);
+var expirySchema = z.array(z.string().uuid()).max(200);
+var daysSchema = z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).max(400);
+var MutationJournalError = class extends Error {
+	code;
+	constructor(code, message) {
+		super(message);
+		this.code = code;
+		this.name = "MutationJournalError";
+	}
+};
+var MutationJournal = class {
+	store;
+	now;
+	constructor(store, now = Date.now) {
+		this.store = store;
+		this.now = now;
+	}
+	async prepare(partition, review, beforeDigest, revisionTokens) {
+		const { before: _before, ...safeReview } = review;
+		const record = recordSchema.parse({
+			review: safeReview,
+			beforeDigest,
+			revisionTokens,
+			claimed: false
+		});
+		await this.indexExpiry(partition, review.id, review.expiresAt);
+		if (Date.parse(review.expiresAt) <= this.now()) throw new MutationJournalError("review-expired", "The source review expired before it could be persisted.");
+		if (!await this.store.insert(partition, `mutation:${review.id}`, record)) throw new MutationJournalError("review-changed", "The mutation review already exists.");
+	}
+	async read(partition, id) {
+		const row = await this.store.read(partition, `mutation:${id}`);
+		if (!row) throw new MutationJournalError("review-expired", "The mutation review is unavailable or expired.");
+		return {
+			record: recordSchema.parse(row.value),
+			revision: row.revision
+		};
+	}
+	async claim(partition, id, digest, reason = "Confirmed exact reviewed source intent") {
+		const { record, revision } = await this.read(partition, id);
+		if (record.review.digest !== digest) throw new MutationJournalError("review-changed", "The exact reviewed change is required.");
+		if (record.receipt) return {
+			claimed: false,
+			receipt: record.receipt
+		};
+		if (Date.parse(record.review.expiresAt) <= this.now()) throw new MutationJournalError("review-expired", "The review expired. Prepare a fresh review.");
+		await this.reserve(partition, id, record.review.recordKeys);
+		const time = new Date(this.now()).toISOString();
+		const expired = Date.parse(record.review.expiresAt) <= this.now();
+		const receipt = mutationReceiptSchema.parse({
+			contractVersion: "1.0",
+			id,
+			operation: record.review.operation,
+			state: expired ? "failed-before-send" : "accepted",
+			...expired ? { code: "review-expired" } : {},
+			acceptedAt: time,
+			updatedAt: time,
+			recordKeys: record.review.recordKeys
+		});
+		if (!await this.store.replace(partition, `mutation:${id}`, revision, recordSchema.parse({
+			...record,
+			claimed: true,
+			receipt,
+			approval: {
+				reason,
+				confirmedAt: time
+			}
+		}))) {
+			const row = await this.store.read(partition, `mutation:${id}`);
+			if (!row) {
+				await this.release(partition, id);
+				throw new MutationJournalError("review-expired", "The review expired while it was being admitted.");
+			}
+			const current = { record: recordSchema.parse(row.value) };
+			if (!current.record.receipt) throw new MutationJournalError("review-changed", "Another request changed this review.");
+			return {
+				claimed: false,
+				receipt: current.record.receipt
+			};
+		}
+		if (expired) await this.release(partition, id);
+		return {
+			claimed: !expired,
+			receipt
+		};
+	}
+	async transition(partition, id, update) {
+		for (let attempt = 0; attempt < 8; attempt++) {
+			const { record, revision } = await this.read(partition, id);
+			if (!record.receipt) throw new MutationJournalError("review-changed", "The mutation was not admitted.");
+			if (["confirmed", "reconciled-current-state"].includes(record.receipt.state)) return record.receipt;
+			const receipt = mutationReceiptSchema.parse({
+				...record.receipt,
+				...update,
+				updatedAt: new Date(this.now()).toISOString()
+			});
+			if (!await this.store.replace(partition, `mutation:${id}`, revision, {
+				...record,
+				receipt
+			})) continue;
+			if (![
+				"accepted",
+				"dispatching",
+				"effect-unknown"
+			].includes(receipt.state)) await this.release(partition, id);
+			return receipt;
+		}
+		throw new MutationJournalError("storage-unavailable", "The durable mutation receipt could not be updated.");
+	}
+	async failBeforeSend(partition, id, code) {
+		for (let attempt = 0; attempt < 8; attempt++) {
+			const { record, revision } = await this.read(partition, id);
+			if (record.receipt) return record.receipt;
+			const time = new Date(this.now()).toISOString();
+			const receipt = mutationReceiptSchema.parse({
+				contractVersion: "1.0",
+				id,
+				operation: record.review.operation,
+				state: "failed-before-send",
+				code,
+				acceptedAt: time,
+				updatedAt: time,
+				recordKeys: record.review.recordKeys
+			});
+			if (!await this.store.replace(partition, `mutation:${id}`, revision, {
+				...record,
+				claimed: true,
+				receipt
+			})) continue;
+			await this.release(partition, id);
+			return receipt;
+		}
+		throw new MutationJournalError("storage-unavailable", "The source admission outcome could not be recorded.");
+	}
+	async pending(partition) {
+		const row = await this.store.read(partition, "mutation:active");
+		const active = activeSchema.parse(row?.value ?? []);
+		const receipts = [];
+		for (const entry of active) {
+			const row = await this.store.read(partition, `mutation:${entry.id}`);
+			if (!row) {
+				await this.release(partition, entry.id);
+				continue;
+			}
+			const record = recordSchema.parse(row.value);
+			if (record.receipt && [
+				"accepted",
+				"dispatching",
+				"effect-unknown"
+			].includes(record.receipt.state)) receipts.push(record.receipt);
+			else if (!record.receipt) {
+				const at = new Date(this.now()).toISOString();
+				receipts.push({
+					contractVersion: "1.0",
+					id: entry.id,
+					operation: record.review.operation,
+					state: "effect-unknown",
+					acceptedAt: at,
+					updatedAt: at,
+					recordKeys: entry.recordKeys,
+					code: "outcome-unconfirmed"
+				});
+			} else await this.release(partition, entry.id);
+		}
+		return receipts;
+	}
+	async prune(partition) {
+		if (!this.store.delete) throw new MutationJournalError("storage-unavailable", "The journal cannot enforce conditional retention.");
+		const manifest = await this.store.read(partition, "mutation:expiry-days");
+		const days = daysSchema.parse(manifest?.value ?? []);
+		const today = new Date(this.now()).toISOString().slice(0, 10);
+		for (const day of days.filter((value) => value <= today)) {
+			const count = await this.store.read(partition, `mutation:expiry-count:${day}`);
+			const pages = z.number().int().min(0).parse(count?.value ?? 0);
+			for (let page = 0; page < pages; page++) {
+				const key = `mutation:expiry:${day}:${page}`;
+				const bucket = await this.store.read(partition, key);
+				if (!bucket) continue;
+				const ids = expirySchema.parse(bucket.value);
+				const retained = [];
+				for (const id of ids) {
+					const row = await this.store.read(partition, `mutation:${id}`);
+					if (!row) {
+						if (day >= today) retained.push(id);
+						continue;
+					}
+					const { review, receipt, claimed } = recordSchema.parse(row.value);
+					if (!(!claimed && Date.parse(review.expiresAt) <= this.now() || receipt !== void 0 && [
+						"confirmed",
+						"reconciled-current-state",
+						"failed-before-send",
+						"conflict"
+					].includes(receipt.state) && Date.parse(receipt.updatedAt) + defaultCachePolicy.confirmedRetentionMs <= this.now()) || !await this.store.delete(partition, `mutation:${id}`, row.revision)) retained.push(id);
+					else await this.release(partition, id);
+				}
+				await this.store.replace(partition, key, bucket.revision, retained);
+			}
+		}
+		const emptyDays = [];
+		for (const day of days.filter((value) => value < today)) {
+			const countKey = `mutation:expiry-count:${day}`;
+			const count = await this.store.read(partition, countKey);
+			const pages = z.number().int().nonnegative().parse(count?.value ?? 0);
+			let empty = true;
+			for (let page = 0; page < pages; page++) {
+				const key = `mutation:expiry:${day}:${page}`;
+				const bucket = await this.store.read(partition, key);
+				if (bucket && (expirySchema.parse(bucket.value).length || !await this.store.delete(partition, key, bucket.revision))) empty = false;
+			}
+			if (empty && (!count || await this.store.delete(partition, countKey, count.revision))) emptyDays.push(day);
+		}
+		if (manifest && emptyDays.length) await this.store.replace(partition, "mutation:expiry-days", manifest.revision, days.filter((day) => !emptyDays.includes(day)));
+	}
+	async reserve(partition, id, recordKeys) {
+		for (let attempt = 0; attempt < 12; attempt++) {
+			const row = await this.store.read(partition, "mutation:active");
+			const active = activeSchema.parse(row?.value ?? []);
+			if (active.some((entry) => entry.id === id)) return;
+			if (active.some((entry) => entry.recordKeys.some((key) => recordKeys.includes(key)))) throw new MutationJournalError("capacity", "This record has pending work. Resolve it before another write.");
+			if (active.length >= 100) throw new MutationJournalError("capacity", "The unresolved operation limit has been reached.");
+			let running = 0;
+			for (const entry of active) {
+				const current = await this.store.read(partition, `mutation:${entry.id}`);
+				if (!current) {
+					await this.release(partition, entry.id);
+					continue;
+				}
+				const receipt = recordSchema.parse(current.value).receipt;
+				if (!receipt || ["accepted", "dispatching"].includes(receipt.state)) running++;
+			}
+			if (running >= defaultCachePolicy.maxConcurrentWrites) throw new MutationJournalError("capacity", "Two independent writes are already in progress.");
+			const value = [...active, {
+				id,
+				recordKeys
+			}];
+			if (row ? await this.store.replace(partition, "mutation:active", row.revision, value) : await this.store.insert(partition, "mutation:active", value)) return;
+		}
+		throw new MutationJournalError("capacity", "Another write is being admitted. Try again after it completes.");
+	}
+	async release(partition, id) {
+		for (let attempt = 0; attempt < 12; attempt++) {
+			const row = await this.store.read(partition, "mutation:active");
+			if (!row) return;
+			const active = activeSchema.parse(row.value);
+			if (await this.store.replace(partition, "mutation:active", row.revision, active.filter((entry) => entry.id !== id))) return;
+		}
+		throw new MutationJournalError("storage-unavailable", "The completed mutation index could not be updated.");
+	}
+	async indexExpiry(partition, id, expiresAt) {
+		const day = expiresAt.slice(0, 10);
+		for (let attempt = 0; attempt < 12; attempt++) {
+			const manifest = await this.store.read(partition, "mutation:expiry-days");
+			const days = daysSchema.parse(manifest?.value ?? []);
+			const updated = daysSchema.parse([.../* @__PURE__ */ new Set([...days, day])].sort());
+			if (manifest ? await this.store.replace(partition, "mutation:expiry-days", manifest.revision, updated) : await this.store.insert(partition, "mutation:expiry-days", updated)) break;
+			if (attempt === 11) throw new MutationJournalError("storage-unavailable", "Receipt retention could not be indexed.");
+		}
+		for (let attempt = 0; attempt < 20; attempt++) {
+			const countKey = `mutation:expiry-count:${day}`;
+			const count = await this.store.read(partition, countKey);
+			const pages = z.number().int().nonnegative().parse(count?.value ?? 0);
+			const page = Math.max(0, pages - 1);
+			const key = `mutation:expiry:${day}:${page}`;
+			const bucket = await this.store.read(partition, key);
+			const ids = expirySchema.parse(bucket?.value ?? []);
+			if (ids.includes(id)) return;
+			if (ids.length < 200) {
+				if (!count) {
+					if (!await this.store.insert(partition, countKey, 1)) continue;
+				}
+				if (bucket ? await this.store.replace(partition, key, bucket.revision, [...ids, id]) : await this.store.insert(partition, key, [id])) {
+					await this.publishExpiry(partition, day, page + 1);
+					return;
+				}
+			} else if (count) await this.store.replace(partition, countKey, count.revision, pages + 1);
+		}
+		throw new MutationJournalError("storage-unavailable", "Receipt retention capacity could not be reserved.");
+	}
+	async publishExpiry(partition, day, minimumPages) {
+		for (let attempt = 0; attempt < 12; attempt++) {
+			const key = `mutation:expiry-count:${day}`;
+			const row = await this.store.read(partition, key);
+			const pages = Math.max(z.number().int().nonnegative().parse(row?.value ?? 0), minimumPages);
+			if (row ? await this.store.replace(partition, key, row.revision, pages) : await this.store.insert(partition, key, pages)) {
+				for (let publish = 0; publish < 12; publish++) {
+					const manifest = await this.store.read(partition, "mutation:expiry-days");
+					const days = daysSchema.parse(manifest?.value ?? []);
+					const updated = daysSchema.parse([.../* @__PURE__ */ new Set([...days, day])].sort());
+					if (manifest ? await this.store.replace(partition, "mutation:expiry-days", manifest.revision, updated) : await this.store.insert(partition, "mutation:expiry-days", updated)) return;
+				}
+				break;
+			}
+		}
+		throw new MutationJournalError("storage-unavailable", "Receipt retention could not be published.");
+	}
+};
+//#endregion
+//#region packages/orchestrator/mutations/host.ts
+var MutationDispatchPreventedError = class extends Error {
+	code;
+	effect = "not-dispatched";
+	status;
+	constructor(code, message) {
+		super(message);
+		this.code = code;
+		this.name = "MutationDispatchPreventedError";
+		this.status = ["auth-required", "session-changed"].includes(code) ? 401 : code === "access-denied" ? 403 : 409;
+	}
+};
+var MutationRuntime = class {
+	jobs = /* @__PURE__ */ new Map();
+	results = /* @__PURE__ */ new Map();
+	closing = false;
+	async drain(timeoutMs = 1e4) {
+		this.closing = true;
+		let timer;
+		try {
+			await Promise.race([Promise.allSettled([...this.jobs.values()]), new Promise((resolve) => {
+				timer = setTimeout(resolve, timeoutMs);
+			})]);
+		} finally {
+			if (timer) clearTimeout(timer);
+		}
+	}
+};
+var hash = (value) => createHash("sha256").update(canonicalJson(value)).digest("hex");
+var ongoing = (receipt) => [
+	"accepted",
+	"dispatching",
+	"effect-unknown"
+].includes(receipt.state);
+var errorStatus = (error) => error !== null && typeof error === "object" && "status" in error && typeof error.status === "number" ? error.status : void 0;
+var SharedMutationHost = class {
+	options;
+	now;
+	runtime;
+	journal;
+	constructor(options) {
+		this.options = options;
+		this.now = options.now ?? Date.now;
+		this.runtime = options.runtime ?? new MutationRuntime();
+		this.journal = options.store && options.durable && options.store.delete ? new MutationJournal(options.store, this.now) : void 0;
+	}
+	async invoke(rawRequest) {
+		const request = mutationSyncRequestSchema.parse(rawRequest);
+		await this.options.actor.assertCurrent();
+		if (request.operation === "capabilities") return mutationSyncResponseSchema.parse({
+			contractVersion: "1.0",
+			kind: "capabilities",
+			capabilities: {
+				contractVersion: "1.0",
+				available: Boolean(this.journal && this.options.operations.length && !this.runtime.closing),
+				recoveryAvailable: Boolean(this.journal),
+				readCacheOwner: this.options.readCacheOwner ?? "client",
+				operations: this.journal ? this.options.operations : [],
+				...!this.journal ? { reason: "Durable protected mutation storage is not configured. Existing acknowledged writes remain available." } : !this.options.operations.length ? { reason: "Background admission is disabled. Existing private receipts remain available." } : {}
+			}
+		});
+		const journal = this.requireJournal();
+		if (request.operation === "prepare") {
+			if (!this.options.operations.includes(request.mutation)) throw new MutationDispatchPreventedError("unsupported", "This source operation does not support safe background execution.");
+			if (this.runtime.closing) throw new MutationDispatchPreventedError("session-changed", "The source session is closing.");
+			const input = this.options.validate(request.mutation, request.input);
+			const authorization = await this.options.authorize(request.mutation, input);
+			await this.options.actor.assertCurrent();
+			const id = randomUUID();
+			const expiresAt = new Date(this.now() + 3e5).toISOString();
+			const beforeDigest = hash(authorization.before);
+			const digest = hash({
+				partition: this.options.actor.partition,
+				id,
+				operation: request.mutation,
+				input,
+				beforeDigest,
+				revisionTokens: authorization.revisionTokens ?? {},
+				expiresAt
+			});
+			const review = {
+				contractVersion: "1.0",
+				id,
+				operation: request.mutation,
+				input,
+				digest,
+				expiresAt,
+				before: authorization.before,
+				recordKeys: authorization.recordKeys
+			};
+			await journal.prune(this.options.actor.partition);
+			await journal.prepare(this.options.actor.partition, review, beforeDigest, authorization.revisionTokens ?? {});
+			return mutationSyncResponseSchema.parse({
+				contractVersion: "1.0",
+				kind: "review",
+				review
+			});
+		}
+		if (request.operation === "pending") {
+			const pending = await journal.pending(this.options.actor.partition);
+			const receipts = [];
+			for (const receipt of pending) receipts.push(["accepted", "dispatching"].includes(receipt.state) && this.now() - Date.parse(receipt.updatedAt) > 12e4 ? await journal.transition(this.options.actor.partition, receipt.id, {
+				state: "effect-unknown",
+				code: "outcome-unconfirmed"
+			}) : receipt);
+			await this.options.actor.assertCurrent();
+			return mutationSyncResponseSchema.parse({
+				contractVersion: "1.0",
+				kind: "pending",
+				receipts
+			});
+		}
+		const { record } = await journal.read(this.options.actor.partition, request.id);
+		if (request.operation === "submit") {
+			if (!this.options.operations.includes(record.review.operation)) throw new MutationDispatchPreventedError("access-denied", "This operation is not allowed in the current source profile.");
+			if (record.review.digest !== request.digest) throw new MutationJournalError("review-changed", "The reviewed mutation digest changed.");
+			if (record.receipt) return this.receiptResponse(record.receipt);
+			if (this.runtime.closing) throw new MutationDispatchPreventedError("session-changed", "The source session is closing.");
+			if (Date.parse(record.review.expiresAt) <= this.now()) throw new MutationJournalError("review-expired", "The source review expired.");
+			const current = await this.options.authorize(record.review.operation, record.review.input);
+			await this.options.actor.assertCurrent();
+			if (hash(current.before) !== record.beforeDigest) throw new MutationJournalError("review-changed", "Source state changed. Review current values before saving.");
+			let admission;
+			try {
+				admission = await journal.claim(this.options.actor.partition, request.id, request.digest, request.reason);
+			} catch (error) {
+				if (!(error instanceof MutationJournalError) || error.code !== "capacity") throw error;
+				return this.receiptResponse(await journal.failBeforeSend(this.options.actor.partition, request.id, "capacity"));
+			}
+			if (admission.claimed) {
+				const key = this.jobKey(request.id);
+				const job = this.execute(request.id, record.review.operation, record.review.input, record.revisionTokens);
+				this.runtime.jobs.set(key, job);
+				job.then(() => this.runtime.jobs.delete(key), () => this.runtime.jobs.delete(key));
+			}
+			return this.receiptResponse(admission.receipt);
+		}
+		if (!record.receipt) {
+			if (request.operation === "reconcile") return this.receiptResponse(await journal.failBeforeSend(this.options.actor.partition, request.id, "validation"));
+			throw new MutationJournalError("review-changed", "This review has not been submitted.");
+		}
+		if (request.operation === "reconcile") {
+			if (!ongoing(record.receipt)) return this.receiptResponse(record.receipt);
+			if (this.runtime.jobs.has(this.jobKey(request.id))) return this.receiptResponse(record.receipt);
+			const matching = await this.options.reconcile?.(record.review.operation, record.review.input);
+			await this.options.actor.assertCurrent();
+			const receipt = await journal.transition(this.options.actor.partition, request.id, matching ? { state: "reconciled-current-state" } : {
+				state: "effect-unknown",
+				code: "outcome-unconfirmed"
+			});
+			return this.receiptResponse(receipt);
+		}
+		if (["accepted", "dispatching"].includes(record.receipt.state) && this.now() - Date.parse(record.receipt.updatedAt) > 12e4) return this.receiptResponse(await journal.transition(this.options.actor.partition, request.id, {
+			state: "effect-unknown",
+			code: "outcome-unconfirmed"
+		}));
+		return this.receiptResponse(record.receipt);
+	}
+	drain(timeoutMs) {
+		return this.runtime.drain(timeoutMs);
+	}
+	async execute(id, operation, input, revisionTokens) {
+		const journal = this.requireJournal();
+		let dispatched = false;
+		let sourceReturned = false;
+		try {
+			await this.options.actor.assertCurrent();
+			await journal.transition(this.options.actor.partition, id, { state: "dispatching" });
+			const tracked = this.options.tracksDispatch?.includes(operation);
+			dispatched = !tracked;
+			const result = await this.options.execute(operation, input, {
+				revisionTokens,
+				...tracked ? { onDispatch: () => {
+					dispatched = true;
+				} } : {}
+			});
+			sourceReturned = true;
+			await this.options.actor.assertCurrent();
+			if (result !== null && typeof result === "object" && "state" in result && result.state === "rolled-back") {
+				await journal.transition(this.options.actor.partition, id, {
+					state: "effect-unknown",
+					code: "outcome-unconfirmed"
+				});
+				return;
+			}
+			await journal.transition(this.options.actor.partition, id, { state: "confirmed" });
+			if (this.runtime.results.size >= 100) this.runtime.results.delete(this.runtime.results.keys().next().value);
+			this.runtime.results.set(this.jobKey(id), result);
+		} catch (error) {
+			this.options.onError?.(errorStatus(error) === 412 ? "source-conflict" : "mutation-unconfirmed");
+			const prevented = !sourceReturned && (error instanceof MutationDispatchPreventedError || error !== null && typeof error === "object" && "effect" in error && error.effect === "not-dispatched");
+			try {
+				await journal.transition(this.options.actor.partition, id, errorStatus(error) === 412 ? {
+					state: "conflict",
+					code: "source-conflict"
+				} : !sourceReturned && (!dispatched || prevented) ? {
+					state: "failed-before-send",
+					code: error instanceof MutationDispatchPreventedError ? error.code : "validation"
+				} : {
+					state: "effect-unknown",
+					code: "outcome-unconfirmed"
+				});
+			} catch (persistenceError) {
+				this.options.onError?.("receipt-persistence-unconfirmed");
+				throw persistenceError;
+			}
+		}
+	}
+	async receiptResponse(receipt) {
+		await this.options.actor.assertCurrent();
+		let result = this.runtime.results.get(this.jobKey(receipt.id));
+		if (receipt.state === "confirmed" && result !== void 0) {
+			const { record } = await this.requireJournal().read(this.options.actor.partition, receipt.id);
+			try {
+				if (this.options.authorizeResult) await this.options.authorizeResult(record.review.operation, record.review.input);
+				else await this.options.authorize(record.review.operation, record.review.input);
+			} catch (error) {
+				this.options.onError?.("result-authorization-unavailable");
+				result = void 0;
+				receipt = {
+					...receipt,
+					code: errorStatus(error) === 403 ? "access-denied" : errorStatus(error) === 401 ? "auth-required" : "source-unavailable"
+				};
+			}
+			await this.options.actor.assertCurrent();
+		}
+		return mutationSyncResponseSchema.parse({
+			contractVersion: "1.0",
+			kind: "receipt",
+			receipt: {
+				...receipt,
+				...receipt.state === "confirmed" && result !== void 0 ? { result } : {}
+			}
+		});
+	}
+	requireJournal() {
+		if (!this.journal) throw new MutationDispatchPreventedError("storage-unavailable", "Durable protected mutation storage is unavailable.");
+		return this.journal;
+	}
+	jobKey(id) {
+		return `${this.options.actor.partition}:${id}`;
+	}
+};
+//#endregion
+//#region packages/orchestrator/mutations/core-adapter.ts
+var subjectSchema = z.object({
+	tid: z.string().guid(),
+	oid: z.string().guid(),
+	scp: z.string().trim().min(1)
+});
+function sourceSubject(token) {
+	const part = token.split(".")[1];
+	if (!part) throw new MutationDispatchPreventedError("auth-required", "A verified delegated source token is required.");
+	try {
+		return subjectSchema.parse(JSON.parse(Buffer.from(part, "base64url").toString("utf8")));
+	} catch (error) {
+		if (error instanceof SyntaxError || error instanceof z.ZodError) throw new MutationDispatchPreventedError("auth-required", "A verified delegated user identity is required. App-only source tokens cannot authorize these writes.");
+		throw error;
+	}
+}
+function bindSourceToken(getToken, source, onSessionChanged) {
+	let expected;
+	return async () => {
+		const token = await getToken();
+		const subject = sourceSubject(token);
+		const identity = createHash("sha256").update(JSON.stringify([
+			source,
+			subject.tid,
+			subject.oid
+		])).digest("hex");
+		if (expected !== void 0 && identity !== expected) {
+			onSessionChanged?.();
+			throw new MutationDispatchPreventedError("session-changed", "The source identity changed. Reconnect before reading private data.");
+		}
+		expected = identity;
+		return token;
+	};
+}
+function delegatedMutationActor(source, getToken, isCurrent = () => true) {
+	let expected;
+	const subject = (token) => {
+		const value = sourceSubject(token);
+		return createHash("sha256").update(JSON.stringify([
+			source,
+			value.tid,
+			value.oid
+		])).digest("hex");
+	};
+	const verify = (token) => {
+		if (!isCurrent() || expected === void 0 || subject(token) !== expected) throw new MutationDispatchPreventedError("session-changed", "The original source identity changed. Reconnect and prepare a new review.");
+	};
+	return {
+		verify,
+		async resolve() {
+			const partition = subject(await getToken());
+			if (expected !== void 0 && partition !== expected) throw new MutationDispatchPreventedError("session-changed", "The source identity changed.");
+			expected = partition;
+			return {
+				partition,
+				assertCurrent: async () => verify(await getToken())
+			};
+		}
+	};
+}
+function createCoreMutationHost(options) {
+	const core = options.core;
+	const mutations = createCoreMutationOperations(core, options.applyMeeting);
+	const snapshot = async (operation, input, writing = true) => core.withFreshReadContext(async () => {
+		if (writing) await options.assertAllowed?.(operation);
+		if (operation === "addAccount" || operation === "setAccountVisibility") return {
+			before: await core.listAccounts({ includeHidden: true }),
+			revisionTokens: {},
+			recordKeys: [`account:${String(input["accountId"])}`]
+		};
+		if (operation === "commitRecordCreation") {
+			const request = recordCreationCommitRequestSchema.parse(input);
+			const catalog = await core.getRecordCreationCatalog({
+				contractVersion: "1.2",
+				accountId: request.preview.normalizedDraft.account.id
+			});
+			if (request.preview.target !== "draft" && catalog.target !== "sqlite") throw new MutationDispatchPreventedError("unsupported", "Live creation remains disabled; export this draft instead.");
+			return {
+				before: catalog,
+				revisionTokens: {},
+				recordKeys: [`account:${request.preview.normalizedDraft.account.id}`]
+			};
+		}
+		const opportunityId = operation === "applyMeetingChangeSet" ? meetingChangeSetProposalSchema.parse(input["proposal"]).opportunityId : z.string().min(1).parse(input["opportunityId"]);
+		if (operation === "joinDealTeam" || operation === "joinMilestoneTeam") {
+			const candidate = (await core.getDiscoverySnapshot({ contractVersion: "1.0" })).opportunities.find((item) => item.id === opportunityId);
+			if (!candidate) throw new MutationDispatchPreventedError("access-denied", "The record is outside the current Discovery scope.");
+			const milestones = operation === "joinMilestoneTeam" ? await core.listDiscoverableMilestones(opportunityId) : [];
+			if (input["milestoneId"] && !milestones.some((item) => item.id === input["milestoneId"])) throw new MutationDispatchPreventedError("access-denied", "The milestone is outside the selected opportunity.");
+			return {
+				before: {
+					opportunity: candidate,
+					milestones
+				},
+				revisionTokens: {},
+				recordKeys: [`opportunity:${opportunityId}`]
+			};
+		}
+		const current = await core.getOpportunitySnapshot(opportunityId);
+		const revisionTokens = current.revisionTokens ?? {};
+		if (writing && options.requireNativeVersions && [
+			"updateOpportunity",
+			"updateMilestone",
+			"transitionOpportunityStage"
+		].includes(operation)) {
+			if (!revisionTokens[(operation === "updateMilestone" ? `msp_engagementmilestones(${String(input["milestoneId"])})` : `opportunities(${opportunityId})`).toLowerCase()]) throw new MutationDispatchPreventedError("unsupported", "This record has no authoritative source version for safe background updates.");
+		}
+		return {
+			before: current,
+			revisionTokens,
+			recordKeys: [`opportunity:${opportunityId}`]
+		};
+	});
+	return new SharedMutationHost({
+		...options,
+		...options.requireNativeVersions ? { tracksDispatch: [
+			"updateOpportunity",
+			"updateMilestone",
+			"transitionOpportunityStage"
+		] } : {},
+		validate: (operation, input) => mutations[operation].parse(input),
+		authorize: async (operation, input) => {
+			const value = await snapshot(operation, input);
+			return options.reviewContext ? {
+				...value,
+				before: {
+					source: value.before,
+					context: await options.reviewContext()
+				}
+			} : value;
+		},
+		authorizeResult: async (operation, input) => {
+			await snapshot(operation, input, false);
+		},
+		execute: async (operation, input, reviewed) => {
+			await options.assertAllowed?.(operation);
+			return core.withReviewedVersions(reviewed.revisionTokens, () => mutations[operation].run(input), options.verifyAccessToken, reviewed.onDispatch);
+		},
+		reconcile: async (operation, input) => {
+			const current = await snapshot(operation, input, false);
+			if (operation === "setAccountVisibility" || operation === "addAccount") return accountSchema$1.array().parse(current.before).some((account) => account.id === input["accountId"] && (operation === "addAccount" || account.visibility === input["visibility"]));
+			if (operation === "joinDealTeam") return z.object({ opportunity: discoverableOpportunitySchema }).parse(current.before).opportunity.onDealTeam;
+			if (operation === "updateOpportunity") return z.object({ opportunity: opportunitySchema }).parse(current.before).opportunity.comments === opportunityUpdateSchema.parse(input["update"]).comments;
+			if (operation === "transitionOpportunityStage") return z.object({ opportunity: opportunitySchema }).parse(current.before).opportunity.recordedStage === input["targetStage"];
+			if (operation === "updateMilestone") {
+				const milestone = z.object({ milestones: z.array(milestoneSchema) }).parse(current.before).milestones.find((item) => item.id === input["milestoneId"]);
+				if (!milestone) return false;
+				const update = milestoneUpdateSchema.parse(input["update"]);
+				return Object.entries(update).every(([key, value]) => key === "customerCommitment" ? milestone.commitment === value : key === "status" ? milestone.status === value : key === "comments" ? milestone.comments === value : key === "targetDate" ? milestone.targetDate === value : milestone.riskDetails === value);
+			}
+			return false;
+		}
+	});
+}
+//#endregion
+//#region packages/orchestrator/mutations/composition.ts
+function createMutationSession(options) {
+	const runtime = options.runtime ?? new MutationRuntime();
+	let resolved;
+	const available = options.state.durable && options.state.store?.delete !== void 0;
+	const resolve = async () => {
+		if (resolved) return resolved;
+		resolved = (async () => {
+			const identity = options.getToken ? delegatedMutationActor(options.source, options.getToken, options.isCurrent) : void 0;
+			const actor = options.actor ?? (options.mode === "sample" ? {
+				partition: `${options.source}:sample`,
+				assertCurrent: async () => {
+					if (options.isCurrent && !options.isCurrent()) throw new MutationDispatchPreventedError("session-changed", "The sample source session changed.");
+				}
+			} : identity ? await identity.resolve() : (() => {
+				throw new MutationDispatchPreventedError("auth-required", "A verified source actor is required.");
+			})());
+			const store = options.state.store;
+			if (!store) throw new MutationDispatchPreventedError("storage-unavailable", "Durable mutation state is unavailable.");
+			if (!await store.read("mutation-store:health", "v1") && !await store.insert("mutation-store:health", "v1", "ready") && !await store.read("mutation-store:health", "v1")) throw new MutationDispatchPreventedError("storage-unavailable", "Mutation storage could not be verified.");
+			const operations = (!options.enabled ? [] : options.mode === "sample" ? syncMutationOperationSchema.options.filter((operation) => operation !== "applyMeetingChangeSet" || options.applyMeeting !== void 0) : [
+				"addAccount",
+				"setAccountVisibility",
+				...await options.conditionalOperations?.() ?? []
+			]).filter((operation) => !options.excludeOperations?.includes(operation));
+			return createCoreMutationHost({
+				core: options.core,
+				actor,
+				store,
+				durable: true,
+				operations,
+				runtime,
+				readCacheOwner: options.readCacheOwner,
+				...options.mode === "live" ? { requireNativeVersions: true } : {},
+				...identity ? { verifyAccessToken: identity.verify } : {},
+				...options.assertAllowed ? { assertAllowed: options.assertAllowed } : {},
+				...options.reviewContext ? { reviewContext: options.reviewContext } : {},
+				...options.applyMeeting ? { applyMeeting: options.applyMeeting } : {},
+				onError: (code) => console.error(`[mutation-sync] ${code}`)
+			});
+		})().catch((error) => {
+			resolved = void 0;
+			throw error;
+		});
+		return resolved;
+	};
+	return {
+		async invoke(rawRequest) {
+			const request = mutationSyncRequestSchema.parse(rawRequest);
+			if (!available) {
+				if (request.operation !== "capabilities") throw new MutationDispatchPreventedError("storage-unavailable", "Protected durable background writes are not configured.");
+				return {
+					contractVersion: "1.0",
+					kind: "capabilities",
+					capabilities: {
+						contractVersion: "1.0",
+						available: false,
+						readCacheOwner: options.readCacheOwner,
+						operations: [],
+						reason: options.enabled ? "Protected durable receipt storage is unavailable. Saves use acknowledged mode." : "Background writes are not enabled. Saves use acknowledged mode."
+					}
+				};
+			}
+			return (await resolve()).invoke(request);
+		},
+		drain: () => runtime.drain(),
+		resumeAdmission: async () => {
+			runtime.closing = false;
+		}
+	};
+}
+//#endregion
 //#region apps/desktop/electron/main/index.ts
 var currentDirectory = dirname(fileURLToPath(import.meta.url));
 var desktopRoot = resolve(currentDirectory, "../..");
@@ -14967,7 +17639,8 @@ var reportPerformance = (event) => {
 };
 var mcemConnector = new LocalPdfMcemGuidanceConnector(app.isPackaged ? resolve(process.resourcesPath, "docs/knowledge/MCEM Overview.pdf") : resolve(desktopRoot, "../../docs/knowledge/MCEM Overview.pdf"));
 var portfolioPreferenceStore = new JsonFilePortfolioPreferenceStore(resolve(app.getPath("userData"), "portfolio-preferences.json"));
-var liveMsxConnector = dataMode === "sample" ? void 0 : new LiveMsxConnector(tokenProvider, fetch, void 0, reportPerformance, msxWriteMetadataFromEnvironment(process.env), portfolioPreferenceStore);
+var sourceToken = bindSourceToken(() => tokenProvider.getAccessToken(), "https://microsoftsales.crm.dynamics.com", () => clearSourceSession());
+var liveMsxConnector = dataMode === "sample" ? void 0 : new LiveMsxConnector({ getAccessToken: sourceToken }, fetch, void 0, reportPerformance, msxWriteMetadataFromEnvironment(process.env), portfolioPreferenceStore);
 var localStoreMsxConnector = liveMsxConnector ? void 0 : createLocalStoreMsxConnector({
 	...process.env,
 	TLC_DATA_STORE_PATH: process.env["TLC_DATA_STORE_PATH"]?.trim() || resolve(app.getPath("userData"), "sample.sqlite")
@@ -15010,6 +17683,68 @@ var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object
 		})
 	}];
 })), reportPerformance, recordCreation);
+var presentation = createPresentationOwner(orchestrator);
+var clearSourceSession = () => presentation.session.clear();
+var backgroundEnabled = process.env["TLC_BACKGROUND_SYNC"] === "1";
+var mutationClosing = false;
+var mutationDisposed = false;
+var quitDrainComplete = false;
+var mutationState = {
+	durable: false,
+	close() {}
+};
+async function initializeMutations() {
+	if (backgroundEnabled || existsSync(resolve(app.getPath("userData"), "mutation-state", `${dataMode}.sqlite`))) {
+		const root = resolve(app.getPath("userData"), "mutation-state");
+		let key;
+		if (dataMode === "live") {
+			if (!safeStorage.isEncryptionAvailable()) throw new Error("Protected receipt storage requires Windows encryption. Background writes were not enabled.");
+			const keyPath = resolve(root, "protected-key.bin");
+			key = await protectedMutationKey({
+				lockPath: resolve(root, "key-init.lock"),
+				read: async () => {
+					try {
+						return safeStorage.decryptString(await readFile(keyPath));
+					} catch (error) {
+						if (error !== null && typeof error === "object" && "code" in error && error.code === "ENOENT") return void 0;
+						throw error;
+					}
+				},
+				write: (value) => writeFile(keyPath, safeStorage.encryptString(value), { flag: "wx" })
+			});
+		}
+		mutationState = await localMutationState(resolve(root, `${dataMode}.sqlite`), key);
+	}
+	return createMutationSession({
+		core: orchestrator,
+		mode: dataMode,
+		source: "desktop:https://microsoftsales.crm.dynamics.com",
+		state: mutationState,
+		enabled: backgroundEnabled,
+		readCacheOwner: "host",
+		isCurrent: () => !mutationDisposed,
+		...dataMode === "live" ? {
+			getToken: sourceToken,
+			conditionalOperations: () => orchestrator.conditionalWriteOperations()
+		} : {},
+		...meetingConnector ? { applyMeeting: (input) => meetingConnector.applyMeetingChangeSet(input) } : {}
+	});
+}
+var mutationsReady = app.whenReady().then(initializeMutations);
+mutationsReady.catch(() => console.error("[mutation-sync] protected-state-unavailable"));
+var mutations = {
+	invoke: async (request) => (await mutationsReady).invoke(request),
+	drain: async () => (await mutationsReady).drain(),
+	resumeAdmission: async () => (await mutationsReady).resumeAdmission()
+};
+presentation.session.subscribe(() => {
+	const state = presentation.session.getState();
+	if (state.refreshing) return;
+	for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed() && !window.webContents.isDestroyed() && window.webContents.getURL().startsWith(allowedRendererUrl)) window.webContents.send("tlc:cache-changed", {
+		contractVersion: "1.0",
+		state
+	});
+});
 var configurationRoot = app.isPackaged ? resolve(process.resourcesPath, "config") : resolve(desktopRoot, "../../config");
 var [mcpRegistry, mcpPolicy, dataverseEntityMap] = await Promise.all([
 	loadMcpServerRegistry(resolve(configurationRoot, "mcp.servers.json")),
@@ -15038,8 +17773,7 @@ var configuredWorkflowHost = dataMode === "sample" ? void 0 : createLivePlayWork
 	}
 });
 var workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost(async () => {
-	const accounts = await msxConnector.listAccounts();
-	const opportunities = (await Promise.all(accounts.map((account) => msxConnector.listOpportunities(account.id)))).flat();
+	const { accounts, opportunities } = await orchestrator.getPortfolioIndex({ contractVersion: "1.0" });
 	return {
 		accountIds: accounts.map((account) => account.id),
 		opportunityIds: opportunities.map((opportunity) => opportunity.id)
@@ -15070,6 +17804,26 @@ function assertTrustedSender(event) {
 	if (!senderUrl || !senderUrl.startsWith(allowedRendererUrl)) throw new Error("Rejected IPC request from an untrusted renderer.");
 }
 function registerIpc() {
+	const invokeMutationSync = createMutationSyncIpcHandler(mutations);
+	ipcMain.handle("tlc:mutation-sync", async (event, request) => {
+		assertTrustedSender(event);
+		return invokeMutationSync(request);
+	});
+	ipcMain.handle("tlc:cache-control", (event, raw) => {
+		assertTrustedSender(event);
+		const request = cacheControlRequestSchema.parse(raw);
+		if (request.operation === "interest") {
+			const owner = BrowserWindow.fromWebContents(event.sender);
+			const prefix = `renderer:${event.sender.id}`;
+			presentation.suspend(prefix, !owner?.isVisible() || !owner.isFocused());
+			presentation.interest(`${prefix}:${request.consumer ?? "main"}`, request.keys, request.active);
+		}
+		if (request.operation === "refresh") presentation.session.refresh(request.opportunityId);
+		return cacheControlResponseSchema.parse({
+			contractVersion: "1.0",
+			state: presentation.session.getState()
+		});
+	});
 	const invokeSellerDashboard = createSellerDashboardIpcHandler(sellerDashboardHost);
 	ipcMain.handle(sellerDashboardIpcChannel, (event, request) => {
 		assertTrustedSender(event);
@@ -15099,11 +17853,20 @@ function registerIpc() {
 	});
 	ipcMain.handle("tlc:list-accounts", (event, options) => {
 		assertTrustedSender(event);
-		return orchestrator.listAccounts(accountListOptionsSchema.parse(options ?? {}));
+		return presentation.session.listAccounts(accountListOptionsSchema.parse(options ?? {}).includeHidden);
+	});
+	for (const [channel, handler] of Object.entries(createPortfolioIpcHandlers({
+		getPortfolioIndex: (request) => presentation.session.getPortfolioIndex(request.includeHidden),
+		getPortfolioWorkspace: (request) => presentation.session.getPortfolioWorkspace(request),
+		getDiscoverySnapshot: () => presentation.session.getDiscoverySnapshot()
+	}))) ipcMain.handle(channel, (event, request) => {
+		assertTrustedSender(event);
+		return handler(request);
 	});
 	ipcMain.handle("tlc:search-accounts", (event, request) => {
 		assertTrustedSender(event);
-		return orchestrator.searchAccounts(accountSearchRequestSchema.parse(request));
+		const parsed = accountSearchRequestSchema.parse(request);
+		return presentation.session.readDataset(`search:${parsed.matchBy}:${parsed.query}`, () => orchestrator.withFreshReadContext(() => orchestrator.searchAccounts(parsed)));
 	});
 	ipcMain.handle("tlc:add-account", (event, accountId) => {
 		assertTrustedSender(event);
@@ -15119,11 +17882,11 @@ function registerIpc() {
 	});
 	ipcMain.handle("tlc:list-opportunities", (event, accountId) => {
 		assertTrustedSender(event);
-		return orchestrator.listOpportunities(z.string().min(1).parse(accountId));
+		return presentation.session.listOpportunities(z.string().min(1).parse(accountId));
 	});
 	ipcMain.handle("tlc:discover-opportunities", (event, domain) => {
 		assertTrustedSender(event);
-		return orchestrator.discoverOpportunities(seDomainSchema.parse(domain));
+		return presentation.session.discoverOpportunities(seDomainSchema.parse(domain));
 	});
 	ipcMain.handle("tlc:join-deal-team", (event, opportunityId) => {
 		assertTrustedSender(event);
@@ -15143,11 +17906,11 @@ function registerIpc() {
 	});
 	ipcMain.handle("tlc:list-milestones", (event, opportunityId) => {
 		assertTrustedSender(event);
-		return orchestrator.listMilestones(z.string().min(1).parse(opportunityId));
+		return presentation.session.listMilestones(z.string().min(1).parse(opportunityId));
 	});
 	ipcMain.handle("tlc:list-discoverable-milestones", (event, opportunityId) => {
 		assertTrustedSender(event);
-		return orchestrator.listDiscoverableMilestones(z.string().min(1).max(200).parse(opportunityId));
+		return presentation.session.listMilestones(z.string().min(1).max(200).parse(opportunityId), true);
 	});
 	ipcMain.handle("tlc:list-milestone-activities", (event, opportunityId, milestoneId) => {
 		assertTrustedSender(event);
@@ -15276,8 +18039,35 @@ async function createWindow() {
 	window.webContents.on("will-navigate", (event, url) => {
 		if (!url.startsWith(allowedRendererUrl)) event.preventDefault();
 	});
-	window.on("blur", () => voiceHost.cancel());
-	window.webContents.on("destroyed", () => voiceHost.dispose());
+	const prefix = `renderer:${window.webContents.id}`;
+	const updateInterest = () => presentation.suspend(prefix, !window.isVisible() || !window.isFocused());
+	window.on("focus", updateInterest);
+	window.on("show", updateInterest);
+	window.on("hide", updateInterest);
+	window.on("minimize", updateInterest);
+	window.on("blur", () => {
+		voiceHost.cancel();
+		updateInterest();
+	});
+	window.webContents.on("destroyed", () => {
+		presentation.forget(prefix);
+		voiceHost.dispose();
+	});
+	window.webContents.on("will-prevent-unload", (event) => {
+		if (dialog.showMessageBoxSync(window, {
+			type: "warning",
+			buttons: ["Keep open", "Close and recover later"],
+			defaultId: 0,
+			cancelId: 0,
+			message: "Confirmed source changes may still be pending.",
+			detail: "Closing does not undo a sent change. Reopen with the same source account to check private receipts before repeating an uncertain write."
+		}) === 1) event.preventDefault();
+		else {
+			mutationClosing = false;
+			quitDrainComplete = false;
+			mutations.resumeAdmission().catch(() => console.error("[mutation-sync] resume-admission-failed"));
+		}
+	});
 	if (developmentUrl) await window.loadURL(developmentUrl);
 	else await window.loadFile(rendererFile);
 }
@@ -15291,7 +18081,24 @@ app.on("window-all-closed", () => {
 app.on("activate", () => {
 	if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
-app.on("before-quit", () => {
+app.on("before-quit", (event) => {
+	if (!backgroundEnabled && !mutationState.durable || quitDrainComplete) return;
+	event.preventDefault();
+	if (mutationClosing) return;
+	mutationClosing = true;
+	mutations.drain().then(() => {
+		quitDrainComplete = true;
+		setImmediate(() => app.quit());
+	}, () => {
+		console.error("[mutation-sync] shutdown-outcome-unconfirmed");
+		quitDrainComplete = true;
+		setImmediate(() => app.quit());
+	});
+});
+app.on("will-quit", () => {
+	mutationDisposed = true;
+	presentation.dispose();
+	mutationState.close();
 	voiceHost.dispose();
 	configuredWorkflowHost?.dispose();
 });

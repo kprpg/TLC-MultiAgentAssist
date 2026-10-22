@@ -6,7 +6,7 @@ interface BridgeRequest {
     kind: string
     id: string
     method: string
-    params?: { accountId?: string; opportunityId?: string; url?: string; draft?: unknown; preview?: unknown }
+    params?: { accountId?: string; opportunityId?: string; url?: string; draft?: unknown; preview?: unknown; update?: { comments: string } }
 }
 
 declare global {
@@ -19,6 +19,8 @@ declare global {
             delayAccount?: string
             failAccounts: boolean
             rejectEvidence: boolean
+            rejectComments: boolean
+            delayComments: boolean
             release(): void
         }
     }
@@ -72,6 +74,7 @@ async function mountWebview(page: Page): Promise<void> {
         const reply = (id: string, result: unknown) => window.postMessage({ kind: 'response', id, ok: true, result }, window.location.origin)
         window.portfolioTest = {
             accounts, requests: [], delayed: [], delayCoach: false, failAccounts: false, rejectEvidence: false,
+            rejectComments: false, delayComments: false,
             release() {
                 for (const response of this.delayed.splice(0)) reply(response.id, response.result)
             }
@@ -84,17 +87,37 @@ async function mountWebview(page: Page): Promise<void> {
                     if (message.kind !== 'request') return
                     const state = window.portfolioTest
                     state.requests.push(message)
-                    if ((message.method === 'listAccounts' && state.failAccounts) || (message.method === 'openEvidence' && state.rejectEvidence)) {
+                    if ((['listAccounts', 'getPortfolioIndex', 'getDiscoverySnapshot'].includes(message.method) && state.failAccounts) ||
+                        (message.method === 'openEvidence' && state.rejectEvidence) ||
+                        (message.method === 'updateOpportunity' && state.rejectComments)) {
                         window.postMessage({
                             kind: 'response', id: message.id, ok: false,
-                            error: { message: message.method === 'listAccounts' ? 'Portfolio search failed.' : 'Evidence opening denied.' }
+                            error: { message: message.method === 'openEvidence' ? 'Evidence opening denied.'
+                                : message.method === 'updateOpportunity' ? 'MSX did not confirm the saved opportunity comments.' : 'Portfolio search failed.' }
                         }, window.location.origin)
                         return
                     }
                     let result: unknown
                     if (message.method === 'getCurrentUserEmail') result = 'sample@example.test'
+                    else if (message.method === 'getPortfolioIndex') result = {
+                        contractVersion: '1.0', accounts: state.accounts.map((account) => ({ ...account, segment: account.segment ?? 'Enterprise' })),
+                        opportunities: opportunities.filter((item) => state.accounts.some((account) => account.id === item.accountId && account.visibility !== 'hidden'))
+                    }
+                    else if (message.method === 'getDiscoverySnapshot') result = {
+                        contractVersion: '1.0', generatedAt: '2026-10-21T12:00:00.000Z',
+                        accounts: state.accounts.map((account) => ({ ...account, segment: account.segment ?? 'Enterprise' })),
+                        portfolioOpportunities: opportunities.filter((item) => state.accounts.some((account) => account.id === item.accountId && account.visibility !== 'hidden')),
+                        opportunities: [], milestoneTeamOpportunityIds: []
+                    }
                     else if (message.method === 'listAccounts') result = state.accounts
                     else if (message.method === 'listOpportunities') result = opportunities.filter((item) => item.accountId === message.params?.accountId)
+                    else if (message.method === 'updateOpportunity') {
+                        const opportunity = opportunities.find((item) => item.id === message.params?.opportunityId)
+                        const comments = message.params?.update?.comments
+                        if (!opportunity || typeof comments !== 'string') throw new Error('Invalid opportunity comment update.')
+                        opportunity.comments = comments
+                        result = { ...opportunity }
+                    }
                     else if (message.method === 'getRecordCreationCatalog') result = creationCatalog
                     else if (message.method === 'previewRecordCreation') {
                         const draft = message.params?.draft as {
@@ -163,7 +186,8 @@ async function mountWebview(page: Page): Promise<void> {
                             ]
                         }
                     } else throw new Error(`Unexpected test request: ${message.method}`)
-                    if ((message.method === 'runMcemCoach' && state.delayCoach) ||
+                    if ((message.method === 'updateOpportunity' && state.delayComments) ||
+                        (message.method === 'runMcemCoach' && state.delayCoach) ||
                         (message.method === 'listOpportunities' && message.params?.accountId === state.delayAccount)) {
                         state.delayed.push({ id: message.id, result })
                     } else reply(message.id, result)
@@ -176,6 +200,34 @@ async function mountWebview(page: Page): Promise<void> {
     await page.addScriptTag({ path: resolve('apps', 'vscode-extension', 'dist', 'webview', 'webview.js') })
     await expect(page.locator('#portfolio-details-panel').getByRole('heading', { name: 'Alpha analysis', exact: true })).toBeVisible()
 }
+
+test('opens the focused opportunity in MSX through the VS Code host and tracks selection changes', async ({ page }) => {
+    await mountWebview(page)
+    const details = page.locator('#portfolio-details-panel')
+    const opportunities = page.locator('#portfolio-accounts-panel .opportunity-table')
+    const openedLinks = () => page.evaluate(() => window.portfolioTest.requests
+        .filter((request) => request.method === 'openEvidence').map((request) => request.params?.url))
+    await opportunities.getByRole('row').filter({ hasText: 'Alpha renewal' }).locator('.record-link').click()
+    expect(await openedLinks()).toEqual([])
+    await expect(opportunities.getByRole('link')).toHaveCount(0)
+    const renewalLink = details.getByRole('heading', { name: 'Alpha renewal', exact: true }).getByRole('link')
+    const renewalUrl = 'https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=opportunity&id=alpha-two'
+    await expect(renewalLink).toHaveAttribute('href', renewalUrl)
+    await renewalLink.click()
+    await expect.poll(openedLinks).toEqual([renewalUrl])
+
+    await opportunities.getByRole('row').filter({ hasText: 'Alpha analysis' }).locator('.record-link').click()
+    const analysisLink = details.getByRole('heading', { name: 'Alpha analysis', exact: true }).getByRole('link')
+    const analysisUrl = 'https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=opportunity&id=alpha-one'
+    await expect(analysisLink).toHaveAttribute('href', analysisUrl)
+    await analysisLink.focus()
+    await analysisLink.press('Enter')
+    await expect.poll(openedLinks).toEqual([renewalUrl, analysisUrl])
+
+    await page.evaluate(() => { window.portfolioTest.rejectEvidence = true })
+    await analysisLink.click()
+    await expect(details.getByText('Evidence opening denied.', { exact: true })).toBeVisible()
+})
 
 test('opens a dedicated New pane before Discover in the VS Code webview', async ({ page }) => {
     await mountWebview(page)
@@ -191,6 +243,37 @@ test('opens a dedicated New pane before Discover in the VS Code webview', async 
     const content = await pane.boundingBox()
     expect(content!.y).toBeGreaterThan(tabs!.y + tabs!.height)
     await expect(page.locator('#portfolio-details-panel')).toHaveCount(0)
+})
+
+test('saves opportunity comments only after acknowledgement and retains an unconfirmed draft in VS Code', async ({ page }) => {
+    await mountWebview(page)
+    const row = page.getByRole('row').filter({ hasText: 'Alpha analysis' }).first()
+    await row.getByRole('button', { name: 'Comments', exact: true }).click()
+    const editor = page.locator('.record-editor-row')
+    const comments = editor.getByRole('textbox')
+    await comments.fill('Reviewed webview opportunity comment.')
+    await page.evaluate(() => { window.portfolioTest.delayComments = true })
+    await editor.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(editor.getByRole('button', { name: 'Saving...' })).toBeDisabled()
+    await expect(page.getByText('Opportunity comments saved.', { exact: true })).toHaveCount(0)
+    await page.evaluate(() => { window.portfolioTest.delayComments = false; window.portfolioTest.release() })
+    await expect(editor).toHaveCount(0)
+    await expect(page.getByText('Opportunity comments saved.', { exact: true })).toBeVisible()
+    const writes = await page.evaluate(() => window.portfolioTest.requests.filter((request) => request.method === 'updateOpportunity'))
+    expect(writes).toHaveLength(1)
+    expect(writes[0]?.params).toEqual({ opportunityId: 'alpha-one', update: { comments: 'Reviewed webview opportunity comment.' } })
+
+    await row.getByRole('button', { name: 'Comments', exact: true }).click()
+    await expect(comments).toHaveValue('Reviewed webview opportunity comment.')
+    await comments.fill('Retain this unconfirmed draft.')
+    await page.evaluate(() => { window.portfolioTest.rejectComments = true })
+    await editor.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page.getByText('MSX did not confirm the saved opportunity comments.', { exact: true })).toBeVisible()
+    await expect(comments).toHaveValue('Retain this unconfirmed draft.')
+    await expect(editor.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
+    await editor.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await row.getByRole('button', { name: 'Comments', exact: true }).click()
+    await expect(comments).toHaveValue('Reviewed webview opportunity comment.')
 })
 
 test('previews and exports a reviewed Opportunity draft in the VS Code New pane', async ({ page }) => {
@@ -389,27 +472,27 @@ test('searches across the portfolio from other tabs, restores panels, and suppor
     expect(errors).toEqual([])
 })
 
-test('reports search errors, retries on refocus, and refreshes the visible account set', async ({ page }) => {
+test('uses cached search until explicit Refresh, reports source failures and retries without exposing hidden accounts', async ({ page }) => {
     await mountWebview(page)
     const search = page.getByRole('searchbox', { name: 'Search accounts and opportunities' })
-    await page.evaluate(() => { window.portfolioTest.failAccounts = true })
     await search.fill('Alpha')
-    await expect(page.getByRole('alert')).toHaveText('Portfolio search failed.')
+    await expect(page.getByRole('option', { name: /^Alpha Corp Account/ })).toBeVisible()
+    await page.evaluate(() => { window.portfolioTest.failAccounts = true })
     await search.press('Escape')
-    await page.getByRole('button', { name: 'Portfolio', exact: true }).focus()
+    await page.getByRole('button', { name: 'Refresh Portfolio', exact: true }).click()
+    await expect(page.getByRole('alert')).toHaveText('Portfolio search failed.')
     await page.evaluate(() => {
         window.portfolioTest.failAccounts = false
-        window.portfolioTest.accounts.push({ id: 'gamma', name: 'Gamma Services' })
-        window.portfolioTest.delayAccount = 'beta'
+        window.portfolioTest.accounts.push({ id: 'gamma', name: 'Gamma Services', segment: 'Enterprise' })
     })
+    await page.getByRole('button', { name: 'Refresh Portfolio', exact: true }).click()
     await search.fill('Gamma')
-    await expect(page.getByText('Searching portfolio...', { exact: true })).toBeVisible()
-    await expect.poll(() => page.evaluate(() => window.portfolioTest.delayed.length)).toBe(1)
-    await page.evaluate(() => { window.portfolioTest.release() })
-    await expect(page.getByRole('option', { name: 'Gamma Services Account' })).toBeVisible()
+    await expect(page.getByRole('option', { name: /^Gamma Services Account/ })).toBeVisible()
     await expect(page.getByRole('alert')).toHaveCount(0)
     expect(await page.evaluate(() => window.portfolioTest.requests.some((request) =>
         request.method === 'listOpportunities' && request.params?.accountId === 'hidden'))).toBe(false)
+    expect(await page.evaluate(() => window.portfolioTest.requests.filter((request) => request.method === 'getPortfolioIndex').length)).toBe(1)
+    expect(await page.evaluate(() => window.portfolioTest.requests.filter((request) => request.method === 'getDiscoverySnapshot').length)).toBe(2)
 })
 
 test('shows recommendation rationale, per-action citations and assumptions, and opens evidence through the host', async ({ page }) => {
@@ -437,11 +520,11 @@ test('ignores stale account loads and MCEM responses after changing the selectio
     await page.evaluate(() => { window.portfolioTest.delayCoach = true })
     await page.locator('#portfolio-details-panel').getByRole('button', { name: 'Run MCEM Coach', exact: true }).click()
     await expect(page.locator('#next-best-actions-panel')).toContainText('Evaluating')
-    await page.evaluate(() => { window.portfolioTest.delayAccount = 'beta' })
     const accountSelect = page.getByRole('combobox', { name: 'Customer account', exact: true })
     await accountSelect.selectOption('beta')
-    await expect(page.locator('#next-best-actions-panel')).toHaveCount(0)
-    await expect.poll(() => page.evaluate(() => window.portfolioTest.delayed.length)).toBe(2)
+    await expect(page.locator('#portfolio-details-panel').getByRole('heading', { name: 'Beta platform', exact: true })).toBeVisible()
+    await expect(page.locator('#next-best-actions-panel')).not.toContainText('Confirm Alpha analysis')
+    await expect.poll(() => page.evaluate(() => window.portfolioTest.delayed.length)).toBe(1)
     await accountSelect.selectOption('alpha')
     await expect(page.locator('#portfolio-details-panel').getByRole('heading', { name: 'Alpha analysis', exact: true })).toBeVisible()
     await page.evaluate(() => {

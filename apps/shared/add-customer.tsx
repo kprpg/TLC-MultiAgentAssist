@@ -4,8 +4,8 @@ import './add-customer.css'
 export interface CustomerAccount {
   id: string
   name: string
-  segment?: string
-  tpid?: string
+  segment?: string | undefined
+  tpid?: string | undefined
 }
 
 interface CustomerCandidate extends CustomerAccount {
@@ -136,6 +136,7 @@ export function AddCustomerButton({ client, onAdded, dataMode, className = '', c
         : mode === 'live' ? 'Live MSX - searches use your delegated access.'
           : 'Check your host data mode before searching.'}</p>
       <p>Search accessible existing customers, even if you are not on any of their Deal Teams. Choose the intended account before adding it. Adding a customer does not change team membership. Use Add me in Discovery to join an opportunity; domain filters may leave an added account without matching opportunities.</p>
+      <p>Discovery uses a session snapshot. Newly visible customer scope loads when needed; tabs and customer filters reuse memory. Refresh checks the source now.</p>
       <form aria-busy={busy !== null} onSubmit={(event) => { event.preventDefault(); void search() }}>
         <div className="customer-search-modes" role="group" aria-label="Search account by">
           {(['name', 'tpid'] as const).map((mode) => <button key={mode} type="button" aria-pressed={matchBy === mode}

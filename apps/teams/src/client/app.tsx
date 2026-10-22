@@ -1,29 +1,35 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { FluentProvider, teamsDarkTheme, teamsHighContrastTheme, teamsLightTheme } from '@fluentui/react-components'
 import { meeting } from '@microsoft/teams-js'
 import { z } from 'zod'
 import { actionPreviewSchema, contextBindingSchema, type ActionPreview, type ActionReceipt, type TeamsSession } from '../../../../packages/common/contracts/collaboration.js'
 import { accountCandidateSchema, accountSchema, opportunitySchema, type AccountCandidate } from '../../../../packages/common/contracts/index.js'
-import { initializeBrowserAuthentication, type BrowserAuthentication } from './authentication.js'
+import type { BrowserAuthentication } from './authentication.js'
 import { TeamsApiClient, type ReviewAction, type ReviewPreview } from './data-client.js'
 import { TeamsShell } from './shell.js'
 import { useWorkspaceNavigation } from './use-workspace-navigation.js'
 import { teamsSurface } from './workspace-navigation.js'
-import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
 import { sellerDashboardResponseSchema } from '../../../../packages/common/contracts/seller-dashboard.js'
 import type { SellerDashboardRequest } from '../../../../packages/common/contracts/seller-dashboard.js'
 import { PortfolioLayoutControls } from '../../../shared/portfolio-layout-controls.js'
 import { PortfolioSearch } from './portfolio-search.js'
 import { AccountsWorkspace, type WorkingSelection } from './accounts.js'
-import { WorkflowsWorkspace } from './workflows.js'
-import { MeetingsWorkspace } from './meetings.js'
-import { ActivityWorkspace } from './activity.js'
 import { ContextWorkspace, SharedStage } from './context.js'
 import { ReviewDialog } from './review-dialog.js'
+import { SourceSyncStatus } from '../../../shared/sync-status.js'
 import { NativeConnectionPanel } from './native-connection-panel.js'
 import { TeamsLaunchStatusPanel } from './launch-status.js'
+import { useTeamsDataMode } from './use-data-mode.js'
+import { DataModeSwitcher } from './data-mode-switcher.js'
+import type { TeamsDataMode } from '../../../../packages/common/contracts/teams-data-mode.js'
+import { WorkspaceBoundary } from './workspace-boundary.js'
 
 interface PendingReview { preview: ActionPreview; resolve(receipt: ActionReceipt): void; reject(error: Error): void }
+
+const WorkflowsWorkspace = lazy(() => import('./workflows.js').then((module) => ({ default: module.WorkflowsWorkspace })))
+const MeetingsWorkspace = lazy(() => import('./meetings.js').then((module) => ({ default: module.MeetingsWorkspace })))
+const ActivityWorkspace = lazy(() => import('./activity.js').then((module) => ({ default: module.ActivityWorkspace })))
+const DashboardWorkspace = lazy(() => import('../../../shared/dashboard-workspace.js').then((module) => ({ default: module.DashboardWorkspace })))
 
 export function TeamsApp() {
   const parameters = new URLSearchParams(location.search)
@@ -58,24 +64,27 @@ export function TeamsApp() {
     pendingRef.current?.reject(new Error('Reconnect and prepare a fresh review before continuing.'))
     pendingRef.current = null; setPending(null); setError(message)
   }, [bindingId])
+  const dataMode = useTeamsDataMode()
   useEffect(() => {
+    if (!dataMode.ready) return
     let alive = true
-    initializeBrowserAuthentication((value) => { if (alive) setTheme(value) }).then(async (auth) => {
+    let api: TeamsApiClient | undefined
+    dataMode.initializeAuthentication((value) => { if (alive) setTheme(value) }).then(async (auth) => {
       if (!alive) return
       setAuthentication(auth)
       const localConnection = auth.localConnection
-      const api = new TeamsApiClient(() => auth.getToken(), (claims) => {
+      api = new TeamsApiClient(() => auth.getToken(), (claims) => {
         if (!alive) return
         auth.localConnection?.clear(); setRequiredClaims(claims)
         clearPrivateWorkspace('Sign in again to satisfy current access policy. Private results were cleared; reopen any unsent review.')
-      }, localConnection ? (token) => localConnection.isCurrentToken(token) : undefined)
+      }, localConnection ? (token) => localConnection.isCurrentToken(token) : undefined, auth.apiBasePath, auth.configuration.mode)
       setClient(api)
-      if (auth.localConnection) return
+      if (auth.localConnection && !auth.localConnection.sessionExpiresAt()) return
       const identity = await api.session()
       if (alive) setSession(identity)
     }).catch((cause: unknown) => { if (alive) setError(String(cause)) })
-    return () => { alive = false }
-  }, [clearPrivateWorkspace])
+    return () => { alive = false; api?.dispose() }
+  }, [clearPrivateWorkspace, dataMode.ready, dataMode.initializeAuthentication])
   const finishLocalConnection = useCallback(async () => {
     if (!client) throw new Error('The local API client is unavailable.')
     setError(''); setRequiredClaims(undefined); setSession(await client.session())
@@ -128,10 +137,25 @@ export function TeamsApp() {
   }
   async function confirmReview(reason: string) {
     if (!client || !pendingRef.current) return
+    const originalReview = pendingRef.current
     setReviewBusy(true); setReviewError('')
     try {
-      const receipt = await client.commit(pendingRef.current.preview, reason)
-      pendingRef.current.resolve(receipt)
+      const submitted = await client.commitBackground(originalReview.preview, reason)
+      if (submitted.admitted) {
+        pendingRef.current = null; setPending(null)
+        setNotice('The exact change was accepted for background saving. It is pending until the source acknowledges it.')
+        void submitted.completion.then((receipt) => {
+          originalReview.resolve(receipt)
+          setNotice(receipt.state === 'confirmed' ? 'The source acknowledged the reviewed change.'
+            : 'The source outcome needs attention. Check synchronization status before repeating this change.')
+        }, (cause: unknown) => {
+          originalReview.reject(cause instanceof Error ? cause : new Error('Source synchronization failed.'))
+          setError('The reviewed change needs reconciliation. Check synchronization status before retrying.')
+        })
+        return
+      }
+      const receipt = await submitted.completion
+      originalReview.resolve(receipt)
       pendingRef.current = null; setPending(null)
       setNotice(receipt.state === 'confirmed' ? 'Reviewed operation completed.'
         : receipt.state === 'failed-before-send' ? 'No external change was dispatched. Resume work and prepare a fresh review.'
@@ -176,6 +200,24 @@ export function TeamsApp() {
   const selectedTheme = theme === 'dark' ? teamsDarkTheme : theme === 'contrast' ? teamsHighContrastTheme : teamsLightTheme
   const workspaceAllowed = !bindingId || bindingStatus === 'ready'
   const hostSurface = teamsSurface(parameters, authentication?.context.frameContext)
+  function switchDataMode(mode: TeamsDataMode) {
+    if (reviewBusy || client?.mutationSession.hasPending()) { setError('Wait for source acknowledgement or reconcile pending work before switching modes.'); return }
+    if (bindingId || hostSurface !== 'personal') { setError('Data-mode switching is available in the personal workbench only.'); return }
+    if (!dataMode.catalog?.availableModes.includes(mode)) { setError('That data mode is not configured for this runtime.'); return }
+    if (authentication?.localConnection && !authentication.localConnection.sessionExpiresAt()) authentication.localConnection.clear()
+    client?.dispose()
+    clearPrivateWorkspace('')
+    setClient(undefined); setAuthentication(undefined); setRequiredClaims(undefined); setReviewError('')
+    const url = new URL(location.href)
+    for (const key of ['referenceId', 'runId', 'artifactId', 'accountId', 'opportunityId']) url.searchParams.delete(key)
+    url.searchParams.set('view', 'portfolio')
+    history.replaceState(null, '', url)
+    setView('portfolio')
+    dataMode.select(mode)
+  }
+  const modeControl = hostSurface === 'personal' && !bindingId && authentication
+    ? <DataModeSwitcher catalog={dataMode.catalog} mode={authentication.configuration.mode} locked={reviewBusy || client?.mutationSession.hasPending() === true}
+      error={dataMode.error} onSwitch={switchDataMode} /> : null
   const focusPortfolio = useCallback((accountId: string, opportunityId = '') => {
     setPreferredAccountId(accountId); setPreferredOpportunityId(opportunityId); setView('portfolio')
   }, [setView])
@@ -188,9 +230,10 @@ export function TeamsApp() {
     if (hostSurface === 'configure') setView('configure')
   }, [hostSurface, setView])
   return <FluentProvider theme={selectedTheme}>
-    {hostSurface === 'personal' && !bindingId && <TeamsLaunchStatusPanel authentication={authentication} client={client} connected={!!session} />}
+    {hostSurface === 'personal' && !bindingId && <TeamsLaunchStatusPanel authentication={authentication} client={client} connected={!!session} runtimeModes={dataMode.catalog} />}
     {!session || !client || !authentication ? <main className="signin-panel">
       <h1>TLC Assist for Teams</h1><p>Private, grounded account-team guidance.</p>
+      {modeControl}
       {error ? <p role="alert" className="error-banner">{error}</p> : <p role="status">{authentication?.localConnection ? 'Local runtime ready. Connect and pair this page yourself to access live MSX.' : 'Initializing your Teams workspace...'}</p>}
       {authentication?.localConnection && client ? <NativeConnectionPanel connection={authentication.localConnection} client={client}
         authentication={'authentication' in authentication.configuration ? authentication.configuration.authentication : 'local-interactive'}
@@ -199,12 +242,14 @@ export function TeamsApp() {
         : authentication?.configuration.mode === 'live' && <button type="button" className="primary" onClick={() => { void signIn() }}>Sign in with Microsoft</button>}
     </main> : surface === 'stage' ? <SharedStage client={client} artifactId={parameters.get('artifactId')} /> : <TeamsShell mode={session.mode} view={view} onNavigate={setView} surface={hostSurface}
       commands={<>
+        {modeControl}
         {hostSurface === 'personal' && <PortfolioSearch client={client} contextKey={`${session.mode}:${view}`} onSelect={focusPortfolio} />}
         {view === 'portfolio' && <PortfolioLayoutControls {...panes} onToggleAccounts={() => togglePane('accountsExpanded')}
           onToggleDetails={() => togglePane('detailsExpanded')} onToggleActions={() => togglePane('actionsExpanded')} />}
       </>}>
       {error && <p role="alert" className="error-banner">{error}</p>}
       {notice && <p role="status" className="success-banner">{notice}</p>}
+      <SourceSyncStatus client={client} showReads={['portfolio', 'discover', 'new'].includes(view)} />
       {authentication.localConnection && <NativeConnectionPanel connection={authentication.localConnection} client={client}
         authentication={'authentication' in authentication.configuration ? authentication.configuration.authentication : 'local-interactive'}
         writeMode={'writeMode' in authentication.configuration ? authentication.configuration.writeMode : 'read-only'}
@@ -232,22 +277,27 @@ export function TeamsApp() {
       {bindingId && bindingStatus !== 'ready' ? <section className="panel"><h1>{bindingStatus === 'denied' ? 'Bound workspace unavailable' : 'Loading your authorized bound workspace'}</h1>
         <p>A shared tab does not grant account access. <a href={`${location.origin}/`}>Open your private workbench</a>.</p>
       </section> : <div hidden={!['portfolio', 'discover', 'new'].includes(view)}><AccountsWorkspace client={client} mode={session.mode} selection={selection} onSelect={setSelection} review={review}
+        active={['portfolio', 'discover', 'new'].includes(view)}
         preferredAccountId={preferredAccountId} preferredOpportunityId={preferredOpportunityId} panes={panes}
         {...(view === 'new' ? { workspace: 'new' as const } : view === 'discover' ? { workspace: 'discovery' as const } : view === 'portfolio' ? { workspace: 'portfolio' as const } : {})}
         onMeeting={() => setView('meetings')} onFocus={focusPortfolio}
         {...(bindingId && preferredAccountId ? { boundAccountId: preferredAccountId, boundOpportunityId } : {})} /></div>}
+      <WorkspaceBoundary key={view}><Suspense fallback={<section className="panel" role="status">Loading workspace controls...</section>}>
       {workspaceAllowed && view === 'plays' && <WorkflowsWorkspace client={client} selection={selection} onFocus={focusPortfolio}
+        {...('authentication' in authentication.configuration ? { authentication: authentication.configuration.authentication } : {})}
         {...(linkedRunId ? { initialRunId: linkedRunId } : {})} {...(bindingId && preferredAccountId ? {
         scope: selection ? { kind: 'opportunity' as const, accountId: selection.account.id, opportunityId: selection.opportunity.id } : { kind: 'account' as const, accountId: preferredAccountId }
       } : {})} />}
       {workspaceAllowed && view === 'dashboard' && !bindingId && <DashboardWorkspace invokeSellerDashboard={invokeDashboard} />}
-      {workspaceAllowed && view === 'meetings' && <MeetingsWorkspace client={client} mode={session.mode} selection={selection} reviewPreview={reviewPreview} compact={hostSurface === 'panel'} />}
+      {workspaceAllowed && view === 'meetings' && <MeetingsWorkspace client={client} mode={session.mode} selection={selection} reviewPreview={reviewPreview} compact={hostSurface === 'panel'}
+        graphAvailable={!('authentication' in authentication.configuration && authentication.configuration.authentication === 'local-azure-cli')} />}
       {workspaceAllowed && view === 'activity' && <ActivityWorkspace client={client} onDisconnect={() => {
         setSelection(null); setReference(undefined)
         pendingRef.current?.reject(new Error('Work disconnected. Resume and prepare a fresh review.'))
         pendingRef.current = null; setPending(null)
       }} />}
       {workspaceAllowed && view === 'configure' && <ContextWorkspace client={client} host={authentication.context} selection={selection} />}
+      </Suspense></WorkspaceBoundary>
     </TeamsShell>}
     <ReviewDialog preview={pending?.preview ?? null} onCancel={cancelReview} onConfirm={(reason) => { void confirmReview(reason) }} error={reviewError} busy={reviewBusy} />
   </FluentProvider>

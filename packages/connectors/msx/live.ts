@@ -7,6 +7,7 @@ import {
   contractVersion,
   customerCommitmentSchema,
   getSeDomainDefinition,
+  seDomainIds,
   measurePerformance,
   milestoneStatusSchema,
   milestoneUpdateSchema,
@@ -71,6 +72,7 @@ interface MsxPortfolio {
   accounts: Account[]
   opportunities: Opportunity[]
   dealTeamOpportunityIds: ReadonlySet<string>
+  milestoneTeamOpportunityIds: string[]
 }
 
 interface AccountRow {
@@ -90,7 +92,7 @@ interface OpportunityRow {
   msp_consumptionconsumedrecurring?: number
   msp_estcompletiondate?: string
   estimatedclosedate?: string
-  description?: string | null
+  msp_forecastcomments?: string | null
   msp_solutionarea?: number
   msp_technicalcapability?: number
   msp_opportunitytype?: string
@@ -306,7 +308,9 @@ export function msxWriteMetadataFromEnvironment(environment: NodeJS.ProcessEnv):
 export class MsxRequestError extends Error {
   constructor(
     message: string,
-    readonly status?: number
+    readonly status?: number,
+    readonly retryAfterMs?: number,
+    readonly effect?: 'not-dispatched' | 'unknown'
   ) {
     super(message)
     this.name = 'MsxRequestError'
@@ -314,8 +318,23 @@ export class MsxRequestError extends Error {
 }
 
 export class LiveMsxConnector implements MsxConnector {
+  private readonly readContext = new AsyncLocalStorage<{
+    portfolio?: Promise<MsxPortfolio>
+    identity?: Promise<string>
+    template?: Promise<string>
+    memberships?: Promise<Array<{ milestoneId: string }>>
+    milestones: Map<string, Promise<MilestoneRow[]>>
+    observations: Map<string, Promise<CriterionObservation[]>>
+    versions: Map<string, string>
+    fresh?: boolean
+    signal?: AbortSignal
+  }>()
   private readonly entityVersions = new Map<string, string>()
-  private readonly expectedVersions = new AsyncLocalStorage<Record<string, string>>()
+  private readonly expectedVersions = new AsyncLocalStorage<{
+    versions: Record<string, string>
+    verifyAccessToken?: (token: string) => void
+    onDispatch?: () => void
+  }>()
   private readonly baseUrl: URL
   private portfolioPromise: Promise<MsxPortfolio> | undefined
   private readonly observationPromises = new Map<string, Promise<CriterionObservation[]>>()
@@ -349,6 +368,27 @@ export class LiveMsxConnector implements MsxConnector {
   async listAccounts(options: AccountListOptions = {}): Promise<Account[]> {
     const portfolio = await this.getPortfolio()
     return structuredClone(portfolio.accounts.filter((account) => options.includeHidden || account.visibility !== 'hidden'))
+  }
+
+  async getPortfolioIndex(options: AccountListOptions = {}): Promise<{ accounts: Account[]; opportunities: Opportunity[] }> {
+    const portfolio = await this.getPortfolio()
+    const accounts = portfolio.accounts.filter((account) => options.includeHidden || account.visibility !== 'hidden')
+    const groups = new Map<string, Opportunity[]>(accounts.filter((account) => account.visibility !== 'hidden').map((account) => [account.id, []]))
+    for (const opportunity of portfolio.opportunities) groups.get(opportunity.accountId)?.push(opportunity)
+    return structuredClone({ accounts, opportunities: accounts.flatMap((account) => groups.get(account.id) ?? []) })
+  }
+
+  async conditionalWriteOperations(): Promise<ReadonlyArray<'updateOpportunity' | 'updateMilestone' | 'transitionOpportunityStage'>> {
+    const [opportunity, milestone] = await Promise.all([
+      this.requestJson<{ IsOptimisticConcurrencyEnabled?: boolean }>("EntityDefinitions(LogicalName='opportunity')?$select=IsOptimisticConcurrencyEnabled"),
+      this.requestJson<{ IsOptimisticConcurrencyEnabled?: boolean }>("EntityDefinitions(LogicalName='msp_engagementmilestone')?$select=IsOptimisticConcurrencyEnabled")
+    ])
+    return [
+      ...(opportunity.IsOptimisticConcurrencyEnabled === true ? ['updateOpportunity' as const] : []),
+      ...(opportunity.IsOptimisticConcurrencyEnabled === true && this.writeMetadata.stageCodes
+        ? ['transitionOpportunityStage' as const] : []),
+      ...(milestone.IsOptimisticConcurrencyEnabled === true ? ['updateMilestone' as const] : [])
+    ]
   }
 
   async getCatalog(accountId: string): Promise<RecordCreationCatalog> {
@@ -614,6 +654,16 @@ export class LiveMsxConnector implements MsxConnector {
    * access-team template is not set up in this environment.
    */
   private async milestoneTeamMemberships(): Promise<Array<{ milestoneId: string }>> {
+    const context = this.readContext.getStore()
+    if (!context) return this.readMilestoneTeamMemberships()
+    context.memberships ??= this.readMilestoneTeamMemberships().catch((error: unknown) => {
+      delete context.memberships
+      throw error
+    })
+    return context.memberships
+  }
+
+  private async readMilestoneTeamMemberships(): Promise<Array<{ milestoneId: string }>> {
     const templateId = await this.resolveMilestoneTeamTemplateId().catch(() => undefined)
     if (!templateId) return []
     const userId = await this.getCurrentUserId()
@@ -678,11 +728,12 @@ export class LiveMsxConnector implements MsxConnector {
   async updateOpportunity(opportunityId: string, input: OpportunityUpdate): Promise<Opportunity> {
     const update = opportunityUpdateSchema.parse(input)
     await this.assertOpportunityAccess(opportunityId)
-    await this.patch(`opportunities(${opportunityId})`, { description: update.comments })
-    this.portfolioPromise = undefined
-    const opportunity = (await this.getPortfolio()).opportunities.find((candidate) => candidate.id === opportunityId)
-    if (!opportunity) throw new Error('MSX updated the opportunity but it could not be reloaded.')
-    return structuredClone(opportunity)
+    await this.patch(`opportunities(${opportunityId})`, { msp_forecastcomments: update.comments })
+    const opportunity = await this.reloadUpdatedOpportunity(opportunityId)
+    if ((opportunity.comments ?? '') !== update.comments) {
+      throw new MsxRequestError('MSX did not confirm the saved opportunity comments. Refresh the opportunity in MSX before retrying.', undefined, undefined, 'unknown')
+    }
+    return opportunity
   }
 
   async updateOpportunityStage(opportunityId: string, targetStage: number, auditNote: string): Promise<Opportunity> {
@@ -691,20 +742,29 @@ export class LiveMsxConnector implements MsxConnector {
     }
     const stageCode = this.writeMetadata.stageCodes?.[targetStage as 1 | 2 | 3 | 4 | 5]
     if (stageCode === undefined) {
-      throw new Error(`Live MSX stage ${targetStage} writes require TLC_MSX_STAGE_${targetStage} to contain the tenant option code.`)
+      throw new MsxRequestError(`Live MSX stage ${targetStage} writes require TLC_MSX_STAGE_${targetStage} to contain the tenant option code.`, undefined, undefined, 'not-dispatched')
     }
     await this.assertOpportunityAccess(opportunityId)
     const current = (await this.getPortfolio()).opportunities.find((candidate) => candidate.id === opportunityId)
     if (!current) throw new Error('The opportunity is not in the signed-in user’s active MSX portfolio.')
-    const description = [current.comments, auditNote].filter(Boolean).join('\n\n')
+    const comments = [current.comments, auditNote].filter(Boolean).join('\n\n')
     await this.patch(`opportunities(${opportunityId})`, {
       msp_activesalesstage: stageCode,
-      description
+      msp_forecastcomments: comments
     })
+    return this.reloadUpdatedOpportunity(opportunityId)
+  }
+
+  private async reloadUpdatedOpportunity(opportunityId: string): Promise<Opportunity> {
     this.portfolioPromise = undefined
     this.observationPromises.delete(opportunityId)
+    const context = this.readContext.getStore()
+    if (context) {
+      delete context.portfolio
+      context.observations.delete(opportunityId)
+    }
     const opportunity = (await this.getPortfolio()).opportunities.find((candidate) => candidate.id === opportunityId)
-    if (!opportunity) throw new Error('MSX updated the stage but the opportunity could not be reloaded.')
+    if (!opportunity) throw new MsxRequestError('MSX accepted the opportunity update but it could not be reloaded. Check the record in MSX before retrying.', undefined, undefined, 'unknown')
     return structuredClone(opportunity)
   }
 
@@ -758,37 +818,60 @@ export class LiveMsxConnector implements MsxConnector {
 
     return rows
       .filter((row) => row._parentaccountid_value && accountNameById.has(row._parentaccountid_value))
-      .map((row) => {
-        const accountName = accountNameById.get(row._parentaccountid_value!) ?? formattedValue(row, '_parentaccountid_value')
-        const solutionArea = formattedValue(row, 'msp_solutionarea')
-        const technicalCapability = formattedValue(row, 'msp_technicalcapability')
-        return {
-          ...this.mapOpportunity(row),
-          domain,
-          ...(accountName ? { accountName } : {}),
-          ...(solutionArea ? { solutionArea } : {}),
-          ...(technicalCapability ? { technicalCapability } : {}),
-          onDealTeam: portfolio.dealTeamOpportunityIds.has(row.opportunityid)
-        }
-      })
+      .map((row) => this.mapDiscoverableOpportunity(row, domain, accountNameById, portfolio.dealTeamOpportunityIds))
       .sort((left, right) => left.name.localeCompare(right.name))
+  }
+
+  getDiscoverySnapshot() {
+    return this.withReadContext(async () => {
+      const portfolio = await this.getPortfolio()
+      const accountNames = new Map(portfolio.accounts.filter((account) => account.visibility !== 'hidden')
+        .map((account) => [account.id, account.name]))
+      const rows = accountNames.size === 0 ? [] : await measurePerformance('msx.discovery-snapshot', this.performanceReporter, () =>
+        this.requestOpportunitiesForAccounts([...accountNames.keys()], []))
+      const opportunities = rows.filter((row) => row._parentaccountid_value && accountNames.has(row._parentaccountid_value))
+        .flatMap((row) => seDomainIds.flatMap((domain) => {
+          const definition = getSeDomainDefinition(domain)
+          const matches = (typeof row.msp_technicalcapability === 'number' && definition.technicalCapabilityCodes.includes(row.msp_technicalcapability))
+            || (typeof row.msp_conversation === 'number' && definition.conversationCodes.includes(row.msp_conversation))
+          if (!matches) return []
+          return [this.mapDiscoverableOpportunity(row, domain, accountNames, portfolio.dealTeamOpportunityIds)]
+        })).sort((left, right) => left.name.localeCompare(right.name))
+      return {
+        accounts: structuredClone(portfolio.accounts),
+        portfolioOpportunities: structuredClone(portfolio.opportunities),
+        opportunities,
+        milestoneTeamOpportunityIds: portfolio.milestoneTeamOpportunityIds.filter((id) =>
+          portfolio.opportunities.some((opportunity) => opportunity.id === id))
+      }
+    })
+  }
+
+  private mapDiscoverableOpportunity(row: OpportunityRow, domain: SeDomainId, accountNames: ReadonlyMap<string, string>, dealTeamOpportunityIds: ReadonlySet<string>): DiscoverableOpportunity {
+    const accountName = accountNames.get(row._parentaccountid_value!) ?? formattedValue(row, '_parentaccountid_value')
+    const solutionArea = formattedValue(row, 'msp_solutionarea')
+    const technicalCapability = formattedValue(row, 'msp_technicalcapability')
+    return {
+      ...this.mapOpportunity(row), domain,
+      ...(accountName ? { accountName } : {}),
+      ...(solutionArea ? { solutionArea } : {}),
+      ...(technicalCapability ? { technicalCapability } : {}),
+      onDealTeam: dealTeamOpportunityIds.has(row.opportunityid)
+    }
   }
 
   /** Fetches open opportunities within the given assigned accounts, filtered by the domain clauses. */
   private async requestOpportunitiesForAccounts(accountIds: string[], domainClauses: string[]): Promise<OpportunityRow[]> {
-    const select = 'opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description,msp_solutionarea,msp_technicalcapability,msp_conversation,msp_opportunitytype'
-    const rows: OpportunityRow[] = []
-    for (let offset = 0; offset < accountIds.length; offset += 40) {
-      const chunk = accountIds.slice(offset, offset + 40)
+    const select = 'opportunityid,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,msp_forecastcomments,msp_solutionarea,msp_technicalcapability,msp_conversation,msp_opportunitytype'
+    return this.collectChunks(accountIds, async (chunk) => {
       const accountFilter = chunk.map((id) => `_parentaccountid_value eq ${id}`).join(' or ')
       const filterClauses = ['statecode eq 0', `(${accountFilter})`, ...domainClauses]
-      rows.push(...await this.requestAll<OpportunityRow>('opportunities', {
+      return this.requestAll<OpportunityRow>('opportunities', {
         '$select': select,
         '$filter': filterClauses.join(' and '),
         '$orderby': 'name asc'
-      }))
-    }
-    return rows
+      })
+    })
   }
 
   async joinDealTeam(opportunityId: string): Promise<DealTeamJoinResult> {
@@ -960,6 +1043,14 @@ export class LiveMsxConnector implements MsxConnector {
     if (configured.templateId && guidPattern.test(configured.templateId)) {
       return Promise.resolve(configured.templateId)
     }
+    const context = this.scopedReads()
+    if (context) {
+      context.template ??= this.discoverMilestoneTeamTemplateId(configured.templateName).catch((error: unknown) => {
+        delete context.template
+        throw error
+      })
+      return context.template
+    }
     this.milestoneTeamTemplateIdPromise ??= this.discoverMilestoneTeamTemplateId(configured.templateName).catch((error: unknown) => {
       this.milestoneTeamTemplateIdPromise = undefined
       throw error
@@ -1051,7 +1142,6 @@ export class LiveMsxConnector implements MsxConnector {
     this.observationPromises.clear()
     this.milestonePromises.clear()
     this.currentUserIdPromise = undefined
-    this.entityVersions.clear()
   }
 
   async getConcurrencyTokens(opportunityId: string): Promise<Record<string, string>> {
@@ -1059,17 +1149,18 @@ export class LiveMsxConnector implements MsxConnector {
     const paths = [`opportunities(${opportunityId})`, ...milestones.map((row) => `msp_engagementmilestones(${row.msp_engagementmilestoneid})`)]
     const result: Record<string, string> = {}
     for (const path of paths) {
-      const token = this.entityVersions.get(path.toLowerCase())
+      const token = (this.readContext.getStore()?.versions ?? this.entityVersions).get(path.toLowerCase())
       if (token) result[path.toLowerCase()] = token
     }
     return result
   }
 
-  withExpectedVersions<T>(versions: Readonly<Record<string, string>>, operation: () => Promise<T>): Promise<T> {
-    return this.expectedVersions.run({ ...versions }, operation)
+  withExpectedVersions<T>(versions: Readonly<Record<string, string>>, operation: () => Promise<T>, verifyAccessToken?: (token: string) => void, onDispatch?: () => void): Promise<T> {
+    return this.expectedVersions.run({ versions: { ...versions }, ...(verifyAccessToken ? { verifyAccessToken } : {}), ...(onDispatch ? { onDispatch } : {}) }, operation)
   }
 
   private rememberNativeVersions(value: unknown): void {
+    const versions = this.readContext.getStore()?.versions ?? this.entityVersions
     const remember = (row: unknown) => {
       if (!isObjectRecord(row)) return
       const records: ReadonlyArray<readonly [string, string]> = [
@@ -1080,9 +1171,9 @@ export class LiveMsxConnector implements MsxConnector {
         const id = row[field]
         if (typeof id !== 'string' || !guidPattern.test(id)) continue
         const path = `${set}(${id})`.toLowerCase()
-        this.entityVersions.delete(path)
+        versions.delete(path)
         if ('@odata.etag' in row && typeof row['@odata.etag'] === 'string' && /^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(row['@odata.etag'])) {
-          this.entityVersions.set(path, row['@odata.etag'])
+          versions.set(path, row['@odata.etag'])
         }
       }
     }
@@ -1092,6 +1183,14 @@ export class LiveMsxConnector implements MsxConnector {
 
   /** Returns the signed-in user's Dataverse systemuser id (WhoAmI UserId), cached for reuse. */
   getCurrentUserId(): Promise<string> {
+    const context = this.scopedReads()
+    if (context) {
+      context.identity ??= this.requestJson<WhoAmIResponse>('WhoAmI').then((identity) => identity.UserId).catch((error: unknown) => {
+        delete context.identity
+        throw error
+      })
+      return context.identity
+    }
     this.currentUserIdPromise ??= this.requestJson<WhoAmIResponse>('WhoAmI')
       .then((identity) => identity.UserId)
       .catch((error) => {
@@ -1120,43 +1219,75 @@ export class LiveMsxConnector implements MsxConnector {
   }
 
   private getOpportunityObservations(opportunity: Opportunity): Promise<CriterionObservation[]> {
-    let observations = this.observationPromises.get(opportunity.id)
+    const promises = this.scopedReads()?.observations ?? this.observationPromises
+    let observations = promises.get(opportunity.id)
     if (!observations) {
       observations = measurePerformance('msx.opportunity-evidence', this.performanceReporter, async () => {
         const milestones = await this.getMilestoneRows(opportunity.id)
         return mapOpportunityObservations(opportunity, milestones)
       }).catch((error: unknown) => {
-        this.observationPromises.delete(opportunity.id)
+        promises.delete(opportunity.id)
         throw error
       })
-      this.observationPromises.set(opportunity.id, observations)
+      promises.set(opportunity.id, observations)
     }
     return observations
   }
 
   private getMilestoneRows(opportunityId: string): Promise<MilestoneRow[]> {
-    let milestones = this.milestonePromises.get(opportunityId)
+    const promises = this.scopedReads()?.milestones ?? this.milestonePromises
+    let milestones = promises.get(opportunityId)
     if (!milestones) {
       milestones = this.requestAll<MilestoneRow>('msp_engagementmilestones', {
         '$select': ['msp_engagementmilestoneid', 'msp_name', '_ownerid_value', 'msp_milestonedate', 'msp_milestonestatus', 'msp_commitmentrecommendation', 'msp_monthlyuse', 'msp_forecastcomments', this.writeMetadata.riskDetailsField].filter(Boolean).join(','),
         '$filter': `statecode eq 0 and _msp_opportunityid_value eq ${opportunityId}`,
         '$orderby': 'msp_milestonedate asc'
       }).catch((error: unknown) => {
-        this.milestonePromises.delete(opportunityId)
+        promises.delete(opportunityId)
         throw error
       })
-      this.milestonePromises.set(opportunityId, milestones)
+      promises.set(opportunityId, milestones)
     }
     return milestones
   }
 
   private getPortfolio(): Promise<MsxPortfolio> {
-    if (this.cacheOptions.cachePortfolio === false) return this.loadPortfolio()
+    if (this.cacheOptions.cachePortfolio === false || this.readContext.getStore()?.fresh) {
+      const context = this.readContext.getStore()
+      if (!context) return this.loadPortfolio()
+      context.portfolio ??= this.loadPortfolio()
+      return context.portfolio
+    }
     this.portfolioPromise ??= this.loadPortfolio().catch((error: unknown) => {
       this.portfolioPromise = undefined
       throw error
     })
     return this.portfolioPromise
+  }
+
+  withReadContext<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted()
+    const existing = this.readContext.getStore()
+    if (existing && !signal) {
+      existing.signal?.throwIfAborted()
+      return operation()
+    }
+    return this.readContext.run({ milestones: new Map(), observations: new Map(), versions: new Map(), ...(signal ? { signal } : {}) }, operation)
+  }
+
+  withFreshReadContext<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    signal?.throwIfAborted()
+    const existing = this.readContext.getStore()
+    if (existing?.fresh && !signal) return operation()
+    return this.readContext.run({
+      fresh: true, milestones: new Map(), observations: new Map(), versions: new Map(),
+      ...(signal ? { signal } : existing?.signal ? { signal: existing.signal } : {})
+    }, operation)
+  }
+
+  private scopedReads() {
+    const context = this.readContext.getStore()
+    return this.cacheOptions.cachePortfolio === false || context?.signal || context?.fresh ? context : undefined
   }
 
   private async loadPortfolio(): Promise<MsxPortfolio> {
@@ -1176,7 +1307,7 @@ export class LiveMsxConnector implements MsxConnector {
       'opportunities',
       'opportunityid',
       opportunityIds,
-      'opportunityid,statecode,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,description,msp_opportunitytype'
+      'opportunityid,statecode,_parentaccountid_value,_ownerid_value,name,msp_activesalesstage,estimatedvalue,msp_consumptionconsumedrecurring,msp_estcompletiondate,estimatedclosedate,msp_forecastcomments,msp_opportunitytype'
     ))
     const activeOpportunities = opportunityRows.filter((row) => row._parentaccountid_value && (row.statecode === undefined || row.statecode === 0))
     const dealTeamAccountIds = unique(
@@ -1202,7 +1333,7 @@ export class LiveMsxConnector implements MsxConnector {
       .map((row) => this.mapOpportunity(row))
       .sort((left, right) => left.name.localeCompare(right.name))
 
-    return { accounts, opportunities, dealTeamOpportunityIds }
+    return { accounts, opportunities, dealTeamOpportunityIds, milestoneTeamOpportunityIds: milestoneOpportunityIds }
   }
 
   private mapAccount(
@@ -1253,7 +1384,7 @@ export class LiveMsxConnector implements MsxConnector {
       value: row.estimatedvalue || row.msp_consumptionconsumedrecurring || 0,
       currency: 'USD',
       closeDate: closeDate?.slice(0, 10) ?? '1970-01-01',
-      ...(typeof row.description === 'string' ? { comments: row.description } : {})
+      ...(typeof row.msp_forecastcomments === 'string' ? { comments: row.msp_forecastcomments } : {})
     }
   }
 
@@ -1263,14 +1394,21 @@ export class LiveMsxConnector implements MsxConnector {
     ids: string[],
     select: string
   ): Promise<T[]> {
-    const rows: T[] = []
-    for (let offset = 0; offset < ids.length; offset += 40) {
-      const chunk = ids.slice(offset, offset + 40)
+    return this.collectChunks(ids, (chunk) => {
       const idFilter = chunk.map((id) => `${idField} eq ${id}`).join(' or ')
-      rows.push(...await this.requestAll<T>(entitySet, {
+      return this.requestAll<T>(entitySet, {
         '$select': select,
         '$filter': `statecode eq 0 and (${idFilter})`
-      }))
+      })
+    })
+  }
+
+  private async collectChunks<T>(ids: string[], read: (chunk: string[]) => Promise<T[]>): Promise<T[]> {
+    const rows: T[] = []
+    for (let offset = 0; offset < ids.length; offset += 80) {
+      this.readContext.getStore()?.signal?.throwIfAborted()
+      const chunks = [ids.slice(offset, offset + 40), ids.slice(offset + 40, offset + 80)].filter((chunk) => chunk.length > 0)
+      rows.push(...(await Promise.all(chunks.map(read))).flat())
     }
     return rows
   }
@@ -1282,6 +1420,7 @@ export class LiveMsxConnector implements MsxConnector {
     const rows: T[] = []
     let nextUrl: URL | undefined = firstUrl
     while (nextUrl) {
+      this.readContext.getStore()?.signal?.throwIfAborted()
       this.assertTrustedUrl(nextUrl)
       const page: ODataPage<T> = await this.requestJson<ODataPage<T>>(nextUrl)
       rows.push(...page.value)
@@ -1293,31 +1432,45 @@ export class LiveMsxConnector implements MsxConnector {
   private async requestJson<T>(pathOrUrl: string | URL): Promise<T> {
     const url = pathOrUrl instanceof URL ? pathOrUrl : new URL(pathOrUrl, this.baseUrl)
     this.assertTrustedUrl(url)
+    const signal = this.readContext.getStore()?.signal
+    signal?.throwIfAborted()
     const accessToken = await this.tokenProvider.getAccessToken()
-    const response = await this.fetchImplementation(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/json',
-        Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=500'
+    signal?.throwIfAborted()
+    return measurePerformance('msx.http.read', this.performanceReporter, async () => {
+      const response = await this.fetchImplementation(url, {
+        ...(signal ? { signal } : {}),
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
+          Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue",odata.maxpagesize=500'
+        }
+      })
+      signal?.throwIfAborted()
+      if (!response.ok) {
+        const retry = response.headers.get('retry-after')
+        const retryAfterMs = retry === null ? undefined : /^\d+$/.test(retry)
+          ? Number(retry) * 1000 : Math.max(0, Date.parse(retry) - Date.now())
+        throw new MsxRequestError(`MSX request failed with status ${response.status}.`, response.status,
+          retryAfterMs !== undefined && Number.isFinite(retryAfterMs) ? retryAfterMs : undefined)
       }
+      const result: unknown = await response.json()
+      signal?.throwIfAborted()
+      this.rememberNativeVersions(result)
+      return result as T
     })
-    if (!response.ok) {
-      throw new MsxRequestError(`MSX request failed with status ${response.status}.`, response.status)
-    }
-    const result: unknown = await response.json()
-    if (this.cacheOptions.requireConditionalWrites) this.rememberNativeVersions(result)
-    return result as T
   }
 
   private async patch(path: string, body: Record<string, unknown>): Promise<void> {
     const url = new URL(path, this.baseUrl)
     this.assertTrustedUrl(url)
     const expected = this.expectedVersions.getStore()
-    const version = this.cacheOptions.requireConditionalWrites ? expected?.[path.toLowerCase()] : '*'
-    if (!version || this.cacheOptions.requireConditionalWrites && !/^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(version)) {
-      throw new Error('A reviewed native concurrency token is required before this update.')
+    const conditional = this.cacheOptions.requireConditionalWrites || expected !== undefined
+    const version = conditional ? expected?.versions[path.toLowerCase()] : '*'
+    if (!version || conditional && !/^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(version)) {
+      throw new MsxRequestError('A reviewed native concurrency token is required before this update.', undefined, undefined, 'not-dispatched')
     }
-    const accessToken = await this.tokenProvider.getAccessToken()
+    const accessToken = await this.writeAccessToken()
+    this.expectedVersions.getStore()?.onDispatch?.()
     const response = await this.fetchImplementation(url, {
       method: 'PATCH',
       headers: {
@@ -1331,17 +1484,18 @@ export class LiveMsxConnector implements MsxConnector {
     if (!response.ok) {
       throw new MsxRequestError(`MSX update failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status)
     }
-    if (this.cacheOptions.requireConditionalWrites && expected) {
+    if (conditional && expected) {
       const next = response.headers.get('etag')
-      if (next && /^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(next)) expected[path.toLowerCase()] = next
-      else delete expected[path.toLowerCase()]
+      if (next && /^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(next)) expected.versions[path.toLowerCase()] = next
+      else delete expected.versions[path.toLowerCase()]
     }
   }
 
   private async post(path: string, body: Record<string, unknown>): Promise<void> {
     const url = new URL(path, this.baseUrl)
     this.assertTrustedUrl(url)
-    const accessToken = await this.tokenProvider.getAccessToken()
+    const accessToken = await this.writeAccessToken()
+    this.expectedVersions.getStore()?.onDispatch?.()
     const response = await this.fetchImplementation(url, {
       method: 'POST',
       headers: {
@@ -1360,7 +1514,8 @@ export class LiveMsxConnector implements MsxConnector {
   private async postReturningEntity<T>(path: string, body: Record<string, unknown>, operation: 'create' | 'search' = 'create'): Promise<T> {
     const url = new URL(path, this.baseUrl)
     this.assertTrustedUrl(url)
-    const accessToken = await this.tokenProvider.getAccessToken()
+    const accessToken = operation === 'search' ? await this.tokenProvider.getAccessToken() : await this.writeAccessToken()
+    if (operation === 'create') this.expectedVersions.getStore()?.onDispatch?.()
     const response = await this.fetchImplementation(url, {
       method: 'POST',
       headers: {
@@ -1381,9 +1536,15 @@ export class LiveMsxConnector implements MsxConnector {
   private async delete(path: string): Promise<void> {
     const url = new URL(path, this.baseUrl)
     this.assertTrustedUrl(url)
-    const version = this.cacheOptions.requireConditionalWrites ? this.entityVersions.get(path.toLowerCase()) : '*'
-    if (!version) throw new Error('A verified native membership concurrency token is required before removal.')
-    const accessToken = await this.tokenProvider.getAccessToken()
+    const expected = this.expectedVersions.getStore()
+    const conditional = this.cacheOptions.requireConditionalWrites || expected !== undefined
+    const version = conditional ? expected?.versions[path.toLowerCase()]
+      ?? (this.readContext.getStore()?.versions ?? this.entityVersions).get(path.toLowerCase()) : '*'
+    if (!version || conditional && !/^(?:W\/)?"[A-Za-z0-9-]{1,100}"$/.test(version)) {
+      throw new MsxRequestError('A verified native membership concurrency token is required before removal.', undefined, undefined, 'not-dispatched')
+    }
+    const accessToken = await this.writeAccessToken()
+    this.expectedVersions.getStore()?.onDispatch?.()
     const response = await this.fetchImplementation(url, {
       method: 'DELETE',
       headers: {
@@ -1395,6 +1556,12 @@ export class LiveMsxConnector implements MsxConnector {
     if (!response.ok) {
       throw new MsxRequestError(`MSX delete failed with status ${response.status}${await serviceErrorDetail(response)}.`, response.status)
     }
+  }
+
+  private async writeAccessToken(): Promise<string> {
+    const token = await this.tokenProvider.getAccessToken()
+    this.expectedVersions.getStore()?.verifyAccessToken?.(token)
+    return token
   }
 
   private assertTrustedUrl(url: URL): void {

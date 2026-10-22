@@ -1,5 +1,6 @@
 import { createServer } from 'node:http'
 import { resolve } from 'node:path'
+import { existsSync } from 'node:fs'
 import { buildWebApiHandler, type WebRuntime } from './app.js'
 import { assertLoopbackHost, createAzureCliAuthentication, createSampleAuthentication } from './authentication.js'
 import { buildStaticHandler, setSecurityHeaders } from './hosting.js'
@@ -15,6 +16,8 @@ import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
 import { createSampleTaskAgents } from '../../../packages/orchestrator/task-agents.js'
 import { RecordCreationService } from '../../../packages/orchestrator/record-creation/service.js'
 import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
+import { localMutationState } from '../../../packages/connectors/common/mutation-state.js'
+import { createMutationSession } from '../../../packages/orchestrator/mutations/composition.js'
 
 const port = parsePort(process.env['PORT'])
 const mode = resolveWebHostMode(process.env)
@@ -72,6 +75,14 @@ const sampleRuntime = sampleMsx
 const createRuntime = sampleRuntime
     ? () => sampleRuntime
     : await createHostedRuntimeFactory()
+const sampleMutationPath = resolve(process.env['TLC_MUTATION_STATE_PATH'] || '.tlc/web-sample-mutations.sqlite')
+const sampleMutationState = sampleRuntime && (process.env['TLC_BACKGROUND_SYNC'] === '1' || existsSync(sampleMutationPath))
+    ? await localMutationState(sampleMutationPath) : undefined
+const sampleMutations = sampleRuntime instanceof ThinSliceOrchestrator && sampleMutationState ? createMutationSession({
+    core: sampleRuntime, mode: 'sample', source: 'web:sample', state: sampleMutationState,
+    enabled: process.env['TLC_BACKGROUND_SYNC'] === '1', readCacheOwner: 'client', applyMeeting: (input) => sampleRuntime.applyMeetingChangeSet(input)
+}) : undefined
+if (sampleRuntime && sampleMutations) sampleRuntime.mutationSync = (request) => sampleMutations.invoke(request)
 const sampleWorkflowHost = sampleMsx ? createSampleWorkflowHost(async () => {
     const accounts = await sampleMsx.listAccounts()
     const opportunities = (await Promise.all(accounts.map((account) => sampleMsx.listOpportunities(account.id)))).flat()
@@ -84,7 +95,8 @@ const resolveWorkflowHost = sampleWorkflowHost ? () => sampleWorkflowHost : awai
 const authenticate = mode === 'sample'
     ? createSampleAuthentication()
     : mode === 'azure-cli' ? createAzureCliAuthentication() : undefined
-const serveStatic = buildStaticHandler(staticRoot, mode === 'sample' ? 'sample' : 'live')
+const serveStatic = buildStaticHandler(staticRoot, mode === 'sample' ? 'sample' : 'live',
+    process.env['TLC_BACKGROUND_SYNC'] === '1' || sampleMutationState?.durable === true || Boolean(process.env['TLC_MUTATION_TABLE_URL']?.trim()))
 const handleApi = buildWebApiHandler({
     createRuntime,
     resolveWorkflowHost,
@@ -108,11 +120,25 @@ const server = createServer(async (request, response) => {
     }
 })
 
-async function closeLocalServer(): Promise<void> {
-    await new Promise<void>((resolveClose, rejectClose) => {
-        server.close((error) => error ? rejectClose(error) : resolveClose())
-    })
+let closing: Promise<void> | undefined
+function closeLocalServer(): Promise<void> {
+    closing ??= (async () => {
+        await sampleMutations?.drain()
+        if ('dispose' in createRuntime && typeof createRuntime.dispose === 'function') await createRuntime.dispose()
+        await new Promise<void>((resolveClose, rejectClose) => {
+            server.close((error) => error ? rejectClose(error) : resolveClose())
+        })
+        sampleMutationState?.close()
+    })()
+    return closing
 }
+
+let stopping: Promise<void> | undefined
+const stop = () => {
+    stopping ??= closeLocalServer().catch(() => { console.error('[web-host] shutdown_failed'); process.exitCode = 1 })
+}
+process.once('SIGINT', stop)
+process.once('SIGTERM', stop)
 
 try {
     await listenWebServer(server, port, host)

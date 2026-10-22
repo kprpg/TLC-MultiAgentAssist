@@ -449,6 +449,13 @@ Each row summarizes one active opportunity with:
 
 Hovering an opportunity shows a full tooltip with the stage owner and additional context.
 
+Select an opportunity in the list to focus it in the middle Guidance/details pane. Its title in that
+pane is an **MSX hyperlink**: click it, or focus it and press **Enter**, to open that opportunity in your
+browser without leaving TLC or changing the selected opportunity. This works in Desktop, Web,
+the VS Code webview, and Teams. List clicks still select opportunities; they do not launch MSX.
+MSX requires your usual sign-in and record access. Sample-mode links use sanitized sample IDs,
+not real MSX records.
+
 ### 4.1 Sorting opportunities
 
 Click the sort icon (⇅) in the Opportunities blade header. A menu lets you sort by:
@@ -465,9 +472,22 @@ The active sort is indicated with a check mark, and the button’s tooltip alway
 
 Right-click an opportunity, or open its **⋯** menu, and choose **Opportunity Comments** to add or update a free-text note. Comments are written back to MSX after human review of the change.
 
+Across Desktop, Web, and the VS Code webview, opportunity comments read and update MSX
+**Forecast Comments** (`msp_forecastcomments`), not the separate **Need** (`description`) field.
+Save succeeds only after MSX accepts the update and a fresh source read confirms the saved text.
+If the update is rejected or cannot be verified, the editor retains your draft and displays an error;
+check the record in MSX before retrying an unconfirmed save. Sample mode changes sample data only.
+Comments previously saved into Need by older builds are not moved automatically.
+
 The **⋮** icon menu on each opportunity currently exposes:
 
 - **Opportunity Comments** — inline edit of the opportunity’s comment field.
+
+In the browser/Teams Portfolio, the **Opportunities** table includes a **Comments** column
+showing the current source comments. Expand **Opportunity Comments** in a row to edit them,
+then choose **Review opportunity update**. Canceling the private review leaves the source
+unchanged; only confirming the reviewed changes submits the update. This entry point remains
+available when the opportunity details and Next Best Actions panels are hidden.
 
 ---
 
@@ -602,10 +622,21 @@ Every agent response follows the same contract:
 - Explicit assumptions and cautions — anything the agent could not confirm from the current evidence.
 - Citations to the underlying MSX/MCEM evidence items.
 
-Two actions sit beside a completed response:
+Two actions sit in the header of a completed response:
 
 - **Send Email** — opens a pre-populated draft in your default Outlook client. Nothing is sent automatically; you review and press *Send* yourself.
 - **Export** — downloads the same response as a formatted Word (`.docx`) document ready to attach to a review or QBR deck.
+
+In the browser/Teams **Portfolio > Guidance** response, these controls are at the top right:
+**Export Word**, **Email draft recipients**, and **Download unsent email draft**. Enter
+recipient addresses separated by commas or semicolons to download an unsent `.eml` draft;
+the browser does not send it automatically.
+
+After **Meeting Capture** analyzes a transcript, the same controls appear at the top right
+of **Follow-up > Proposed meeting changes**. The export includes the proposed field changes,
+new milestones and other signals, plus the evidence attribution and a reminder that the
+suggestions have not been applied. Downloading a document or email draft does not approve
+or apply any MSX changes.
 
 ---
 

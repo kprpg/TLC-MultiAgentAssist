@@ -144,6 +144,29 @@ Packaged upgrades migrate the untouched legacy shared `azure-cli` configuration 
 
 Known template UUIDs and `YOUR-*` endpoints are rejected before credentials are created.
 
+## Memory cache and optional background saves
+
+The trusted main process owns the private browsing cache. Fresh Portfolio/Discovery
+navigation and filters are local; details/catalogs load lazily and visible stale
+data revalidates quietly. Use Refresh for a current source check.
+
+The synchronization indicators share a compact, automatically sized strip above the
+tabs. If an already-open window shows a large blank area there after an update,
+fully close and relaunch Desktop to load the matching rebuilt JavaScript and styles.
+
+Set `TLC_BACKGROUND_SYNC=1` before launch to enable capability-gated confirmed
+background saves. Local receipts live under `userData\mutation-state`; live payloads
+require a master key protected by Electron `safeStorage`. Storage starts after
+Electron readiness. A pending value is not a Saved acknowledgement.
+
+Quit drains admitted work for a bounded interval. If a pending-source warning appears,
+keep the app open to check it or explicitly close and recover with the same identity.
+Canceling quit does not dispose the store or leave admissions permanently disabled.
+For rollback, set the flag to `0` and preserve the databases/protected key.
+
+See [cache policy, supported live operations and reconciliation](../performance/performance-optimization.md#adaptive-freshness-and-confirmed-background-writes).
+No offline write replay or unreviewed autosave is enabled.
+
 ## Development mode
 
 Start Vite in watch mode and launch Electron with live renderer updates:

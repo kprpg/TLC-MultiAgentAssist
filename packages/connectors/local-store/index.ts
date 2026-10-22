@@ -190,11 +190,11 @@ export class LocalStoreMsxConnector implements MsxConnector {
     })
   }
 
-  private toOpportunity(row: Record<string, unknown>): Opportunity {
-    const owner = this.ownerName(row['owner_id'])
+  private toOpportunity(row: Record<string, unknown>, references?: { owner: string | undefined; intents: ReadonlyMap<number, string> }): Opportunity {
+    const owner = references ? references.owner : this.ownerName(row['owner_id'])
     const comments = str(row['description'])
     const intentCodes = str(row['opportunity_intent_codes'])?.split(',') ?? []
-    const intent = intentCodes.map((code) => str(this.store.get(
+    const intent = intentCodes.map((code) => references ? references.intents.get(Number(code)) : str(this.store.get(
       'SELECT label FROM option_value WHERE option_set = ? AND code = ?',
       'msp_opportunitytype', Number(code)
     )?.['label'])).filter((value): value is string => value !== undefined)
@@ -212,8 +212,18 @@ export class LocalStoreMsxConnector implements MsxConnector {
     })
   }
 
-  private toMilestone(row: Record<string, unknown>): Milestone {
-    const owner = this.ownerName(row['owner_id'])
+  private mapOpportunities(rows: Record<string, unknown>[]): Opportunity[] {
+    if (rows.length === 0) return []
+    const intents = new Map<number, string>()
+    for (const row of this.store.all('SELECT code, label FROM option_value WHERE option_set = ?', 'msp_opportunitytype')) {
+      const label = str(row['label'])
+      if (label !== undefined) intents.set(Number(row['code']), label)
+    }
+    return rows.map((row) => this.toOpportunity(row, { owner: str(row['portfolio_owner_name']), intents }))
+  }
+
+  private toMilestone(row: Record<string, unknown>, references?: { owner: string | undefined }): Milestone {
+    const owner = references ? references.owner : this.ownerName(row['owner_id'])
     const status = MILESTONE_STATUS[num(row['status']) ?? -1] ?? 'On Track'
     const commitmentCode = num(row['commitment'])
     const commitment = commitmentCode === undefined ? undefined : COMMITMENT[commitmentCode]
@@ -295,37 +305,61 @@ export class LocalStoreMsxConnector implements MsxConnector {
 
   async listOpportunities(accountId: string): Promise<Opportunity[]> {
     if (str(this.store.get('SELECT visibility FROM account WHERE id = ?', accountId)?.['visibility']) === 'hidden') return []
-    return this.store.all(
-      `SELECT o.* FROM opportunity o
+    return this.mapOpportunities(this.store.all(
+      `SELECT o.*, u.fullname AS portfolio_owner_name FROM opportunity o
+       LEFT JOIN systemuser u ON u.id = o.owner_id
        WHERE o.account_id = ? AND (
          EXISTS (SELECT 1 FROM opportunity_dealteam dt WHERE dt.opportunity_id = o.id AND dt.systemuser_id = ?)
          OR EXISTS (SELECT 1 FROM milestone_team_member mt WHERE mt.opportunity_id = o.id AND mt.systemuser_id = ?)
        )
        ORDER BY o.estimated_close_date`,
       accountId, this.currentUserId, this.currentUserId
-    ).map((row) => this.toOpportunity(row))
+    ))
+  }
+
+  async getPortfolioIndex(options: AccountListOptions = {}): Promise<{ accounts: Account[]; opportunities: Opportunity[] }> {
+    const accounts = await this.listAccounts(options)
+    const groups = new Map<string, Opportunity[]>(accounts.filter((account) => account.visibility !== 'hidden').map((account) => [account.id, []]))
+    const opportunities = this.mapOpportunities(this.store.all(
+      `SELECT o.*, u.fullname AS portfolio_owner_name FROM opportunity o
+       JOIN account a ON a.id = o.account_id
+       LEFT JOIN systemuser u ON u.id = o.owner_id
+       WHERE a.visibility <> 'hidden' AND (
+         EXISTS (SELECT 1 FROM opportunity_dealteam dt WHERE dt.opportunity_id = o.id AND dt.systemuser_id = ?)
+         OR EXISTS (SELECT 1 FROM milestone_team_member mt WHERE mt.opportunity_id = o.id AND mt.systemuser_id = ?)
+       )
+       ORDER BY o.estimated_close_date`,
+      this.currentUserId, this.currentUserId
+    ))
+    for (const opportunity of opportunities) groups.get(opportunity.accountId)?.push(opportunity)
+    return { accounts, opportunities: accounts.flatMap((account) => groups.get(account.id) ?? []) }
   }
 
   async listMilestones(opportunityId: string): Promise<Milestone[]> {
     this.assertOpportunityAccess(opportunityId)
+    return this.readMilestones(opportunityId)
+  }
+
+  private readMilestones(opportunityId: string): Milestone[] {
     const memberMilestoneIds = new Set(this.store.all(
       'SELECT milestone_id FROM milestone_team_member WHERE opportunity_id = ? AND systemuser_id = ?',
       opportunityId, this.currentUserId
     ).map((row) => String(row['milestone_id'])))
-    return this.store.all('SELECT * FROM engagement_milestone WHERE opportunity_id = ? ORDER BY milestone_date', opportunityId)
-      .map((row) => ({ ...this.toMilestone(row), onMilestoneTeam: memberMilestoneIds.has(String(row['id'])) }))
+    return this.store.all(
+      `SELECT m.*, u.fullname AS portfolio_owner_name FROM engagement_milestone m
+       LEFT JOIN systemuser u ON u.id = m.owner_id
+       WHERE m.opportunity_id = ? ORDER BY m.milestone_date`, opportunityId
+    ).map((row) => ({
+      ...this.toMilestone(row, { owner: str(row['portfolio_owner_name']) }),
+      onMilestoneTeam: memberMilestoneIds.has(String(row['id']))
+    }))
   }
 
   async listDiscoverableMilestones(opportunityId: string): Promise<Milestone[]> {
     // No portfolio gate: lists milestones for an opportunity in the user's account scope so a
     // milestone team can be joined without Deal Team membership. Returns [] for a discovery
     // candidate that has not yet been promoted into the store.
-    const memberMilestoneIds = new Set(this.store.all(
-      'SELECT milestone_id FROM milestone_team_member WHERE opportunity_id = ? AND systemuser_id = ?',
-      opportunityId, this.currentUserId
-    ).map((row) => String(row['milestone_id'])))
-    return this.store.all('SELECT * FROM engagement_milestone WHERE opportunity_id = ? ORDER BY milestone_date', opportunityId)
-      .map((row) => ({ ...this.toMilestone(row), onMilestoneTeam: memberMilestoneIds.has(String(row['id'])) }))
+    return this.readMilestones(opportunityId)
   }
 
   private toMilestoneActivity(row: Record<string, unknown>): MilestoneActivity {

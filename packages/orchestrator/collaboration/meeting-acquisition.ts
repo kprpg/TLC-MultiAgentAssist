@@ -1,13 +1,22 @@
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import { acquisitionSchema, collaborationVersion, type Acquisition } from '../../common/contracts/collaboration.js'
-import { meetingChangeSetProposalSchema, type MeetingChangeSetProposal, type MeetingTranscript } from '../../common/contracts/meeting.js'
+import {
+  manualMeetingTranscriptRequestSchema, meetingChangeSetProposalSchema, meetingTranscriptSchema, transcriptMaximumSegments,
+  type MeetingChangeSetProposal, type MeetingTranscript
+} from '../../common/contracts/meeting.js'
 import { GraphMeetingError, type GraphAcquisitionResult } from '../../connectors/graph/meetings.js'
+import { parseTranscriptContent } from '../../agents/meeting-signal-extractor/src/transcript-parse.js'
 import type { ScopedDocumentStore } from '../../connectors/common/scoped-document-store.js'
 import { principalPartition, requireRole, type ExecutionPrincipal } from './principal.js'
 import { canonicalJson } from './reviewed-actions.js'
 import { CollaborationLifecycle } from './lifecycle.js'
 import { UserRequestBudget } from './request-budget.js'
+
+export { GraphMeetingError }
+export class ManualTranscriptError extends Error {
+  constructor(readonly code: 'empty_transcript' | 'too_many_transcript_segments') { super(code) }
+}
 
 export const meetingAcquisitionRequestSchema = z.object({
   meetingId: z.string().min(1).max(500),
@@ -22,8 +31,18 @@ const recordSchema = z.object({
   claimUntil: z.number(),
   status: acquisitionSchema,
   versions: z.record(z.string(), z.string()),
-  proposals: z.array(meetingChangeSetProposalSchema)
+  proposals: z.array(meetingChangeSetProposalSchema),
+  manualTranscript: meetingTranscriptSchema.optional()
 }).strict()
+
+type AcquisitionResult = { status: Acquisition; proposals: MeetingChangeSetProposal[]; evidenceVersion?: string }
+
+function manualEvidence(transcript: MeetingTranscript): GraphAcquisitionResult {
+  return {
+    state: 'ready', meetingId: transcript.id, transcripts: [transcript], attribution: 'unknown',
+    contentVersions: { [transcript.id]: createHash('sha256').update(canonicalJson(transcript)).digest('hex') }
+  }
+}
 
 export class MeetingAcquisitionService {
   constructor(private readonly store: ScopedDocumentStore, private readonly options: {
@@ -31,20 +50,40 @@ export class MeetingAcquisitionService {
     getTranscripts(principal: ExecutionPrincipal, request: MeetingAcquisitionRequest): Promise<GraphAcquisitionResult>
     propose(principal: ExecutionPrincipal, opportunityId: string, transcript: MeetingTranscript): Promise<MeetingChangeSetProposal>
   }) {}
-  async acquire(principal: ExecutionPrincipal, raw: unknown, notification?: { notificationId: string }): Promise<{ status: Acquisition; proposals: MeetingChangeSetProposal[]; evidenceVersion?: string }> {
+  async ingest(principal: ExecutionPrincipal, raw: unknown): Promise<AcquisitionResult> {
+    requireRole(principal, 'TLC.Teams.User')
+    const input = manualMeetingTranscriptRequestSchema.parse(raw)
+    const transcript = parseTranscriptContent(input.content, {
+      id: `manual-${createHash('sha256').update(canonicalJson(input)).digest('hex')}`,
+      opportunityId: input.opportunityId, meetingType: input.meetingType, source: input.source,
+      ...(input.format ? { format: input.format } : {})
+    })
+    if (transcript.segments.length === 0) throw new ManualTranscriptError('empty_transcript')
+    if (transcript.segments.length > transcriptMaximumSegments) throw new ManualTranscriptError('too_many_transcript_segments')
+    return this.acquireTranscript(principal, {
+      meetingId: transcript.id, opportunityId: input.opportunityId, meetingType: input.meetingType
+    }, undefined, transcript)
+  }
+  async acquire(principal: ExecutionPrincipal, raw: unknown, notification?: { notificationId: string }): Promise<AcquisitionResult> {
+    return this.acquireTranscript(principal, raw, notification)
+  }
+  private async acquireTranscript(principal: ExecutionPrincipal, raw: unknown, notification?: { notificationId: string }, manualTranscript?: MeetingTranscript): Promise<AcquisitionResult> {
     requireRole(principal, 'TLC.Teams.User')
     const request = meetingAcquisitionRequestSchema.parse(raw)
     const lifecycle = new CollaborationLifecycle(this.store)
     const admission = await lifecycle.assertActive(principal)
     await this.options.readOpportunity(principal, request.opportunityId)
-    const id = createHash('sha256').update(canonicalJson(request)).digest('hex')
+    const id = `${manualTranscript ? 'manual-' : ''}${createHash('sha256').update(canonicalJson(request)).digest('hex')}`
     const key = `acquisition:${id}`
     const partition = principalPartition(principal)
     const status: Acquisition = {
       contractVersion: collaborationVersion, id, meetingId: request.meetingId, state: 'waiting',
       transcriptIds: [], attribution: 'unknown', detail: 'Checking authorized meeting transcripts.', checkedAt: new Date().toISOString()
     }
-    await this.store.insert(partition, key, { request, attempts: 0, claimUntil: 0, status, versions: {}, proposals: [] })
+    await this.store.insert(partition, key, {
+      request, attempts: 0, claimUntil: 0, status, versions: {}, proposals: [],
+      ...(manualTranscript ? { manualTranscript } : {})
+    })
     const row = await this.store.read(partition, key)
     if (!row) throw new Error('The meeting acquisition could not be persisted.')
     const record = recordSchema.parse(row.value)
@@ -63,13 +102,17 @@ export class MeetingAcquisitionService {
     let updated = { ...record, notificationPasses, attempts: attempts + 1, claimUntil: 0 }
     try {
       await lifecycle.assertGeneration(principal, admission.generation)
-      const result = await this.options.getTranscripts(principal, request)
+      const result = record.manualTranscript ? manualEvidence(record.manualTranscript) : await this.options.getTranscripts(principal, request)
       await lifecycle.assertGeneration(principal, admission.generation)
       const proposals: MeetingChangeSetProposal[] = []
       if (result.transcripts.length) await new UserRequestBudget(this.store).consume(principal, 'agent', principal.mode === 'sample' ? 60 : 4)
       for (const transcript of result.transcripts) {
         await lifecycle.assertActive(principal)
-        proposals.push(meetingChangeSetProposalSchema.parse(await this.options.propose(principal, request.opportunityId, transcript)))
+        const proposal = meetingChangeSetProposalSchema.parse(await this.options.propose(principal, request.opportunityId, transcript))
+        if (proposal.opportunityId !== request.opportunityId || proposal.transcriptId !== transcript.id || proposal.meetingType !== request.meetingType) {
+          throw new Error('The extracted meeting proposal does not match the authorized transcript and opportunity.')
+        }
+        proposals.push(proposal)
       }
       await lifecycle.assertGeneration(principal, admission.generation)
       updated = {
@@ -77,7 +120,11 @@ export class MeetingAcquisitionService {
         status: acquisitionSchema.parse({
           ...status, state: result.state, transcriptIds: result.transcripts.map((transcript) => transcript.id),
           attribution: result.attribution, checkedAt: new Date().toISOString(),
-          detail: result.state === 'ready' ? 'Authorized transcripts acquired automatically. Review proposed changes before applying.' : 'The meeting transcript is not ready.'
+          detail: result.state === 'ready'
+            ? record.manualTranscript
+              ? 'Manual transcript accepted as user-provided evidence, not a Graph-verified meeting. Review proposed changes before applying.'
+              : 'Authorized transcripts acquired automatically. Review proposed changes before applying.'
+            : 'The meeting transcript is not ready.'
         })
       }
     } catch (error) {
@@ -105,7 +152,7 @@ export class MeetingAcquisitionService {
     const record = recordSchema.parse(row.value)
     if (record.status.state !== 'ready') throw new Error('The meeting draft is not ready.')
     await this.options.readOpportunity(principal, record.request.opportunityId)
-    const current = await this.options.getTranscripts(principal, record.request)
+    const current = record.manualTranscript ? manualEvidence(record.manualTranscript) : await this.options.getTranscripts(principal, record.request)
     if (canonicalJson(current.contentVersions) !== canonicalJson(record.versions)) {
       throw new Error('Transcript evidence changed. Acquire and review a new draft.')
     }

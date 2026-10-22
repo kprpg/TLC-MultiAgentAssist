@@ -1,4 +1,5 @@
 import {
+    createPerformanceReporter,
     dataverseEntityMapSchema,
     mcpServerRegistrySchema,
     mcpToolPolicySchema,
@@ -21,6 +22,7 @@ import { createLivePlayWorkflowHost, type WorkflowStepErrorInfo } from '../../..
 import type { ExtensionDataProvider } from './data-provider.js'
 import { ExtensionMcemGuidanceConnector } from './mcem-guidance.js'
 import { AGENT_CAPABILITIES, buildLiveDataProvider, buildLiveTaskAgents } from './live-provider-core.js'
+import { bindSourceToken } from '../../../packages/orchestrator/mutations/core-adapter.js'
 
 export function configuredFoundryTenantId(): string | undefined {
     const parsed = foundryEnvironmentSchema.safeParse(foundryEnvironmentJson)
@@ -85,15 +87,18 @@ export function createLiveDataProvider(
     preferenceFilePath?: string,
     foundryCredential?: TokenCredential
 ): ExtensionDataProvider {
+    const sourceToken = bindSourceToken(getToken, 'https://microsoftsales.crm.dynamics.com')
     const registry = mcpServerRegistrySchema.parse(mcpServersJson)
     const policy = mcpToolPolicySchema.parse(mcpToolPolicyJson)
     const entityMap = dataverseEntityMapSchema.parse(dataverseEntityMapJson)
     const metadata = msxWriteMetadataFromEnvironment(process.env)
+    const performanceReporter = createPerformanceReporter(process.env['TLC_PERFORMANCE'] === '1',
+        (message) => console.info(`[performance] ${message}`))
     const msx = preferenceFilePath
-        ? new LiveMsxConnector({ getAccessToken: getToken }, fetch, undefined, undefined, metadata, new JsonFilePortfolioPreferenceStore(preferenceFilePath))
-        : new LiveMsxConnector({ getAccessToken: getToken }, fetch, undefined, undefined, metadata)
+        ? new LiveMsxConnector({ getAccessToken: sourceToken }, fetch, undefined, performanceReporter, metadata, new JsonFilePortfolioPreferenceStore(preferenceFilePath))
+        : new LiveMsxConnector({ getAccessToken: sourceToken }, fetch, undefined, performanceReporter, metadata)
     const taskAgents = (useFoundryAgents ? buildFoundryTaskAgents(foundryCredential) : undefined) ?? buildLiveTaskAgents()
-    const orchestrator = new ThinSliceOrchestrator(msx, new ExtensionMcemGuidanceConnector(), taskAgents, undefined, new RecordCreationService(msx, msx))
+    const orchestrator = new ThinSliceOrchestrator(msx, new ExtensionMcemGuidanceConnector(), taskAgents, performanceReporter, new RecordCreationService(msx, msx))
     const meetingConnector = new LiveMeetingCaptureConnector(msx)
     const meetingExtractor = buildFoundryMeetingExtractor(process.env, foundryCredential)
 
@@ -101,12 +106,12 @@ export function createLiveDataProvider(
         registry,
         policy,
         entityMap,
-        getAccessToken: () => getToken(),
+        getAccessToken: () => sourceToken(),
         resolveCurrentUserId: () => msx.getCurrentUserId(),
         resolveExcludedAccountIds: async () => (await msx.listAccounts({ includeHidden: true }))
             .filter((candidate) => candidate.visibility === 'hidden')
             .map((candidate) => candidate.id),
         ...(onStepError ? { onStepError } : {})
     })
-    return buildLiveDataProvider({ orchestrator, host: configured.host, account, meetingConnector, ...(meetingExtractor ? { meetingExtractor } : {}), dispose: () => configured.dispose() })
+    return buildLiveDataProvider({ orchestrator, host: configured.host, account, meetingConnector, getSourceToken: sourceToken, ...(meetingExtractor ? { meetingExtractor } : {}), dispose: () => configured.dispose() })
 }

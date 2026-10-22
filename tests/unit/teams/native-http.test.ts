@@ -75,6 +75,54 @@ async function fixture(services?: ApplicationServices, writeMode?: CliWriteMode)
   return { pairing, send, resolveServices, refreshIdentity, changeBeforeResponse: () => { changeBeforeResponse = true }, changeGeneration: () => { identity.generation++ } }
 }
 describe('native HTTP admission without any real source access', () => {
+  it('requires explicit MCP connection before costly workflow source reads without discarding the paired MSX session', async () => {
+    const { pairing, send, resolveServices } = await fixture(undefined, 'reviewed')
+    const verifier = randomBytes(32).toString('base64url')
+    const pending = pairing.begin({ contractVersion: localConnectionVersion, challenge: createHash('sha256').update(verifier).digest('base64url') }, origin)
+    pairing.approve(pending.userCode)
+    const paired = pairing.exchange({ contractVersion: localConnectionVersion, requestId: pending.requestId, verifier }, origin)
+    if (paired.state !== 'paired') throw new Error('Fixture pairing failed.')
+    const headers = { authorization: `Bearer ${paired.token}` }
+    const response = await send('/api/teams/operations/workflows.start', { contractVersion: '1.0', workflowId: 'WF-001', scope: { kind: 'portfolio' } }, headers)
+    expect(response.status).toBe(409)
+    expect(JSON.parse(response.text)).toMatchObject({ error: 'mcp_connection_required' })
+    expect((await send('/api/teams/session', undefined, headers)).status).toBe(200)
+    expect(resolveServices).not.toHaveBeenCalled()
+  })
+
+  it('keeps manual transcript extraction readable but rejects meeting-change review in a read-only CLI profile before source initialization', async () => {
+    const { pairing, send, resolveServices } = await fixture(undefined, 'read-only')
+    const verifier = randomBytes(32).toString('base64url')
+    const pending = pairing.begin({ contractVersion: localConnectionVersion, challenge: createHash('sha256').update(verifier).digest('base64url') }, origin)
+    pairing.approve(pending.userCode)
+    const paired = pairing.exchange({ contractVersion: localConnectionVersion, requestId: pending.requestId, verifier }, origin)
+    if (paired.state !== 'paired') throw new Error('Fixture pairing failed.')
+    const response = await send('/api/teams/meetings/preview-changes', {}, { authorization: `Bearer ${paired.token}` })
+    expect(response.status).toBe(403)
+    expect(JSON.parse(response.text)).toMatchObject({ error: 'local_read_only' })
+    expect(resolveServices).not.toHaveBeenCalled()
+  })
+
+  it('reports unsupported Graph lookup in a CLI profile before initializing source services and retains the paired MSX session', async () => {
+    const { pairing, send, resolveServices } = await fixture(undefined, 'reviewed')
+    const verifier = randomBytes(32).toString('base64url')
+    const pending = pairing.begin({ contractVersion: localConnectionVersion, challenge: createHash('sha256').update(verifier).digest('base64url') }, origin)
+    pairing.approve(pending.userCode)
+    const paired = pairing.exchange({ contractVersion: localConnectionVersion, requestId: pending.requestId, verifier }, origin)
+    if (paired.state !== 'paired') throw new Error('Fixture pairing failed.')
+    const headers = { authorization: `Bearer ${paired.token}` }
+    for (const [path, body] of [
+      ['/api/teams/meetings/resolve', { joinUrl: 'https://teams.microsoft.com/l/meetup-join/sanitized' }],
+      ['/api/teams/meetings/acquire', { meetingId: 'sanitized', opportunityId: 'opp', meetingType: 'internal' }]
+    ] as const) {
+      const result = await send(path, body, headers)
+      expect(result.status).toBe(409)
+      expect(JSON.parse(result.text)).toMatchObject({ error: 'graph_unavailable_in_cli_profile' })
+    }
+    expect((await send('/api/teams/session', undefined, headers)).status).toBe(200)
+    expect(resolveServices).not.toHaveBeenCalled()
+  })
+
   it('requires an issued page capability before silently revalidating the owner and renewing a lease', async () => {
     const { send, pairing, refreshIdentity, resolveServices } = await fixture()
     expect((await send('/api/teams/local/renew', { contractVersion: '1.0' })).status).toBe(401)
@@ -209,19 +257,20 @@ describe('native HTTP admission without any real source access', () => {
   it.each(['native', 'cli'] as const)('rejects an old %s review after reconnect and sends an exact ETag only for a fresh approved mock write', async (profile) => {
     const opportunityId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
     const accountId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
-    let description = 'Before'
+    let forecastComments = 'Before'
     let sourceAllowsWrite = true
     const transport = vi.fn<typeof fetch>(async (input, options) => {
       if (options?.method === 'PATCH') {
         expect(new Headers(options.headers).get('if-match')).toBe('W/"1"')
         if (!sourceAllowsWrite) return Response.json({ error: { message: 'Sanitized source permission denied' } }, { status: 403 })
-        description = 'Reviewed offline fixture'
+        expect(JSON.parse(String(options.body))).toEqual({ msp_forecastcomments: 'Reviewed offline fixture' })
+        forecastComments = 'Reviewed offline fixture'
         return new Response(null, { status: 204 })
       }
       const url = new URL(String(input))
       if (url.pathname.endsWith('WhoAmI')) return Response.json({ UserId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' })
       if (url.pathname.endsWith('msp_dealteams')) return Response.json({ value: [{ _msp_parentopportunityid_value: opportunityId }] })
-      if (url.pathname.endsWith('opportunities')) return Response.json({ value: [{ opportunityid: opportunityId, name: 'Offline fixture opportunity', _parentaccountid_value: accountId, msp_activesalesstage: 1, estimatedvalue: 100, description, '@odata.etag': 'W/"1"' }] })
+      if (url.pathname.endsWith('opportunities')) return Response.json({ value: [{ opportunityid: opportunityId, name: 'Offline fixture opportunity', _parentaccountid_value: accountId, msp_activesalesstage: 1, estimatedvalue: 100, description: 'Preserve the customer need.', msp_forecastcomments: forecastComments, '@odata.etag': 'W/"1"' }] })
       if (url.pathname.endsWith('accounts')) return Response.json({ value: [{ accountid: accountId, name: 'Offline fixture account' }] })
       return Response.json({ value: [] })
     })
@@ -262,6 +311,6 @@ describe('native HTTP admission without any real source access', () => {
     const deniedPreview = actionPreviewSchema.parse(JSON.parse((await send('/api/teams/actions/preview', input, headers)).text))
     const denied = await send('/api/teams/actions/commit', { contractVersion: collaborationVersion, id: deniedPreview.id, digest: deniedPreview.digest, reason: 'Source must enforce its current permissions' }, headers)
     expect(JSON.parse(denied.text)).toMatchObject({ state: 'effect-unknown' })
-    expect(description).toBe('Reviewed offline fixture')
+    expect(forecastComments).toBe('Reviewed offline fixture')
   })
 })

@@ -212,6 +212,22 @@ Guidance:
 
 ## Settings that affect behavior
 
+Browsing uses one provider-owned memory cache for native trees and the webview.
+Hiding/recreating the webview does not require another fresh MSX capture; hidden
+interests pause revalidation. **TLC: Refresh** explicitly revalidates the shared
+source snapshot rather than merely repainting the native tree.
+
+`TLC_BACKGROUND_SYNC=1` is an opt-in extension-host environment setting, not a
+browser-stored preference. Durable receipts use `globalStorageUri\mutation-state`;
+live encryption keys use VS Code SecretStorage. Sample background admission requires
+the source-core/SQLite provider; plain fixture mode keeps acknowledged/draft behavior.
+Native customer commands and webview actions use the same trusted mutation session.
+Keep the storage and original secret when disabling admission with `0`; private
+unknown outcomes remain recoverable with the original identity.
+
+See [defaults, live capability restrictions and recovery](../performance/performance-optimization.md#adaptive-freshness-and-confirmed-background-writes).
+Never add `unsafe-eval` or retain hidden webviews as a caching workaround.
+
 - `tlc.mode` (`sample` | `live`) — `sample` uses sanitized fixtures and makes no network
   calls; `live` requires a delegated Microsoft identity with MSX and Foundry access.
 - `tlc.openOnStartup` — open the workbench automatically on activation.

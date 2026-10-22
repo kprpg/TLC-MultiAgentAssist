@@ -30,6 +30,9 @@ import { localConnectionVersion, localOwnerCommandSchema } from '../../../packag
 import { NativeConnectionError } from './native-identity.js'
 import { TeamsLaunchMonitor } from './launch-status.js'
 import { teamsClientBuildSchema, teamsLaunchIdentitySchema, teamsLaunchVersion } from '../../../packages/common/contracts/teams-launch.js'
+import { teamsDataModeSchema } from '../../../packages/common/contracts/teams-data-mode.js'
+import { createTeamsPerformanceReporter } from './performance.js'
+import { createTeamsDataModeRouter } from './data-mode-router.js'
 
 export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.env) {
   const configuration = loadTeamsConfiguration(environment)
@@ -59,22 +62,32 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
       packageVersion: environment['TLC_TEAMS_PACKAGE_VERSION'], origin: configuration.origin, mode: configuration.mode,
       authentication: isLocalConfiguration(configuration) ? configuration.authentication : 'hosted-obo'
     }), native ? (code) => native.pairing.hasPage(code) : undefined) : undefined
-  const runtimeEnvironment = native?.environment ?? environment
+  const runtimeEnvironment: NodeJS.ProcessEnv = native?.environment ?? environment
+  const performanceReporter = createTeamsPerformanceReporter(runtimeEnvironment)
   const runtime = loadTeamsRuntimeConfiguration(runtimeEnvironment, configuration)
   const stateKey = configuration.mode === 'live' ? loadTeamsStateKey(runtimeEnvironment) : undefined
   const foundry = hosted || isNativeConfiguration(configuration) && configuration.guidanceMode === 'foundry'
     ? await loadFoundryEnvironmentFromEnvironment(runtimeEnvironment) : undefined
   const foundryCredential = foundry ? createTeamsWorkloadCredential(runtime, foundry.authentication.foundryTenantId, runtimeEnvironment) : undefined
+  const initialMode = teamsDataModeSchema.parse(environment['TLC_TEAMS_INITIAL_MODE'] ?? configuration.mode)
+  if (initialMode === 'live' && configuration.mode !== 'live') throw new Error('Live mode is not configured for this runtime.')
   const resources = await createTeamsStateStore(configuration, runtime, runtimeEnvironment)
   const { store } = resources
+  const sampleConfiguration = { mode: 'sample' as const, origin: configuration.origin, environmentId: 'sample' }
+  const sampleStatePath = runtime.samplePath === ':memory:' ? ':memory:' : `${runtime.samplePath}.state.sqlite`
+  let sampleResources: typeof resources
+  try {
+    sampleResources = configuration.mode === 'sample' ? resources : await createTeamsStateStore(sampleConfiguration, {
+      ...runtime, state: { kind: 'sqlite', path: sampleStatePath }
+    }, {})
+  } catch (error) { resources.close(); throw error }
   let sample: ApplicationServices | undefined
   try {
   const lifecycle = new CollaborationLifecycle(store, acceptNewWork)
   const sessions = new Map<string, { services: Promise<ApplicationServices>; tokens: { current: DelegatedTokenProvider }; principal: ExecutionPrincipal; lastUsed: number; generation: number; nativeGeneration: number }>()
   const samplePath = runtime.samplePath
-  if (configuration.mode === 'sample' && samplePath !== ':memory:') await mkdir(dirname(samplePath), { recursive: true })
-  sample = configuration.mode === 'sample'
-    ? await createSampleApplicationServices({ dataPath: samplePath }) : undefined
+  if (samplePath !== ':memory:') await mkdir(dirname(samplePath), { recursive: true })
+  sample = await createSampleApplicationServices({ dataPath: samplePath })
   const confidential = hosted ? new ConfidentialClientApplication({
     auth: {
       clientId: hosted.apiClientId, authority: `https://login.microsoftonline.com/${hosted.tenantId}`,
@@ -101,7 +114,8 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
     })
   } else authority = { verify: async () => { throw new Error('Private local source access is not cross-device publication authority.') } }
   async function resolveServices(principal: ExecutionPrincipal, assertion: string): Promise<ApplicationServices> {
-    if (sample) return sample
+    if (principal.mode !== configuration.mode) throw new Error('The source mode does not match the execution principal.')
+    if (configuration.mode === 'sample' && principal.mode === 'sample') return sample!
     if (configuration.mode !== 'live' || !native && (!hosted || !confidential || !foundryCredential)) throw new Error('Live Teams configuration is unavailable.')
     const key = principalPartition(principal)
     const generation = (await lifecycle.status(principal)).generation
@@ -127,6 +141,7 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
     }
     const services = createLiveApplicationServices({
       environment: runtimeEnvironment, msxResource: configuration.msxResource,
+      ...(performanceReporter ? { performanceReporter } : {}),
       ...(native ? {
         guidanceMode: isNativeConfiguration(configuration) ? configuration.guidanceMode : 'deterministic',
         fetchImplementation: async (input, init) => {
@@ -152,16 +167,16 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
     void services.catch(() => { if (sessions.get(key) === entry) sessions.delete(key) })
     return services
   }
-  async function stopOwnedWork(identity: PrincipalIdentity): Promise<void> {
+  async function stopOwnedWork(identity: PrincipalIdentity, sampleOnly = configuration.mode === 'sample'): Promise<void> {
     const key = principalPartition(identity)
-    const entry = sessions.get(key)
+    const entry = sampleOnly ? undefined : sessions.get(key)
     if (entry) sessions.delete(key)
-    const services = sample ?? (entry ? await entry.services : undefined)
+    const services = sampleOnly ? sample : entry ? await entry.services : undefined
     if (!services) return
     for (const run of services.workflows.listRuns({ contractVersion: workflowContractVersion, limit: 100 })) {
       if (run.status === 'queued' || run.status === 'running') {
         const cancelled = services.workflows.cancel({ contractVersion: workflowContractVersion, runId: run.runId })
-        await new WorkflowActivityStore(store).record(identity, cancelled)
+        await new WorkflowActivityStore(sampleOnly ? sampleResources.store : store).record(identity, cancelled)
       }
     }
     if (entry) await services.dispose()
@@ -213,13 +228,35 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
       await transport?.notify(session.principal)
     }
   ) : undefined
-  const handler = createTeamsHandler({
+  const configuredHandler = createTeamsHandler({
     configuration, store, resolveServices, authority, acceptNewWork, onDeactivate: stopOwnedWork,
+    backgroundSync: runtimeEnvironment['TLC_BACKGROUND_SYNC'] === '1',
+    durableMutationState: runtime.state.kind === 'table' || runtime.state.path !== ':memory:',
     ...(transport ? { deliverPublication: transport.deliverPublication, notify: transport.notify } : {}),
     ...(transcriptEvents ? { transcriptEvents } : {}),
     ...(native ? { localConnection: native } : {}),
     ...(launch ? { launch } : {}),
     onError: ({ correlationId, code, method, category }) => console.error(`[teams-api] ${correlationId} ${code} ${method} ${category}`)
+  })
+  const sampleHandler = configuration.mode === 'sample' ? configuredHandler : createTeamsHandler({
+    configuration: sampleConfiguration, store: sampleResources.store, acceptNewWork,
+    backgroundSync: runtimeEnvironment['TLC_BACKGROUND_SYNC'] === '1',
+    durableMutationState: samplePath !== ':memory:',
+    onDeactivate: (principal) => stopOwnedWork(principal, true),
+    resolveServices: async (principal) => {
+      if (principal.mode !== 'sample' || !sample) throw new Error('Sample services require Sample admission.')
+      return sample
+    },
+    authority: { verify: async (principal) => {
+      if (principal.mode !== 'sample') throw new Error('Sample disclosure cannot authorize a live user.')
+      return { revision: 'sanitized-sample-only', canConfigure: true, canPublish: true, audienceEligible: true }
+    } },
+    ...(launch ? { launch } : {}),
+    onError: ({ correlationId, code, method, category }) => console.error(`[teams-sample-api] ${correlationId} ${code} ${method} ${category}`)
+  })
+  const handler = createTeamsDataModeRouter({
+    configuration, initialMode, sample: sampleHandler,
+    ...(configuration.mode === 'live' ? { live: configuredHandler } : {})
   })
   web.use((request, response, next) => {
     void handler(request, response).then((handled) => { if (!handled) next() }).catch(() => {
@@ -230,7 +267,14 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   web.get('/auth/callback', (_request, response) => response.type('html').send('<!doctype html><html lang="en"><head><title>Microsoft sign-in complete</title></head><body>Return to TLC Assist.</body></html>'))
   web.get('/privacy', (_request, response) => response.type('text').send('TLC Assist uses delegated source permissions. Prompts, tokens, customer details and transcripts are not operational telemetry. Contact your application owner for the approved data and audit retention policy.'))
   web.get('/terms', (_request, response) => response.type('text').send('Internal Microsoft FTE application. Source-system authorization and reviewed-action controls apply. Sample mode uses sanitized data only.'))
-  web.use(express.static(clientRoot, { index: false, dotfiles: 'deny', fallthrough: true }))
+  web.use(express.static(clientRoot, {
+    index: false, dotfiles: 'deny', fallthrough: true,
+    setHeaders: (response, path) => {
+      if (/[\\/]assets[\\/][^\\/]+-[A-Za-z0-9_-]{8,}\.(?:js|css|woff2?|png|svg)$/.test(path)) {
+        response.setHeader('cache-control', 'public, max-age=31536000, immutable')
+      }
+    }
+  }))
   web.get('/', (_request, response) => response.sendFile(resolve(clientRoot, 'index.html')))
   web.use((_request, response) => response.status(404).json({ error: 'route_not_found' }))
   const server = tls ? createHttpsServer(tls, web) : createServer(web)
@@ -284,6 +328,7 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
       ready = false
       if (interval) clearInterval(interval)
       try {
+        await Promise.all([configuredHandler.drainMutations(), ...(sampleHandler === configuredHandler ? [] : [sampleHandler.drainMutations()])])
         try { await ownerControl?.close() }
         finally {
           try { if (native) { native.pairing.invalidate(); await native.provider.disconnect() } }
@@ -294,13 +339,13 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
             await sample?.dispose()
           }
         }
-      } finally { resources.close() }
+      } finally { if (sampleResources !== resources) sampleResources.close(); resources.close() }
       })()
       return closing
     }
   }
   } catch (error) {
-    try { await sample?.dispose() } finally { resources.close() }
+    try { await sample?.dispose() } finally { if (sampleResources !== resources) sampleResources.close(); resources.close() }
     throw error
   }
 }

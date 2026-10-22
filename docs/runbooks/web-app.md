@@ -136,6 +136,10 @@ Optional settings:
 | `TLC_MSX_ACCOUNT_TPID_FIELD`         | Optional tenant TPID logical-field override | verifies known `msp_mstopparentid` when unset |
 | `TLC_PORTFOLIO_PREFERENCES_PATH`     | Durable account-preference JSON path     | `.tlc/portfolio-preferences.json`              |
 | `AZURE_CLIENT_ID`                   | User-assigned managed identity client ID | unset                                         |
+| `TLC_BACKGROUND_SYNC`               | Opt in to confirmed background admission | `0` / acknowledged writes |
+| `TLC_MUTATION_TABLE_URL`            | Existing HTTPS Azure Table service endpoint, no SAS/credentials in URL | unset |
+| `TLC_MUTATION_TABLE_NAME`           | Existing private receipt table | `TlcMutations` |
+| `TLC_MUTATION_STATE_PATH`           | Sample-only durable receipt SQLite file | `.tlc/web-sample-mutations.sqlite` |
 
 The host validates optional MSX field names and option values at startup. TPID lookup
 verifies the override or the known default against readable String metadata before use;
@@ -146,6 +150,24 @@ requires provisioned, synchronized Dataverse account-name indexing and uses the 
 delegated connector as Desktop and VS Code; it never creates an MSX account.
 
 `TLC_PORTFOLIO_PREFERENCES_PATH` must point to durable writable storage in hosted environments. Preferences are partitioned by the immutable authenticated user ID and contain manually added and hidden account IDs only. They do not replace or modify MSX Deal Team records. In a scaled-out App Service deployment, mount the same durable path for every instance or replace the JSON store with an approved shared persistence implementation before enabling multi-instance writes.
+
+## Cached browsing and optional background writes
+
+Browsing is memory-only in each browser session, with lazy details/catalogs and
+visible stale revalidation (5 minutes for mutable data, 30 for references).
+Tabs, filters and fresh cached Portfolio navigation do not query MSX again.
+Refresh checks the source explicitly; errors retain marked-stale confirmed data.
+The backend remains authenticated and constructed per request.
+
+For live background writes, configure an **existing** receipt table and its approved
+managed-identity data permissions before setting `TLC_BACKGROUND_SYNC=1`. The app
+does not provision storage or grant access. Never use a worker-local ephemeral
+SQLite journal for a multi-instance live Web deployment. Source writes still need
+explicit confirmation, current authorization and exact native versions.
+
+Read the [policy, supported live subset and recovery/rollback procedure](../performance/performance-optimization.md#adaptive-freshness-and-confirmed-background-writes).
+Disable admission with `TLC_BACKGROUND_SYNC=0`, but retain the table configuration
+so old private receipts can still be reconciled. Uncertain writes are never replayed.
 
 ## App Service Authentication
 

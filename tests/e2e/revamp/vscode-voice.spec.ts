@@ -34,6 +34,11 @@ async function mount(page: Page, invoke: (message: BridgeRequest) => Promise<unk
                     }
                     let result: unknown
                     if (message.method === 'getCurrentUserEmail') result = 'sample@example.test'
+                    else if (message.method === 'getPortfolioIndex') result = {
+                        contractVersion: '1.0', accounts: [{ id: 'alpha', name: 'Alpha customer', segment: 'Enterprise' }],
+                        opportunities: [{ id: 'grid', accountId: 'alpha', name: 'grid operations modernization', recordedStage: 2,
+                            value: 100, currency: 'USD', closeDate: '2026-12-01' }]
+                    }
                     else if (message.method === 'listAccounts') result = [{ id: 'alpha', name: 'Alpha customer', segment: 'Enterprise' }]
                     else if (message.method === 'listOpportunities') result = [{
                         id: 'grid', accountId: 'alpha', name: 'grid operations modernization',

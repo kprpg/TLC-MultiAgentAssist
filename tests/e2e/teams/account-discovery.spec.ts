@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { accountSchema, opportunitySchema } from '../../../packages/common/contracts/index.js'
+import { accountSchema, discoverySnapshotSchema, opportunitySchema } from '../../../packages/common/contracts/index.js'
 import { embeddedTeams, post } from './helpers.js'
 
 test('a sandboxed Teams customer switch offers an in-app discard choice and preserves edits on cancel', async ({ page, request }) => {
@@ -27,15 +27,16 @@ test('a sandboxed Teams customer switch offers an in-app discard choice and pres
 })
 
 test('Discover waits for delayed results instead of showing empty data and makes only its own source read', async ({ page, request }) => {
-  const results = await post(request, 'discoverOpportunities', { domain: 'infra' }) as Array<{ name: string }>
-  expect(results.length).toBeGreaterThan(0)
+  const results = discoverySnapshotSchema.parse(await post(request, 'getDiscoverySnapshot', { contractVersion: '1.0' }))
+  const infra = results.opportunities.filter((item) => item.domain === 'infra')
+  expect(infra.length).toBeGreaterThan(0)
   let release = () => {}
   const blocked = new Promise<void>((resolve) => { release = resolve })
   const reads: string[] = []
   page.on('request', (entry) => {
     if (entry.url().includes('/operations/')) reads.push(entry.url().split('/').at(-1)!)
   })
-  await page.route('**/api/teams/operations/discoverOpportunities', async (route) => {
+  await page.route('**/api/teams/operations/getDiscoverySnapshot', async (route) => {
     await blocked
     await route.fulfill({ json: results })
   })
@@ -43,21 +44,22 @@ test('Discover waits for delayed results instead of showing empty data and makes
   await expect(page.getByRole('status').filter({ hasText: 'Loading Discover opportunities' })).toBeVisible()
   await expect(page.getByText('No eligible opportunities for this source scope and domain.', { exact: true })).toBeHidden()
   release()
-  await expect(page.getByText(results[0]!.name, { exact: true })).toBeVisible()
-  expect(reads).toEqual(['discoverOpportunities'])
+  await expect(page.getByText(infra[0]!.name, { exact: true })).toBeVisible()
+  expect(reads).toEqual(['getDiscoverySnapshot'])
 })
 
 test('Discover displays source failures with retry rather than falsely reporting an empty working set', async ({ page, request }) => {
-  const results = await post(request, 'discoverOpportunities', { domain: 'infra' })
+  const results = await post(request, 'getDiscoverySnapshot', { contractVersion: '1.0' })
   let attempts = 0
-  await page.route('**/api/teams/operations/discoverOpportunities', async (route) => {
+  await page.route('**/api/teams/operations/getDiscoverySnapshot', async (route) => {
     attempts++
-    await route.fulfill(attempts === 1 ? { status: 503, json: { error: 'source_temporarily_unavailable' } } : { json: results })
+    await route.fulfill(attempts <= 3 ? { status: 503, json: { error: 'source_temporarily_unavailable' } } : { json: results })
   })
   await page.goto('/?view=discover')
   await expect(page.getByRole('alert').filter({ hasText: 'source temporarily unavailable' })).toBeVisible()
   await expect(page.getByText('No eligible opportunities for this source scope and domain.', { exact: true })).toBeHidden()
   await page.getByRole('button', { name: 'Refresh Discover', exact: true }).click()
   await expect(page.getByRole('alert').filter({ hasText: 'source temporarily unavailable' })).toBeHidden()
-  expect(attempts).toBe(2)
+  await expect(page.getByRole('table', { name: 'Discovered opportunities', exact: true })).toBeVisible()
+  expect(attempts).toBe(4)
 })

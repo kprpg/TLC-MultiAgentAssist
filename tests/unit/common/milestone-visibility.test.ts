@@ -29,6 +29,11 @@ describe('milestone visibility', () => {
       .toEqual(['cutoff', 'recent', 'future', 'undated'])
   })
 
+  it('keeps contract-parsed rows with an explicitly undefined target date', () => {
+    const milestone = { id: 'undated', status: 'On Track', targetDate: undefined }
+    expect(filterVisibleMilestones([milestone], asOf)[0]).toBe(milestone)
+  })
+
   it.each([
     ['2026-06-30T12:00:00.000Z', '2026-02-27', '2026-02-28'],
     ['2024-06-30T12:00:00.000Z', '2024-02-28', '2024-02-29']

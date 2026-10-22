@@ -17,9 +17,12 @@ import type { MeetingTranscriptSummary } from '../common/contracts/meeting.js'
 import { GraphMeetingConnector, type GraphAcquisitionResult } from '../connectors/graph/meetings.js'
 import { createSellerDashboardHost, type SellerDashboardHost } from './seller-dashboard.js'
 import type { MeetingAcquisitionRequest } from './collaboration/meeting-acquisition.js'
+import type { PerformanceReporter } from '../common/telemetry/performance.js'
+import { bindSourceToken } from './mutations/core-adapter.js'
 
 type MeetingConnector = Pick<LiveMeetingCaptureConnector, 'proposeMeetingChangeSet' | 'applyMeetingChangeSet'>
 export interface ApplicationServices {
+  performanceReporter?: PerformanceReporter
   orchestrator: ThinSliceOrchestrator
   workflows: WorkflowHost
   sellerDashboard: SellerDashboardHost
@@ -30,15 +33,18 @@ export interface ApplicationServices {
   listTranscriptSources(opportunityId: string): Promise<MeetingTranscriptSummary[]>
   workflowScopes: Map<string, { accountIds: string[]; opportunityIds: string[] }>
   refreshSource(): void
+  withReadContext?<T>(operation: () => Promise<T>): Promise<T>
   withReviewedVersions<T>(before: unknown, operation: () => Promise<T>): Promise<T>
   dispose(): Promise<void>
 }
 
-function assemble(msx: MsxConnector, guidance: McemGuidanceConnector, agents: TaskAgentRegistry, recordCreation: RecordCreationService, meetings: MeetingConnector, workflows: WorkflowHost, sellerDashboard: SellerDashboardHost, source: Pick<ApplicationServices, 'acquireTranscripts' | 'resolveMeeting' | 'listTranscriptSources'>, dispose: () => Promise<void>, refreshSource = () => {}): ApplicationServices {
+function assemble(msx: MsxConnector, guidance: McemGuidanceConnector, agents: TaskAgentRegistry, recordCreation: RecordCreationService, meetings: MeetingConnector, workflows: WorkflowHost, sellerDashboard: SellerDashboardHost, source: Pick<ApplicationServices, 'acquireTranscripts' | 'resolveMeeting' | 'listTranscriptSources'>, dispose: () => Promise<void>, refreshSource = () => {}, performanceReporter?: PerformanceReporter): ApplicationServices {
   return {
-    orchestrator: new ThinSliceOrchestrator(msx, guidance, agents, undefined, recordCreation),
+    ...(performanceReporter ? { performanceReporter } : {}),
+    orchestrator: new ThinSliceOrchestrator(msx, guidance, agents, performanceReporter, recordCreation),
     meetings, workflows, sellerDashboard, dispose, workflowScopes: new Map(), ...source,
     refreshSource,
+    withReadContext: (operation) => msx.withReadContext ? msx.withReadContext(operation) : operation(),
     withReviewedVersions: (before, operation) => {
       const versions = before && typeof before === 'object' && 'revisionTokens' in before
         ? z.record(z.string(), z.string()).parse(before.revisionTokens) : {}
@@ -53,8 +59,7 @@ export async function createSampleApplicationServices(options: { dataPath?: stri
   const msx = new LocalStoreMsxConnector(store)
   const writer = msx.createRecordCreationWriter()
   const workflows = createSampleWorkflowHost(async () => {
-    const accounts = await msx.listAccounts()
-    const opportunities = (await Promise.all(accounts.map((account) => msx.listOpportunities(account.id)))).flat()
+    const { accounts, opportunities } = await msx.getPortfolioIndex()
     return { accountIds: accounts.map((account) => account.id), opportunityIds: opportunities.map((opportunity) => opportunity.id) }
   })
   return assemble(
@@ -87,6 +92,7 @@ export async function createLiveApplicationServices(options: {
   foundryCredential?: TokenCredential
   guidanceMode?: 'foundry' | 'deterministic'
   fetchImplementation?: typeof fetch
+  performanceReporter?: PerformanceReporter
 }): Promise<ApplicationServices> {
   const root = options.workingDirectory ?? process.cwd()
   const guidanceMode = options.guidanceMode ?? 'foundry'
@@ -97,9 +103,11 @@ export async function createLiveApplicationServices(options: {
     loadMcpToolPolicy(resolve(root, 'config/mcp.tool-policy.json')),
     loadDataverseEntityMap(resolve(root, 'config/dataverse.entity-map.json'))
   ])
+  const sourceToken = options.environment['TLC_BACKGROUND_SYNC'] === '1'
+    ? bindSourceToken(() => options.getToken('msx'), options.msxResource) : () => options.getToken('msx')
   const msx = new LiveMsxConnector(
-    { getAccessToken: () => options.getToken('msx') }, options.fetchImplementation ?? fetch, `${options.msxResource}/api/data/v9.2/`,
-    undefined, msxWriteMetadataFromEnvironment(options.environment), options.preferences, { cachePortfolio: false, requireConditionalWrites: true }
+    { getAccessToken: sourceToken }, options.fetchImplementation ?? fetch, `${options.msxResource}/api/data/v9.2/`,
+    options.performanceReporter, msxWriteMetadataFromEnvironment(options.environment), options.preferences, { cachePortfolio: false, requireConditionalWrites: true }
   )
   if (registry.servers.some((server) => server.enabled && new URL(server.serverUrl).origin !== options.msxResource)) {
     throw new Error('An enabled MCP server does not match the configured delegated MSX resource.')
@@ -120,6 +128,6 @@ export async function createLiveApplicationServices(options: {
       acquireTranscripts: (request) => graph.acquire(request),
       resolveMeeting: (url) => graph.resolveMeeting(url),
       listTranscriptSources: async () => { throw new Error('Live transcripts are discovered from the verified Graph meeting, not sample sources.') }
-    }, configured.dispose, () => msx.refresh()
+    }, configured.dispose, () => msx.refresh(), options.performanceReporter
   )
 }

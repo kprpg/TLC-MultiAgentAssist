@@ -1,6 +1,32 @@
 import { expect, test } from '@playwright/test'
 import { chooseOpportunity, openUtility, post } from './helpers.js'
 
+test('opens the focused opportunity in MSX from the standalone Teams workbench', async ({ page, request }) => {
+  await page.addInitScript(() => {
+    const testWindow = window as Window & { openedMsxLinks?: string[][] }
+    const openedMsxLinks: string[][] = []
+    testWindow.openedMsxLinks = openedMsxLinks
+    window.open = (url, target, features) => {
+      openedMsxLinks.push([String(url), target ?? '', features ?? ''])
+      return null
+    }
+  })
+  await page.goto('/')
+  const { opportunity } = await chooseOpportunity(page, request)
+  const openedLinks = () => page.evaluate(() => (window as Window & { openedMsxLinks?: string[][] }).openedMsxLinks)
+  expect(await openedLinks()).toEqual([])
+  await expect(page.locator('.opportunity-table').getByRole('link')).toHaveCount(0)
+  const heading = page.locator('#portfolio-details-panel').getByRole('heading', { name: opportunity.name, exact: true })
+  const link = heading.getByRole('link')
+  const expectedUrl = `https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=opportunity&id=${encodeURIComponent(opportunity.id)}`
+  await expect(link).toHaveAttribute('href', expectedUrl)
+  await link.focus()
+  await link.press('Enter')
+  await expect.poll(openedLinks).toEqual([[expectedUrl, '_blank', 'noopener,noreferrer']])
+  await expect(heading).toBeVisible()
+  await expect(page.getByLabel('Opportunity', { exact: true })).toHaveValue(opportunity.id)
+})
+
 test('extension-first destinations are real workspaces and Portfolio is the default', async ({ page }) => {
   await page.goto('/')
   const navigation = page.getByRole('navigation', { name: 'TLC navigation' })
@@ -171,11 +197,13 @@ test('search clears its old index when a fresh source authorization check fails'
   await expect(suggestions.getByRole('option', { name, exact: true })).toBeVisible()
   await search.press('Escape')
   await page.getByRole('button', { name: 'Portfolio', exact: true }).focus()
-  await page.route('**/api/teams/operations/listAccounts', (route) => route.fulfill({
+  await page.route('**/api/teams/operations/getDiscoverySnapshot', (route) => route.fulfill({
     status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'account_access_denied' })
   }))
   await search.fill(name)
-  await expect(page.getByRole('alert').filter({ hasText: 'account access denied' })).toBeVisible()
+  await expect(suggestions.getByRole('option', { name, exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Refresh sources', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Source synchronization' })).toContainText('account access denied')
   await expect(suggestions.getByRole('option', { name, exact: true })).toHaveCount(0)
 })
 

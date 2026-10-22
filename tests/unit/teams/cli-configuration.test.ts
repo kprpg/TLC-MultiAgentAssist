@@ -32,7 +32,7 @@ describe('explicit current-user CLI live configuration', () => {
     expect(loadTeamsConfiguration({ ...environment, TLC_TEAMS_CLI_WRITE_MODE: 'reviewed' })).toMatchObject({ writeMode: 'reviewed' })
     for (const value of ['true', '', 'all']) expect(() => loadTeamsConfiguration({ ...environment, TLC_TEAMS_CLI_WRITE_MODE: value })).toThrow()
     expect(getCliCapabilities('reviewed').find((entry) => entry.id === 'reviewed-writes')?.state).toBe('requires-source-grant')
-    expect(getCliCapabilities('reviewed').find((entry) => entry.id === 'mcp')?.state).toBe('unavailable-local')
+    expect(getCliCapabilities('reviewed').find((entry) => entry.id === 'mcp')?.state).toBe('requires-source-grant')
   })
   it('versions the write-mode public shape without changing native protocol v1.0', () => {
     const configuration = {
@@ -44,6 +44,6 @@ describe('explicit current-user CLI live configuration', () => {
     expect(teamsPublicConfigurationSchema.safeParse({ ...configuration, contractVersion: '1.0' }).success).toBe(false)
     expect(teamsPublicConfigurationSchema.safeParse({ ...configuration, accessToken: 'not-public' }).success).toBe(false)
     expect(cliCapabilities.find((entry) => entry.id === 'reviewed-writes')?.state).toBe('unavailable-local')
-    expect(cliCapabilities.find((entry) => entry.id === 'mcp')?.state).toBe('unavailable-local')
+    expect(cliCapabilities.find((entry) => entry.id === 'mcp')?.state).toBe('requires-source-grant')
   })
 })

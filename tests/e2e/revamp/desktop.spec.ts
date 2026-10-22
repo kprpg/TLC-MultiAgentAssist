@@ -8,6 +8,42 @@ import { expectCompleteSamplePortfolio } from './sample-portfolio.js'
 import { expectOpportunityAndMilestoneRemoval } from './membership-removal.js'
 import { expectOpportunitiesToFillCollapsedWorkspace } from './opportunities-layout.js'
 
+test('opens the focused opportunity in MSX through the Desktop browser bridge', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-opportunity-link-'))
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_UI_MODE: '' }
+    })
+
+    try {
+        await app.evaluate(({ shell }) => {
+            delete process.env.TLC_TEST_OPENED_MSX_URL
+            shell.openExternal = async (url) => { process.env.TLC_TEST_OPENED_MSX_URL = url }
+        })
+        const window = await app.firstWindow()
+        await window.setViewportSize({ width: 1600, height: 900 })
+        await window.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'Portfolio', exact: true }).click()
+        await window.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
+        const opportunities = window.getByRole('table', { name: 'Contoso Energy opportunities' })
+        await opportunities.getByRole('button', { name: /^Grid operations modernization / }).click()
+        expect(await app.evaluate(() => process.env.TLC_TEST_OPENED_MSX_URL)).toBeUndefined()
+        await expect(opportunities.getByRole('link')).toHaveCount(0)
+
+        const heading = window.getByRole('region', { name: 'Opportunity workbench' }).getByRole('heading', { name: 'Grid operations modernization', exact: true })
+        const link = heading.getByRole('link')
+        const expectedUrl = 'https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=opportunity&id=opp-grid-modernization'
+        await expect(link).toHaveAttribute('href', expectedUrl)
+        await link.focus()
+        await link.press('Enter')
+        await expect.poll(() => app.evaluate(() => process.env.TLC_TEST_OPENED_MSX_URL)).toBe(expectedUrl)
+        await expect(heading).toBeVisible()
+        await expect(opportunities.locator('tr.selected')).toContainText('Grid operations modernization')
+    } finally {
+        await app.close()
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
 test('opens a dedicated New pane before Discover in Desktop', async () => {
     const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-new-tab-'))
     const app = await electron.launch({
@@ -44,6 +80,42 @@ test('opens a dedicated New pane before Discover in Desktop', async () => {
         await expect(pane).toBeVisible()
     } finally {
         await app.close()
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
+test('persists opportunity comments after Save and reopening SQLite Desktop', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-opportunity-comments-'))
+    const environment = {
+        ...process.env, TLC_DATA_MODE: 'sample', TLC_DATA_STORE: 'sqlite', TLC_DATA_STORE_PATH: '',
+        TLC_BACKGROUND_SYNC: '0', TLC_UI_MODE: ''
+    }
+    try {
+        for (const save of [true, false]) {
+            const app = await electron.launch({
+                args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`], env: environment
+            })
+            try {
+                const window = await app.firstWindow()
+                await window.setViewportSize({ width: 1600, height: 900 })
+                await window.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'Portfolio', exact: true }).click()
+                await window.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
+                await window.getByRole('button', { name: 'Edit Grid operations modernization' }).click()
+                await window.getByRole('menuitem', { name: 'Opportunity Comments' }).click()
+                const editor = window.getByLabel('Edit opportunity comments')
+                const comments = editor.getByRole('textbox', { name: 'Opportunity Comments' })
+                if (save) {
+                    await comments.fill('Desktop comment persisted beyond the UI session.')
+                    await editor.getByRole('button', { name: 'Save', exact: true }).click()
+                    await expect(editor).toBeHidden()
+                } else {
+                    await expect(comments).toHaveValue('Desktop comment persisted beyond the UI session.')
+                }
+            } finally {
+                await app.close()
+            }
+        }
+    } finally {
         await rm(userDataDirectory, { recursive: true, force: true })
     }
 })
@@ -582,6 +654,7 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
         expect(horizontalBox!.y + horizontalBox!.height).toBeLessThanOrEqual(workbenchBox!.y + workbenchBox!.height)
         expect(verticalBox!.x + verticalBox!.width).toBeLessThanOrEqual(workbenchBox!.x + workbenchBox!.width)
         await expect.poll(() => horizontalScrollbar.evaluate((element) => Number((element as HTMLInputElement).max))).toBeGreaterThan(0)
+        await expect(horizontalScrollbar).toBeEnabled()
         await horizontalScrollbar.focus()
         await horizontalScrollbar.press('End')
         await expect.poll(() => stageBoardViewport.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
@@ -589,7 +662,9 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
         await stageBoardViewport.locator('.mcem-board').evaluate((element, viewportHeight) => {
             ; (element as HTMLElement).style.minHeight = `${viewportHeight + 400}px`
         }, viewportBox!.height)
+        await expect.poll(() => stageBoardViewport.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
         await expect.poll(() => verticalScrollbar.evaluate((element) => Number((element as HTMLInputElement).max))).toBeGreaterThan(0)
+        await expect(verticalScrollbar).toBeEnabled()
         await verticalScrollbar.focus()
         await verticalScrollbar.press('End')
         await expect.poll(() => stageBoardViewport.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)

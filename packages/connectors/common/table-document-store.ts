@@ -42,6 +42,17 @@ export class TableDocumentStore implements ScopedDocumentStore {
       throw error
     }
   }
+  async delete(partition: string, key: string, expectedRevision: number): Promise<boolean> {
+    try {
+      const entity = await this.client.getEntity<{ revision: number }>(partitionKey(partition), rowKey(key))
+      if (entity.revision !== expectedRevision) return false
+      await this.client.deleteEntity(partitionKey(partition), rowKey(key), { etag: entity.etag })
+      return true
+    } catch (error) {
+      if ([404, 409, 412].includes(status(error) ?? 0)) return false
+      throw error
+    }
+  }
   async list(partition: string, prefix: string, limit: number) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('State list limit must be between 1 and 100.')
     const result: Array<{ key: string } & ScopedDocument> = []

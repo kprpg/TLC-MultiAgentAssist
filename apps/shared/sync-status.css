@@ -1,0 +1,31 @@
+.sync-status,
+.sync-warning {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0.4rem 0.75rem;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+.source-sync-region {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  flex-shrink: 0;
+  min-width: 0;
+  min-height: 0;
+  max-height: 25vh;
+  overflow: auto;
+}
+.source-sync-region > details[open] { flex-basis: 100%; }
+.sync-status > summary {
+  cursor: pointer;
+}
+.sync-status p,
+.sync-status div {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.sync-review table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+.sync-review th, .sync-review td { text-align: left; vertical-align: top; padding: 6px; border: 1px solid currentColor; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sync-review label { display: block; margin: 8px 0; }

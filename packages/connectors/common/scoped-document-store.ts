@@ -9,6 +9,7 @@ export interface ScopedDocumentStore {
   insert(partition: string, key: string, value: unknown): Promise<boolean>
   replace(partition: string, key: string, expectedRevision: number, value: unknown): Promise<boolean>
   list(partition: string, prefix: string, limit: number): Promise<Array<{ key: string } & ScopedDocument>>
+  delete?(partition: string, key: string, expectedRevision: number): Promise<boolean>
 }
 
 export function serializeDocument(value: unknown, maxDocumentBytes = 48_000): string {
@@ -39,6 +40,10 @@ export class SqliteDocumentStore implements ScopedDocumentStore {
   async replace(partition: string, key: string, expectedRevision: number, value: unknown): Promise<boolean> {
     return this.db.prepare('UPDATE scoped_documents SET revision=revision+1,json=? WHERE partition=? AND key=? AND revision=?')
       .run(serializeDocument(value, this.maxDocumentBytes), partition, key, expectedRevision).changes === 1
+  }
+  async delete(partition: string, key: string, expectedRevision: number): Promise<boolean> {
+    return this.db.prepare('DELETE FROM scoped_documents WHERE partition=? AND key=? AND revision=?')
+      .run(partition, key, expectedRevision).changes === 1
   }
   async list(partition: string, prefix: string, limit: number) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('State list limit must be between 1 and 100.')

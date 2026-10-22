@@ -41,8 +41,9 @@
     "web:start": "npm run web:build && cross-env TLC_WEB_MODE=sample node apps/web/dist/server.js",
     "web:start:sqlite": "npm run web:build && cross-env TLC_WEB_MODE=sample TLC_DATA_STORE=sqlite node apps/web/dist/server.js",
     "web:start:live": "npm run web:build && cross-env TLC_WEB_MODE=azure-cli node apps/web/dist/server.js",
-    "test:teams": "vitest run tests/unit/teams tests/contract/collaboration.test.ts tests/contract/local-connection.test.ts tests/contract/teams-launch.test.ts tests/connectors/msx-native-identity.test.ts tests/unit/orchestrator/collaboration-principal.test.ts tests/unit/vscode-extension/live-provider.test.ts tests/unit/agents/meeting-signal-extractor.test.ts tests/unit/agents/meeting-foundry-extractor.test.ts tests/unit/connectors/meeting-capture.test.ts tests/unit/connectors/live-meeting-capture.test.ts",
+    "test:teams": "vitest run tests/unit/teams tests/contract/collaboration.test.ts tests/contract/local-connection.test.ts tests/contract/teams-launch.test.ts tests/contract/teams-data-mode.test.ts tests/contract/portfolio-read.test.ts tests/connectors/msx-native-identity.test.ts tests/connectors/msx-performance.test.ts tests/connectors/msx-request-scope.test.ts tests/unit/orchestrator/collaboration-principal.test.ts tests/unit/vscode-extension/live-provider.test.ts tests/unit/agents/meeting-signal-extractor.test.ts tests/unit/agents/meeting-foundry-extractor.test.ts tests/unit/connectors/meeting-capture.test.ts tests/unit/connectors/live-meeting-capture.test.ts",
     "test:smoke:teams": "playwright test --config playwright.teams.config.ts --reporter=line",
+    "test:perf:backends": "playwright test --config playwright.performance.config.ts --reporter=line",
     "teams:build": "npm --workspace @tlc/teams run build",
     "teams:typecheck": "npm --workspace @tlc/teams run typecheck",
     "teams:start": "npm run teams:build && cross-env TLC_TEAMS_MODE=sample node --experimental-sqlite apps/teams/dist/server.js",
@@ -66,6 +67,7 @@
     "npm": ">=10.0.0"
   },
   "dependencies": {
+    "@azure/data-tables": "13.3.2",
     "@azure/ai-projects": "^2.5.0",
     "@azure/identity": "^4.13.2",
     "@fluentui/react-components": "9.74.6",

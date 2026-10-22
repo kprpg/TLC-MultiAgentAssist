@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { extname, resolve, sep } from 'node:path'
 import { voiceWorkerCsp, voiceWorkerFile } from '../../../scripts/voice-worker-assets.mjs'
 
-export function buildStaticHandler(staticRoot: string, dataMode: 'live' | 'sample' = 'live') {
+export function buildStaticHandler(staticRoot: string, dataMode: 'live' | 'sample' = 'live', backgroundSync = false) {
     const resolvedRoot = resolve(staticRoot)
     return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
         if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -30,7 +30,7 @@ export function buildStaticHandler(staticRoot: string, dataMode: 'live' | 'sampl
         if (filePath.endsWith('index.html')) {
             content = Buffer.from(content.toString('utf8').replace(
                 '</head>',
-                `    <meta name="tlc-data-mode" content="${dataMode}" />\n  </head>`
+                `    <meta name="tlc-data-mode" content="${dataMode}" />\n${backgroundSync ? '    <meta name="tlc-background-sync" content="1" />\n' : ''}  </head>`
             ))
             response.setHeader('cache-control', 'no-store')
         } else {

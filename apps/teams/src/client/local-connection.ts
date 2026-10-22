@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { TeamsApiBasePath } from '../../../../packages/common/contracts/teams-data-mode.js'
 import {
   localConnectionVersion, localPairRequestResultSchema, localPairResultSchema, localRevokeResultSchema, type LocalPairRequestResult,
   localWorkSessionMs, localSessionRenewalIntervalMs, localSessionVersion, localSessionRenewalResultSchema
@@ -12,9 +13,9 @@ export class LocalBrowserConnection {
   private capability: { token: string; expiresAt: number; sessionExpiresAt: number; renewAt: number } | undefined
   private renewal: Promise<void> | undefined
   private generation = 0
-  constructor(private readonly context: { tenantId?: string; userId?: string } = {}) {}
+  constructor(private readonly context: { tenantId?: string; userId?: string } = {}, private readonly apiBasePath: TeamsApiBasePath = '/api/teams') {}
   private async post<T>(path: string, input: unknown, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
-    const response = await fetch(`/api/teams/local/${path}`, {
+    const response = await fetch(`${this.apiBasePath}/local/${path}`, {
       method: 'POST', credentials: 'omit', headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input), ...(signal ? { signal } : {})
     })
@@ -74,7 +75,7 @@ export class LocalBrowserConnection {
     }
     const renewing = (async () => {
       try {
-        const response = await fetch('/api/teams/local/renew', {
+        const response = await fetch(`${this.apiBasePath}/local/renew`, {
           method: 'POST', credentials: 'omit', signal: AbortSignal.timeout(30_000),
           headers: { authorization: `Bearer ${capability.token}`, 'content-type': 'application/json' },
           body: JSON.stringify({ contractVersion: localSessionVersion })
@@ -104,7 +105,7 @@ export class LocalBrowserConnection {
     const capability = this.capability
     this.clear()
     if (!capability) return
-    const response = await fetch('/api/teams/local/revoke', {
+    const response = await fetch(`${this.apiBasePath}/local/revoke`, {
       method: 'POST', credentials: 'omit',
       headers: { authorization: `Bearer ${capability.token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ contractVersion: localConnectionVersion })

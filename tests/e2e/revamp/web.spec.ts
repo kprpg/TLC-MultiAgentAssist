@@ -4,6 +4,41 @@ import { expectCompleteSamplePortfolio } from './sample-portfolio.js'
 import { expectOpportunityAndMilestoneRemoval } from './membership-removal.js'
 import { expectOpportunitiesToFillCollapsedWorkspace } from './opportunities-layout.js'
 
+test('opens the focused opportunity in MSX without navigating away from Web', async ({ page }) => {
+    await page.addInitScript(() => {
+        const testWindow = window as Window & { openedMsxLinks?: string[][] }
+        const openedMsxLinks: string[][] = []
+        testWindow.openedMsxLinks = openedMsxLinks
+        window.open = (url, target, features) => {
+            openedMsxLinks.push([String(url), target ?? '', features ?? ''])
+            return null
+        }
+    })
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await page.goto('/')
+    const originalUrl = page.url()
+    await page.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
+    const opportunities = page.getByRole('table', { name: 'Contoso Energy opportunities' })
+    await opportunities.getByRole('button', { name: /^Grid operations modernization / }).click()
+    const openedLinks = () => page.evaluate(() => (window as Window & { openedMsxLinks?: string[][] }).openedMsxLinks)
+    expect(await openedLinks()).toEqual([])
+    await expect(opportunities.getByRole('link')).toHaveCount(0)
+
+    const heading = page.getByRole('region', { name: 'Opportunity workbench' }).getByRole('heading', { name: 'Grid operations modernization', exact: true })
+    const link = heading.getByRole('link')
+    const expectedUrl = 'https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=opportunity&id=opp-grid-modernization'
+    await expect(link).toHaveAttribute('href', expectedUrl)
+    await link.click()
+    await expect.poll(openedLinks).toEqual([[expectedUrl, '_blank', 'noopener,noreferrer']])
+    expect(page.url()).toBe(originalUrl)
+    await expect(heading).toBeVisible()
+
+    await page.evaluate(() => { window.open = () => { throw new Error('Browser opening denied.') } })
+    await link.focus()
+    await link.press('Enter')
+    await expect(page.getByRole('alert')).toHaveText('Browser opening denied.')
+})
+
 test('opens a dedicated New pane before Discover in Web', async ({ page }) => {
     await page.goto('/')
     const tabs = page.getByRole('navigation', { name: 'Primary tabs' })
