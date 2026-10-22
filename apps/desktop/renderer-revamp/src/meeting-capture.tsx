@@ -4,29 +4,13 @@ import { ArrowDownload20Regular, Mic20Regular } from '@fluentui/react-icons'
 import { contractVersion, type Milestone, type MeetingChangeSetProposal, type MeetingChangeSetResult, type MeetingTranscriptSummary, type MeetingType } from '../../../../packages/common/index.js'
 import type { RevampDataClient } from './data-client.js'
 import { readTranscriptFile } from '../../../shared/transcript-file.js'
+import { meetingProposalToMarkdown } from '../../../shared/meeting-proposal-markdown.js'
 
 function toggleSet(previous: ReadonlySet<string>, id: string): Set<string> {
     const next = new Set(previous)
     if (next.has(id)) next.delete(id)
     else next.add(id)
     return next
-}
-
-/** Renders a change-set proposal as Markdown for the Word export action. */
-function meetingProposalToMarkdown(proposal: MeetingChangeSetProposal, opportunityName: string): string {
-    const lines = [`# Meeting signals - ${opportunityName}`, '', `Meeting type: ${proposal.meetingType}`, '', '## Proposed field changes', '', '| Apply | Field | Current | Proposed | MCEM | Confidence |', '| --- | --- | --- | --- | --- | --- |']
-    for (const slot of proposal.slots) {
-        lines.push(`| ${slot.checkedByDefault && !slot.blocked ? 'yes' : 'review'} | ${slot.label} | ${slot.displayBefore ?? '(empty)'} | ${slot.displayAfter} | ${slot.mcemCriterion} | ${Math.round(slot.confidence * 100)}% |`)
-    }
-    if (proposal.newMilestones.length > 0) {
-        lines.push('', '## New milestones', '')
-        for (const milestone of proposal.newMilestones) lines.push(`- ${milestone.name}${milestone.milestoneDate ? ` (${milestone.milestoneDate})` : ''}`)
-    }
-    if (proposal.unmappedSignals.length > 0) {
-        lines.push('', '## Other signals (not injected)', '')
-        for (const signal of proposal.unmappedSignals) lines.push(`- ${signal.label}: ${signal.text}`)
-    }
-    return lines.join('\n')
 }
 
 async function readFileIntoContent(event: ChangeEvent<HTMLInputElement>, setContent: (value: string) => void, onNote: (message: string) => void): Promise<void> {

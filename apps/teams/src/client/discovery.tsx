@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { z } from 'zod'
 import * as c from '../../../../packages/common/contracts/index.js'
 import { seDomainDefinitions, seDomainIds, type SeDomainId } from '../../../../packages/common/configuration/se-domains.js'
@@ -11,6 +11,7 @@ import {
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 import type { TeamsApiClient } from './data-client.js'
 import './discovery.css'
+import { usePresentationSession } from '../../../shared/presentation-hooks.js'
 
 type ReviewedAction = (operation: string, input: Record<string, unknown>) => Promise<unknown>
 
@@ -26,23 +27,34 @@ export function DiscoveryWorkspace({ client, mode, active, searchClient, onActio
   const [filters, setFilters] = useState<DiscoveryFilters>({ include: [], exclude: [] })
   const [sort, setSort] = useState<DiscoverySort | null>(null)
   const [expandedId, setExpandedId] = useState<string>()
-  const visible = sortDiscoveryOpportunities(filterDiscoveryOpportunities(opportunities, filters), sort)
+  const domainOpportunities = useMemo(() => opportunities.filter((item) => item.domain === domain), [opportunities, domain])
+  const visible = useMemo(() => sortDiscoveryOpportunities(filterDiscoveryOpportunities(domainOpportunities, filters), sort), [domainOpportunities, filters, sort])
+  const customers = useMemo(() => discoveryCustomers(opportunities), [opportunities])
+  usePresentationSession(client, active ? ['discovery', ...(expandedId ? [`milestones:${expandedId}`] : [])] : [], {
+    onError: (cause) => setError(String(cause)),
+    onReset: () => { setOpportunities([]); setExpandedId(undefined); setError('Source identity or access changed. Reconnect before reading private data.') },
+    onChanged: async () => {
+      if (!active || !client.cacheSession.cache.has('discovery')) return
+      const value = await client.operation('getDiscoverySnapshot', { contractVersion: c.discoverySnapshotVersion }, c.discoverySnapshotSchema)
+      setOpportunities(boundAccountId ? value.opportunities.filter((item) => item.accountId === boundAccountId) : value.opportunities)
+    }
+  })
 
   useEffect(() => {
     if (!active) return
     const controller = new AbortController()
     setOpportunities([]); setLoading(true); setError(''); setExpandedId(undefined)
-    client.operation('discoverOpportunities', { domain }, z.array(c.discoverableOpportunitySchema), controller.signal)
-      .then((items) => {
+    client.operation('getDiscoverySnapshot', { contractVersion: c.discoverySnapshotVersion }, c.discoverySnapshotSchema, controller.signal)
+      .then((snapshot) => {
         if (controller.signal.aborted) return
-        setOpportunities(boundAccountId ? items.filter((item) => item.accountId === boundAccountId) : items)
+        setOpportunities(boundAccountId ? snapshot.opportunities.filter((item) => item.accountId === boundAccountId) : snapshot.opportunities)
         setLoading(false)
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted) { setError(String(cause)); setLoading(false) }
       })
     return () => controller.abort()
-  }, [client, active, domain, refreshVersion, boundAccountId])
+  }, [client, active, refreshVersion, boundAccountId])
 
   return <section className="teams-discovery" aria-label="Discover opportunities" aria-busy={loading} hidden={!active}>
     <header className="teams-discovery-header">
@@ -70,15 +82,16 @@ export function DiscoveryWorkspace({ client, mode, active, searchClient, onActio
             tabIndex={domain === id ? 0 : -1} onClick={() => setDomain(id)}>{seDomainDefinitions[id].label}</button>)}
         </nav>
         <button type="button" className="teams-discovery-refresh" aria-label="Refresh Discover" disabled={loading}
-          onClick={() => setRefreshVersion((value) => value + 1)}>Refresh</button>
+          onClick={() => { client.refreshSources(); setRefreshVersion((value) => value + 1) }}>Refresh</button>
       </div>
     </header>
-    <DiscoveryControls customers={discoveryCustomers(opportunities)} filters={filters} onChange={setFilters}
-      visibleCount={visible.length} totalCount={opportunities.length} loading={loading} />
-    {loading && <p role="status">Loading Discover opportunities... {mode === 'live' ? 'MSX searches can take time; results will appear when the source responds.' : ''}</p>}
+    <p className="muted">Session snapshot. Tabs and customer filters use memory; Refresh reloads source data.</p>
+    <DiscoveryControls customers={customers} filters={filters} onChange={setFilters}
+      visibleCount={visible.length} totalCount={domainOpportunities.length} loading={loading} />
+    {loading && <div className="discovery-loading" role="status">Loading Discover opportunities... {mode === 'live' ? 'Checking your current visible accounts and source opportunities. Navigation remains available while the source responds.' : ''}</div>}
     {error && <p role="alert" className="error-banner">{error}. Use Refresh to retry.</p>}
-    {!loading && !error && opportunities.length === 0 && <p>No eligible opportunities for this source scope and domain.</p>}
-    {!loading && !error && opportunities.length > 0 && visible.length === 0 && <p role="status">No opportunities match your customer filters. Clear filters to show all customers.</p>}
+    {!loading && !error && domainOpportunities.length === 0 && <p>No eligible opportunities for this source scope and domain.</p>}
+    {!loading && !error && domainOpportunities.length > 0 && visible.length === 0 && <p role="status">No opportunities match your customer filters. Clear filters to show all customers.</p>}
     {visible.length > 0 && <div className="record-table-wrap" role="region" aria-label="Discover opportunity table" tabIndex={0}>
       <table className="teams-discovery-table" aria-label="Discovered opportunities">
         <thead><tr><th scope="col">Opportunity</th>
@@ -106,6 +119,19 @@ function DiscoveryOpportunityRow({ client, item, domain, expanded, onExpand, onA
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState('')
   const visibleMilestones = filterVisibleMilestones(milestones)
+
+  useEffect(() => {
+    if (!expanded) return
+    let active = true
+    const stop = client.cacheSession.subscribe(() => {
+      if (!active || client.cacheSession.getState().refreshing || client.cacheSession.getState().error
+        || !client.cacheSession.cache.has(`milestones:${item.id}`)) return
+      void client.operation('listDiscoverableMilestones', { opportunityId: item.id }, z.array(c.milestoneSchema))
+        .then((items) => { if (active) { setMilestones(items); setMilestoneState('ready') } })
+        .catch((cause: unknown) => { if (active) { setMilestoneError(String(cause)); setMilestoneState('error') } })
+    })
+    return () => { active = false; stop() }
+  }, [client, item.id, expanded])
 
   useEffect(() => {
     if (!expanded) return
@@ -156,7 +182,8 @@ function DiscoveryOpportunityRow({ client, item, domain, expanded, onExpand, onA
       </span></td>
       <td>{item.accountName ?? '-'}</td><td>{item.technicalCapability ?? '-'}</td><td>{item.recordedStage}</td>
       <td><div className="teams-discovery-membership">
-        {item.onDealTeam && <span className="teams-discovery-joined">On deal team</span>}
+        {client.mutationSession.pendingMembershipForRecord(item.id) ? <span role="status">Membership change pending</span>
+          : item.onDealTeam && <span className="teams-discovery-joined">On deal team</span>}
         <button type="button" className={`link${item.onDealTeam ? ' teams-discovery-remove' : ''}`} disabled={busy !== null}
           title={item.onDealTeam ? 'Review leaving Deal Team' : 'Review joining Deal Team'} onClick={() => { void changeDealTeam() }}>
           {busy === 'deal-team' ? item.onDealTeam ? 'Removing...' : 'Adding...' : item.onDealTeam ? 'Remove me' : 'Add me'}

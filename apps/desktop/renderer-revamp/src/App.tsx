@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, DialogTrigger, DrawerBody, DrawerHeader, DrawerHeaderTitle, Field, FluentProvider, Input, Menu, MenuItem, MenuItemRadio, MenuList, MenuPopover, MenuTrigger, MessageBar, OverlayDrawer, Spinner, Textarea, Tooltip, webDarkTheme, webLightTheme } from '@fluentui/react-components'
@@ -56,7 +56,10 @@ import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
 import { AddCustomerButton, type CustomerAccount } from '../../../shared/add-customer.js'
 import { RemoveCustomerButton } from '../../../shared/remove-customer.js'
+import { McemStageColumns } from '../../../shared/mcem-stage-board.js'
 import { WorkbenchPane } from './workbench-pane.js'
+import { SourceSyncStatus } from '../../../shared/sync-status.js'
+import { usePresentationSession } from '../../../shared/presentation-hooks.js'
 
 type Shell = 'desktop' | 'web'
 type WorkspaceView = 'accounts' | 'workflows' | 'discover' | 'dashboard' | 'new'
@@ -74,13 +77,6 @@ type PendingMembershipRemoval =
 type BoardDrag = { pointerId: number; opportunityId: string; sourceStage: number; startX: number; startY: number; targetStage: number | null; dragging: boolean }
 type WorkflowDescription = { summary: string; reads: string; useIt: string }
 
-const mcemStages = [
-  { id: 1, name: 'Listen & Consult', role: 'Account Executive' },
-  { id: 2, name: 'Inspire & Design', role: 'Specialist / SSP' },
-  { id: 3, name: 'Empower & Achieve', role: 'Solution Engineer' },
-  { id: 4, name: 'Realize Value', role: 'Cloud Solution Architect' },
-  { id: 5, name: 'Manage & Optimize', role: 'CSAM' }
-] as const
 
 const bladeWidthStorageKey = 'tlc.blade-widths.v1'
 const defaultBladeWidths: BladeWidths = { accounts: 230, opportunities: 320, actions: 310 }
@@ -236,7 +232,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [discoverFilters, setDiscoverFilters] = useState<DiscoveryFilters>({ include: [], exclude: [] })
   const [discoverSort, setDiscoverSort] = useState<DiscoverySort | null>(null)
   const [discoverLoading, setDiscoverLoading] = useState(false)
-  const [discoverLoadedDomain, setDiscoverLoadedDomain] = useState<SeDomainId | null>(null)
+  const [discoverLoaded, setDiscoverLoaded] = useState(false)
   const [joiningOpportunityId, setJoiningOpportunityId] = useState<string | null>(null)
   const [milestoneTeamBusyId, setMilestoneTeamBusyId] = useState<string | null>(null)
   const [pendingMembershipRemoval, setPendingMembershipRemoval] = useState<PendingMembershipRemoval | null>(null)
@@ -288,15 +284,16 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const accountRequest = useRef(0)
   const detailRequest = useRef(0)
   const discoveryRequest = useRef(0)
-  const sortedOpportunities = sortOpportunities(opportunities, opportunitySort, opportunitySortDirection)
-  const sortedMilestones = sortMilestones(filterVisibleMilestones(milestones), milestoneSort, milestoneSortDirection)
-  const visibleDiscoverResults = sortDiscoveryOpportunities(filterDiscoveryOpportunities(discoverResults, discoverFilters), discoverSort)
-  const discoverCustomers = discoveryCustomers([
+  const sortedOpportunities = useMemo(() => sortOpportunities(opportunities, opportunitySort, opportunitySortDirection), [opportunities, opportunitySort, opportunitySortDirection])
+  const sortedMilestones = useMemo(() => sortMilestones(filterVisibleMilestones(milestones), milestoneSort, milestoneSortDirection), [milestones, milestoneSort, milestoneSortDirection])
+  const domainDiscoverResults = useMemo(() => discoverResults.filter((item) => item.domain === discoverDomain), [discoverResults, discoverDomain])
+  const visibleDiscoverResults = useMemo(() => sortDiscoveryOpportunities(filterDiscoveryOpportunities(domainDiscoverResults, discoverFilters), discoverSort), [domainDiscoverResults, discoverFilters, discoverSort])
+  const discoverCustomers = useMemo(() => discoveryCustomers([
     ...discoverResults,
     ...accounts
       .filter((item) => item.visibility !== 'hidden')
       .map((item) => ({ accountId: item.id, accountName: item.name }))
-  ])
+  ]), [discoverResults, accounts])
   const displayedDiscoverMilestones = (opportunityId: string): Milestone[] =>
     filterVisibleMilestones(discoverMilestones[opportunityId] ?? [])
 
@@ -359,9 +356,9 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
   useEffect(() => {
     if (workspaceView !== 'discover') return
-    if (discoverLoadedDomain === discoverDomain || discoverLoading) return
+    if (discoverLoaded || discoverLoading) return
     void loadDiscover(discoverDomain)
-  }, [workspaceView, discoverDomain])
+  }, [workspaceView, client])
 
   const workflowPersonas = [...new Set(workflowDefinitions.flatMap((definition) => definition.personaTargets))].sort()
   const workflowSources = [...new Set(workflowDefinitions.flatMap((definition) => definition.connectorPlan.map((step) => step.connector)))].sort()
@@ -501,6 +498,8 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
   function startMilestoneEdit(milestone: Milestone, field: MilestoneField) {
     const value = field === 'customerCommitment' ? milestone.commitment ?? 'Uncommitted' : milestone[field] ?? ''
+    client.cacheSession?.captureField(milestone.opportunityId, field,
+      field === 'customerCommitment' ? milestone.commitment ?? '' : milestone[field] ?? '', { milestoneId: milestone.id, reset: true })
     setError('')
     setMilestoneEdit({ milestoneId: milestone.id, field, value })
   }
@@ -551,6 +550,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   }
 
   function openOpportunityComments(nextOpportunity: Opportunity) {
+    client.cacheSession?.captureField(nextOpportunity.id, 'comments', nextOpportunity.comments ?? '', { reset: true })
     if (opportunity?.id !== nextOpportunity.id) void selectOpportunity(nextOpportunity)
     setOpportunityComments(nextOpportunity.comments ?? '')
     setOpportunityCommentsOpen(true)
@@ -690,6 +690,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
   async function proposeStageMove(item: Opportunity, targetStage: number) {
     if (!account || Math.abs(targetStage - item.recordedStage) !== 1) return
+    client.cacheSession?.captureField(item.id, 'recordedStage', item.recordedStage, { reset: true })
     const request = detailRequest.current
     setError('')
     try {
@@ -801,17 +802,21 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     }
   }
 
-  async function refreshAccounts(failureContext = '') {
+  async function refreshAccounts(failureContext = '', reload = false) {
+    if (reload) {
+      client.refreshSources?.()
+      setDiscoverLoaded(false)
+    }
     const request = ++accountRequest.current
     setError('')
     setLoading(true)
     setSearchLoading(true)
     try {
-      const items = (await client.listAccounts()).filter((item) => item.visibility !== 'hidden')
-      const portfolio = await Promise.all(items.map((item) => client.listOpportunities(item.id)))
+      const portfolio = await client.getPortfolioIndex()
+      const items = portfolio.accounts.filter((item) => item.visibility !== 'hidden')
       if (request !== accountRequest.current) return
       setAccounts(items)
-      setSearchOpportunities(portfolio.flat())
+      setSearchOpportunities(portfolio.opportunities)
     } catch (cause) {
       if (request === accountRequest.current) {
         setError(`${failureContext}${cause instanceof Error ? cause.message : 'The portfolio could not be refreshed.'}`)
@@ -824,16 +829,23 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     }
   }
 
-  async function loadDiscover(domain: SeDomainId) {
+  async function loadDiscover(domain: SeDomainId, reload = false) {
+    if (reload) {
+      client.refreshSources?.()
+      setDiscoverMilestones({})
+      setDiscoverResults([])
+      setDiscoverLoaded(false)
+      setExpandedDiscoverId(null)
+    }
     const request = ++discoveryRequest.current
     setError('')
     setDiscoverDomain(domain)
     setDiscoverLoading(true)
     try {
-      const items = await client.discoverOpportunities(domain)
+      const snapshot = await client.getDiscoverySnapshot()
       if (request !== discoveryRequest.current) return
-      setDiscoverResults(items)
-      setDiscoverLoadedDomain(domain)
+      setDiscoverResults(snapshot.opportunities)
+      setDiscoverLoaded(true)
     } catch (cause) {
       if (request === discoveryRequest.current) handleError(cause)
     } finally {
@@ -1020,7 +1032,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setPendingMembershipRemoval((current) => current && removedOpportunityIds.has(current.opportunityId) ? null : current)
     setDiscoverMilestonesLoadingId(null)
     setDiscoverLoading(false)
-    setDiscoverLoadedDomain(null)
+    setDiscoverLoaded(false)
     if (account?.id === removed.id) {
       closeOpportunities()
       setWorkflowScopeKind('portfolio')
@@ -1033,6 +1045,8 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
   async function refreshOpportunities() {
     if (!account) return
+    client.refreshSources?.()
+    setDiscoverLoaded(false)
     const request = detailRequest.current
     setError('')
     setLoading(true)
@@ -1050,6 +1064,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
   async function refreshOpportunityContext() {
     if (!account || !opportunity) return
+    client.refreshSources?.(opportunity.id)
     const request = detailRequest.current
     setError('')
     setLoading(true)
@@ -1135,6 +1150,46 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     ? 'WEB · CONNECTED DATA'
     : shell === 'web' ? 'STATIC WEB · SAMPLE DATA' : 'DESKTOP · CONNECTED DATA'
 
+  usePresentationSession(client, workspaceView === 'discover' ? ['discovery', ...(expandedDiscoverId ? [`milestones:${expandedDiscoverId}`] : [])]
+    : workspaceView === 'accounts' ? ['portfolio', ...(opportunity ? [`milestones:${opportunity.id}`] : []), ...(activitiesMilestone ? [`activities:${activitiesMilestone.opportunityId}:${activitiesMilestone.id}`] : [])] : [], {
+    ...(workspaceView === 'accounts' && opportunity ? { opportunityId: opportunity.id } : {}),
+    onError: handleError,
+    onReset: () => {
+      accountRequest.current++; detailRequest.current++; discoveryRequest.current++
+      setAccounts([]); setSearchOpportunities([]); setOpportunities([]); setMilestones([]); setAccount(null); setOpportunity(null)
+      setDiscoverResults([]); setDiscoverLoaded(false); setAgentResult(null); setResult(null)
+      setDiscoverMilestones({}); setExpandedDiscoverId(null)
+      setActivities([]); setActivitiesMilestone(null); setWorkspaceView('accounts')
+      setError('Source access or identity changed. Refresh or sign in again.')
+    },
+    onChanged: async () => {
+      const cache = client.cacheSession
+      if (!cache) return
+      const request = detailRequest.current
+      if (cache.cache.has('portfolio')) {
+        const index = await client.getPortfolioIndex()
+        setAccounts(index.accounts.filter((item) => item.visibility !== 'hidden')); setSearchOpportunities(index.opportunities)
+        if (request === detailRequest.current) {
+          if (account) setOpportunities(index.opportunities.filter((item) => item.accountId === account.id))
+          if (opportunity) setOpportunity(index.opportunities.find((item) => item.id === opportunity.id) ?? null)
+        }
+      }
+      if (discoverLoaded && cache.cache.has('discovery')) setDiscoverResults((await client.getDiscoverySnapshot()).opportunities)
+      if (expandedDiscoverId && cache.cache.has(`milestones:${expandedDiscoverId}`)) {
+        const items = await client.listDiscoverableMilestones(expandedDiscoverId)
+        setDiscoverMilestones((current) => ({ ...current, [expandedDiscoverId]: items }))
+      }
+      if (opportunity && cache.cache.has(`milestones:${opportunity.id}`)) {
+        const items = await client.listMilestones(opportunity.id)
+        if (request === detailRequest.current) setMilestones(items)
+      }
+      if (activitiesMilestone && cache.cache.has(`activities:${activitiesMilestone.opportunityId}:${activitiesMilestone.id}`)) {
+        const items = await client.listMilestoneActivities(activitiesMilestone.opportunityId, activitiesMilestone.id)
+        if (request === detailRequest.current) setActivities(items)
+      }
+    }
+  })
+
   return <div className="app-shell">
     <header className="command-bar">
       <div className="brand-mark" aria-hidden="true">T</div>
@@ -1152,6 +1207,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         </Button>
       </div>
     </header>
+    <SourceSyncStatus client={client} showReads={['accounts', 'discover', 'new'].includes(workspaceView)} />
 
     <nav className="primary-tabs" aria-label="Primary tabs">
       <button type="button" className={workspaceView === 'new' ? 'active' : ''} onClick={() => setWorkspaceView('new')}>New</button>
@@ -1195,7 +1251,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         <BladeHeader title="Accounts" subtitle={`${accounts.length} customer accounts`} collapsed={collapsed.has('accounts')} refreshing={loading || searchLoading} actions={<>
           <AddCustomerButton client={client} onAdded={customerAdded} className="icon-button"><Add20Regular /></AddCustomerButton>
           <RemoveCustomerButton client={client} onRemoved={customerRemoved} className="icon-button"><Subtract20Regular /></RemoveCustomerButton>
-        </>} onRefresh={() => void refreshAccounts()} onToggle={() => toggleBlade('accounts')} />
+        </>} onRefresh={() => void refreshAccounts('', true)} onToggle={() => toggleBlade('accounts')} />
         {!collapsed.has('accounts') && <div className="blade-body">
           {!opportunity && error && <MessageBar intent="error" role="alert">{error}</MessageBar>}
           <p className="blade-intro">Choose an account to open its active opportunities.</p>
@@ -1300,7 +1356,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           </div>
 
           {opportunity && opportunityCommentsOpen && <div className="record-editor opportunity-editor" aria-label="Edit opportunity comments">
-            <Field label="Opportunity Comments"><Textarea resize="vertical" value={opportunityComments} onChange={(_, data) => setOpportunityComments(data.value)} /></Field>
+            <Field label="Opportunity Comments"><Textarea data-draft-opportunity-id={opportunity.id} data-draft-field="comments" resize="vertical" value={opportunityComments} onChange={(_, data) => setOpportunityComments(data.value)} /></Field>
             <div className="record-editor-actions"><Button disabled={savingEdit} onClick={() => setOpportunityCommentsOpen(false)}>Cancel</Button><Button appearance="primary" disabled={savingEdit} onClick={() => void saveOpportunityComments()}>{savingEdit ? 'Saving...' : 'Save'}</Button></div>
           </div>}
 
@@ -1368,7 +1424,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                   </tr>
                   {milestoneEdit?.milestoneId === milestone.id && <tr>
                     <td colSpan={7}>
-                      <div className="record-editor" aria-label={`Edit ${milestoneFieldLabels[milestoneEdit.field]}`}>
+                      <div className="record-editor" data-draft-opportunity-id={milestone.opportunityId} data-draft-milestone-id={milestone.id} data-draft-field={milestoneEdit.field} aria-label={`Edit ${milestoneFieldLabels[milestoneEdit.field]}`}>
                         <Field label={milestoneFieldLabels[milestoneEdit.field]}>
                           {milestoneEdit.field === 'status' && <select value={milestoneEdit.value} onChange={(event) => setMilestoneEdit({ ...milestoneEdit, value: event.target.value })}>{milestoneStatuses.map((value) => <option key={value}>{value}</option>)}</select>}
                           {milestoneEdit.field === 'customerCommitment' && <select value={milestoneEdit.value} onChange={(event) => setMilestoneEdit({ ...milestoneEdit, value: event.target.value })}>{customerCommitments.map((value) => <option key={value}>{value}</option>)}</select>}
@@ -1484,16 +1540,8 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
               maxTop: Math.max(0, Math.round(event.currentTarget.scrollHeight - event.currentTarget.clientHeight))
             })}>
               {boardLoading && <div className="loading-state">Evaluating stage gates for this account…</div>}
-              <div className="mcem-board" aria-label={`MCEM stages for ${account?.name}`}>
-              {mcemStages.map((stage) => <section
-                key={stage.id}
-                className={`mcem-column ${dragTargetStage === stage.id ? 'drop-target' : ''}`}
-                aria-label={`Stage ${stage.id}: ${stage.name}`}
-                data-stage={stage.id}
-              >
-                <header><span>Stage {stage.id}</span><strong>{stage.name}</strong><small>{stage.role}</small></header>
-                <div className="mcem-column-cards">
-                  {opportunities.filter((item) => item.recordedStage === stage.id).map((item) => {
+              <McemStageColumns label={`MCEM stages for ${account?.name}`} opportunities={opportunities} dropTargetStage={dragTargetStage}
+                renderOpportunity={(item, stage) => {
                     const evaluation = boardEvaluations[item.id]
                     const met = evaluation?.criteria.filter((criterion) => criterion.status === 'met').length ?? 0
                     const total = evaluation?.criteria.length ?? 0
@@ -1530,10 +1578,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                         <Button size="small" appearance="subtle" className="text-action" disabled={stage.id === 5} icon={<ChevronRight20Regular />} aria-label={`Move ${item.name} to next stage`} onClick={(event) => { event.stopPropagation(); void proposeStageMove(item, stage.id + 1) }} />
                       </div>
                     </article>
-                  })}
-                </div>
-                </section>)}
-              </div>
+                }} />
             </div>
             <div className="mcem-horizontal-scrollbar">
               <input
@@ -1715,18 +1760,19 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
         <div className="workflow-toolbar discover-toolbar">
           <div className="scope-switcher" role="group" aria-label="Solution Engineer domain">
-            {seDomainList.map((domain) => <button key={domain.id} className={discoverDomain === domain.id ? 'active' : ''} title={domain.description} onClick={() => void loadDiscover(domain.id)}>{domain.label}</button>)}
+            {seDomainList.map((domain) => <button key={domain.id} className={discoverDomain === domain.id ? 'active' : ''} title={domain.description} onClick={() => setDiscoverDomain(domain.id)}>{domain.label}</button>)}
           </div>
-          <Button appearance="subtle" className="text-action" icon={<ArrowClockwise20Regular />} disabled={discoverLoading} onClick={() => void loadDiscover(discoverDomain)}>Refresh</Button>
+          <Button appearance="subtle" className="text-action" icon={<ArrowClockwise20Regular />} disabled={discoverLoading} onClick={() => void loadDiscover(discoverDomain, true)}>Refresh</Button>
         </div>
 
-        <DiscoveryControls customers={discoverCustomers} filters={discoverFilters} onChange={setDiscoverFilters} visibleCount={visibleDiscoverResults.length} totalCount={discoverResults.length} loading={discoverLoading} />
+        <p className="muted">Session snapshot. Tabs and customer filters use memory; Refresh reloads source data.</p>
+        <DiscoveryControls customers={discoverCustomers} filters={discoverFilters} onChange={setDiscoverFilters} visibleCount={visibleDiscoverResults.length} totalCount={domainDiscoverResults.length} loading={discoverLoading} />
 
         {error && <MessageBar intent="error" role="alert">{error}</MessageBar>}
         <div className="discover-body">
           {discoverLoading && <div className="discover-loading"><Spinner size="small" label="Loading opportunities…" /></div>}
-          {!discoverLoading && discoverResults.length === 0 && <MessageBar intent="info">No active opportunities were found for this domain.</MessageBar>}
-          {!discoverLoading && discoverResults.length > 0 && visibleDiscoverResults.length === 0 && <MessageBar intent="info">No opportunities match your customer filters. Clear filters to show all customers.</MessageBar>}
+          {!discoverLoading && !error && domainDiscoverResults.length === 0 && <MessageBar intent="info">No active opportunities were found for this domain.</MessageBar>}
+          {!discoverLoading && !error && domainDiscoverResults.length > 0 && visibleDiscoverResults.length === 0 && <MessageBar intent="info">No opportunities match your customer filters. Clear filters to show all customers.</MessageBar>}
           {!discoverLoading && visibleDiscoverResults.length > 0 && <table className="record-table discover-table" aria-label="Discovered opportunities">
             <thead><tr><th scope="col">Opportunity</th><DiscoverySortHeader column="account" sort={discoverSort} onSort={(column) => setDiscoverSort((current) => toggleDiscoverySort(current, column))} /><th scope="col">Solution area</th><th scope="col">Technical capability</th><DiscoverySortHeader column="stage" sort={discoverSort} onSort={(column) => setDiscoverSort((current) => toggleDiscoverySort(current, column))} /><th scope="col">Value</th><th scope="col">Closes</th><DiscoverySortHeader column="action" sort={discoverSort} onSort={(column) => setDiscoverSort((current) => toggleDiscoverySort(current, column))} /></tr></thead>
             <tbody>
@@ -1745,7 +1791,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                 <td>{formatMoney(item.value, item.currency)}</td>
                 <td>{item.closeDate}</td>
                 <td>
-                  {item.onDealTeam
+                  {client.mutationSession?.pendingMembershipForRecord(item.id) ? <span role="status">Membership change pending</span> : item.onDealTeam
                     ? <div className="deal-team-actions"><span className="deal-team-joined"><CheckmarkCircle20Filled /> On deal team</span><Button size="small" appearance="subtle" className="text-action danger-action" disabled={joiningOpportunityId === item.id} onClick={() => setPendingMembershipRemoval({ kind: 'deal-team', opportunityId: item.id, name: item.name })}>Remove me</Button></div>
                     : <Button size="small" appearance="primary" disabled={joiningOpportunityId === item.id} icon={joiningOpportunityId === item.id ? <Spinner size="tiny" /> : <Person20Regular />} onClick={() => void joinDealTeam(item.id)}>Add me</Button>}
                 </td>
@@ -1767,6 +1813,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                         onClick={() => void toggleDiscoverMilestone(item.id, milestone)}
                       />
                       <span><strong>{milestone.name}</strong> · {milestone.status}{milestone.targetDate ? ` · ${milestone.targetDate}` : ''}</span>
+                      {client.mutationSession?.pendingMembershipForRecord(milestone.id) && <span role="status">Membership change pending</span>}
                     </div>)}
                   </td>
                 </tr>}

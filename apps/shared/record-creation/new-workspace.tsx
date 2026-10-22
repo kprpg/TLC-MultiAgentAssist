@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type InvalidEvent, type ReactElement } from 'react'
+import { usePresentationSession, type PresentationClient } from '../presentation-hooks.js'
 import type {
   RecordCreationCatalog,
   RecordCreationDraft,
@@ -25,8 +26,8 @@ import { OpportunityForm } from './opportunity-form.js'
 
 export type CreationKind = 'opportunity' | 'multiple-opportunities' | 'milestone'
 
-export interface CreationClient {
-  listAccounts(): Promise<Array<{ id: string; name: string; visibility?: 'visible' | 'hidden' }>>
+export interface CreationClient extends PresentationClient {
+  listAccounts(): Promise<Array<{ id: string; name: string; visibility?: 'visible' | 'hidden' | undefined }>>
   getRecordCreationCatalog(accountId: string): Promise<RecordCreationCatalog>
   previewRecordCreation(target: RecordCreationPreviewRequest['target'], draft: RecordCreationDraft): Promise<RecordCreationPreview>
   commitRecordCreation(preview: RecordCreationPreview): Promise<RecordCreationResult>
@@ -54,14 +55,19 @@ function downloadFile(file: RecordCreationDraftResult['files'][number]): void {
 
 export function NewWorkspace({
   client,
-  onCommitted
+  onCommitted,
+  active = true
 }: {
   client: CreationClient
+  active?: boolean
   onCommitted?(accountId: string, opportunityId: string): Promise<void> | void
 }): ReactElement {
   const [kind, setKind] = useState<CreationKind | null>(null)
   const [entryMode, setEntryMode] = useState<'form' | 'grid' | 'import'>('form')
   const [accounts, setAccounts] = useState<Array<{ id: string; name: string }>>([])
+  const [accountsLoading, setAccountsLoading] = useState(true)
+  const [accountsRevision, setAccountsRevision] = useState(0)
+  const [accountsError, setAccountsError] = useState('')
   const [accountId, setAccountId] = useState('')
   const [parentId, setParentId] = useState('')
   const [catalog, setCatalog] = useState<RecordCreationCatalog | null>(null)
@@ -92,13 +98,37 @@ export function NewWorkspace({
     return candidate
   }
 
+  usePresentationSession(client, active ? ['portfolio', ...(accountId ? [`catalog:${accountId}`] : [])] : [], {
+    onError: (cause) => setError(errorMessage(cause)),
+    onReset: () => {
+      setAccounts([]); setAccountId(''); setParentId(''); setCatalog(null); setPreview(null); setResult(null); setDraftFiles([])
+      setRows([newOpportunityRow('opportunity-1')]); setMilestoneRows([newMilestoneRow('milestone-1')])
+      setError('Source identity or access changed. Reconnect before reviewing a new draft.')
+    },
+    onChanged: async () => {
+      const cache = client.cacheSession
+      if (!active || !cache) return
+      if (cache.cache.has('portfolio')) setAccounts((await client.listAccounts()).filter((item) => item.visibility !== 'hidden'))
+      if (accountId && cache.cache.has(`catalog:${accountId}`)) {
+        const updated = await client.getRecordCreationCatalog(accountId)
+        setCatalog((previous) => previous?.revision === updated.revision ? previous : updated)
+        if (catalog && updated.revision !== catalog.revision) {
+          setPreview(null)
+          setError('Reference data changed. Your draft was retained; review current choices before preparing it again.')
+        }
+      }
+    }
+  })
+
   useEffect(() => {
     let active = true
+    setAccountsLoading(true); setAccountsError('')
     client.listAccounts()
       .then((items) => { if (active) setAccounts(items.filter((item) => item.visibility !== 'hidden')) })
-      .catch((cause: unknown) => { if (active) setError(errorMessage(cause)) })
+      .catch((cause: unknown) => { if (active) { setAccounts([]); setAccountsError(errorMessage(cause)) } })
+      .finally(() => { if (active) setAccountsLoading(false) })
     return () => { active = false }
-  }, [client])
+  }, [client, accountsRevision])
 
   useEffect(() => {
     if (!accountId) {
@@ -318,8 +348,11 @@ export function NewWorkspace({
 
         {kind && <>
           <div className="new-record-fields new-record-context">
+            {accountsLoading && <p role="status">Loading accounts for record creation...</p>}
+            {accountsError && <p role="alert">{accountsError} <button type="button" onClick={() => setAccountsRevision((value) => value + 1)}>Retry loading accounts</button></p>}
+            {!accountsLoading && !accountsError && accounts.length === 0 && <p>No visible accounts are available. Add a customer in Portfolio first.</p>}
             <label>Account
-              <select required value={accountId} onChange={(event) => chooseAccount(event.target.value)}>
+              <select required value={accountId} disabled={accountsLoading} onChange={(event) => chooseAccount(event.target.value)}>
                 <option value="">Select Account</option>
                 {accounts.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>

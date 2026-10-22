@@ -17,7 +17,11 @@ async function mockCustomerLookup(page: Page, lookup: () => Promise<unknown>): P
         else if (path === '/api/accounts' && request.method() === 'POST') {
             mutations.push(request.postDataJSON().accountId)
             await route.fulfill({ json: { id: request.postDataJSON().accountId, name: 'Northwind Health', segment: 'Enterprise' } })
-        } else if (request.method() === 'GET') await route.fulfill({ json: [] })
+        } else if (path === '/api/portfolio/index') await route.fulfill({ json: { contractVersion: '1.0', accounts: [], opportunities: [] } })
+        else if (path === '/api/discovery/snapshot') await route.fulfill({ json: {
+            contractVersion: '1.0', generatedAt: '2026-10-21T12:00:00.000Z', accounts: [], portfolioOpportunities: [], opportunities: [], milestoneTeamOpportunityIds: []
+        } })
+        else if (request.method() === 'GET') await route.fulfill({ json: [] })
         else await route.fulfill({ status: 500, json: { error: 'Unexpected mutation in the customer lookup test.' } })
     })
     return mutations
@@ -146,6 +150,7 @@ async function addMissingCustomer(page: Page, host: 'desktop' | 'web' | 'vscode'
     await expect(dialog).toContainText('Northwind Health')
     await dialog.getByRole('button', { name: 'Add account', exact: true }).click()
     await expect(dialog).not.toBeVisible()
+    await discovery.getByRole('button', { name: 'Refresh', exact: true }).click()
 
     const opportunity = discovery.getByRole('row').filter({ hasText: 'Clinical data platform modernization' })
     await expect(opportunity).toContainText('Northwind Health')
@@ -200,12 +205,17 @@ for (const state of ['not-added', 'hidden'] as const) {
                     await route.fulfill({ json: account })
                 }
             } else if (path === '/api/me') await route.fulfill({ json: { email: 'sample@example.test' } })
+            else if (path === '/api/portfolio/index') await route.fulfill({ json: { contractVersion: '1.0', accounts: saved ? [account] : [], opportunities: [] } })
+            else if (path === '/api/discovery/snapshot') await route.fulfill({ json: {
+                contractVersion: '1.0', generatedAt: '2026-10-21T12:00:00.000Z', accounts: saved ? [account] : [],
+                portfolioOpportunities: [], opportunities: saved ? [opportunity] : [], milestoneTeamOpportunityIds: []
+            } })
             else if (path === '/api/accounts') await route.fulfill({ json: saved ? [account] : [] })
             else if (path.endsWith('/opportunities')) await route.fulfill({ json: [] })
             else if (path.startsWith('/api/discover/')) await route.fulfill({ json: saved ? [opportunity] : [] })
             else if (path === '/api/account-candidates') {
                 searches += 1
-                if (searches === 1) await route.fulfill({ status: 503, json: { error: 'Customer search is temporarily unavailable.' } })
+                if (searches <= 3) await route.fulfill({ status: 503, json: { error: 'Customer search is temporarily unavailable.' } })
                 else await route.fulfill({ json: [{ ...account, state, visibility: state === 'hidden' ? 'hidden' : 'visible' }] })
             } else {
                 unexpected.push(`${request.method()} ${path}`)
@@ -229,6 +239,7 @@ for (const state of ['not-added', 'hidden'] as const) {
         await expect(dialog).toBeVisible()
         await add.click()
         await expect(dialog).not.toBeVisible()
+        await discovery.getByRole('button', { name: 'Refresh', exact: true }).click()
         await expect(discovery.getByRole('row').filter({ hasText: opportunity.name }).getByRole('button', { name: 'Add me', exact: true })).toBeVisible()
         expect(mutations).toEqual([`${mutationMethod} ${mutationPath}`, `${mutationMethod} ${mutationPath}`])
         expect(unexpected).toEqual([])
@@ -273,6 +284,11 @@ test('adds a customer from an empty VS Code portfolio and discovers its opportun
                     if (message.kind !== 'request') return
                     let result: unknown
                     if (message.method === 'getCurrentUserEmail') result = 'sample@example.test'
+                    else if (message.method === 'getPortfolioIndex') result = { contractVersion: '1.0', accounts: added ? [account] : [], opportunities: added && opportunity.onDealTeam ? [opportunity] : [] }
+                    else if (message.method === 'getDiscoverySnapshot') result = {
+                        contractVersion: '1.0', generatedAt: '2026-10-21T12:00:00.000Z', accounts: added ? [account] : [],
+                        portfolioOpportunities: added && opportunity.onDealTeam ? [opportunity] : [], opportunities: added ? [opportunity] : [], milestoneTeamOpportunityIds: []
+                    }
                     else if (message.method === 'listAccounts') result = added ? [account] : []
                     else if (message.method === 'listOpportunities') result = added && opportunity.onDealTeam ? [opportunity] : []
                     else if (message.method === 'listMilestones') result = []

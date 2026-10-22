@@ -39,7 +39,11 @@ export const cliCapabilities: z.infer<typeof localCapabilitySchema>[] = nativeCa
     ...capability, title: 'Automatic Teams transcripts', state: 'unavailable-local',
     detail: 'This CLI profile does not request Graph meeting access. Use Paste / upload for a transcript you are authorized to provide, or an approved profile with separate Graph grants.'
   }
-  if (['mcp', 'foundry'].includes(capability.id)) return {
+  if (capability.id === 'mcp') return {
+    ...capability, state: 'requires-source-grant',
+    detail: 'Optional: explicitly connect MCP through the protected owner command using the current CLI user. Existing Dataverse permissions, MCP admission and read-query policy remain mandatory.'
+  }
+  if (capability.id === 'foundry') return {
     ...capability, state: 'unavailable-local',
     detail: 'This CLI profile does not request this optional resource grant. Use an approved native profile for separately granted capabilities.'
   }

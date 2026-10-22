@@ -217,6 +217,7 @@ The `ext-v*` tag must match the extension `version` in `apps/vscode-extension/pa
 - [Account Discovery: implementation and validation](docs/Account-Discovery-Portfolio-Feasibility.md)
 - [Voice search: usage, offline engines, and tests](docs/user-guide/VOICE-SEARCH.md)
 - [Frequently asked questions](docs/FAQ.md)
+- [Product Backlog: feature requests, feedback, and screenshots](docs/Product-Backlog.md)
 - [VS Code extension install (end user)](docs/user-guide/VSCODE-EXTENSION-INSTALL.md)
 - [VS Code extension — command-line build, install, and run](docs/user-guide/VSCODE-EXTENSION-CLI.md)
 - [VS Code extension build, package, and deploy](docs/runbooks/vscode-extension.md)
@@ -264,10 +265,20 @@ connection and verified pairing, use the single
 After one-time setup, it discovers the private live configuration at
 `%LOCALAPPDATA%\TLC-Assist\Teams\configuration\cli.env` and trusted PEM files at
 `%LOCALAPPDATA%\TLC-Assist\Teams\certs\localhost.pem` / `localhost-key.pem`.
+Starting in Sample with this approved configuration prepares the same
+Live-capable backend without connecting to MSX. In Teams **My work**, use
+**Data mode: Sample / Live** to switch in place: no backend restart, page reload
+or reinstall. Sample uses the shared sanitized SQLite services and persists
+edits separately from encrypted Live state. Confirm before discarding drafts;
+switching is blocked during write confirmation. First Live use still needs
+explicit owner connection and page pairing; a valid approval is reused only in
+the same page. Without a configured Live profile, Live stays unavailable. See
+[mode switching and storage](docs/runbooks/teams-app.md#switch-sample-and-live-inside-teams).
+
 The origin comes from `-Origin`, configured `TLC_TEAMS_ORIGIN`, or defaults to
 `https://localhost:3978`. It verifies HTTPS before sideloading and also supports
 an existing approved HTTPS ingress. It never creates/trusts certificates or
-signs in to MSX automatically. The guide asks for explicit **CONNECT** confirmation
+signs in to MSX automatically. For initial Live setup, the guide asks for explicit **CONNECT** confirmation
 and the exact code displayed by the Teams page, then requires a fresh matching
 client/build/runtime acknowledgement before printing **VERIFIED**. Upload success
 or a browser preview alone is not completion. `-BackendOnly` defers installation;
@@ -288,6 +299,10 @@ Desktop-equivalent MSX writes through the shared review/approval and audit path.
 Source permissions remain enforced; no FTE or publication role is inferred.
 Use `-CliWriteMode read-only` to retain read-only access. The separate native and hosted profiles retain
 their own approvals and capabilities.
+Live Plays additionally require an explicit owner-enabled MCP connection; see
+[optional CLI MCP setup](docs/runbooks/teams-app.md#optional-cli-mcp-connection-for-live-plays).
+This reuses approved current-user permissions and does not grant tenant consent
+or bypass source/tool policy.
 
 Teams uses the same **New, Discover, Portfolio, Plays, Dashboards** navigation as
 the VS Code extension, opening Portfolio by default. Its responsive account,

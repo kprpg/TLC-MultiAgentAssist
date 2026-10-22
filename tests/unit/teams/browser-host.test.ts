@@ -43,6 +43,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   hooks.effects.length = 0
   sdk.isSupported.mockReturnValue(true)
+  sdk.getContext.mockResolvedValue({ app: { theme: 'dark' }, page: { frameContext: 'content' } })
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ mode: 'sample' })))
   vi.stubGlobal('window', { parent: {} })
 })
@@ -58,6 +59,42 @@ async function renderContext(host: BrowserHostContext) {
 }
 
 describe('Teams browser host context', () => {
+  it('reuses SDK initialization and a valid same-page local approval only while the Teams identity/context still matches', async () => {
+    const host = {
+      app: { theme: 'dark' }, page: { frameContext: 'content' }, chat: { id: 'original-chat' },
+      user: { id: '11111111-1111-4111-8111-111111111111', tenant: { id: '22222222-2222-4222-8222-222222222222' } }
+    }
+    sdk.getContext.mockResolvedValue(host)
+    const token = 'L'.repeat(43)
+    const expiresAt = new Date(Date.now() + 60_000).toISOString()
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ contractVersion: localConnectionVersion, mode: 'live', authentication: 'local-interactive', capabilities: nativeCapabilities }))
+      .mockResolvedValueOnce(Response.json({ contractVersion: localConnectionVersion, requestId: '33333333-3333-4333-8333-333333333333', userCode: 'ABCDEF12', state: 'pending-owner-approval', expiresAt }))
+      .mockResolvedValueOnce(Response.json({ contractVersion: localConnectionVersion, state: 'paired', token, expiresAt })))
+    const authentication = await initializeBrowserAuthentication(() => undefined, '/api/teams/live')
+    await authentication.localConnection?.begin()
+    await authentication.localConnection?.poll()
+    expect(await authentication.activate(() => undefined)).toBe(true)
+    expect(await authentication.getToken()).toBe(token)
+    expect(sdk.initialize).toHaveBeenCalledOnce()
+    const changed = { ...host, user: { ...host.user, id: '44444444-4444-4444-8444-444444444444' } }
+    sdk.getContext.mockResolvedValue(changed)
+    expect(await authentication.activate(() => undefined)).toBe(false)
+    await expect(authentication.getToken()).rejects.toThrow(/pair/i)
+    expect(sdk.initialize).toHaveBeenCalledOnce()
+  })
+  it.each(['tenant', 'context', 'frame'] as const)('rejects cached activation after a Teams %s change', async (change) => {
+    const host = {
+      app: { theme: 'dark' }, page: { frameContext: 'content' }, chat: { id: 'original-chat' },
+      user: { id: '11111111-1111-4111-8111-111111111111', tenant: { id: '22222222-2222-4222-8222-222222222222' } }
+    }
+    sdk.getContext.mockResolvedValue(host)
+    const authentication = await initializeBrowserAuthentication(() => undefined)
+    const changed = change === 'tenant' ? { ...host, user: { ...host.user, tenant: { id: '44444444-4444-4444-8444-444444444444' } } }
+      : change === 'context' ? { ...host, chat: { id: 'different-chat' } } : { ...host, page: { frameContext: 'sidePanel' } }
+    sdk.getContext.mockResolvedValue(changed)
+    expect(await authentication.activate(() => undefined)).toBe(false)
+  })
   it('uses local pairing rather than browser source sign-in for the explicit native strategy', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({
       contractVersion: localConnectionVersion, mode: 'live', authentication: 'local-interactive', capabilities: nativeCapabilities

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z, ZodError } from 'zod'
+import { withTeamsPerformanceContext } from './performance.js'
 import { collaborationVersion, collaborationLifecycleCommandSchema, type ContextBinding } from '../../../packages/common/contracts/collaboration.js'
 import { meetingChangeSetApprovalSchema } from '../../../packages/common/contracts/meeting.js'
 import { accountCandidateSchema, emailComposeRequestSchema, exportResponseRequestSchema, workflowRunSchema } from '../../../packages/common/contracts/index.js'
@@ -16,7 +17,7 @@ import { CollaborationAdmissionError, CollaborationLifecycle } from '../../../pa
 import { GraphMeetingError, ManualTranscriptError, MeetingAcquisitionService } from '../../../packages/orchestrator/collaboration/meeting-acquisition.js'
 import { PublicationService, type SharedProjection } from '../../../packages/orchestrator/collaboration/publications.js'
 import type { ExecutionPrincipal } from '../../../packages/orchestrator/collaboration/principal.js'
-import { isLocalSourcePrincipal, principalPartition } from '../../../packages/orchestrator/collaboration/principal.js'
+import { isLocalSourcePrincipal, principalPartition, requireRole } from '../../../packages/orchestrator/collaboration/principal.js'
 import { UserRequestBudget, RequestQuotaError } from '../../../packages/orchestrator/collaboration/request-budget.js'
 import { WorkflowActivityStore } from '../../../packages/orchestrator/collaboration/activity.js'
 import { WorkflowRuntimeError } from '../../../packages/orchestrator/workflows/runtime.js'
@@ -30,8 +31,15 @@ import { NativeConnectionError } from './native-identity.js'
 import { teamsClientReadyResultSchema, teamsLaunchVersion } from '../../../packages/common/contracts/teams-launch.js'
 import { TeamsLaunchError, type TeamsLaunchMonitor } from './launch-status.js'
 import { localSessionRenewalRequestSchema } from '../../../packages/common/contracts/local-connection.js'
+import { mutationSyncRequestSchema, mutationSyncResponseSchema } from '../../../packages/common/contracts/cache-sync.js'
+import { createMutationSession } from '../../../packages/orchestrator/mutations/composition.js'
+import { MutationDispatchPreventedError, MutationRuntime } from '../../../packages/orchestrator/mutations/host.js'
+import { MutationJournalError } from '../../../packages/orchestrator/mutations/journal.js'
+import { sourceHttpFailure } from '../../../packages/common/source-failure.js'
 
 export interface TeamsHandlerOptions {
+  backgroundSync?: boolean
+  durableMutationState?: boolean
   configuration: TeamsConfiguration
   store: ScopedDocumentStore
   resolveServices(principal: ExecutionPrincipal, assertion: string): Promise<ApplicationServices>
@@ -71,16 +79,23 @@ export function assertNativeHttpRequest(request: IncomingMessage, origin: string
 }
 
 export function createTeamsHandler(options: TeamsHandlerOptions) {
+  const mutationRuntime = new MutationRuntime()
+  let conditionalProbe: Promise<ReadonlyArray<'updateOpportunity' | 'updateMilestone' | 'transitionOpportunityStage'>> | undefined
+  let conditionalExpiresAt = 0
   const local = isLocalConfiguration(options.configuration) ? options.localConnection : undefined
   if (isLocalConfiguration(options.configuration) && !local) throw new Error('Local HTTP requires the protected local pairing authority.')
   const authenticate = options.authenticate ?? (local ? async (assertion: string) => local.pairing.authenticate(assertion)
     : options.configuration.mode === 'sample' ? async () => samplePrincipal : createTeamsAuthenticator(options.configuration))
-  return async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
+  const handler = async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
     const url = new URL(request.url ?? '/', options.configuration.origin)
     if (!url.pathname.startsWith('/api/teams/') && url.pathname !== '/api/health') return false
     const correlationId = randomUUID()
     response.setHeader('x-correlation-id', correlationId)
     response.setHeader('cache-control', 'no-store')
+    const readCancellation = new AbortController()
+    const abortRead = () => { if (!response.writableFinished) readCancellation.abort() }
+    response.once('close', abortRead)
+    request.once('aborted', abortRead)
     let authenticatedAssertion: string | undefined
     const assertCurrentCaller = () => { if (local && authenticatedAssertion !== undefined) local.pairing.authenticate(authenticatedAssertion) }
     const json = (status: number, value: unknown) => {
@@ -215,6 +230,10 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
       }
       await lifecycle.assertReadable(principal)
       await new UserRequestBudget(options.store).consume(principal, 'requests', principal.mode === 'sample' ? 600 : 60)
+      if (local && url.pathname === '/api/teams/operations/workflows.start' &&
+          !local.status().resources.some((resource) => resource.resource === 'mcp' && resource.state === 'connected')) {
+        throw new TeamsHttpError(409, 'mcp_connection_required')
+      }
       if (isCliConfiguration(options.configuration) && ['/api/teams/meetings/resolve', '/api/teams/meetings/acquire'].includes(url.pathname)) {
         throw new TeamsHttpError(409, 'graph_unavailable_in_cli_profile')
       }
@@ -320,6 +339,48 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
       }
       if (request.method !== 'POST') throw new TeamsHttpError(404, 'route_not_found')
       const body = await readBody(request)
+      if (url.pathname === '/api/teams/mutation-sync') {
+        const input = mutationSyncRequestSchema.parse(body)
+        if (input.operation === 'prepare' || input.operation === 'submit') await lifecycle.assertActive(principal)
+        const admission = await lifecycle.status(principal)
+        const nativeGeneration = local?.pairing.reviewGeneration()
+        const readOnly = isCliConfiguration(options.configuration) && options.configuration.writeMode === 'read-only'
+        const mutations = createMutationSession({
+          core: services.orchestrator, mode: principal.mode,
+          source: `teams:${options.configuration.environmentId}:${principal.mode}`,
+          state: { store: options.store, durable: options.durableMutationState === true, close() {} },
+          enabled: options.backgroundSync === true && !readOnly,
+          excludeOperations: ['applyMeetingChangeSet'],
+          runtime: mutationRuntime, readCacheOwner: 'client',
+          actor: { partition: `${principalPartition(principal)}:${principal.mode}`, assertCurrent: async () => {
+            assertCurrentCaller()
+            await lifecycle.assertReadable(principal)
+            if (principal.expiresAt !== undefined && principal.expiresAt <= Date.now()) throw new MutationDispatchPreventedError('auth-required', 'The original source session expired.')
+            if (local && nativeGeneration !== local.pairing.reviewGeneration()) throw new MutationDispatchPreventedError('session-changed', 'The original native source connection changed.')
+          } },
+          conditionalOperations: () => {
+            if (Date.now() >= conditionalExpiresAt) conditionalProbe = undefined
+            if (!conditionalProbe) {
+              conditionalExpiresAt = Date.now() + 30 * 60_000
+              conditionalProbe = services.orchestrator.conditionalWriteOperations().catch((error: unknown) => { conditionalProbe = undefined; throw error })
+            }
+            return conditionalProbe
+          },
+          assertAllowed: async (operation) => {
+            await lifecycle.assertGeneration(principal, admission.generation)
+            if (readOnly) throw new MutationDispatchPreventedError('access-denied', 'This CLI source profile is read-only.')
+            requireRole(principal, ['addAccount', 'setAccountVisibility'].includes(operation) ? 'TLC.Teams.User' : 'TLC.Teams.Writer')
+          },
+          reviewContext: async () => ({
+            generation: (await lifecycle.status(principal)).generation,
+            nativeGeneration: local?.pairing.reviewGeneration() ?? 'hosted'
+          }),
+          applyMeeting: (value) => services.meetings.applyMeetingChangeSet(value)
+        })
+        const result = mutationSyncResponseSchema.parse(await mutations.invoke(input))
+        json(result.kind === 'receipt' && result.receipt.state === 'accepted' ? 202 : 200, result)
+        return true
+      }
       if (!url.pathname.startsWith('/api/teams/operations/') && ![
         '/api/teams/documents/export', '/api/teams/documents/email', '/api/teams/meetings/sources',
         '/api/teams/meetings/review', '/api/teams/meetings/unsubscribe'
@@ -347,7 +408,8 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         if (operations.describe(name).effect !== 'read') throw new TeamsHttpError(403, 'review_required')
         if (operations.describe(name).startsWork) await lifecycle.assertActive(principal)
         if (operations.describe(name).startsWork) await new UserRequestBudget(options.store).consume(principal, 'agent', principal.mode === 'sample' ? 60 : 4)
-        const result = await operations.invoke(name, body)
+        const result = await withTeamsPerformanceContext(correlationId, () => operations.invoke(name, body,
+          name === 'workflows.start' || name === 'workflows.cancel' ? undefined : readCancellation.signal))
         if (['workflows.start', 'workflows.cancel'].includes(name)) await activity.record(principal, workflowRunSchema.parse(result))
         if (name === 'workflows.get') await activity.record(principal, z.object({ run: workflowRunSchema }).parse(result).run)
         json(200, result)
@@ -411,6 +473,21 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         throw new TeamsHttpError(404, 'route_not_found')
       }
     } catch (error) {
+      if (error instanceof MutationDispatchPreventedError || error instanceof MutationJournalError) {
+        if (error.code === 'capacity') response.setHeader('retry-after', '5')
+        json(error instanceof MutationDispatchPreventedError ? error.status : error.code === 'capacity' ? 429 : 409, { error: error.code.replaceAll('-', '_'), correlationId })
+        return true
+      }
+      const source = sourceHttpFailure(error)
+      if (source) {
+        const code = source.status === 401 ? 'source_auth_required' : source.status === 403 ? 'source_access_denied'
+          : source.status === 429 ? 'source_throttled' : 'source_unavailable'
+        if (source.retryAfterSeconds !== undefined) response.setHeader('retry-after', String(source.retryAfterSeconds))
+        options.onError?.({ correlationId, code, method: request.method === 'GET' ? 'GET' : 'POST', category: 'operations' })
+        json(source.status, { error: code, correlationId })
+        return true
+      }
+      if (readCancellation.signal.aborted && response.destroyed) return true
       const status = error instanceof GraphMeetingError ? error.state === 'denied' || error.state === 'admin-blocked' ? 403 : error.state === 'auth-required' ? 409 : error.state === 'unsupported' ? 400 : 503
         : error instanceof ManualTranscriptError ? 400
         : error instanceof NativeConnectionError ? error.code === 'native_source_denied' ? 403 : error.code === 'native_resource_unavailable' ? 409 : 401 : error instanceof LocalPairingError ? error.status : error instanceof CollaborationAdmissionError || error instanceof ActionReviewStaleError ? 409 : error instanceof WorkflowScopeAuthorizationError ? 403 : error instanceof RequestQuotaError ? 429 : error instanceof TeamsAuthorizationError ? 401 : error instanceof TeamsHttpError ? error.status
@@ -423,11 +500,16 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
       const category = ['session', 'config', 'local', 'operations', 'actions', 'activity', 'contexts', 'meetings', 'publications', 'shared', 'documents', 'graph', 'references', 'lifecycle'].includes(candidate) ? candidate : 'unknown'
       options.onError?.({ correlationId, code, method, category })
       const claims = error instanceof TeamsAuthorizationError ? error.claims : undefined
+      if (status === 429) response.setHeader('retry-after', '5')
       if (claims && options.configuration.mode === 'live') response.setHeader('www-authenticate', `Bearer authorization_uri="https://login.microsoftonline.com/${options.configuration.tenantId}/oauth2/v2.0/authorize", error="insufficient_claims", claims="${Buffer.from(claims).toString('base64')}"`)
       json(status, { error: code, correlationId, ...(claims ? { claims } : {}) })
+    } finally {
+      response.removeListener('close', abortRead)
+      request.removeListener('aborted', abortRead)
     }
     return true
   }
+  return Object.assign(handler, { drainMutations: (timeoutMs?: number) => mutationRuntime.drain(timeoutMs) })
 }
 
 export async function readBody(request: IncomingMessage): Promise<unknown> {

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { get } from 'node:https'
+import { get, request as httpsRequest } from 'node:https'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,6 +10,8 @@ import { loadTeamsTlsConfiguration } from '../../../apps/teams/src/configuration
 import { startTeamsServer } from '../../../apps/teams/src/server.js'
 import { invokeProtectedOwnerCommand, prepareOwnerDirectory } from '../../../apps/teams/src/local-owner-control.js'
 import { localConnectionVersion } from '../../../packages/common/contracts/local-connection.js'
+import { actionPreviewSchema } from '../../../packages/common/contracts/collaboration.js'
+import { z } from 'zod'
 
 const nativeClient = vi.hoisted(() => ({
   interactive: vi.fn(async () => { throw new Error('A TLS/bootstrap test must not trigger source sign-in.') }),
@@ -89,6 +91,7 @@ describe('explicit local HTTPS hosting', () => {
       TLC_TEAMS_TENANT_ID: '77777777-7777-4777-8777-777777777777',
       ...(authentication === 'local-interactive' ? { TLC_TEAMS_NATIVE_CLIENT_ID: '88888888-8888-4888-8888-888888888888' } : {}),
       TLC_TEAMS_MSX_RESOURCE: 'https://example.crm.dynamics.com', TLC_TEAMS_ENVIRONMENT_ID: 'offline-native-bootstrap',
+      TLC_TEAMS_DATA_DIR: join(ownerDirectory, 'data'), TLC_TEAMS_SAMPLE_PATH: ':memory:',
       TLC_TEAMS_OWNER_DIRECTORY: ownerDirectory, TLC_TEAMS_TLS_CERT_PATH: certificatePath, TLC_TEAMS_TLS_KEY_PATH: keyPath
     })
     try {
@@ -133,6 +136,84 @@ describe('explicit local HTTPS hosting', () => {
       expect(cliCredential.getToken).not.toHaveBeenCalled()
     } finally { await application.close() }
     expect(application.server.listening).toBe(false)
+  }, 50_000)
+  it('keeps real Sample writes in their own SQLite files across a Live runtime restart without source access', async () => {
+    const reservation = createServer()
+    await new Promise<void>((ready) => reservation.listen(0, '127.0.0.1', ready))
+    const reserved = reservation.address()
+    if (!reserved || typeof reserved === 'string') throw new Error('No persistence-test port.')
+    const port = reserved.port
+    await new Promise<void>((closed, reject) => reservation.close((error) => error ? reject(error) : closed()))
+    const ownerDirectory = join(directory, 'sample-first-owner')
+    await prepareOwnerDirectory(ownerDirectory)
+    const samplePath = join(directory, 'isolated-sample.sqlite')
+    const origin = `https://localhost:${port}`
+    const environment: NodeJS.ProcessEnv = {
+      TLC_TEAMS_MODE: 'live', TLC_TEAMS_INITIAL_MODE: 'sample', TLC_TEAMS_AUTH_MODE: 'local-azure-cli',
+      TLC_TEAMS_RUNTIME_PROFILE: 'local', TLC_TEAMS_ORIGIN: origin, TLC_TEAMS_HOST: '127.0.0.1', TLC_TEAMS_PORT: String(port),
+      TLC_TEAMS_TENANT_ID: '77777777-7777-4777-8777-777777777777',
+      TLC_TEAMS_MSX_RESOURCE: 'https://example.crm.dynamics.com', TLC_TEAMS_ENVIRONMENT_ID: 'offline-sample-first',
+      TLC_TEAMS_DATA_DIR: join(ownerDirectory, 'data'), TLC_TEAMS_SAMPLE_PATH: samplePath,
+      TLC_TEAMS_OWNER_DIRECTORY: ownerDirectory, TLC_TEAMS_TLS_CERT_PATH: certificatePath, TLC_TEAMS_TLS_KEY_PATH: keyPath
+    }
+    const ca = await readFile(certificatePath)
+    const outbound = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => { throw new Error('This Sample test must not access an external source.') })
+    const request = (path: string, body?: unknown) => new Promise<{ status: number; body: unknown }>((done, fail) => {
+      const response = httpsRequest(`https://127.0.0.1:${port}${path}`, {
+        ca, method: body === undefined ? 'GET' : 'POST', timeout: 5000,
+        headers: { host: `localhost:${port}`, origin, ...(body === undefined ? {} : { 'content-type': 'application/json' }) }
+      }, (incoming) => {
+        const chunks: Buffer[] = []
+        incoming.on('data', (chunk: Buffer) => chunks.push(chunk))
+        incoming.on('end', () => {
+          try { done({ status: incoming.statusCode ?? 0, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) }) }
+          catch (error) { fail(error) }
+        })
+      })
+      response.once('error', fail)
+      response.once('timeout', () => response.destroy(new Error('Sample persistence HTTPS request timed out.')))
+      response.end(body === undefined ? undefined : JSON.stringify(body))
+    })
+    let opportunityId = ''
+    try {
+      for (let generation = 0; generation < 2; generation++) {
+        const application = await startTeamsServer(environment)
+        try {
+          expect(await request('/api/teams/modes')).toMatchObject({
+            status: 200, body: { initialMode: 'sample', runtimeMode: 'live', availableModes: ['sample', 'live'] }
+          })
+          expect((await request('/api/teams/live/session')).status).toBe(401)
+          expect((await request('/api/teams/sample/session')).body).toMatchObject({ mode: 'sample' })
+          if (generation === 0) {
+            const accounts = z.array(z.object({ id: z.string() })).parse((await request('/api/teams/sample/operations/listAccounts', {})).body)
+            const account = accounts[0]
+            if (!account) throw new Error('No canonical Sample account.')
+            const opportunities = z.array(z.object({ id: z.string() })).parse((await request('/api/teams/sample/operations/listOpportunities', { accountId: account.id })).body)
+            const opportunity = opportunities[0]
+            if (!opportunity) throw new Error('No canonical Sample opportunity.')
+            opportunityId = opportunity.id
+            const preview = actionPreviewSchema.parse((await request('/api/teams/sample/actions/preview', {
+              operation: 'updateOpportunity', input: { opportunityId, update: { comments: 'Persistent isolated Sample edit' } }
+            })).body)
+            expect(await request('/api/teams/sample/actions/commit', {
+              contractVersion: '1.0', id: preview.id, digest: preview.digest, reason: 'Explicit local Sample review'
+            })).toMatchObject({ status: 200, body: { state: 'confirmed' } })
+          }
+          expect(await request('/api/teams/sample/operations/getOpportunityContext', { opportunityId })).toMatchObject({
+            status: 200, body: { opportunity: { comments: 'Persistent isolated Sample edit' } }
+          })
+          expect((await invokeProtectedOwnerCommand(ownerDirectory, { contractVersion: localConnectionVersion, action: 'status' })))
+            .toMatchObject({ ok: true, status: { state: 'sign-in-required' }, pending: [] })
+        } finally { await application.close(); await application.close() }
+      }
+      for (const path of [samplePath, `${samplePath}.state.sqlite`]) {
+        expect((await readFile(path)).subarray(0, 16).toString()).toBe('SQLite format 3\u0000')
+      }
+      expect(nativeClient.interactive).not.toHaveBeenCalled()
+      expect(nativeClient.silent).not.toHaveBeenCalled()
+      expect(cliCredential.getToken).not.toHaveBeenCalled()
+      expect(outbound).not.toHaveBeenCalled()
+    } finally { outbound.mockRestore() }
   }, 50_000)
   it('requires a complete certificate/key pair and an HTTPS configured origin', () => {
     expect(loadTeamsTlsConfiguration({}, 'http://127.0.0.1:3978')).toBeUndefined()

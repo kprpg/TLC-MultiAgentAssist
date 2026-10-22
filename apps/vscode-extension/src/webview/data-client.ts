@@ -13,6 +13,10 @@ import {
     type RecordCreationPreviewRequest
 } from '../../../../packages/common/contracts/record-creation.js'
 import { contractVersion } from '../../../../packages/common/contracts/version.js'
+import { discoverySnapshotSchema, discoverySnapshotVersion, portfolioIndexSchema } from '../../../../packages/common/contracts/index.js'
+import * as syncContracts from '../../../../packages/common/contracts/index.js'
+import { SessionPortfolio } from '../../../shared/session-portfolio.js'
+import { MutationSyncClient } from '../../../shared/mutation-sync.js'
 import type {
     AccountView,
     AccountCandidateView,
@@ -37,6 +41,8 @@ import type {
     MilestoneUpdateInput,
     MilestoneView,
     OpportunityView,
+    PortfolioIndexView,
+    PortfolioWorkspaceView,
     SeDomainView,
     WorkflowDefinitionView,
     WorkflowRunResultView,
@@ -48,13 +54,19 @@ const POLL_TIMEOUT_MS = 15_000
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
-export const dataClient = {
+const transport = {
+    invokeMutationSync: async (input: syncContracts.MutationSyncRequest) =>
+        syncContracts.mutationSyncResponseSchema.parse(await request('mutationSync', input)),
     invokeSellerDashboard: async (input: SellerDashboardRequest) => sellerDashboardResponseSchema.parse(
         await request('sellerDashboard', sellerDashboardRequestSchema.parse(input))
     ),
     invokeVoice: async (input: VoiceRequest) => voiceResponseSchema.parse(await request('voiceInput', voiceRequestSchema.parse(input))),
     getCurrentUserEmail: () => request<string | null>('getCurrentUserEmail'),
     listAccounts: (includeHidden = false) => request<AccountView[]>('listAccounts', { includeHidden }),
+    getPortfolioIndex: (includeHidden = false) => request<PortfolioIndexView>('getPortfolioIndex', { contractVersion: '1.0', includeHidden }),
+    getPortfolioWorkspace: (input: { accountId?: string; opportunityId?: string; includeHidden?: boolean } = {}) =>
+        request<PortfolioWorkspaceView>('getPortfolioWorkspace', { contractVersion: '1.0', ...input }),
+    getDiscoverySnapshot: async () => discoverySnapshotSchema.parse(await request('getDiscoverySnapshot', { contractVersion: discoverySnapshotVersion })),
     searchAccounts: (query: string, matchBy: 'name' | 'tpid') => request<AccountCandidateView[]>('searchAccounts', { query, matchBy }),
     addAccount: (accountId: string) => request<AccountView>('addAccount', { accountId }),
     setAccountVisibility: (accountId: string, visibility: 'visible' | 'hidden') => request<AccountView>('setAccountVisibility', { accountId, visibility }),
@@ -132,6 +144,102 @@ export const dataClient = {
             await delay(POLL_INTERVAL_MS)
             view = await request<WorkflowRunResultView>('getWorkflowRun', { runId: run.runId })
         }
+
         return view
     }
+}
+
+const session = new SessionPortfolio({
+    getPortfolioIndex: async () => portfolioIndexSchema.parse(await transport.getPortfolioIndex(true)),
+    getDiscoverySnapshot: () => transport.getDiscoverySnapshot(),
+    listMilestones: (id) => transport.listMilestones(id),
+    listDiscoverableMilestones: (id) => transport.listDiscoverableMilestones(id)
+})
+
+const hostOwned = document.getElementById('root')?.dataset.cacheOwner === 'host'
+const sync = new MutationSyncClient(document.getElementById('root')?.dataset.backgroundSync === '1' ? transport.invokeMutationSync : undefined, {
+    onConfirmed: (operation, result, input) => { session.applyMutation(operation, result); session.finishDraft(operation, input) },
+    onRecovered: () => { session.refresh(); session.cache.changed() },
+    onAccessDenied: () => session.clear(),
+    validateReview: (review) => session.validateMutationReview(review),
+    captureReview: (operation, input) => session.captureReview(operation, input)
+})
+const mutate = <T>(operation: syncContracts.SyncMutationOperation, input: Record<string, unknown>, action: () => Promise<T>, parse: (value: unknown) => T) =>
+    sync.run(operation, input, action, parse)
+let hostGeneration: number | undefined
+let hostDataRevision: number | undefined
+const interests = new Map<string, { keys: readonly string[]; active: boolean }>()
+window.addEventListener('message', (event: MessageEvent<unknown>) => {
+    const value = event.data
+    if (value === null || typeof value !== 'object' || !('kind' in value) || value.kind !== 'cache-state') return
+    const parsed = syncContracts.cacheControlResponseSchema.safeParse({ contractVersion: 'contractVersion' in value ? value.contractVersion : undefined,
+        state: 'state' in value ? value.state : undefined })
+    if (!parsed.success) return
+    const nextDataRevision = parsed.data.state.dataRevision ?? parsed.data.state.revision
+    session.cache.batch(() => {
+        if (hostGeneration !== undefined && hostGeneration !== parsed.data.state.generation) { session.clear(); sync.reset() }
+        else if (hostDataRevision !== undefined && hostDataRevision !== nextDataRevision) session.cache.invalidateAll()
+        if (parsed.data.state.error) session.cache.reportError(new Error(parsed.data.state.error))
+        else session.cache.recovered()
+        if (hostOwned) session.cache.observeSourceState(parsed.data.state)
+    })
+    hostGeneration = parsed.data.state.generation
+    hostDataRevision = nextDataRevision
+})
+
+export const dataClient = {
+    ...transport,
+    cacheSession: session,
+    mutationSession: sync,
+    setActiveReads: async (keys: readonly string[], active: boolean, consumer = 'main') => {
+        if (!active && !keys.length) interests.delete(consumer)
+        else interests.set(consumer, { keys, active })
+        const visible = [...interests.values()].filter((item) => item.active)
+        session.setActiveKeys([...new Set(visible.flatMap((item) => item.keys))])
+        if (hostOwned) { session.setActive(false); await request('cacheControl', { contractVersion: '1.0', operation: 'interest', keys: [...keys], active, consumer }) }
+        else session.setActive(visible.length > 0)
+    },
+    refreshSources: () => {
+        if (hostOwned) void request('cacheControl', { contractVersion: '1.0', operation: 'refresh' }).catch(() => console.error('[cache-sync] host-refresh-control-failed'))
+        session.refresh()
+    },
+    resetSession: () => { session.clear(); sync.reset() },
+    getDiscoverySnapshot: async () => {
+        const value = await session.getDiscoverySnapshot()
+        return { ...value, opportunities: value.opportunities.map((item) => sync.projectDiscovery(item)),
+            portfolioOpportunities: value.portfolioOpportunities.map((item) => sync.projectOpportunity(item)) }
+    },
+    getPortfolioIndex: async (includeHidden = false) => {
+        const value = await session.getPortfolioIndex(includeHidden)
+        return { ...value, opportunities: value.opportunities.map((item) => sync.projectOpportunity(item)) }
+    },
+    getPortfolioWorkspace: (input: { accountId?: string; opportunityId?: string; includeHidden?: boolean } = {}) =>
+        session.getPortfolioWorkspace({ contractVersion: '1.0', ...input }),
+    listAccounts: (includeHidden = false) => session.listAccounts(includeHidden),
+    listOpportunities: async (accountId: string) => (await session.listOpportunities(accountId)).map((item) => sync.projectOpportunity(item)),
+    discoverOpportunities: (domain: SeDomainView) => session.discoverOpportunities(domain),
+    listMilestones: async (id: string) => (await session.listMilestones(id)).map((item) => sync.projectMilestone(item)),
+    listDiscoverableMilestones: async (id: string) => (await session.listMilestones(id, true)).map((item) => sync.projectMilestone(item)),
+    listMilestoneActivities: (id: string, milestoneId: string) => session.readDataset(`activities:${id}:${milestoneId}`, () => transport.listMilestoneActivities(id, milestoneId)),
+    getRecordCreationCatalog: (id: string) => session.readDataset(`catalog:${id}`, () => transport.getRecordCreationCatalog(id), { reference: true }),
+    searchAccounts: (query: string, matchBy: 'name' | 'tpid') => session.readDataset(`search:${matchBy}:${query}`, () => transport.searchAccounts(query, matchBy)),
+    addAccount: (id: string) => mutate('addAccount', { accountId: id }, () => transport.addAccount(id), syncContracts.accountSchema.parse),
+    setAccountVisibility: (id: string, visibility: 'visible' | 'hidden') => mutate('setAccountVisibility', { accountId: id, visibility }, () => transport.setAccountVisibility(id, visibility), syncContracts.accountSchema.parse),
+    joinDealTeam: (id: string) => mutate('joinDealTeam', { opportunityId: id }, () => transport.joinDealTeam(id), syncContracts.dealTeamJoinResultSchema.parse),
+    leaveDealTeam: (id: string) => mutate('leaveDealTeam', { opportunityId: id }, () => transport.leaveDealTeam(id), syncContracts.dealTeamLeaveResultSchema.parse),
+    joinMilestoneTeam: (id: string, milestoneId: string) => mutate('joinMilestoneTeam', { opportunityId: id, milestoneId }, () => transport.joinMilestoneTeam(id, milestoneId), syncContracts.milestoneTeamJoinResultSchema.parse),
+    leaveMilestoneTeam: (id: string, milestoneId: string) => mutate('leaveMilestoneTeam', { opportunityId: id, milestoneId }, () => transport.leaveMilestoneTeam(id, milestoneId), syncContracts.milestoneTeamLeaveResultSchema.parse),
+    updateOpportunity: (id: string, comments: string) => mutate('updateOpportunity', { opportunityId: id, update: { comments } }, () => transport.updateOpportunity(id, comments), syncContracts.opportunitySchema.parse),
+    updateMilestone: (id: string, milestoneId: string, update: MilestoneUpdateInput) => mutate('updateMilestone', { opportunityId: id, milestoneId, update }, () => transport.updateMilestone(id, milestoneId, update), syncContracts.milestoneSchema.parse),
+    createMilestoneActivity: async (id: string, milestoneId: string, activity: CreateMilestoneActivityInput) => {
+        const result = await mutate('createMilestoneActivity', { opportunityId: id, milestoneId, request: activity },
+            () => transport.createMilestoneActivity(id, milestoneId, activity), syncContracts.milestoneActivitySchema.parse)
+        session.invalidateDataset(`activities:${id}:${milestoneId}`)
+        return result
+    },
+    transitionOpportunityStage: (accountId: string, id: string, stage: number, reason?: string) =>
+        mutate('transitionOpportunityStage', { contractVersion, accountId, opportunityId: id, targetStage: stage, ...(reason ? { reason } : {}) }, () => transport.transitionOpportunityStage(accountId, id, stage, reason), syncContracts.mcemStageTransitionResultSchema.parse),
+    commitRecordCreation: (preview: RecordCreationPreview) => mutate('commitRecordCreation', { contractVersion, preview, expectedDigest: preview.digest, confirmed: true }, () => transport.commitRecordCreation(preview), syncContracts.recordCreationResultSchema.parse),
+    applyMeetingChangeSet: (proposal: MeetingChangeSetProposalView, approval: MeetingChangeSetApprovalInput) =>
+        mutate('applyMeetingChangeSet', { proposal, approval }, () => transport.applyMeetingChangeSet(proposal, approval), syncContracts.meetingChangeSetResultSchema.parse)
 }

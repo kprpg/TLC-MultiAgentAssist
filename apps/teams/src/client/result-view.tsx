@@ -1,11 +1,12 @@
+import type { ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AgentTaskResponse } from '../../../../packages/common/contracts/index.js'
 import { formatResponseMarkdown } from '../../../shared/response-markdown.js'
 
-export function AgentResultView({ result }: { result: AgentTaskResponse }) {
+export function AgentResultView({ result, actions }: { result: AgentTaskResponse; actions?: ReactNode }) {
   return <section className="result-panel" aria-label="Grounded TLC response">
-    <div className="section-heading"><h2>TLC guidance</h2><span className={`status-pill ${result.state}`}>{result.state}</span></div>
+    <header className="section-heading result-heading"><div className="result-title"><h2>TLC guidance</h2><span className={`status-pill ${result.state}`}>{result.state}</span></div>{actions}</header>
     <Markdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={(url) => {
       try { const parsed = new URL(url); return parsed.protocol === 'https:' && !parsed.username && !parsed.password ? url : '' } catch { return '' }
     }} components={{ a: ({ href, children }) => href ? <a href={href} target="_blank" rel="noreferrer">{children}</a> : <span>{children}</span> }}>

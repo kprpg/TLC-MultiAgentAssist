@@ -6,6 +6,8 @@ import type { TeamsApiClient, ReviewPreview } from './data-client.js'
 import type { WorkingSelection } from './accounts.js'
 import { ManualTranscriptInput } from './manual-transcript-input.js'
 import { meetingCaptureError, meetingResultSchema, type MeetingResult } from './meeting-capture.js'
+import { meetingProposalToMarkdown } from '../../../shared/meeting-proposal-markdown.js'
+import { ResponseActions } from './response-actions.js'
 
 export function MeetingsWorkspace({ client, selection, mode, reviewPreview, compact = false, graphAvailable = true }: {
   client: TeamsApiClient; selection: WorkingSelection | null; mode: 'sample' | 'live'; reviewPreview: ReviewPreview
@@ -151,7 +153,15 @@ export function MeetingsWorkspace({ client, selection, mode, reviewPreview, comp
       {task !== 'capture' && result && <p role="status" className={result.status.state === 'ready' ? 'success-banner' : 'warning'}>{result.status.detail} ({result.status.attribution})</p>}
       <section id="meeting-follow-up" role="tabpanel" aria-labelledby="meeting-tab-follow-up" hidden={task !== 'follow-up'}>
       {result?.status.state === 'ready' ? <div>
-        <h2>Proposed meeting changes</h2><p>Evidence is {result.status.attribution}. These suggestions have not been applied.</p>
+        <header className="section-heading result-heading"><h2>Proposed meeting changes</h2>
+          <ResponseActions client={client} opportunityId={selection.opportunity.id} title={`Meeting signals - ${selection.opportunity.name}`}
+            generatedAt={result.status.checkedAt} markdown={[
+              `Evidence is ${result.status.attribution}. ${result.status.detail}`,
+              'These suggestions have not been applied.',
+              ...result.proposals.map((proposal) => meetingProposalToMarkdown(proposal, selection.opportunity.name))
+            ].join('\n\n')} />
+        </header>
+        <p>Evidence is {result.status.attribution}. These suggestions have not been applied.</p>
         {result.proposals.map((proposal) => <section key={proposal.changeSetId}>
           {proposal.slots.map((slot) => <label key={slot.slotId} className="meeting-change">
             <input type="checkbox" checked={selected.has(slot.slotId)} disabled={slot.blocked} onChange={(event) => setSelected((current) => {

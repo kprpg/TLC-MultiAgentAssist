@@ -1,5 +1,6 @@
 import * as vscode from 'vscode'
 import { resolve } from 'node:path'
+import { existsSync } from 'node:fs'
 import { createLocalStoreDataProvider, createSampleDataProvider, type ExtensionDataProvider } from './data-provider.js'
 import { configuredFoundryTenantId, createLiveDataProvider } from './live-provider.js'
 import { WorkbenchPanel } from './webview-controller.js'
@@ -7,6 +8,13 @@ import { acquireDelegatedToken, createVsCodeTokenCredential } from './authentica
 import { ConnectionTreeProvider, PlaysTreeProvider, PortfolioTreeProvider, type PortfolioNode } from './tree/trees.js'
 import { McpHttpClient } from '../../../packages/connectors/mcp/index.js'
 import { createRemoveCustomerAction } from './customer-removal.js'
+import { withPresentationCache } from './presentation-provider.js'
+import { localMutationState, protectedMutationKey } from '../../../packages/connectors/common/mutation-state.js'
+import { createMutationSession } from '../../../packages/orchestrator/mutations/composition.js'
+import { MutationSyncClient } from '../../shared/mutation-sync.js'
+import { accountSchema } from '../../../packages/common/contracts/index.js'
+
+let disposeCurrentProvider: (() => Promise<void>) | undefined
 
 function readMode(): 'sample' | 'live' {
     return vscode.workspace.getConfiguration('tlc').get<'sample' | 'live'>('mode', 'sample')
@@ -153,7 +161,51 @@ export function activate(context: vscode.ExtensionContext): void {
         return createSampleDataProvider()
     }
 
-    let provider: ExtensionDataProvider = makeSampleProvider()
+    const prepareProvider = (raw: ExtensionDataProvider): ExtensionDataProvider => {
+        const result = withPresentationCache(raw)
+        const enabled = process.env['TLC_BACKGROUND_SYNC'] === '1'
+        const root = resolve(context.globalStorageUri.fsPath, 'mutation-state')
+        if ((!enabled && !existsSync(resolve(root, `${raw.mode}.sqlite`))) || !raw.sourceCore) return result
+        const core = raw.sourceCore
+        let current = true
+        const state = (async () => {
+            const key = raw.mode === 'live' ? await protectedMutationKey({
+                lockPath: resolve(root, 'key-init.lock'),
+                read: async () => context.secrets.get('tlc.mutation-state-key.v1'),
+                write: async (value) => context.secrets.store('tlc.mutation-state-key.v1', value)
+            }) : undefined
+            return localMutationState(resolve(root, `${raw.mode}.sqlite`), key)
+        })()
+        const mutations = state.then((store) => createMutationSession({
+            core, mode: raw.mode, source: `vscode:${dynamicsResource()}`, state: store,
+            enabled, readCacheOwner: 'host', isCurrent: () => current,
+            ...(raw.getSourceToken ? { getToken: raw.getSourceToken } : {}),
+            conditionalOperations: () => core.conditionalWriteOperations(),
+            applyMeeting: (input) => raw.applyMeetingChangeSet(input)
+        }))
+        result.mutationSync = async (request) => (await mutations).invoke(request)
+        const nativeSync = new MutationSyncClient(result.mutationSync, { onAccessDenied: () => result.cacheSession?.clear() })
+        const addAccount = result.addAccount
+        const setAccountVisibility = result.setAccountVisibility
+        result.addAccount = (accountId) => nativeSync.run('addAccount', { accountId }, () => addAccount(accountId), accountSchema.parse)
+        result.setAccountVisibility = (accountId, visibility) => nativeSync.run('setAccountVisibility', { accountId, visibility },
+            () => setAccountVisibility(accountId, visibility), accountSchema.parse)
+        result.drainMutations = async () => { await (await mutations).drain() }
+        const dispose = result.dispose
+        result.dispose = async () => {
+            try { await result.drainMutations?.() } finally {
+                current = false
+                nativeSync.dispose()
+                await dispose()
+                const storage = await state
+                storage.close()
+            }
+        }
+        void mutations.catch(() => { void vscode.window.showWarningMessage('Protected mutation receipt storage is unavailable. Reconnect after checking the configured runtime and encryption key.') })
+        return result
+    }
+    let provider: ExtensionDataProvider = prepareProvider(makeSampleProvider())
+    disposeCurrentProvider = () => provider.dispose()
     const getProvider = (): ExtensionDataProvider => provider
 
     const connectionTree = new ConnectionTreeProvider(getProvider)
@@ -170,11 +222,27 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     updateStatus()
 
+    const portfolioView = vscode.window.createTreeView('tlcPortfolio', { treeDataProvider: portfolioTree })
+    const updateCacheInterest = () => provider.setCacheInterest?.('native-tree', ['portfolio'], portfolioView.visible && vscode.window.state.focused)
+    const stopData = () => {
+        let generation = provider.cacheSession?.cache.generation
+        return provider.cacheSession?.subscribe(() => {
+            const state = provider.cacheSession?.getState()
+            const changedScope = generation !== state?.generation
+            generation = state?.generation
+            if (!state?.refreshing && (changedScope || state?.error || provider.cacheSession?.cache.has('portfolio'))) portfolioTree.refresh()
+        })
+    }
+    let stopCacheData = stopData()
+    updateCacheInterest()
     context.subscriptions.push(
         statusItem,
         output,
         vscode.window.registerTreeDataProvider('tlcConnection', connectionTree),
-        vscode.window.registerTreeDataProvider('tlcPortfolio', portfolioTree),
+        portfolioView,
+        portfolioView.onDidChangeVisibility(updateCacheInterest),
+        vscode.window.onDidChangeWindowState(updateCacheInterest),
+        { dispose: () => stopCacheData?.() },
         vscode.window.registerTreeDataProvider('tlcPlays', playsTree),
         connectionTree,
         portfolioTree,
@@ -189,9 +257,7 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(WorkbenchPanel.onDidChangePortfolio(refreshAll))
 
     const refreshWorkbench = (): void => {
-        if (!WorkbenchPanel.isOpen) return
-        WorkbenchPanel.disposeCurrent()
-        WorkbenchPanel.createOrShow(context.extensionUri, getProvider)
+        provider.cacheSession?.cache.changed()
     }
 
     const addCustomer = async (): Promise<void> => {
@@ -263,8 +329,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const swapProvider = (next: ExtensionDataProvider): void => {
         const previous = provider
-        provider = next
-        void Promise.resolve(previous.dispose?.()).catch(() => { /* ignore disposal errors */ })
+        stopCacheData?.()
+        provider = prepareProvider(next)
+        stopCacheData = stopData()
+        updateCacheInterest()
+        void Promise.resolve(previous.dispose?.()).catch(() => {
+            output.appendLine('[mutation-sync] previous-source-shutdown-unconfirmed')
+            void vscode.window.showWarningMessage('The previous source could not close cleanly. Check pending source receipts after reconnecting; do not repeat uncertain writes.')
+        })
         updateStatus()
         refreshAll()
         if (WorkbenchPanel.isOpen) {
@@ -314,9 +386,16 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.commands.registerCommand('tlc.open', (focus?: { accountId?: string; opportunityId?: string }) => {
             WorkbenchPanel.createOrShow(context.extensionUri, getProvider, focus)
         }),
-        vscode.commands.registerCommand('tlc.refresh', () => {
-            refreshAll()
-            void vscode.window.setStatusBarMessage('TLC Assist: data refreshed', 2000)
+        vscode.commands.registerCommand('tlc.refresh', async () => {
+            try {
+                provider.cacheSession?.cache.recovered()
+                provider.cacheSession?.refresh()
+                await provider.getPortfolioIndex({ contractVersion: '1.0', includeHidden: true })
+                refreshAll()
+                void vscode.window.setStatusBarMessage('TLC Assist: source data refreshed', 2000)
+            } catch {
+                void vscode.window.showErrorMessage('TLC could not refresh the current source. Check your connection and reconnect before retrying.')
+            }
         }),
         vscode.commands.registerCommand('tlc.addCustomer', () => addCustomer()),
         vscode.commands.registerCommand('tlc.removeCustomer', (node?: PortfolioNode) => removeCustomer(node?.kind === 'account' ? node.recordId : undefined)),
@@ -362,6 +441,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 }
 
-export function deactivate(): void {
-    // Tree providers and commands are disposed through context.subscriptions.
+export async function deactivate(): Promise<void> {
+    await disposeCurrentProvider?.()
+    disposeCurrentProvider = undefined
 }

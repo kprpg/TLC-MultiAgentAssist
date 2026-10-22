@@ -1,7 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, screen, shell, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, screen, shell, type IpcMainInvokeEvent } from 'electron'
 import { AzureCliCredential } from '@azure/identity'
-import { mkdirSync } from 'node:fs'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { existsSync, mkdirSync } from 'node:fs'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -38,6 +38,12 @@ import { createVoiceIpcHandler, voiceIpcChannel } from './voice-ipc.js'
 import { createSellerDashboardHost } from '../../../../packages/orchestrator/seller-dashboard.js'
 import { createSellerDashboardIpcHandler, sellerDashboardIpcChannel } from './seller-dashboard-ipc.js'
 import { desktopWindowBounds } from './window-bounds.js'
+import { createMutationSyncIpcHandler, createPortfolioIpcHandlers } from './portfolio-ipc.js'
+import { createPresentationOwner } from '../../../shared/presentation-owner.js'
+import { localMutationState, protectedMutationKey, type MutationState } from '../../../../packages/connectors/common/mutation-state.js'
+import { createMutationSession, type MutationSession } from '../../../../packages/orchestrator/mutations/composition.js'
+import { bindSourceToken } from '../../../../packages/orchestrator/mutations/core-adapter.js'
+import { cacheControlRequestSchema, cacheControlResponseSchema } from '../../../../packages/common/contracts/cache-sync.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -123,9 +129,10 @@ const mcemConnector = new LocalPdfMcemGuidanceConnector(mcemGuidancePath)
 const portfolioPreferenceStore = new JsonFilePortfolioPreferenceStore(
   resolve(app.getPath('userData'), 'portfolio-preferences.json')
 )
+const sourceToken = bindSourceToken(() => tokenProvider.getAccessToken(), 'https://microsoftsales.crm.dynamics.com', () => clearSourceSession())
 const liveMsxConnector = dataMode === 'sample'
   ? undefined
-  : new LiveMsxConnector(tokenProvider, fetch, undefined, reportPerformance, msxWriteMetadataFromEnvironment(process.env), portfolioPreferenceStore)
+  : new LiveMsxConnector({ getAccessToken: sourceToken }, fetch, undefined, reportPerformance, msxWriteMetadataFromEnvironment(process.env), portfolioPreferenceStore)
 // Keep the opt-in SQLite sample store across Desktop restarts; fixture mode remains in memory.
 const localStoreMsxConnector = liveMsxConnector ? undefined : createLocalStoreMsxConnector({
   ...process.env,
@@ -185,6 +192,58 @@ const orchestrator = new ThinSliceOrchestrator(
   reportPerformance,
   recordCreation
 )
+const presentation = createPresentationOwner(orchestrator)
+const clearSourceSession = () => presentation.session.clear()
+const backgroundEnabled = process.env['TLC_BACKGROUND_SYNC'] === '1'
+let mutationClosing = false
+let mutationDisposed = false
+let quitDrainComplete = false
+let mutationState: MutationState = { durable: false, close() {} }
+async function initializeMutations(): Promise<MutationSession> {
+  if (backgroundEnabled || existsSync(resolve(app.getPath('userData'), 'mutation-state', `${dataMode}.sqlite`))) {
+    const root = resolve(app.getPath('userData'), 'mutation-state')
+    let key: Buffer | undefined
+    if (dataMode === 'live') {
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('Protected receipt storage requires Windows encryption. Background writes were not enabled.')
+      const keyPath = resolve(root, 'protected-key.bin')
+      key = await protectedMutationKey({
+        lockPath: resolve(root, 'key-init.lock'),
+        read: async () => {
+          try { return safeStorage.decryptString(await readFile(keyPath)) } catch (error) {
+            if (error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return undefined
+            throw error
+          }
+        },
+        write: (value) => writeFile(keyPath, safeStorage.encryptString(value), { flag: 'wx' })
+      })
+    }
+    mutationState = await localMutationState(resolve(root, `${dataMode}.sqlite`), key)
+  }
+  return createMutationSession({
+    core: orchestrator, mode: dataMode, source: 'desktop:https://microsoftsales.crm.dynamics.com',
+    state: mutationState, enabled: backgroundEnabled, readCacheOwner: 'host',
+    isCurrent: () => !mutationDisposed,
+    ...(dataMode === 'live' ? { getToken: sourceToken,
+      conditionalOperations: () => orchestrator.conditionalWriteOperations() } : {}),
+    ...(meetingConnector ? { applyMeeting: (input) => meetingConnector.applyMeetingChangeSet(input) } : {})
+  })
+}
+const mutationsReady = app.whenReady().then(initializeMutations)
+void mutationsReady.catch(() => console.error('[mutation-sync] protected-state-unavailable'))
+const mutations: MutationSession = {
+  invoke: async (request) => (await mutationsReady).invoke(request),
+  drain: async () => (await mutationsReady).drain(),
+  resumeAdmission: async () => (await mutationsReady).resumeAdmission()
+}
+presentation.session.subscribe(() => {
+  const state = presentation.session.getState()
+  if (state.refreshing) return
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed() && !window.webContents.isDestroyed() && window.webContents.getURL().startsWith(allowedRendererUrl)) {
+      window.webContents.send('tlc:cache-changed', { contractVersion: '1.0', state })
+    }
+  }
+})
 const configurationRoot = app.isPackaged ? resolve(process.resourcesPath, 'config') : resolve(desktopRoot, '../../config')
 const [mcpRegistry, mcpPolicy, dataverseEntityMap] = await Promise.all([
   loadMcpServerRegistry(resolve(configurationRoot, 'mcp.servers.json')),
@@ -215,8 +274,7 @@ const configuredWorkflowHost = dataMode === 'sample' ? undefined : createLivePla
   }
 })
 const workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost(async () => {
-  const accounts = await msxConnector.listAccounts()
-  const opportunities = (await Promise.all(accounts.map((account) => msxConnector.listOpportunities(account.id)))).flat()
+  const { accounts, opportunities } = await orchestrator.getPortfolioIndex({ contractVersion: '1.0' })
   return {
     accountIds: accounts.map((account) => account.id),
     opportunityIds: opportunities.map((opportunity) => opportunity.id)
@@ -249,6 +307,23 @@ function assertTrustedSender(event: IpcMainInvokeEvent): void {
 }
 
 function registerIpc(): void {
+  const invokeMutationSync = createMutationSyncIpcHandler(mutations)
+  ipcMain.handle('tlc:mutation-sync', async (event, request: unknown) => {
+    assertTrustedSender(event)
+    return invokeMutationSync(request)
+  })
+  ipcMain.handle('tlc:cache-control', (event, raw: unknown) => {
+    assertTrustedSender(event)
+    const request = cacheControlRequestSchema.parse(raw)
+    if (request.operation === 'interest') {
+      const owner = BrowserWindow.fromWebContents(event.sender)
+      const prefix = `renderer:${event.sender.id}`
+      presentation.suspend(prefix, !owner?.isVisible() || !owner.isFocused())
+      presentation.interest(`${prefix}:${request.consumer ?? 'main'}`, request.keys, request.active)
+    }
+    if (request.operation === 'refresh') presentation.session.refresh(request.opportunityId)
+    return cacheControlResponseSchema.parse({ contractVersion: '1.0', state: presentation.session.getState() })
+  })
   const invokeSellerDashboard = createSellerDashboardIpcHandler(sellerDashboardHost)
   ipcMain.handle(sellerDashboardIpcChannel, (event, request: unknown) => {
     assertTrustedSender(event)
@@ -282,11 +357,22 @@ function registerIpc(): void {
   })
   ipcMain.handle('tlc:list-accounts', (event, options: unknown) => {
     assertTrustedSender(event)
-    return orchestrator.listAccounts(accountListOptionsSchema.parse(options ?? {}))
+    return presentation.session.listAccounts(accountListOptionsSchema.parse(options ?? {}).includeHidden)
   })
+  for (const [channel, handler] of Object.entries(createPortfolioIpcHandlers({
+    getPortfolioIndex: (request) => presentation.session.getPortfolioIndex(request.includeHidden),
+    getPortfolioWorkspace: (request) => presentation.session.getPortfolioWorkspace(request),
+    getDiscoverySnapshot: () => presentation.session.getDiscoverySnapshot()
+  }))) {
+    ipcMain.handle(channel, (event, request: unknown) => {
+      assertTrustedSender(event)
+      return handler(request)
+    })
+  }
   ipcMain.handle('tlc:search-accounts', (event, request: unknown) => {
     assertTrustedSender(event)
-    return orchestrator.searchAccounts(accountSearchRequestSchema.parse(request))
+    const parsed = accountSearchRequestSchema.parse(request)
+    return presentation.session.readDataset(`search:${parsed.matchBy}:${parsed.query}`, () => orchestrator.withFreshReadContext(() => orchestrator.searchAccounts(parsed)))
   })
   ipcMain.handle('tlc:add-account', (event, accountId: unknown) => {
     assertTrustedSender(event)
@@ -305,11 +391,11 @@ function registerIpc(): void {
   })
   ipcMain.handle('tlc:list-opportunities', (event, accountId: unknown) => {
     assertTrustedSender(event)
-    return orchestrator.listOpportunities(z.string().min(1).parse(accountId))
+    return presentation.session.listOpportunities(z.string().min(1).parse(accountId))
   })
   ipcMain.handle('tlc:discover-opportunities', (event, domain: unknown) => {
     assertTrustedSender(event)
-    return orchestrator.discoverOpportunities(seDomainSchema.parse(domain))
+    return presentation.session.discoverOpportunities(seDomainSchema.parse(domain))
   })
   ipcMain.handle('tlc:join-deal-team', (event, opportunityId: unknown) => {
     assertTrustedSender(event)
@@ -329,11 +415,11 @@ function registerIpc(): void {
   })
   ipcMain.handle('tlc:list-milestones', (event, opportunityId: unknown) => {
     assertTrustedSender(event)
-    return orchestrator.listMilestones(z.string().min(1).parse(opportunityId))
+    return presentation.session.listMilestones(z.string().min(1).parse(opportunityId))
   })
   ipcMain.handle('tlc:list-discoverable-milestones', (event, opportunityId: unknown) => {
     assertTrustedSender(event)
-    return orchestrator.listDiscoverableMilestones(z.string().min(1).max(200).parse(opportunityId))
+    return presentation.session.listMilestones(z.string().min(1).max(200).parse(opportunityId), true)
   })
   ipcMain.handle('tlc:list-milestone-activities', (event, opportunityId: unknown, milestoneId: unknown) => {
     assertTrustedSender(event)
@@ -468,8 +554,26 @@ async function createWindow(): Promise<void> {
   window.webContents.on('will-navigate', (event, url) => {
     if (!url.startsWith(allowedRendererUrl)) event.preventDefault()
   })
-  window.on('blur', () => voiceHost.cancel())
-  window.webContents.on('destroyed', () => voiceHost.dispose())
+  const prefix = `renderer:${window.webContents.id}`
+  const updateInterest = () => presentation.suspend(prefix, !window.isVisible() || !window.isFocused())
+  window.on('focus', updateInterest)
+  window.on('show', updateInterest)
+  window.on('hide', updateInterest)
+  window.on('minimize', updateInterest)
+  window.on('blur', () => { voiceHost.cancel(); updateInterest() })
+  window.webContents.on('destroyed', () => { presentation.forget(prefix); voiceHost.dispose() })
+  window.webContents.on('will-prevent-unload', (event) => {
+    const close = dialog.showMessageBoxSync(window, {
+      type: 'warning', buttons: ['Keep open', 'Close and recover later'], defaultId: 0, cancelId: 0,
+      message: 'Confirmed source changes may still be pending.',
+      detail: 'Closing does not undo a sent change. Reopen with the same source account to check private receipts before repeating an uncertain write.'
+    })
+    if (close === 1) event.preventDefault()
+    else {
+      mutationClosing = false; quitDrainComplete = false
+      void mutations.resumeAdmission().catch(() => console.error('[mutation-sync] resume-admission-failed'))
+    }
+  })
 
   if (developmentUrl) {
     await window.loadURL(developmentUrl)
@@ -491,7 +595,18 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) void createWindow()
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  if ((!backgroundEnabled && !mutationState.durable) || quitDrainComplete) return
+  event.preventDefault()
+  if (mutationClosing) return
+  mutationClosing = true
+  void mutations.drain().then(() => { quitDrainComplete = true; setImmediate(() => app.quit()) },
+    () => { console.error('[mutation-sync] shutdown-outcome-unconfirmed'); quitDrainComplete = true; setImmediate(() => app.quit()) })
+})
+app.on('will-quit', () => {
+  mutationDisposed = true
+  presentation.dispose()
+  mutationState.close()
   voiceHost.dispose()
   void configuredWorkflowHost?.dispose()
 })

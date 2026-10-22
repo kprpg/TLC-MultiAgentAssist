@@ -2,9 +2,17 @@ export interface PerformanceEvent {
   operation: string
   durationMs: number
   outcome: 'success' | 'failure'
+  correlationId?: string
 }
 
 export type PerformanceReporter = (event: PerformanceEvent) => void
+
+export function createPerformanceReporter(enabled: boolean, emit: (message: string) => void): PerformanceReporter | undefined {
+  return enabled ? (event) => emit(JSON.stringify({
+    operation: event.operation, durationMs: event.durationMs, outcome: event.outcome,
+    ...(event.correlationId ? { correlationId: event.correlationId } : {})
+  })) : undefined
+}
 
 export async function measurePerformance<T>(
   operation: string,

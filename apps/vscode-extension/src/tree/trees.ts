@@ -70,11 +70,15 @@ export class PortfolioTreeProvider extends RefreshEmitter implements vscode.Tree
     async getChildren(element?: PortfolioNode): Promise<PortfolioNode[]> {
         const provider = this.provider()
         const revision = this.revision
+        const error = provider.cacheSession?.getState().error
+        if (error && !provider.cacheSession?.cache.has('portfolio')) {
+            return [new PortfolioNode('empty', 'source-access-error', 'Source access changed - Refresh or reconnect', vscode.TreeItemCollapsibleState.None)]
+        }
         if (!element) {
             const accounts = (await provider.listAccounts()).filter((account) => account.visibility !== 'hidden')
             if (revision !== this.revision) return this.getChildren()
             if (accounts.length === 0) return [new PortfolioNode('empty', 'empty-portfolio', 'No customer accounts - use Add customer', vscode.TreeItemCollapsibleState.None)]
-            return accounts.map((account) => new PortfolioNode(
+            const nodes = accounts.map((account) => new PortfolioNode(
                 'account',
                 account.id,
                 account.name,
@@ -82,6 +86,8 @@ export class PortfolioTreeProvider extends RefreshEmitter implements vscode.Tree
                 undefined,
                 account.visibility === 'hidden'
             ))
+            if (error) nodes.unshift(new PortfolioNode('empty', 'source-refresh-error', 'Source refresh failed - cached data may be stale', vscode.TreeItemCollapsibleState.None))
+            return nodes
         }
         if (element.kind === 'account') {
             if (element.hidden) return []

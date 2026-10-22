@@ -4,7 +4,7 @@ import './add-customer.css'
 import './remove-customer.css'
 
 interface RemovableCustomer extends CustomerAccount {
-  visibility?: 'visible' | 'hidden'
+  visibility?: 'visible' | 'hidden' | undefined
 }
 
 export interface CustomerRemovalClient {

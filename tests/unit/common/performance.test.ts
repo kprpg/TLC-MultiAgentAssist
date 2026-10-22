@@ -1,7 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
-import { measurePerformance, type PerformanceEvent } from '../../../packages/common/index.js'
+import { createPerformanceReporter, measurePerformance, type PerformanceEvent } from '../../../packages/common/index.js'
 
 describe('performance telemetry', () => {
+  it('is opt-in and serializes only technical operation, duration and outcome fields', () => {
+    const emit = vi.fn()
+    expect(createPerformanceReporter(false, emit)).toBeUndefined()
+    const report = createPerformanceReporter(true, emit)
+    const event = { operation: 'msx.http.read', durationMs: 12, outcome: 'success' as const, token: 'must-not-be-logged', customer: 'must-not-be-logged' }
+    report?.(event)
+    expect(emit).toHaveBeenCalledWith('{"operation":"msx.http.read","durationMs":12,"outcome":"success"}')
+  })
   it('reports duration without changing the operation result', async () => {
     const events: PerformanceEvent[] = []
 

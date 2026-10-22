@@ -2,6 +2,8 @@ import { z } from 'zod'
 import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, createMilestoneActivityRequestSchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, meetingTypeSchema, milestoneUpdateSchema, opportunityUpdateSchema, recordCreationCatalogRequestSchema, recordCreationPreviewRequestSchema, recordCreationCommitRequestSchema, scopeRefSchema, seDomainSchema } from '../../../packages/common/index.js'
 import { voiceRequestSchema } from '../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema } from '../../../packages/common/contracts/seller-dashboard.js'
+import { discoverySnapshotRequestSchema, portfolioReadRequestSchema, portfolioWorkspaceRequestSchema } from '../../../packages/common/contracts/index.js'
+import { cacheControlRequestSchema, mutationSyncRequestSchema } from '../../../packages/common/contracts/cache-sync.js'
 
 /**
  * Strict, discriminated message envelopes for the webview <-> extension-host bridge.
@@ -17,10 +19,15 @@ export const agentCapabilitySchema = z.enum([
 ])
 
 export const bridgeMethodSchema = z.enum([
+    'cacheControl',
+    'mutationSync',
     'sellerDashboard',
     'voiceInput',
     'getCurrentUserEmail',
     'listAccounts',
+    'getPortfolioIndex',
+    'getPortfolioWorkspace',
+    'getDiscoverySnapshot',
     'searchAccounts',
     'addAccount',
     'setAccountVisibility',
@@ -63,10 +70,15 @@ export type BridgeMethod = z.infer<typeof bridgeMethodSchema>
 const scopeKindSchema = z.enum(['portfolio', 'account', 'opportunity'])
 
 export const bridgeParamSchemas = {
+    cacheControl: cacheControlRequestSchema,
+    mutationSync: mutationSyncRequestSchema,
     sellerDashboard: sellerDashboardRequestSchema,
     voiceInput: voiceRequestSchema,
     getCurrentUserEmail: z.void().optional(),
     listAccounts: accountListOptionsSchema.optional(),
+    getPortfolioIndex: portfolioReadRequestSchema,
+    getPortfolioWorkspace: portfolioWorkspaceRequestSchema,
+    getDiscoverySnapshot: discoverySnapshotRequestSchema,
     searchAccounts: accountSearchRequestSchema,
     addAccount: z.object({ accountId: z.string().min(1).max(200) }).strict(),
     setAccountVisibility: z.object({

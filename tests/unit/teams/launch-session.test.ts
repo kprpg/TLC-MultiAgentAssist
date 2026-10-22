@@ -34,12 +34,13 @@ $script:connected = $env:TLC_GUIDED_SCENARIO -in @('already-ready', 'resume-hidd
 $script:msxConnected = $script:connected -and $env:TLC_GUIDED_SCENARIO -ne 'account-only'
 $script:opened = $env:TLC_GUIDED_SCENARIO -eq 'already-ready'
 $script:approved = if ($script:connected) { 'A1B2C3D4' } else { '' }
-$sample = $env:TLC_GUIDED_SCENARIO -in @('sample', 'manual-install', 'install-failure', 'no-guide')
+$sample = $env:TLC_GUIDED_SCENARIO -in @('sample', 'sample-in-live-runtime', 'manual-install', 'install-failure', 'no-guide')
 $record = [pscustomobject]@{
   pid=2147483000; startTimeUtc='2026-10-19T20:00:00.0000000Z'
   runId='11111111111111111111111111111111'; runtimeDirectory=$env:TLC_GUIDED_RUNTIME
-  origin='https://localhost:49199'; mode=$(if ($sample) { 'sample' } else { 'live' })
-  authentication=$(if ($sample) { 'hosted-obo' } else { 'local-azure-cli' })
+  origin='https://localhost:49199'; mode=$(if ($sample -and $env:TLC_GUIDED_SCENARIO -ne 'sample-in-live-runtime') { 'sample' } else { 'live' })
+  initialDataMode=$(if ($sample) { 'sample' } else { 'live' })
+  authentication=$(if ($sample -and $env:TLC_GUIDED_SCENARIO -ne 'sample-in-live-runtime') { 'hosted-obo' } else { 'local-azure-cli' })
   ownerDirectory=(Join-Path $env:TLC_GUIDED_WORK 'private'); logs=(Join-Path $env:TLC_GUIDED_WORK 'logs')
   clientBuildId='22222222-2222-4222-8222-222222222222'; packageId='8cb8c9a2-6ee6-4382-bfa4-5b409c77e54b'
   packageVersion='1.2484.12345'; teamsArchive=$env:TLC_GUIDED_ARCHIVE
@@ -149,6 +150,14 @@ describe('guided Teams installation and finish-line verification', () => {
     await data.run()
     expect((await data.calls()).some((call) => call.phase === 'owner')).toBe(false)
     expect(await data.record()).toMatchObject({ setup: 'complete', mode: 'sample' })
+  }, 40_000)
+  it('verifies a Sample-first Live-capable runtime without connecting MSX or asking for page pairing', async () => {
+    const data = await fixture('sample-in-live-runtime')
+    const result = await data.run()
+    expect((await data.calls()).some((call) => call.phase === 'owner')).toBe(false)
+    expect(await data.record()).toMatchObject({ setup: 'complete', mode: 'live', initialDataMode: 'sample' })
+    expect(result.stdout).toContain('not-required')
+    expect(result.stdout).not.toContain('Type CONNECT')
   }, 40_000)
   it('retains a verified existing page without reinstalling, reconnecting or opening another tab', async () => {
     const data = await fixture('already-ready')

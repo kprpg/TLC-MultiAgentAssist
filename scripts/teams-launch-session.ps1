@@ -60,12 +60,20 @@ function Invoke-TeamsRunOwner {
     return & (Join-Path $PSScriptRoot 'teams-local-connection.ps1') @arguments
 }
 
+function Get-TeamsRunDataMode {
+    param([object] $Record)
+    $mode = if ($Record.PSObject.Properties['initialDataMode']) { $Record.initialDataMode } else { $Record.mode }
+    if ($mode -notin @('sample', 'live')) { throw 'The recorded initial data mode is invalid.' }
+    return $mode
+}
+
 function Get-TeamsRunStatus {
     param([string] $WorkDirectory)
     $record = (Get-OwnedTeamsRun -WorkDirectory $WorkDirectory).Record
     $status = Read-TeamsLaunchStatus -Record $record
-    $native = $record.authentication -in @('local-interactive', 'local-azure-cli')
-    $source = if ($record.mode -eq 'sample') { 'not-required' } elseif ($native) {
+    $dataMode = Get-TeamsRunDataMode -Record $record
+    $native = $dataMode -eq 'live' -and $record.authentication -in @('local-interactive', 'local-azure-cli')
+    $source = if ($dataMode -eq 'sample') { 'not-required' } elseif ($native) {
         $owner = Invoke-TeamsRunOwner -WorkDirectory $WorkDirectory -Action Status
         if ($owner.status.state -eq 'connected' -and @($owner.status.resources | Where-Object { $_.resource -eq 'msx' -and $_.state -eq 'connected' }).Count -gt 0) { 'connected' }
         elseif ($owner.status.state -eq 'connected') { 'msx-not-connected' }
@@ -78,7 +86,7 @@ function Get-TeamsRunStatus {
     })
     $installed = $record.installation -in @('command-succeeded', 'manually-confirmed', 'verified')
     return [pscustomobject]@{
-        Backend = 'ready'; Origin = $record.origin; Mode = $record.mode; Authentication = $record.authentication
+        Backend = 'ready'; Origin = $record.origin; Mode = $record.mode; InitialDataMode = $dataMode; Authentication = $record.authentication
         RunId = $record.runId; ClientBuild = $record.clientBuildId; AppVersion = $record.packageVersion
         Installation = $record.installation; Source = $source; TeamsClient = $(if ($clients.Count) { 'verified' } else { 'waiting' })
         Ready = ($installed -and $clients.Count -gt 0 -and (-not $native -or $source -eq 'connected'))
@@ -88,7 +96,7 @@ function Get-TeamsRunStatus {
 
 function Show-TeamsRunStatus {
     param([object] $Status)
-    $Status | Format-List Backend, Origin, Mode, Authentication, AppVersion, RunId, ClientBuild, Installation, Source, TeamsClient, Ready, CheckedAt, Logs | Out-Host
+    $Status | Format-List Backend, Origin, Mode, InitialDataMode, Authentication, AppVersion, RunId, ClientBuild, Installation, Source, TeamsClient, Ready, CheckedAt, Logs | Out-Host
     if (-not $Status.Ready) { Write-Warning 'Setup is incomplete. Keep Teams open and use -Resume with the same work directory; this does not restart the backend.' }
 }
 
@@ -169,7 +177,7 @@ function Complete-TeamsRunSetup {
     Write-Host "[5/7] Opening the installed TLC personal app in Teams: $link"
     Write-Host "Expected backend: $($record.origin). App version: $($record.packageVersion). Backend run: $($record.runId)."
     Start-Process -FilePath $link
-    $native = $record.authentication -in @('local-interactive', 'local-azure-cli')
+    $native = (Get-TeamsRunDataMode -Record $record) -eq 'live' -and $record.authentication -in @('local-interactive', 'local-azure-cli')
     if ($native) {
         if ($initial.Source -ne 'connected') {
             Write-Host '[6/7] Explicit source connection. This verifies your own MSX identity; it does not write source records.'
@@ -194,7 +202,7 @@ function Complete-TeamsRunSetup {
         $record.setup = 'waiting-for-client'
         Write-TeamsRunRecord -WorkDirectory $WorkDirectory -Record $record
     } else {
-        Write-Host '[6/7] Keep the app open inside Teams. For hosted Live, complete corporate sign-in in that app.'
+        Write-Host '[6/7] Keep the app open inside Teams. Sample uses local SQLite without source sign-in or pairing. For hosted Live, complete corporate sign-in in that app.'
     }
     Write-Host '[7/7] Waiting for the matching, visible Teams client to acknowledge this exact backend and build...'
     $deadline = [DateTime]::UtcNow.AddSeconds($ClientTimeoutSeconds)

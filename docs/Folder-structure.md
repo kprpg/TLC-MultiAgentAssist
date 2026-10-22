@@ -20,6 +20,13 @@ The structure supports these boundaries:
 
 ## Repository Layout
 
+### Product feedback intake
+
+- [Product Backlog](./Product-Backlog.md) records incoming user requests, ideas,
+  screenshots, triage decisions, and acceptance criteria; capture is not implementation approval.
+- [Backlog screenshot assets](./media/product-backlog/) contains redacted,
+  ID-labelled references linked from each entry. Sensitive originals stay outside Git.
+
 ### Teams implementation additions
 
 The original proposal below is retained as historical context. The Teams development
@@ -28,6 +35,8 @@ surface adds the following focused areas while preserving one shared backend/har
 ```text
 apps/teams/src/                       Teams composition, verified HTTP/bot transport
 apps/teams/src/runtime-resources.ts   Local SQLite/CLI or Azure Table/managed identity
+apps/teams/src/data-mode-router.ts    Per-page Sample/Live routes over isolated canonical services/stores
+apps/teams/src/performance.ts         Opt-in technical timing and async HTTP correlation; no payload logging
 apps/teams/src/native-identity.ts     Native SDK identity/resource tokens; no HTTP interaction
 apps/teams/src/cli-identity.ts        Verified current CLI user; private read-only MSX, no FTE inference
 apps/teams/src/native-connection.ts   Per-user native composition, private state and owner control
@@ -39,34 +48,71 @@ apps/teams/src/client/                Personal/channel/meeting presentation
                                      Plays/result, navigation and responsive-disclosure modules
                                      Native connection panel and memory-only local API client
 apps/teams/src/client/discovery.tsx   Domain tabs, shared customer filters/sort and reviewed memberships
+apps/teams/src/client/use-data-mode.ts
+apps/teams/src/client/data-mode-switcher.tsx
+                                     Personal mode selector, discard confirmation and memory-only auth reuse
 apps/teams/src/client/discovery.css   Teams-themed compact discovery table and responsive layout
+apps/teams/src/client/mcem-stage-board.tsx
+                                     Account-scoped Teams selection over shared MCEM stage columns
 apps/teams/src/client/manual-transcript-input.tsx
                                      Bounded paste/upload input and scope-safe extraction
 apps/teams/src/client/meeting-capture.ts
                                      Shared capture result validation and actionable source errors
+apps/teams/src/client/response-actions.tsx
+                                     Top-right Word/unsent email downloads for Guidance and meeting proposals
+apps/teams/src/client/workspace-boundary.tsx
+                                     Explicit recovery for lazily loaded workspace failures
+apps/desktop/electron/main/portfolio-ipc.ts
+                                     Validated aggregate portfolio/index IPC over the shared orchestrator
 apps/teams/.env.native.example       Safe per-user native configuration, not real credentials
 apps/teams/.env.cli.example          Safe existing-user CLI configuration, not tokens/secrets
 apps/shared/                         Browser-safe prompt/Markdown and existing UI reuse
 apps/shared/transcript-file.ts       Shared UTF-8 VTT/text reader for Desktop/Web, VS Code and Teams
                                      Shared Portfolio controls, sorting and Next Best Actions
+apps/shared/session-portfolio.ts     Memory-only, mode/session-scoped Portfolio/Discovery snapshots
+                                     Shared lazy detail caching, local filtering and confirmed-write updates
+apps/shared/session-cache.ts         Bounded reactive datasets, active-interest freshness and safe read retries
+apps/shared/presentation-owner.ts    Host-owned cache composition and confirmed canonical patches
+apps/shared/presentation-hooks.ts    Visible-interest subscriptions and original editor-field capture
+apps/shared/mutation-sync.ts         Browser-safe pending overlays, private recovery and exact-source review
+apps/shared/sync-status.tsx          Shared stale/last-checked and pending/conflict/unknown presentation
+apps/vscode-extension/src/presentation-provider.ts
+                                     One provider cache for native trees and recreated webviews
+apps/shared/meeting-proposal-markdown.ts
+                                     Shared browser-safe meeting proposal export format across surfaces
+apps/shared/mcem-stages.ts           Browser-safe stage names and accountable role metadata
+apps/shared/mcem-stage-board.tsx     Shared Desktop/Web/Teams stage columns and presentation
+apps/shared/mcem-stage-board.css     Shared stage headers, cards, selection and gate styling
 packages/common/contracts/workflow-output.ts
                                      Browser-safe existing workflow result/run-view schemas
+packages/common/contracts/cache-sync.ts
+                                     Independent strict v1.0 read-control, policy and asynchronous receipt contracts
+packages/common/source-failure.ts    Preserve MSX denial/throttling status without replacing host policy errors
 packages/common/contracts/local-connection.ts
                                      Native/owner protocol v1.0, CLI public profile v1.2,
                                      and independently versioned work-session renewal v1.0
 packages/common/contracts/teams-launch.ts
                                      Separate strict v1.0 launch/build/client-readiness contracts
+packages/common/contracts/teams-data-mode.ts
+                                     Strict v1.0 runtime/initial/available modes and bounded API paths
+packages/common/contracts/index.ts   Independently versioned v1.0 Portfolio index/workspace and all-domain Discovery snapshot contracts
 packages/orchestrator/application-runtime.ts
 packages/orchestrator/operations.ts   Shared composition and typed operation catalog
 packages/orchestrator/task-agents.ts  Shared Foundry/sample/deterministic-live registries
 packages/orchestrator/collaboration/  Reviewed actions, bindings, events, state admission
+packages/orchestrator/mutations/     Immediate confirmed admission, protected journal, actor/version and effect tracking
 packages/connectors/graph/            Delegated meeting/transcript/subscription access
 packages/connectors/teams/            Authoritative resource membership checks
 packages/connectors/common/encrypted-document-store.ts
                                      Authenticated local state payload encryption
+packages/connectors/common/mutation-state.ts
+                                     Protected local key initialization and existing Azure Table receipt composition
 packages/documents/                   Shared Word/email builders, not an app dependency
 tests/unit/teams/                     Cumulative deterministic Teams slices
 tests/e2e/teams/                      Actual host/browser journeys
+tests/e2e/backend-performance/        Controlled all-four-host backend round-trip comparisons
+tests/fixtures/performance/          Read-only Live-class fixtures and isolated production-preload host
+playwright.performance.config.ts     Reproducible backend performance gate; no tenant/model calls
 release-teams/                       Ignored generated installation/runtime archives
 scripts/run-teams-local.ps1          Guided build/start/install/pair/verify; status and restart-free resume
 scripts/teams-launch-session.ps1     Owned-run checks, exact-ZIP install and finish-line verification

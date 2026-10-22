@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z, ZodError } from 'zod'
 import {
@@ -12,6 +12,10 @@ import {
     dealTeamJoinResultSchema,
     dealTeamLeaveResultSchema,
     discoverableOpportunitySchema,
+    discoverySnapshotRequestSchema,
+    discoverySnapshotSchema,
+    type DiscoverySnapshot,
+    type DiscoverySnapshotRequest,
     emailComposeRequestSchema,
     exportResponseRequestSchema,
     mcemRequestSchema,
@@ -82,11 +86,21 @@ import { invokeWorkflowHost, type WorkflowHost, type WorkflowHostOperation } fro
 import { createBrowserOnlyVoiceHost, type SharedVoiceInputHost } from '../../../packages/orchestrator/voice-input.js'
 import type { SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 import { RecordCreationError } from '../../../packages/orchestrator/record-creation/service.js'
+import { portfolioReadRequestSchema, portfolioIndexSchema, portfolioWorkspaceRequestSchema, portfolioWorkspaceSchema, type PortfolioReadRequest, type PortfolioIndex, type PortfolioWorkspaceRequest, type PortfolioWorkspace } from '../../../packages/common/contracts/index.js'
+import { mutationSyncRequestSchema, mutationSyncResponseSchema, type MutationSyncRequest, type MutationSyncResponse } from '../../../packages/common/contracts/cache-sync.js'
+import { MutationDispatchPreventedError } from '../../../packages/orchestrator/mutations/host.js'
+import { MutationJournalError } from '../../../packages/orchestrator/mutations/journal.js'
+import { sourceHttpFailure } from '../../../packages/common/source-failure.js'
 
 const accountIdSchema = z.string().min(1).max(200)
 const maximumBodyBytes = 1_048_576
 
 export interface WebRuntime {
+    mutationSync?(request: MutationSyncRequest): Promise<MutationSyncResponse>
+    withReadContext?<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T>
+    getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
+    getPortfolioWorkspace(request: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace>
+    getDiscoverySnapshot(request: DiscoverySnapshotRequest): Promise<DiscoverySnapshot>
     listAccounts(options?: AccountListOptions): Promise<Account[]>
     searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
     addAccount(accountId: string): Promise<Account>
@@ -132,6 +146,21 @@ export interface WebApiOptions {
     onError?(error: unknown, correlationId: string): void
 }
 
+async function cancellableRead<T>(request: IncomingMessage, response: ServerResponse, runtime: WebRuntime, action: () => Promise<T>): Promise<T> {
+    const controller = new AbortController()
+    const abort = () => { if (!response.writableFinished) controller.abort() }
+    response.once('close', abort)
+    request.once('aborted', abort)
+    try {
+        const result = await (runtime.withReadContext ? runtime.withReadContext(action, controller.signal) : action())
+        controller.signal.throwIfAborted()
+        return result
+    } finally {
+        response.removeListener('close', abort)
+        request.removeListener('aborted', abort)
+    }
+}
+
 export function buildWebApiHandler(options: WebApiOptions) {
     const browserOnlyVoice = createBrowserOnlyVoiceHost()
     return async (request: IncomingMessage, response: ServerResponse): Promise<boolean> => {
@@ -159,6 +188,7 @@ export function buildWebApiHandler(options: WebApiOptions) {
 
             const authentication = await (options.authenticate ?? readEasyAuthAuthentication)(request)
             assertSameOriginMutation(request)
+            response.setHeader('x-tlc-source-scope', authenticatedSourceScope(authentication))
 
             if (request.method === 'GET' && url.pathname === '/api/me') {
                 sendJson(response, 200, { email: authentication.userEmail })
@@ -231,6 +261,35 @@ export function buildWebApiHandler(options: WebApiOptions) {
 
             const runtime = await options.createRuntime(authentication)
 
+            if (request.method === 'POST' && url.pathname === '/api/mutation-sync') {
+                const input = mutationSyncRequestSchema.parse(await readJsonBody(request))
+                if (!runtime.mutationSync) {
+                    if (input.operation !== 'capabilities') throw new MutationDispatchPreventedError('storage-unavailable', 'Durable background writes are unavailable.')
+                    sendJson(response, 200, { contractVersion: '1.0', kind: 'capabilities', capabilities: {
+                        contractVersion: '1.0', available: false, readCacheOwner: 'client', operations: [],
+                        reason: 'This host has not enabled protected durable background writes.'
+                    } })
+                } else {
+                    const result = mutationSyncResponseSchema.parse(await runtime.mutationSync(input))
+                    sendJson(response, result.kind === 'receipt' && result.receipt.state === 'accepted' ? 202 : 200, result)
+                }
+                return true
+            }
+            if (request.method === 'POST' && url.pathname === '/api/discovery/snapshot') {
+                const input = discoverySnapshotRequestSchema.parse(await readJsonBody(request))
+                sendJson(response, 200, discoverySnapshotSchema.parse(await cancellableRead(request, response, runtime, () => runtime.getDiscoverySnapshot(input))))
+                return true
+            }
+            if (request.method === 'POST' && url.pathname === '/api/portfolio/index') {
+                const input = portfolioReadRequestSchema.parse(await readJsonBody(request))
+                sendJson(response, 200, portfolioIndexSchema.parse(await cancellableRead(request, response, runtime, () => runtime.getPortfolioIndex(input))))
+                return true
+            }
+            if (request.method === 'POST' && url.pathname === '/api/portfolio/workspace') {
+                const input = portfolioWorkspaceRequestSchema.parse(await readJsonBody(request))
+                sendJson(response, 200, portfolioWorkspaceSchema.parse(await cancellableRead(request, response, runtime, () => runtime.getPortfolioWorkspace(input))))
+                return true
+            }
             if (request.method === 'GET' && url.pathname === '/api/accounts') {
                 const options = accountListOptionsSchema.parse({
                     ...(url.searchParams.has('includeHidden')
@@ -416,6 +475,20 @@ export function buildWebApiHandler(options: WebApiOptions) {
             sendJson(response, 404, { error: 'The requested API route was not found.', correlationId })
             return true
         } catch (error) {
+            if (error instanceof MutationDispatchPreventedError || error instanceof MutationJournalError) {
+                if (error.code === 'capacity') response.setHeader('retry-after', '5')
+                sendJson(response, error instanceof MutationDispatchPreventedError ? error.status : error.code === 'capacity' ? 429 : 409, { error: error.message, code: error.code })
+                return true
+            }
+            const source = sourceHttpFailure(error)
+            if (source) {
+                if (source.retryAfterSeconds !== undefined) response.setHeader('retry-after', String(source.retryAfterSeconds))
+                options.onError?.(new Error(`Source request failed with status ${source.status}.`), correlationId)
+                sendJson(response, source.status, { error: source.status === 401 ? 'Reauthenticate before reading source data.'
+                    : source.status === 403 ? 'Current source access was denied. Reconnect before reading private data.'
+                        : source.status === 429 ? 'The source is throttled. Wait before refreshing again.' : 'The source is temporarily unavailable.', correlationId })
+                return true
+            }
             const statusCode = error instanceof HttpError
                 ? error.statusCode
                 : error instanceof ZodError
@@ -451,6 +524,20 @@ export function readEasyAuthAuthentication(request: IncomingMessage): Authentica
         throw new HttpError(401, 'Sign in with Microsoft Entra ID to access live data.')
     }
     return { accessToken, clientPrincipal, userEmail }
+}
+
+function authenticatedSourceScope(authentication: AuthenticatedRequest): string {
+    const payload = authentication.accessToken.split('.')[1]
+    let subject: { tid: string; oid: string } | undefined
+    if (payload) {
+        try {
+            subject = z.object({ tid: z.string().guid(), oid: z.string().guid() }).parse(
+                JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')))
+        } catch {
+            throw new HttpError(401, 'The delegated source identity is invalid. Sign in again.')
+        }
+    }
+    return createHash('sha256').update(JSON.stringify([authentication.clientPrincipal, subject])).digest('hex')
 }
 
 function assertSameOriginMutation(request: IncomingMessage): void {

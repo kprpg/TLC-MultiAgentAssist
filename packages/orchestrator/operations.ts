@@ -10,6 +10,9 @@ import type { ApplicationServices } from './application-runtime.js'
 import { workflowContractVersion } from '../common/contracts/workflows.js'
 import { canonicalJson } from './collaboration/reviewed-actions.js'
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema } from '../common/contracts/seller-dashboard.js'
+import { measurePerformance } from '../common/telemetry/performance.js'
+import type { ThinSliceOrchestrator } from './index.js'
+import type { SyncMutationOperation } from '../common/contracts/cache-sync.js'
 
 export class WorkflowScopeAuthorizationError extends Error {
   constructor() { super('Workflow source scope is unavailable or changed. Start a fresh workflow after verifying current access.'); this.name = 'WorkflowScopeAuthorizationError' }
@@ -30,21 +33,10 @@ function operation<I extends Record<string, unknown>, O>(input: z.ZodType<I>, ou
   return { effect, startsWork, parse: (raw) => input.parse(raw), run: async (raw) => output.parse(await invoke(input.parse(raw))) }
 }
 
-export function createApplicationOperations(services: ApplicationServices) {
-  const core = services.orchestrator
-  const workflows = services.workflows
-  const operations: Record<string, ApplicationOperation> = {
-    sellerDashboard: operation(sellerDashboardRequestSchema, sellerDashboardResponseSchema, (input) => services.sellerDashboard.invoke(input)),
-    listAccounts: operation(c.accountListOptionsSchema.strict(), z.array(c.accountSchema), (input) => core.listAccounts(input)),
-    searchAccounts: operation(c.accountSearchRequestSchema.strict(), z.array(c.accountCandidateSchema), (input) => core.searchAccounts(input)),
+export function createCoreMutationOperations(core: ThinSliceOrchestrator, applyMeeting?: ApplicationServices['meetings']['applyMeetingChangeSet']): Record<SyncMutationOperation, ApplicationOperation> {
+  return {
     addAccount: operation(z.object({ accountId: id }).strict(), c.accountSchema, (input) => core.addAccount(input.accountId), 'preference'),
     setAccountVisibility: operation(z.object({ accountId: id, visibility: z.enum(['visible', 'hidden']) }).strict(), c.accountSchema, (input) => core.setAccountVisibility(input.accountId, input.visibility), 'preference'),
-    listOpportunities: operation(z.object({ accountId: id }).strict(), z.array(c.opportunitySchema), (input) => core.listOpportunities(input.accountId)),
-    getOpportunityContext: operation(opportunity, z.object({ account: c.accountSchema, opportunity: c.opportunitySchema, milestones: z.array(c.milestoneSchema), revisionTokens: z.record(z.string(), z.string()).optional() }).strict(), (input) => core.getOpportunitySnapshot(input.opportunityId)),
-    discoverOpportunities: operation(z.object({ domain: seDomainSchema }).strict(), z.array(c.discoverableOpportunitySchema), (input) => core.discoverOpportunities(input.domain)),
-    listMilestones: operation(opportunity, z.array(c.milestoneSchema), (input) => core.listMilestones(input.opportunityId)),
-    listDiscoverableMilestones: operation(opportunity, z.array(c.milestoneSchema), (input) => core.listDiscoverableMilestones(input.opportunityId)),
-    listMilestoneActivities: operation(milestone, z.array(c.milestoneActivitySchema), (input) => core.listMilestoneActivities(input.opportunityId, input.milestoneId)),
     joinDealTeam: operation(opportunity.extend({ domain: seDomainSchema.optional() }).strict(), c.dealTeamJoinResultSchema, (input) => core.joinDealTeam(input.opportunityId), 'source'),
     leaveDealTeam: operation(opportunity, c.dealTeamLeaveResultSchema, (input) => core.leaveDealTeam(input.opportunityId), 'source'),
     joinMilestoneTeam: operation(milestone.extend({ domain: seDomainSchema.optional() }).strict(), c.milestoneTeamJoinResultSchema, (input) => core.joinMilestoneTeam(input.opportunityId, input.milestoneId), 'source'),
@@ -53,13 +45,36 @@ export function createApplicationOperations(services: ApplicationServices) {
     updateMilestone: operation(milestone.extend({ update: c.milestoneUpdateSchema }).strict(), c.milestoneSchema, (input) => core.updateMilestone(input.opportunityId, input.milestoneId, input.update), 'source'),
     createMilestoneActivity: operation(milestone.extend({ request: c.createMilestoneActivityRequestSchema }).strict(), c.milestoneActivitySchema, (input) => core.createMilestoneActivity(input.opportunityId, input.milestoneId, input.request), 'source'),
     transitionOpportunityStage: operation(c.mcemStageTransitionRequestSchema, c.mcemStageTransitionResultSchema, (input) => core.transitionOpportunityStage(input), 'source'),
+    commitRecordCreation: operation(c.recordCreationCommitRequestSchema, c.recordCreationResultSchema, (input) => core.commitRecordCreation(input), 'source'),
+    applyMeetingChangeSet: operation(z.object({ proposal: c.meetingChangeSetProposalSchema, approval: c.meetingChangeSetApprovalSchema }).strict(), c.meetingChangeSetResultSchema, (input) => {
+      if (!applyMeeting) throw new Error('Meeting writes are unavailable in this source profile.')
+      return applyMeeting(input)
+    }, 'source')
+  }
+}
+
+export function createApplicationOperations(services: ApplicationServices) {
+  const core = services.orchestrator
+  const workflows = services.workflows
+  const operations: Record<string, ApplicationOperation> = {
+    ...createCoreMutationOperations(core, (input) => services.meetings.applyMeetingChangeSet(input)),
+    sellerDashboard: operation(sellerDashboardRequestSchema, sellerDashboardResponseSchema, (input) => services.sellerDashboard.invoke(input)),
+    listAccounts: operation(c.accountListOptionsSchema.strict(), z.array(c.accountSchema), (input) => core.listAccounts(input)),
+    getPortfolioIndex: operation(c.portfolioReadRequestSchema, c.portfolioIndexSchema, (input) => core.getPortfolioIndex(input)),
+    getPortfolioWorkspace: operation(c.portfolioWorkspaceRequestSchema, c.portfolioWorkspaceSchema, (input) => core.getPortfolioWorkspace(input)),
+    getDiscoverySnapshot: operation(c.discoverySnapshotRequestSchema, c.discoverySnapshotSchema, (input) => core.getDiscoverySnapshot(input)),
+    searchAccounts: operation(c.accountSearchRequestSchema.strict(), z.array(c.accountCandidateSchema), (input) => core.searchAccounts(input)),
+    listOpportunities: operation(z.object({ accountId: id }).strict(), z.array(c.opportunitySchema), (input) => core.listOpportunities(input.accountId)),
+    getOpportunityContext: operation(opportunity, z.object({ account: c.accountSchema, opportunity: c.opportunitySchema, milestones: z.array(c.milestoneSchema), revisionTokens: z.record(z.string(), z.string()).optional() }).strict(), (input) => core.getOpportunitySnapshot(input.opportunityId)),
+    discoverOpportunities: operation(z.object({ domain: seDomainSchema }).strict(), z.array(c.discoverableOpportunitySchema), (input) => core.discoverOpportunities(input.domain)),
+    listMilestones: operation(opportunity, z.array(c.milestoneSchema), (input) => core.listMilestones(input.opportunityId)),
+    listDiscoverableMilestones: operation(opportunity, z.array(c.milestoneSchema), (input) => core.listDiscoverableMilestones(input.opportunityId)),
+    listMilestoneActivities: operation(milestone, z.array(c.milestoneActivitySchema), (input) => core.listMilestoneActivities(input.opportunityId, input.milestoneId)),
     runMcemCoach: operation(c.mcemRequestSchema.strict(), c.mcemResponseSchema, (input) => core.runMcemCoach(input), 'read', true),
     runAgentTask: operation(c.agentTaskRequestSchema.strict(), c.agentTaskResponseSchema, (input) => core.runAgentTask(input), 'read', true),
     getRecordCreationCatalog: operation(c.recordCreationCatalogRequestSchema, c.recordCreationCatalogSchema, (input) => core.getRecordCreationCatalog(input)),
     previewRecordCreation: operation(c.recordCreationPreviewRequestSchema, c.recordCreationPreviewSchema, (input) => core.previewRecordCreation(input)),
-    commitRecordCreation: operation(c.recordCreationCommitRequestSchema, c.recordCreationResultSchema, (input) => core.commitRecordCreation(input), 'source'),
     exportRecordCreationDraft: operation(c.recordCreationCommitRequestSchema, c.recordCreationDraftResultSchema, (input) => core.exportRecordCreationDraft(input)),
-    applyMeetingChangeSet: operation(z.object({ proposal: c.meetingChangeSetProposalSchema, approval: c.meetingChangeSetApprovalSchema }).strict(), c.meetingChangeSetResultSchema, (input) => services.meetings.applyMeetingChangeSet(input), 'source'),
     'workflows.list': operation(listWorkflowDefinitionsRequestSchema, z.array(c.workflowDefinitionSchema), (input) => workflows.listDefinitions(input)),
     'workflows.start': operation(startWorkflowHostRequestSchema, c.workflowRunSchema, (input) => workflows.start(input), 'read', true),
     'workflows.get': operation(workflowRunRequestSchema, workflowRunViewSchema, (input) => workflows.get(input)),
@@ -72,9 +87,11 @@ export function createApplicationOperations(services: ApplicationServices) {
     return operations[name]!
   }
   async function workingSet() {
-    const accounts = await core.listAccounts()
-    const opportunities = (await Promise.all(accounts.map((account) => core.listOpportunities(account.id)))).flat()
-    return { accountIds: accounts.map((account) => account.id).sort(), opportunityIds: opportunities.map((opportunity) => opportunity.id).sort() }
+    const capture = async () => {
+      const { accounts, opportunities } = await core.getPortfolioIndex({ contractVersion: c.portfolioReadVersion })
+      return { accountIds: accounts.map((account) => account.id).sort(), opportunityIds: opportunities.map((opportunity) => opportunity.id).sort() }
+    }
+    return services.withReadContext ? services.withReadContext(capture) : capture()
   }
   async function verifyWorkflow(runId: string) {
     const captured = services.workflowScopes.get(runId)
@@ -86,21 +103,29 @@ export function createApplicationOperations(services: ApplicationServices) {
   return {
     describe,
     names: () => Object.keys(operations),
-    async invoke(name: string, input: unknown): Promise<unknown> {
-      services.refreshSource()
+    async invoke(name: string, input: unknown, signal?: AbortSignal): Promise<unknown> {
       const entry = describe(name)
-      if (name === 'workflows.start') {
-        const captured = await workingSet()
-        const run = c.workflowRunSchema.parse(await entry.run(input))
-        if (services.workflowScopes.size >= 100) services.workflowScopes.delete(services.workflowScopes.keys().next().value!)
-        services.workflowScopes.set(run.runId, captured)
-        return run
-      }
-      if (name === 'workflows.get' || name === 'workflows.guidance') {
-        const request = entry.parse(input)
-        await verifyWorkflow(String(request['runId']))
-      }
-      return entry.run(input)
+      return measurePerformance(`operation.${name}`, services.performanceReporter, async () => {
+        signal?.throwIfAborted()
+        services.refreshSource()
+        if (name === 'workflows.start') {
+          const request = entry.parse(input)
+          const captured = await workingSet()
+          const run = c.workflowRunSchema.parse(await entry.run(request))
+          if (services.workflowScopes.size >= 100) services.workflowScopes.delete(services.workflowScopes.keys().next().value!)
+          services.workflowScopes.set(run.runId, captured)
+          return run
+        }
+        const read = async () => {
+          if (name === 'workflows.get' || name === 'workflows.guidance') {
+            const request = entry.parse(input)
+            await verifyWorkflow(String(request['runId']))
+          }
+          return entry.run(input)
+        }
+        return entry.effect === 'read' && name !== 'workflows.cancel'
+          ? core.withReadContext(read, signal) : entry.run(input)
+      })
     },
     async snapshot(name: string, input: unknown): Promise<unknown> {
       services.refreshSource()
