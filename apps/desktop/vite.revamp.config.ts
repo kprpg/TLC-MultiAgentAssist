@@ -3,8 +3,11 @@ import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import { readVoiceModel, voiceModelName } from '../../scripts/prepare-voice-model.mjs'
 import { voiceWorkerAssets, voiceWorkerFile, voiceWorkerCsp } from '../../scripts/voice-worker-assets.mjs'
+import { fontScalePlugin } from './postcss-font-scale.js'
+import { uiFontScale } from './renderer-revamp/src/font-scale.js'
 
 export default defineConfig({
+    css: { postcss: { plugins: [fontScalePlugin(uiFontScale)] } },
     plugins: [react(), {
         name: 'offline-voice-model',
         async load(id) {
