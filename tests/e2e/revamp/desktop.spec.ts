@@ -48,6 +48,42 @@ test('opens a dedicated New pane before Discover in Desktop', async () => {
     }
 })
 
+test('persists opportunity comments after Save and reopening SQLite Desktop', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-opportunity-comments-'))
+    const environment = {
+        ...process.env, TLC_DATA_MODE: 'sample', TLC_DATA_STORE: 'sqlite', TLC_DATA_STORE_PATH: '',
+        TLC_BACKGROUND_SYNC: '0', TLC_UI_MODE: ''
+    }
+    try {
+        for (const save of [true, false]) {
+            const app = await electron.launch({
+                args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`], env: environment
+            })
+            try {
+                const window = await app.firstWindow()
+                await window.setViewportSize({ width: 1600, height: 900 })
+                await window.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'Portfolio', exact: true }).click()
+                await window.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
+                await window.getByRole('button', { name: 'Edit Grid operations modernization' }).click()
+                await window.getByRole('menuitem', { name: 'Opportunity Comments' }).click()
+                const editor = window.getByLabel('Edit opportunity comments')
+                const comments = editor.getByRole('textbox', { name: 'Opportunity Comments' })
+                if (save) {
+                    await comments.fill('Desktop comment persisted beyond the UI session.')
+                    await editor.getByRole('button', { name: 'Save', exact: true }).click()
+                    await expect(editor).toBeHidden()
+                } else {
+                    await expect(comments).toHaveValue('Desktop comment persisted beyond the UI session.')
+                }
+            } finally {
+                await app.close()
+            }
+        }
+    } finally {
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
 test('creates an Opportunity and child Milestone from New in SQLite Desktop', async () => {
     const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-create-records-'))
     const app = await electron.launch({

@@ -625,6 +625,26 @@ have passed.
 
 ## Developer prerequisites
 
+### Browsing cache and confirmed background synchronization
+
+Teams keeps canonical browsing data in private browser memory, not in the shared
+service runtime. Domain/customer filters remain local; loaded visible data can
+quietly revalidate at the shared 5/30-minute policy. Scope/connection changes clear
+data, and dirty notes/field editors survive a quiet refresh.
+
+`TLC_BACKGROUND_SYNC=1` enables only capabilities supported by the existing protected
+durable runtime store. In-memory state is not durable. The review dialog closes
+after persisted admission; pending status remains visible while unrelated navigation
+continues. Source confirmation, conflict and unknown effects are distinct.
+
+Read-only CLI stays read-only. Current delegated identity, generation, writer roles,
+native ETags and the server-owned meeting draft boundary are not bypassed. The new
+receipt namespace does not replace existing reviewed-action history.
+
+Use [the shared recovery and rollback procedure](../performance/performance-optimization.md#adaptive-freshness-and-confirmed-background-writes).
+Set the flag to `0` without deleting protected runtime state to disable new background
+admission while retaining private receipt reconciliation.
+
 - Node >= 22.12 and npm >= 10; Node 24 is recommended. Sample launchers explicitly
   enable the Node SQLite feature for older supported Node versions.
 - Existing repository dependencies, restored using the repository package manager.

@@ -45,4 +45,8 @@ export class EncryptedDocumentStore implements ScopedDocumentStore {
   async list(partition: string, prefix: string, limit: number) {
     return (await this.store.list(partition, prefix, limit)).map((row) => ({ key: row.key, ...this.decrypt(partition, row.key, row) }))
   }
+  async delete(partition: string, key: string, expectedRevision: number): Promise<boolean> {
+    if (!this.store.delete) throw new Error('Conditional deletion is unavailable for the protected state store.')
+    return this.store.delete(partition, key, expectedRevision)
+  }
 }

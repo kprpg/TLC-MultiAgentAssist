@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import { resolve } from 'node:path'
 
 export default defineConfig({
+  ssr: { noExternal: ['zod'] },
   build: {
     emptyOutDir: true,
     ssr: resolve(__dirname, 'electron/preload/index.ts'),

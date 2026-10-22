@@ -171,11 +171,13 @@ test('search clears its old index when a fresh source authorization check fails'
   await expect(suggestions.getByRole('option', { name, exact: true })).toBeVisible()
   await search.press('Escape')
   await page.getByRole('button', { name: 'Portfolio', exact: true }).focus()
-  await page.route('**/api/teams/operations/getPortfolioIndex', (route) => route.fulfill({
+  await page.route('**/api/teams/operations/getDiscoverySnapshot', (route) => route.fulfill({
     status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'account_access_denied' })
   }))
   await search.fill(name)
-  await expect(page.getByRole('alert').filter({ hasText: 'account access denied' })).toBeVisible()
+  await expect(suggestions.getByRole('option', { name, exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Refresh sources', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'Source synchronization' })).toContainText('account access denied')
   await expect(suggestions.getByRole('option', { name, exact: true })).toHaveCount(0)
 })
 

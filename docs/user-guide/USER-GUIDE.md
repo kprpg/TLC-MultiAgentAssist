@@ -465,6 +465,13 @@ The active sort is indicated with a check mark, and the button’s tooltip alway
 
 Right-click an opportunity, or open its **⋯** menu, and choose **Opportunity Comments** to add or update a free-text note. Comments are written back to MSX after human review of the change.
 
+Across Desktop, Web, and the VS Code webview, opportunity comments read and update MSX
+**Forecast Comments** (`msp_forecastcomments`), not the separate **Need** (`description`) field.
+Save succeeds only after MSX accepts the update and a fresh source read confirms the saved text.
+If the update is rejected or cannot be verified, the editor retains your draft and displays an error;
+check the record in MSX before retrying an unconfirmed save. Sample mode changes sample data only.
+Comments previously saved into Need by older builds are not moved automatically.
+
 The **⋮** icon menu on each opportunity currently exposes:
 
 - **Opportunity Comments** — inline edit of the opportunity’s comment field.

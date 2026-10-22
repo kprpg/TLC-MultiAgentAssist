@@ -5,25 +5,36 @@ import { z } from 'zod'
 import { TeamsApiClient } from '../../../apps/teams/src/client/data-client.js'
 import { DataModeSwitcher } from '../../../apps/teams/src/client/data-mode-switcher.js'
 import { teamsDataModesSchema } from '../../../packages/common/contracts/teams-data-mode.js'
+import { discoverableOpportunitySchema, portfolioIndexSchema, type DiscoverySnapshot } from '../../../packages/common/contracts/index.js'
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 describe('mode-scoped Teams clients', () => {
-  it('coalesces identical pending reads but not completed reads, and one subscriber cannot abort the other', async () => {
+  it('coalesces pending and completed session reads until Refresh, and one subscriber cannot abort the other', async () => {
     let complete: (response: Response) => void = () => {}
     const pending = new Promise<Response>((resolve) => { complete = resolve })
-    const transport = vi.fn<typeof fetch>().mockReturnValueOnce(pending).mockImplementation(async () => Response.json(['fresh']))
+    const snapshot: DiscoverySnapshot = {
+      contractVersion: '1.0', generatedAt: '2026-10-21T00:00:00.000Z',
+      accounts: [{ id: 'account', name: 'Sanitized customer', segment: 'test' }], portfolioOpportunities: [], milestoneTeamOpportunityIds: [],
+      opportunities: [{ id: 'opportunity', accountId: 'account', name: 'Sanitized opportunity', recordedStage: 1, value: 0,
+        currency: 'USD', closeDate: '2099-01-01', domain: 'infra', onDealTeam: false }]
+    }
+    const transport = vi.fn<typeof fetch>().mockReturnValueOnce(pending).mockImplementation(async () => Response.json(snapshot))
     vi.stubGlobal('fetch', transport)
     const client = new TeamsApiClient(async () => '')
     const controller = new AbortController()
-    const first = client.operation('discoverOpportunities', { domain: 'infra' }, z.array(z.string()), controller.signal)
-    const second = client.operation('discoverOpportunities', { domain: 'infra' }, z.array(z.string()))
+    const first = client.operation('discoverOpportunities', { domain: 'infra' }, z.array(discoverableOpportunitySchema), controller.signal)
+    const second = client.operation('discoverOpportunities', { domain: 'infra' }, z.array(discoverableOpportunitySchema))
     controller.abort()
     await expect(first).rejects.toMatchObject({ name: 'AbortError' })
     await vi.waitFor(() => expect(transport).toHaveBeenCalledOnce())
     expect(transport.mock.calls[0]?.[1]?.signal?.aborted).toBe(false)
-    complete(Response.json(['shared']))
-    expect(await second).toEqual(['shared'])
-    expect(await client.operation('discoverOpportunities', { domain: 'infra' }, z.array(z.string()))).toEqual(['fresh'])
+    complete(Response.json(snapshot))
+    expect(await second).toEqual(snapshot.opportunities)
+    expect(await client.operation('discoverOpportunities', { domain: 'infra' }, z.array(discoverableOpportunitySchema))).toEqual(snapshot.opportunities)
+    expect(await client.operation('discoverOpportunities', { domain: 'services' }, z.array(discoverableOpportunitySchema))).toEqual([])
+    expect(transport).toHaveBeenCalledOnce()
+    client.refreshSources()
+    expect(await client.operation('discoverOpportunities', { domain: 'infra' }, z.array(discoverableOpportunitySchema))).toEqual(snapshot.opportunities)
     expect(transport).toHaveBeenCalledTimes(2)
   })
   it('does not issue a request after its old mode is disposed while token acquisition is pending', async () => {
@@ -36,6 +47,27 @@ describe('mode-scoped Teams clients', () => {
     client.dispose()
     complete?.('old-mode-capability')
     await expect(request).rejects.toMatchObject({ code: 'data_mode_changed' })
+    expect(transport).not.toHaveBeenCalled()
+  })
+  it('rechecks connection identity before returning a queued memory-cache result', async () => {
+    const transport = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ contractVersion: '1.0', accounts: [], opportunities: [] }))
+    vi.stubGlobal('fetch', transport)
+    let current = true
+    const client = new TeamsApiClient(async () => 'fixture', undefined, () => current)
+    await client.operation('getPortfolioIndex', { contractVersion: '1.0' }, portfolioIndexSchema)
+    const pending = client.operation('getPortfolioIndex', { contractVersion: '1.0' }, portfolioIndexSchema)
+    queueMicrotask(() => { current = false })
+    await expect(pending).rejects.toMatchObject({ code: 'local_connection_changed' })
+    expect(transport).toHaveBeenCalledOnce()
+  })
+  it('does not fetch a source for an already aborted cached read', async () => {
+    const transport = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', transport)
+    const controller = new AbortController()
+    controller.abort()
+    const client = new TeamsApiClient(async () => '')
+    await expect(client.operation('getPortfolioIndex', { contractVersion: '1.0' }, portfolioIndexSchema, controller.signal))
+      .rejects.toMatchObject({ name: 'AbortError' })
     expect(transport).not.toHaveBeenCalled()
   })
   it('rejects an old response rather than letting it populate the newly selected mode', async () => {

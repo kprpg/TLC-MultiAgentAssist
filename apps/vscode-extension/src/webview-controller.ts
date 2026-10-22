@@ -46,6 +46,15 @@ export class WorkbenchPanel {
         }, undefined, this.disposables)
         vscode.window.onDidChangeWindowState((state) => {
             if (!state.focused) this.voiceHost.cancel()
+            this.getProvider().setCacheSuspended?.('webview', !state.focused || !this.panel.visible || !this.panel.active)
+        }, undefined, this.disposables)
+        const stopCache = this.getProvider().cacheSession?.subscribe(() => {
+            const state = this.getProvider().cacheSession?.getState()
+            if (state && !state.refreshing && this.ready) void this.panel.webview.postMessage({ kind: 'cache-state', contractVersion: '1.0', state })
+        })
+        if (stopCache) this.disposables.push({ dispose: stopCache })
+        this.panel.onDidChangeViewState(() => {
+            this.getProvider().setCacheSuspended?.('webview', !this.panel.visible || !this.panel.active || !vscode.window.state.focused)
         }, undefined, this.disposables)
         this.render()
     }
@@ -99,6 +108,8 @@ export class WorkbenchPanel {
 
     private flushPending(): void {
         void this.panel.webview.postMessage({ kind: 'event', type: 'init', payload: { mode: this.getProvider().mode } })
+        const state = this.getProvider().cacheSession?.getState()
+        if (state) void this.panel.webview.postMessage({ kind: 'cache-state', contractVersion: '1.0', state })
         if (this.pending) void this.panel.webview.postMessage(this.pending)
     }
 
@@ -125,6 +136,7 @@ export class WorkbenchPanel {
             await this.handleComposeEmail(message)
             return
         }
+        this.getProvider().setCacheSuspended?.('webview', !this.panel.visible || !this.panel.active || !vscode.window.state.focused)
         const response = await routeBridgeMessage(this.getProvider(), message)
         void this.panel.webview.postMessage(response)
         if (isSuccessfulCustomerMutation(message, response)) WorkbenchPanel.portfolioChanges.fire()
@@ -242,7 +254,7 @@ export class WorkbenchPanel {
 <title>TLC Assist</title>
 </head>
 <body>
-<div id="root" data-mode="${provider.mode}">Loading TLC Assist\u2026</div>
+<div id="root" data-mode="${provider.mode}" data-cache-owner="${provider.cacheSession ? 'host' : 'client'}" data-background-sync="${provider.mutationSync ? '1' : '0'}">Loading TLC Assist\u2026</div>
 <script nonce="${cspNonce}">window.addEventListener('error',function(e){var r=document.getElementById('root');if(r)r.textContent='TLC Assist error: '+(e.message||'script failed to load');});window.addEventListener('unhandledrejection',function(e){var r=document.getElementById('root');if(r)r.textContent='TLC Assist error: '+((e.reason&&e.reason.message)||e.reason||'promise rejected');});</script>
 <script nonce="${cspNonce}" src="${scriptUri}"></script>
 </body>
@@ -250,6 +262,7 @@ export class WorkbenchPanel {
     }
 
     dispose(): void {
+        this.getProvider().setCacheInterest?.('webview', [], false)
         this.voiceHost.dispose()
         WorkbenchPanel.current = undefined
         while (this.disposables.length) this.disposables.pop()?.dispose()

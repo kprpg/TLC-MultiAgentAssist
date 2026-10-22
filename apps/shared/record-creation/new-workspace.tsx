@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type InvalidEvent, type ReactElement } from 'react'
+import { usePresentationSession, type PresentationClient } from '../presentation-hooks.js'
 import type {
   RecordCreationCatalog,
   RecordCreationDraft,
@@ -25,8 +26,8 @@ import { OpportunityForm } from './opportunity-form.js'
 
 export type CreationKind = 'opportunity' | 'multiple-opportunities' | 'milestone'
 
-export interface CreationClient {
-  listAccounts(): Promise<Array<{ id: string; name: string; visibility?: 'visible' | 'hidden' }>>
+export interface CreationClient extends PresentationClient {
+  listAccounts(): Promise<Array<{ id: string; name: string; visibility?: 'visible' | 'hidden' | undefined }>>
   getRecordCreationCatalog(accountId: string): Promise<RecordCreationCatalog>
   previewRecordCreation(target: RecordCreationPreviewRequest['target'], draft: RecordCreationDraft): Promise<RecordCreationPreview>
   commitRecordCreation(preview: RecordCreationPreview): Promise<RecordCreationResult>
@@ -54,9 +55,11 @@ function downloadFile(file: RecordCreationDraftResult['files'][number]): void {
 
 export function NewWorkspace({
   client,
-  onCommitted
+  onCommitted,
+  active = true
 }: {
   client: CreationClient
+  active?: boolean
   onCommitted?(accountId: string, opportunityId: string): Promise<void> | void
 }): ReactElement {
   const [kind, setKind] = useState<CreationKind | null>(null)
@@ -94,6 +97,28 @@ export function NewWorkspace({
     }
     return candidate
   }
+
+  usePresentationSession(client, active ? ['portfolio', ...(accountId ? [`catalog:${accountId}`] : [])] : [], {
+    onError: (cause) => setError(errorMessage(cause)),
+    onReset: () => {
+      setAccounts([]); setAccountId(''); setParentId(''); setCatalog(null); setPreview(null); setResult(null); setDraftFiles([])
+      setRows([newOpportunityRow('opportunity-1')]); setMilestoneRows([newMilestoneRow('milestone-1')])
+      setError('Source identity or access changed. Reconnect before reviewing a new draft.')
+    },
+    onChanged: async () => {
+      const cache = client.cacheSession
+      if (!active || !cache) return
+      if (cache.cache.has('portfolio')) setAccounts((await client.listAccounts()).filter((item) => item.visibility !== 'hidden'))
+      if (accountId && cache.cache.has(`catalog:${accountId}`)) {
+        const updated = await client.getRecordCreationCatalog(accountId)
+        setCatalog((previous) => previous?.revision === updated.revision ? previous : updated)
+        if (catalog && updated.revision !== catalog.revision) {
+          setPreview(null)
+          setError('Reference data changed. Your draft was retained; review current choices before preparing it again.')
+        }
+      }
+    }
+  })
 
   useEffect(() => {
     let active = true

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { portfolioIndexSchema, portfolioReadVersion, type Account, type Opportunity } from '../../../../packages/common/contracts/index.js'
 import { findPortfolioSearchResults, type PortfolioSearchResult } from '../../../shared/portfolio-search.js'
 import type { TeamsApiClient } from './data-client.js'
+import { usePresentationSession } from '../../../shared/presentation-hooks.js'
 
 export function PortfolioSearch({ client, contextKey, onSelect }: {
   client: TeamsApiClient; contextKey: string; onSelect(accountId: string, opportunityId?: string): void
@@ -13,6 +14,18 @@ export function PortfolioSearch({ client, contextKey, onSelect }: {
   const [loading, setLoading] = useState(false)
   const [active, setActive] = useState(0)
   const request = useRef<AbortController | null>(null)
+  usePresentationSession(client, query.trim().length >= 2 ? ['portfolio'] : [], {
+    onError: (cause) => setError(String(cause)),
+    onReset: () => {
+      request.current?.abort()
+      setQuery(''); setAccounts([]); setOpportunities([]); setLoading(false); setError('Source access changed. Reconnect before searching private data.')
+    },
+    onChanged: async () => {
+      if (query.trim().length < 2 || !client.cacheSession.cache.has('portfolio')) return
+      const current = await client.operation('getPortfolioIndex', { contractVersion: portfolioReadVersion }, portfolioIndexSchema)
+      setAccounts(current.accounts); setOpportunities(current.opportunities)
+    }
+  })
   useEffect(() => {
     setQuery(''); setAccounts([]); setOpportunities([]); setError(''); setLoading(false)
     return () => request.current?.abort()

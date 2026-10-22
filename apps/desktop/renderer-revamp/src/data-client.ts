@@ -94,8 +94,18 @@ import {
 import { withSampleOpportunityIntents } from '../../../../packages/common/fixtures/sample-opportunity-intent.js'
 import { samplePortfolioDiscoveryOpportunities } from '../../../../packages/common/fixtures/sample-discovery.js'
 import { portfolioReadVersion, portfolioReadRequestSchema, portfolioIndexSchema, portfolioWorkspaceRequestSchema, portfolioWorkspaceSchema, type PortfolioReadRequest, type PortfolioIndex, type PortfolioWorkspaceRequest, type PortfolioWorkspace } from '../../../../packages/common/contracts/index.js'
+import { discoverySnapshotRequestSchema, discoverySnapshotSchema, discoverySnapshotVersion, type DiscoverySnapshot, type DiscoverySnapshotRequest } from '../../../../packages/common/contracts/index.js'
+import { SessionPortfolio } from '../../../shared/session-portfolio.js'
+import { MutationSyncClient, type MutationInvoker } from '../../../shared/mutation-sync.js'
+import * as syncContracts from '../../../../packages/common/contracts/index.js'
 
 export interface RevampDataClient {
+    cacheSession?: SessionPortfolio
+    mutationSession?: MutationSyncClient
+    invokeMutationSync?: MutationInvoker
+    onSourceCacheChanged?(listener: (state: syncContracts.CacheReadState) => void): () => void
+    setActiveReads?(keys: readonly string[], active: boolean, consumer?: string): void | Promise<void>
+    refreshSources?(opportunityId?: string): void
     getDataMode(): Promise<'sample' | 'live'>
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
@@ -105,6 +115,7 @@ export interface RevampDataClient {
     listAccounts(options?: AccountListOptions): Promise<Account[]>
     getPortfolioIndex(request?: PortfolioReadRequest): Promise<PortfolioIndex>
     getPortfolioWorkspace(request: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace>
+    getDiscoverySnapshot(request?: DiscoverySnapshotRequest): Promise<DiscoverySnapshot>
     searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
     addAccount(accountId: string): Promise<Account>
     setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
@@ -143,10 +154,13 @@ export interface RevampDataClient {
     prepareWorkflowGuidance(runId: string, queueItemId: string, capability: AgentCapability): Promise<WorkflowGuidanceHandoff>
 }
 
-type Fetcher = typeof fetch
+type Fetcher = typeof fetch & {
+    assertScope?(generation?: number): void
+    scopeVersion?(): number
+}
 
 class WebApiRequestError extends Error {
-    constructor(readonly status: number, message: string) {
+    constructor(readonly status: number, message: string, readonly retryAfterMs?: number) {
         super(message)
     }
 }
@@ -164,6 +178,7 @@ function downloadBlob(blob: Blob, fileName: string): void {
 }
 
 async function apiRequest(fetcher: Fetcher, path: string, init?: RequestInit): Promise<unknown> {
+    const generation = fetcher.scopeVersion?.()
     const response = await fetcher(path, {
         ...init,
         credentials: 'same-origin',
@@ -174,17 +189,51 @@ async function apiRequest(fetcher: Fetcher, path: string, init?: RequestInit): P
         }
     })
     const payload = await response.json().catch(() => null) as { error?: string } | null
-    if (!response.ok) throw new WebApiRequestError(response.status, payload?.error ?? `The server request failed (${response.status}).`)
+    if (!response.ok) {
+        const retry = response.headers.get('retry-after')
+        const delay = retry === null ? undefined : /^\d+(?:\.\d+)?$/.test(retry) ? Number(retry) * 1000 : Math.max(0, Date.parse(retry) - Date.now())
+        throw new WebApiRequestError(response.status, payload?.error ?? `The server request failed (${response.status}).`,
+            delay !== undefined && Number.isFinite(delay) ? delay : undefined)
+    }
+    fetcher.assertScope?.(generation)
     return payload
 }
 
 export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 'web-sample' = 'web-live'): RevampDataClient {
+    const baseFetcher = fetcher
+    let scope: string | undefined
+    let generation = 0
+    let invalidated = false
+    const listeners = new Set<(state: syncContracts.CacheReadState) => void>()
+    const state = (): syncContracts.CacheReadState => ({ revision: generation, generation, refreshing: false, stale: false })
+    const invalidate = () => { generation++; for (const listener of listeners) listener(state()) }
+    fetcher = Object.assign(async (input: Parameters<Fetcher>[0], init?: RequestInit) => {
+        if (invalidated) throw new WebApiRequestError(401, 'The source identity changed. Reload this page before reading private data.')
+        const response = await baseFetcher(input, init)
+        const identity = response.headers.get('x-tlc-source-scope')
+        if (scope !== undefined && identity !== null && scope !== identity) {
+            invalidated = true; invalidate()
+            throw new WebApiRequestError(401, 'The source identity changed. Reload this page before reading private data.')
+        }
+        if (identity !== null) scope = identity
+        if (response.status === 401) invalidate()
+        return response
+    }, {
+        scopeVersion: () => generation,
+        assertScope: (started?: number) => {
+            if (invalidated || started !== undefined && started !== generation) throw new WebApiRequestError(401, 'Source access changed. Reload before reading private data.')
+        }
+    })
+    const background = typeof document !== 'undefined' && document.querySelector<HTMLMetaElement>('meta[name="tlc-background-sync"]')?.content === '1'
     const invokeWorkflow = (operation: WorkflowHostOperation, request: unknown) => apiRequest(
         fetcher,
         `/api/workflows/${operation}`,
         { method: 'POST', body: JSON.stringify(request) }
     )
     return {
+        onSourceCacheChanged: (listener) => { listeners.add(listener); listener(state()); return () => listeners.delete(listener) },
+        ...(background ? { invokeMutationSync: async (request: syncContracts.MutationSyncRequest) =>
+            syncContracts.mutationSyncResponseSchema.parse(await apiRequest(fetcher, '/api/mutation-sync', { method: 'POST', body: JSON.stringify(request) })) } : {}),
         mode,
         getDataMode: async () => mode === 'web-live' ? 'live' : 'sample',
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(await apiRequest(fetcher, '/api/seller-dashboard', {
@@ -198,6 +247,9 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
             const result = await apiRequest(fetcher, '/api/me') as { email?: unknown }
             return typeof result.email === 'string' ? result.email : undefined
         },
+        getDiscoverySnapshot: async (request = { contractVersion: discoverySnapshotVersion }) => discoverySnapshotSchema.parse(
+            await apiRequest(fetcher, '/api/discovery/snapshot', { method: 'POST', body: JSON.stringify(discoverySnapshotRequestSchema.parse(request)) })
+        ),
         listAccounts: async (options) => accountSchema.array().parse(await apiRequest(fetcher, `/api/accounts${options?.includeHidden ? '?includeHidden=true' : ''}`)),
         getPortfolioIndex: async (request = { contractVersion: portfolioReadVersion }) => portfolioIndexSchema.parse(await apiRequest(fetcher, '/api/portfolio/index', {
             method: 'POST', body: JSON.stringify(portfolioReadRequestSchema.parse(request))
@@ -263,6 +315,7 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
                 throw new Error(payload?.error ?? `The server request failed (${response.status}).`)
             }
             const blob = await response.blob()
+            fetcher.assertScope?.()
             downloadBlob(blob, response.headers.get('x-tlc-file-name') || 'TLC-agent-response.eml')
             return { state: 'opened' }
         },
@@ -278,6 +331,7 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
                 throw new Error(payload?.error ?? `The server request failed (${response.status}).`)
             }
             const blob = await response.blob()
+            fetcher.assertScope?.()
             const fileName = response.headers.get('x-tlc-file-name') || 'TLC-agent-response.docx'
             downloadBlob(blob, fileName)
             return { state: 'saved', filePath: fileName }
@@ -299,12 +353,17 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
 }
 
 interface DesktopBridge {
+    invokeMutationSync?: MutationInvoker
+    onCacheChanged?(listener: (state: syncContracts.CacheReadState) => void): () => void
+    cacheControl?(request: syncContracts.CacheControlRequest): Promise<syncContracts.CacheControlResponse>
+    setActiveReads?(keys: readonly string[], active: boolean): void
     getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
     getPortfolioWorkspace(request: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace>
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     exitApplication(): Promise<void>
     getDataStatus(): Promise<DesktopDataStatus>
+    getDiscoverySnapshot(request: DiscoverySnapshotRequest): Promise<DiscoverySnapshot>
     listAccounts(options?: AccountListOptions): Promise<Account[]>
     searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
     addAccount(accountId: string): Promise<Account>
@@ -516,6 +575,18 @@ function webClient(): RevampDataClient {
         },
         exitApplication: async () => { await apiRequest(fetch, '/api/exit', { method: 'POST' }) },
         getCurrentUserEmail: async () => undefined,
+        async getDiscoverySnapshot(input = { contractVersion: discoverySnapshotVersion }) {
+            discoverySnapshotRequestSchema.parse(input)
+            const portfolio = await this.getPortfolioIndex({ contractVersion: portfolioReadVersion, includeHidden: true })
+            const visibleIds = new Set(portfolio.accounts.filter((account) => account.visibility !== 'hidden').map((account) => account.id))
+            return discoverySnapshotSchema.parse({
+                contractVersion: discoverySnapshotVersion, generatedAt: new Date().toISOString(), accounts: portfolio.accounts,
+                portfolioOpportunities: portfolio.opportunities,
+                opportunities: discoverableOpportunities.filter((item) => visibleIds.has(item.accountId))
+                    .map((item) => ({ ...item, onDealTeam: dealTeamOpportunityIds.has(item.id) })),
+                milestoneTeamOpportunityIds: [...new Set(milestones.filter((item) => item.onMilestoneTeam).map((item) => item.opportunityId))]
+            })
+        },
         listAccounts: async (options) => structuredClone(sampleAccountRows(options?.includeHidden)),
         getPortfolioIndex: async (input = { contractVersion: portfolioReadVersion }) => {
             const request = portfolioReadRequestSchema.parse(input)
@@ -720,6 +791,15 @@ function webClient(): RevampDataClient {
 
 function desktopClient(bridge: DesktopBridge): RevampDataClient {
     return {
+        ...(bridge.invokeMutationSync ? { invokeMutationSync: (request) => bridge.invokeMutationSync!(request) } : {}),
+        ...(bridge.onCacheChanged ? { onSourceCacheChanged: (listener) => bridge.onCacheChanged!(listener) } : {}),
+        ...(bridge.cacheControl ? {
+            setActiveReads: async (keys: readonly string[], active: boolean, consumer?: string) => { await bridge.cacheControl!({ contractVersion: '1.0', operation: 'interest', keys: [...keys], active, ...(consumer ? { consumer } : {}) }) },
+            refreshSources: (opportunityId?: string) => {
+                void bridge.cacheControl!({ contractVersion: '1.0', operation: 'refresh', ...(opportunityId ? { opportunityId } : {}) })
+                    .catch(() => console.error('[cache-sync] host-refresh-control-failed'))
+            }
+        } : {}),
         mode: 'desktop',
         getDataMode: async () => (await bridge.getDataStatus()).mode,
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(
@@ -728,6 +808,8 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         invokeVoice: async (request) => voiceResponseSchema.parse(await bridge.invokeVoice(voiceRequestSchema.parse(request))),
         exitApplication: () => bridge.exitApplication(),
         getCurrentUserEmail: async () => (await bridge.getDataStatus()).auth.userEmail,
+        getDiscoverySnapshot: async (request = { contractVersion: discoverySnapshotVersion }) =>
+            discoverySnapshotSchema.parse(await bridge.getDiscoverySnapshot(discoverySnapshotRequestSchema.parse(request))),
         listAccounts: (options) => bridge.listAccounts(options),
         getPortfolioIndex: async (request = { contractVersion: portfolioReadVersion }) => portfolioIndexSchema.parse(await bridge.getPortfolioIndex(portfolioReadRequestSchema.parse(request))),
         getPortfolioWorkspace: async (request) => portfolioWorkspaceSchema.parse(await bridge.getPortfolioWorkspace(portfolioWorkspaceRequestSchema.parse(request))),
@@ -784,7 +866,94 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
     }
 }
 
-export function createDataClient(shell: 'desktop' | 'web'): RevampDataClient {
+export function withSessionPortfolio(source: RevampDataClient): RevampDataClient {
+    const session = new SessionPortfolio({
+        getPortfolioIndex: () => source.getPortfolioIndex({ contractVersion: portfolioReadVersion, includeHidden: true }),
+        getDiscoverySnapshot: () => source.getDiscoverySnapshot(),
+        listMilestones: (id) => source.listMilestones(id),
+        listDiscoverableMilestones: (id) => source.listDiscoverableMilestones(id)
+    })
+    const sync = new MutationSyncClient(source.invokeMutationSync, {
+        onConfirmed: (operation, result, input) => { session.applyMutation(operation, result); session.finishDraft(operation, input) },
+        onRecovered: () => session.refresh(),
+        onAccessDenied: () => session.clear(),
+        validateReview: (review) => session.validateMutationReview(review),
+        captureReview: (operation, input) => session.captureReview(operation, input)
+    })
+    let hostGeneration: number | undefined
+    let hostDataRevision: number | undefined
+    source.onSourceCacheChanged?.((state) => {
+        const nextDataRevision = state.dataRevision ?? state.revision
+        session.cache.batch(() => {
+            if (hostGeneration !== undefined && hostGeneration !== state.generation) session.clear()
+            else if (hostDataRevision !== undefined && hostDataRevision !== nextDataRevision) session.cache.invalidateAll()
+            if (state.error) session.cache.reportError(new Error(state.error))
+            else session.cache.recovered()
+            if (source.setActiveReads) session.cache.observeSourceState(state)
+        })
+        hostGeneration = state.generation
+        hostDataRevision = nextDataRevision
+    })
+    const mutate = <T>(operation: syncContracts.SyncMutationOperation, input: Record<string, unknown>, action: () => Promise<T>, parse: (value: unknown) => T) =>
+        sync.run(operation, input, action, parse)
+    const interests = new Map<string, { keys: readonly string[]; active: boolean }>()
+    return {
+        ...source,
+        cacheSession: session,
+        mutationSession: sync,
+        setActiveReads: (keys, active, consumer = 'main') => {
+            if (!active && !keys.length) interests.delete(consumer)
+            else interests.set(consumer, { keys, active })
+            const visible = [...interests.values()].filter((item) => item.active)
+            session.setActiveKeys([...new Set(visible.flatMap((item) => item.keys))])
+            if (source.setActiveReads) { session.setActive(false); return source.setActiveReads(keys, active, consumer) }
+            else session.setActive(visible.length > 0)
+        },
+        refreshSources: (opportunityId) => { source.refreshSources?.(opportunityId); session.refresh(opportunityId) },
+        getDiscoverySnapshot: async () => {
+            const value = await session.getDiscoverySnapshot()
+            return { ...value, opportunities: value.opportunities.map((item) => sync.projectDiscovery(item)),
+                portfolioOpportunities: value.portfolioOpportunities.map((item) => sync.projectOpportunity(item)) }
+        },
+        getPortfolioIndex: async (input = { contractVersion: portfolioReadVersion }) => {
+            const value = await session.getPortfolioIndex(portfolioReadRequestSchema.parse(input).includeHidden)
+            return { ...value, opportunities: value.opportunities.map((item) => sync.projectOpportunity(item)) }
+        },
+        getPortfolioWorkspace: async (input) => {
+            const value = await session.getPortfolioWorkspace(input)
+            return { ...value, opportunities: value.opportunities.map((item) => sync.projectOpportunity(item)),
+                milestones: value.milestones.map((item) => sync.projectMilestone(item)) }
+        },
+        listAccounts: (options) => session.listAccounts(options?.includeHidden),
+        listOpportunities: async (accountId) => (await session.listOpportunities(accountId)).map((item) => sync.projectOpportunity(item)),
+        discoverOpportunities: async (domain) => (await session.discoverOpportunities(domain)).map((item) => sync.projectDiscovery(item)),
+        listMilestones: async (id) => (await session.listMilestones(id)).map((item) => sync.projectMilestone(item)),
+        listDiscoverableMilestones: async (id) => (await session.listMilestones(id, true)).map((item) => sync.projectMilestone(item)),
+        listMilestoneActivities: (id, milestoneId) => session.readDataset(`activities:${id}:${milestoneId}`, () => source.listMilestoneActivities(id, milestoneId)),
+        getRecordCreationCatalog: (id) => session.readDataset(`catalog:${id}`, () => source.getRecordCreationCatalog(id), { reference: true }),
+        searchAccounts: (request) => session.readDataset(`search:${request.matchBy}:${request.query}`, () => source.searchAccounts(request)),
+        addAccount: (id) => mutate('addAccount', { accountId: id }, () => source.addAccount(id), syncContracts.accountSchema.parse),
+        setAccountVisibility: (id, visibility) => mutate('setAccountVisibility', { accountId: id, visibility }, () => source.setAccountVisibility(id, visibility), syncContracts.accountSchema.parse),
+        joinDealTeam: (id) => mutate('joinDealTeam', { opportunityId: id }, () => source.joinDealTeam(id), syncContracts.dealTeamJoinResultSchema.parse),
+        leaveDealTeam: (id) => mutate('leaveDealTeam', { opportunityId: id }, () => source.leaveDealTeam(id), syncContracts.dealTeamLeaveResultSchema.parse),
+        joinMilestoneTeam: (id, milestoneId) => mutate('joinMilestoneTeam', { opportunityId: id, milestoneId }, () => source.joinMilestoneTeam(id, milestoneId), syncContracts.milestoneTeamJoinResultSchema.parse),
+        leaveMilestoneTeam: (id, milestoneId) => mutate('leaveMilestoneTeam', { opportunityId: id, milestoneId }, () => source.leaveMilestoneTeam(id, milestoneId), syncContracts.milestoneTeamLeaveResultSchema.parse),
+        updateOpportunity: (id, update) => mutate('updateOpportunity', { opportunityId: id, update }, () => source.updateOpportunity(id, update), syncContracts.opportunitySchema.parse),
+        updateMilestone: (id, milestoneId, update) => mutate('updateMilestone', { opportunityId: id, milestoneId, update }, () => source.updateMilestone(id, milestoneId, update), syncContracts.milestoneSchema.parse),
+        createMilestoneActivity: async (id, milestoneId, request) => {
+            const result = await mutate('createMilestoneActivity', { opportunityId: id, milestoneId, request }, () => source.createMilestoneActivity(id, milestoneId, request), syncContracts.milestoneActivitySchema.parse)
+            session.invalidateDataset(`activities:${id}:${milestoneId}`)
+            return result
+        },
+        transitionOpportunityStage: (accountId, id, stage, reason) => mutate('transitionOpportunityStage',
+            { contractVersion, accountId, opportunityId: id, targetStage: stage, ...(reason ? { reason } : {}) },
+            () => source.transitionOpportunityStage(accountId, id, stage, reason), syncContracts.mcemStageTransitionResultSchema.parse),
+        commitRecordCreation: (preview) => mutate('commitRecordCreation', { contractVersion, preview, expectedDigest: preview.digest, confirmed: true }, () => source.commitRecordCreation(preview), syncContracts.recordCreationResultSchema.parse),
+        applyMeetingChangeSet: (proposal, approval) => mutate('applyMeetingChangeSet', { proposal, approval }, () => source.applyMeetingChangeSet(proposal, approval), syncContracts.meetingChangeSetResultSchema.parse)
+    }
+}
+
+function createTransportClient(shell: 'desktop' | 'web'): RevampDataClient {
     if (shell === 'desktop') {
         if (!window.tlc) throw new Error('The desktop data bridge is unavailable.')
         return desktopClient(window.tlc)
@@ -794,6 +963,10 @@ export function createDataClient(shell: 'desktop' | 'web'): RevampDataClient {
     if (hostedMode === 'sample') return createWebApiClient(fetch, 'web-sample')
     if (window.location.protocol === 'file:') return webClient()
     return webClient()
+}
+
+export function createDataClient(shell: 'desktop' | 'web'): RevampDataClient {
+    return withSessionPortfolio(createTransportClient(shell))
 }
 
 export function stageOwner(stage: number): string {

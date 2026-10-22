@@ -230,6 +230,8 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   ) : undefined
   const configuredHandler = createTeamsHandler({
     configuration, store, resolveServices, authority, acceptNewWork, onDeactivate: stopOwnedWork,
+    backgroundSync: runtimeEnvironment['TLC_BACKGROUND_SYNC'] === '1',
+    durableMutationState: runtime.state.kind === 'table' || runtime.state.path !== ':memory:',
     ...(transport ? { deliverPublication: transport.deliverPublication, notify: transport.notify } : {}),
     ...(transcriptEvents ? { transcriptEvents } : {}),
     ...(native ? { localConnection: native } : {}),
@@ -238,6 +240,8 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   })
   const sampleHandler = configuration.mode === 'sample' ? configuredHandler : createTeamsHandler({
     configuration: sampleConfiguration, store: sampleResources.store, acceptNewWork,
+    backgroundSync: runtimeEnvironment['TLC_BACKGROUND_SYNC'] === '1',
+    durableMutationState: samplePath !== ':memory:',
     onDeactivate: (principal) => stopOwnedWork(principal, true),
     resolveServices: async (principal) => {
       if (principal.mode !== 'sample' || !sample) throw new Error('Sample services require Sample admission.')
@@ -324,6 +328,7 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
       ready = false
       if (interval) clearInterval(interval)
       try {
+        await Promise.all([configuredHandler.drainMutations(), ...(sampleHandler === configuredHandler ? [] : [sampleHandler.drainMutations()])])
         try { await ownerControl?.close() }
         finally {
           try { if (native) { native.pairing.invalidate(); await native.provider.disconnect() } }

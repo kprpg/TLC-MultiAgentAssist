@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { z } from 'zod'
 import { actionPreviewSchema, actionReceiptSchema } from '../../../packages/common/contracts/collaboration.js'
-import { seDomainSchema } from '../../../packages/common/configuration/se-domains.js'
+import { seDomainIds } from '../../../packages/common/configuration/se-domains.js'
 import type { DiscoverableOpportunity, Milestone } from '../../../packages/common/contracts/index.js'
 import { embeddedTeams } from './helpers.js'
 
@@ -14,23 +14,33 @@ const opportunities: DiscoverableOpportunity[] = [
   ...item, domain: 'infra', value: 100, currency: 'USD', closeDate: '2099-12-31', technicalCapability: 'Cloud infrastructure'
 }))
 
+function snapshot(rows = opportunities) {
+  return {
+    contractVersion: '1.0', generatedAt: '2026-10-21T12:00:00.000Z',
+    accounts: [...new Map(rows.map((item) => [item.accountId, { id: item.accountId, name: item.accountName!, segment: 'test' }])).values()],
+    portfolioOpportunities: [],
+    opportunities: seDomainIds.flatMap((domain) => rows.map((item) => ({ ...item, domain }))),
+    milestoneTeamOpportunityIds: []
+  }
+}
+
 async function discoveryFixture(page: Page) {
   const domains: string[] = []
   const reads: string[] = []
   page.on('request', (request) => {
     if (request.url().includes('/operations/')) reads.push(request.url().split('/').at(-1)!)
   })
-  await page.route('**/api/teams/operations/discoverOpportunities', async (route) => {
-    const domain = seDomainSchema.parse(route.request().postDataJSON().domain)
-    domains.push(domain)
-    await route.fulfill({ json: opportunities.map((item) => ({ ...item, domain })) })
+  await page.route('**/api/teams/operations/getDiscoverySnapshot', async (route) => {
+    expect(route.request().postDataJSON()).toEqual({ contractVersion: '1.0' })
+    domains.push('snapshot')
+    await route.fulfill({ json: snapshot() })
   })
   return { domains, reads }
 }
 
 test('Discover displays every Infrastructure opportunity when source values include a negative amount', async ({ page }) => {
-  await page.route('**/api/teams/operations/discoverOpportunities', (route) => route.fulfill({
-    json: opportunities.map((item, index) => ({ ...item, value: index === 0 ? -1250.75 : item.value }))
+  await page.route('**/api/teams/operations/getDiscoverySnapshot', (route) => route.fulfill({
+    json: snapshot(opportunities.map((item, index) => ({ ...item, value: index === 0 ? -1250.75 : item.value })))
   }))
   await page.goto('/?view=discover')
   const panel = page.getByRole('region', { name: 'Discover opportunities', exact: true })
@@ -81,7 +91,7 @@ test('Discover reuses searchable include/exclude customer filters without extra 
   await editor.getByRole('searchbox', { name: 'Search customers' }).press('Escape')
   await expect(editor).toBeHidden()
   await expect(panel.getByRole('button', { name: 'Add filter', exact: true })).toBeFocused()
-  expect(reads).toEqual(['discoverOpportunities'])
+  expect(reads).toEqual(['getDiscoverySnapshot'])
 })
 
 test('Discover sorts Account, Stage and Action and keeps filters across domain changes and refresh', async ({ page }) => {
@@ -113,7 +123,7 @@ test('Discover sorts Account, Stage and Action and keeps filters across domain c
   await expect(names).toHaveText(['Alpha infrastructure', 'Alpha analysis'])
   await panel.getByRole('button', { name: 'Refresh Discover', exact: true }).click()
   await expect(names).toHaveText(['Alpha infrastructure', 'Alpha analysis'])
-  await expect.poll(() => domains).toEqual(['infra', 'ai-apps', 'ai-apps'])
+  await expect.poll(() => domains).toEqual(['snapshot', 'snapshot'])
   await tabs.getByRole('tab', { name: 'AI & Apps', exact: true }).press('ArrowRight')
   await expect(tabs.getByRole('tab', { name: 'Security', exact: true })).toBeFocused()
   await expect(tabs.getByRole('tab', { name: 'Security', exact: true })).toHaveAttribute('aria-selected', 'true')
@@ -185,7 +195,7 @@ test('Discover expands only requested milestones and reviews membership before c
   await dialog.getByRole('button', { name: 'Confirm selected changes' }).click()
   await expect(expanded.getByRole('button', { name: 'Remove me from the team for Sanitized active milestone', exact: true })).toHaveAttribute('aria-pressed', 'true')
   expect(commits).toBe(2)
-  expect(reads).toEqual(['discoverOpportunities', 'listDiscoverableMilestones'])
+  expect(reads).toEqual(['getDiscoverySnapshot', 'listDiscoverableMilestones'])
 })
 
 for (const theme of ['default', 'dark', 'contrast'] as const) {

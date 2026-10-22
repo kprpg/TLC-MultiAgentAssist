@@ -16,6 +16,7 @@ import { PortfolioSearch } from './portfolio-search.js'
 import { AccountsWorkspace, type WorkingSelection } from './accounts.js'
 import { ContextWorkspace, SharedStage } from './context.js'
 import { ReviewDialog } from './review-dialog.js'
+import { SourceSyncStatus } from '../../../shared/sync-status.js'
 import { NativeConnectionPanel } from './native-connection-panel.js'
 import { TeamsLaunchStatusPanel } from './launch-status.js'
 import { useTeamsDataMode } from './use-data-mode.js'
@@ -136,10 +137,25 @@ export function TeamsApp() {
   }
   async function confirmReview(reason: string) {
     if (!client || !pendingRef.current) return
+    const originalReview = pendingRef.current
     setReviewBusy(true); setReviewError('')
     try {
-      const receipt = await client.commit(pendingRef.current.preview, reason)
-      pendingRef.current.resolve(receipt)
+      const submitted = await client.commitBackground(originalReview.preview, reason)
+      if (submitted.admitted) {
+        pendingRef.current = null; setPending(null)
+        setNotice('The exact change was accepted for background saving. It is pending until the source acknowledges it.')
+        void submitted.completion.then((receipt) => {
+          originalReview.resolve(receipt)
+          setNotice(receipt.state === 'confirmed' ? 'The source acknowledged the reviewed change.'
+            : 'The source outcome needs attention. Check synchronization status before repeating this change.')
+        }, (cause: unknown) => {
+          originalReview.reject(cause instanceof Error ? cause : new Error('Source synchronization failed.'))
+          setError('The reviewed change needs reconciliation. Check synchronization status before retrying.')
+        })
+        return
+      }
+      const receipt = await submitted.completion
+      originalReview.resolve(receipt)
       pendingRef.current = null; setPending(null)
       setNotice(receipt.state === 'confirmed' ? 'Reviewed operation completed.'
         : receipt.state === 'failed-before-send' ? 'No external change was dispatched. Resume work and prepare a fresh review.'
@@ -185,7 +201,7 @@ export function TeamsApp() {
   const workspaceAllowed = !bindingId || bindingStatus === 'ready'
   const hostSurface = teamsSurface(parameters, authentication?.context.frameContext)
   function switchDataMode(mode: TeamsDataMode) {
-    if (reviewBusy) { setError('Wait for the current write confirmation before switching modes.'); return }
+    if (reviewBusy || client?.mutationSession.hasPending()) { setError('Wait for source acknowledgement or reconcile pending work before switching modes.'); return }
     if (bindingId || hostSurface !== 'personal') { setError('Data-mode switching is available in the personal workbench only.'); return }
     if (!dataMode.catalog?.availableModes.includes(mode)) { setError('That data mode is not configured for this runtime.'); return }
     if (authentication?.localConnection && !authentication.localConnection.sessionExpiresAt()) authentication.localConnection.clear()
@@ -200,7 +216,7 @@ export function TeamsApp() {
     dataMode.select(mode)
   }
   const modeControl = hostSurface === 'personal' && !bindingId && authentication
-    ? <DataModeSwitcher catalog={dataMode.catalog} mode={authentication.configuration.mode} locked={reviewBusy}
+    ? <DataModeSwitcher catalog={dataMode.catalog} mode={authentication.configuration.mode} locked={reviewBusy || client?.mutationSession.hasPending() === true}
       error={dataMode.error} onSwitch={switchDataMode} /> : null
   const focusPortfolio = useCallback((accountId: string, opportunityId = '') => {
     setPreferredAccountId(accountId); setPreferredOpportunityId(opportunityId); setView('portfolio')
@@ -233,6 +249,7 @@ export function TeamsApp() {
       </>}>
       {error && <p role="alert" className="error-banner">{error}</p>}
       {notice && <p role="status" className="success-banner">{notice}</p>}
+      <SourceSyncStatus client={client} showReads={['portfolio', 'discover', 'new'].includes(view)} />
       {authentication.localConnection && <NativeConnectionPanel connection={authentication.localConnection} client={client}
         authentication={'authentication' in authentication.configuration ? authentication.configuration.authentication : 'local-interactive'}
         writeMode={'writeMode' in authentication.configuration ? authentication.configuration.writeMode : 'read-only'}
@@ -260,6 +277,7 @@ export function TeamsApp() {
       {bindingId && bindingStatus !== 'ready' ? <section className="panel"><h1>{bindingStatus === 'denied' ? 'Bound workspace unavailable' : 'Loading your authorized bound workspace'}</h1>
         <p>A shared tab does not grant account access. <a href={`${location.origin}/`}>Open your private workbench</a>.</p>
       </section> : <div hidden={!['portfolio', 'discover', 'new'].includes(view)}><AccountsWorkspace client={client} mode={session.mode} selection={selection} onSelect={setSelection} review={review}
+        active={['portfolio', 'discover', 'new'].includes(view)}
         preferredAccountId={preferredAccountId} preferredOpportunityId={preferredOpportunityId} panes={panes}
         {...(view === 'new' ? { workspace: 'new' as const } : view === 'discover' ? { workspace: 'discovery' as const } : view === 'portfolio' ? { workspace: 'portfolio' as const } : {})}
         onMeeting={() => setView('meetings')} onFocus={focusPortfolio}

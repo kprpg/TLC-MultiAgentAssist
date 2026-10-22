@@ -69,6 +69,15 @@ apps/teams/.env.cli.example          Safe existing-user CLI configuration, not t
 apps/shared/                         Browser-safe prompt/Markdown and existing UI reuse
 apps/shared/transcript-file.ts       Shared UTF-8 VTT/text reader for Desktop/Web, VS Code and Teams
                                      Shared Portfolio controls, sorting and Next Best Actions
+apps/shared/session-portfolio.ts     Memory-only, mode/session-scoped Portfolio/Discovery snapshots
+                                     Shared lazy detail caching, local filtering and confirmed-write updates
+apps/shared/session-cache.ts         Bounded reactive datasets, active-interest freshness and safe read retries
+apps/shared/presentation-owner.ts    Host-owned cache composition and confirmed canonical patches
+apps/shared/presentation-hooks.ts    Visible-interest subscriptions and original editor-field capture
+apps/shared/mutation-sync.ts         Browser-safe pending overlays, private recovery and exact-source review
+apps/shared/sync-status.tsx          Shared stale/last-checked and pending/conflict/unknown presentation
+apps/vscode-extension/src/presentation-provider.ts
+                                     One provider cache for native trees and recreated webviews
 apps/shared/meeting-proposal-markdown.ts
                                      Shared browser-safe meeting proposal export format across surfaces
 apps/shared/mcem-stages.ts           Browser-safe stage names and accountable role metadata
@@ -76,6 +85,9 @@ apps/shared/mcem-stage-board.tsx     Shared Desktop/Web/Teams stage columns and 
 apps/shared/mcem-stage-board.css     Shared stage headers, cards, selection and gate styling
 packages/common/contracts/workflow-output.ts
                                      Browser-safe existing workflow result/run-view schemas
+packages/common/contracts/cache-sync.ts
+                                     Independent strict v1.0 read-control, policy and asynchronous receipt contracts
+packages/common/source-failure.ts    Preserve MSX denial/throttling status without replacing host policy errors
 packages/common/contracts/local-connection.ts
                                      Native/owner protocol v1.0, CLI public profile v1.2,
                                      and independently versioned work-session renewal v1.0
@@ -83,15 +95,18 @@ packages/common/contracts/teams-launch.ts
                                      Separate strict v1.0 launch/build/client-readiness contracts
 packages/common/contracts/teams-data-mode.ts
                                      Strict v1.0 runtime/initial/available modes and bounded API paths
-packages/common/contracts/index.ts   Independently versioned v1.0 portfolio index/workspace read contracts
+packages/common/contracts/index.ts   Independently versioned v1.0 Portfolio index/workspace and all-domain Discovery snapshot contracts
 packages/orchestrator/application-runtime.ts
 packages/orchestrator/operations.ts   Shared composition and typed operation catalog
 packages/orchestrator/task-agents.ts  Shared Foundry/sample/deterministic-live registries
 packages/orchestrator/collaboration/  Reviewed actions, bindings, events, state admission
+packages/orchestrator/mutations/     Immediate confirmed admission, protected journal, actor/version and effect tracking
 packages/connectors/graph/            Delegated meeting/transcript/subscription access
 packages/connectors/teams/            Authoritative resource membership checks
 packages/connectors/common/encrypted-document-store.ts
                                      Authenticated local state payload encryption
+packages/connectors/common/mutation-state.ts
+                                     Protected local key initialization and existing Azure Table receipt composition
 packages/documents/                   Shared Word/email builders, not an app dependency
 tests/unit/teams/                     Cumulative deterministic Teams slices
 tests/e2e/teams/                      Actual host/browser journeys

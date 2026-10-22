@@ -1,6 +1,6 @@
 import { AzureCliCredential, ManagedIdentityCredential } from '@azure/identity'
 import { resolve } from 'node:path'
-import { loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy } from '../../../packages/common/index.js'
+import { createPerformanceReporter, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy } from '../../../packages/common/index.js'
 import { loadFoundryEnvironmentFromEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
 import { LiveMeetingCaptureConnector, LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
@@ -14,6 +14,9 @@ import { createFoundryTaskAgents } from '../../../packages/orchestrator/task-age
 import { createLivePlayWorkflowHost, type WorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import { createSellerDashboardHost, type SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 import type { AuthenticatedRequest, WebRuntime } from './app.js'
+import { hostedMutationState } from '../../../packages/connectors/common/mutation-state.js'
+import { createMutationSession } from '../../../packages/orchestrator/mutations/composition.js'
+import { MutationRuntime } from '../../../packages/orchestrator/mutations/host.js'
 
 export function createWebSellerDashboardHost(mode: 'sample' | 'live'): SellerDashboardHost {
     return createSellerDashboardHost({
@@ -31,6 +34,8 @@ export interface HostedRuntimeOptions {
 export async function createHostedRuntimeFactory(options: HostedRuntimeOptions = {}) {
     const environment = options.environment ?? process.env
     const workingDirectory = options.workingDirectory ?? process.cwd()
+    const performanceReporter = createPerformanceReporter(environment['TLC_PERFORMANCE'] === '1',
+        (message) => console.info(`[performance] ${message}`))
     const foundryEnvironment = await loadFoundryEnvironmentFromEnvironment(environment, workingDirectory)
     const managedIdentityClientId = environment['AZURE_CLIENT_ID']?.trim()
     const foundryCredential = environment['WEBSITE_SITE_NAME']
@@ -42,6 +47,12 @@ export async function createHostedRuntimeFactory(options: HostedRuntimeOptions =
             processTimeoutInMs: 30_000
         })
     const foundryClient = createFoundryOpenAIClient(foundryEnvironment.foundry.projectEndpoint, foundryCredential)
+    const mutationState = hostedMutationState(environment, environment['WEBSITE_SITE_NAME']
+        ? managedIdentityClientId ? new ManagedIdentityCredential(managedIdentityClientId) : new ManagedIdentityCredential()
+        : new AzureCliCredential())
+    const mutationRuntime = new MutationRuntime()
+    let conditionalProbe: Promise<ReadonlyArray<'updateOpportunity' | 'updateMilestone' | 'transitionOpportunityStage'>> | undefined
+    let conditionalExpiresAt = 0
     const taskAgents = createFoundryTaskAgents(foundryEnvironment, foundryCredential, foundryClient)
     const guidance = new LocalPdfMcemGuidanceConnector(
         resolve(workingDirectory, environment['TLC_MCEM_GUIDANCE_PATH']?.trim() || 'docs/knowledge/MCEM Overview.pdf')
@@ -58,10 +69,26 @@ export async function createHostedRuntimeFactory(options: HostedRuntimeOptions =
         })
         : undefined
 
-    return ({ accessToken }: AuthenticatedRequest): WebRuntime => {
-        const msx = new LiveMsxConnector({ getAccessToken: async () => accessToken }, fetch, undefined, undefined, msxWriteMetadataFromEnvironment(environment), portfolioPreferenceStore)
+    const factory = ({ accessToken }: AuthenticatedRequest): WebRuntime => {
+        const msx = new LiveMsxConnector({ getAccessToken: async () => accessToken }, fetch, undefined, performanceReporter, msxWriteMetadataFromEnvironment(environment), portfolioPreferenceStore)
         const meetingConnector = new LiveMeetingCaptureConnector(msx)
-        return Object.assign(new ThinSliceOrchestrator(msx, guidance, taskAgents, undefined, new RecordCreationService(msx, msx)), {
+        const core = new ThinSliceOrchestrator(msx, guidance, taskAgents, performanceReporter, new RecordCreationService(msx, msx))
+        const mutations = createMutationSession({
+            core, mode: 'live', source: `web:${foundryEnvironment.environment}:https://microsoftsales.crm.dynamics.com`,
+            state: mutationState, enabled: environment['TLC_BACKGROUND_SYNC'] === '1', readCacheOwner: 'client',
+            getToken: async () => accessToken, runtime: mutationRuntime,
+            conditionalOperations: () => {
+                if (Date.now() >= conditionalExpiresAt) conditionalProbe = undefined
+                if (!conditionalProbe) {
+                    conditionalExpiresAt = Date.now() + 30 * 60_000
+                    conditionalProbe = core.conditionalWriteOperations().catch((error: unknown) => { conditionalProbe = undefined; throw error })
+                }
+                return conditionalProbe
+            },
+            applyMeeting: (input) => meetingConnector.applyMeetingChangeSet(input)
+        })
+        return Object.assign(core, {
+            mutationSync: (request: Parameters<typeof mutations.invoke>[0]) => mutations.invoke(request),
             listMeetingTranscripts: () => meetingConnector.listMeetingTranscripts(),
             getMeetingTranscript: async () => (await meetingConnector.getMeetingTranscript()) ?? null,
             proposeMeetingChangeSet: (request: { opportunityId: string; transcriptId?: string; rawTranscript?: { content: string; format?: 'vtt' | 'text'; meetingType?: 'customer' | 'internal' } }) => {
@@ -81,6 +108,7 @@ export async function createHostedRuntimeFactory(options: HostedRuntimeOptions =
             applyMeetingChangeSet: (input: Parameters<LiveMeetingCaptureConnector['applyMeetingChangeSet']>[0]) => meetingConnector.applyMeetingChangeSet(input)
         }) as WebRuntime
     }
+    return Object.assign(factory, { dispose: async () => { await mutationRuntime.drain(); mutationState.close() } })
 }
 
 export async function createHostedWorkflowHostResolver(options: HostedRuntimeOptions = {}) {

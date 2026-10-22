@@ -9,6 +9,13 @@ import {
   portfolioWorkspaceRequestSchema,
   portfolioWorkspaceSchema,
   portfolioReadVersion,
+  discoverySnapshotRequestSchema,
+  discoverySnapshotSchema,
+  discoverySnapshotVersion,
+  seDomainIds,
+  type DiscoverySnapshot,
+  type DiscoverySnapshotRequest,
+  type SyncMutationOperation,
   type PortfolioReadRequest,
   type PortfolioIndex,
   type PortfolioWorkspaceRequest,
@@ -91,6 +98,7 @@ export interface ConfiguredTaskAgent {
 export type TaskAgentRegistry = Partial<Record<AgentCapability, ConfiguredTaskAgent>>
 
 export class ThinSliceOrchestrator {
+  private readonly mutationListeners = new Set<(operation: SyncMutationOperation, result: unknown, input: Record<string, unknown>) => void>()
   constructor(
     private readonly msx: MsxConnector,
     private readonly mcem: McemGuidanceConnector,
@@ -104,9 +112,41 @@ export class ThinSliceOrchestrator {
     return this.msx.withReadContext ? this.msx.withReadContext(operation, signal) : operation()
   }
 
+  subscribeMutations(listener: (operation: SyncMutationOperation, result: unknown, input: Record<string, unknown>) => void): () => void {
+    this.mutationListeners.add(listener)
+    return () => this.mutationListeners.delete(listener)
+  }
+
+  conditionalWriteOperations(): Promise<ReadonlyArray<'updateOpportunity' | 'updateMilestone' | 'transitionOpportunityStage'>> {
+    return this.msx.conditionalWriteOperations ? this.msx.conditionalWriteOperations() : Promise.resolve([])
+  }
+
+  notifyMutation(operation: SyncMutationOperation, result: unknown, input: Record<string, unknown>): void {
+    for (const listener of this.mutationListeners) {
+      try { listener(operation, result, input) } catch {
+        console.warn('[cache-sync] source-acknowledged-view-update-failed')
+      }
+    }
+  }
+
+  private async acknowledged<T>(operation: SyncMutationOperation, input: Record<string, unknown>, work: () => Promise<T>): Promise<T> {
+    const result = await work()
+    this.notifyMutation(operation, result, input)
+    return result
+  }
+
+  withFreshReadContext<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return this.msx.withFreshReadContext ? this.msx.withFreshReadContext(operation, signal) : this.withReadContext(operation, signal)
+  }
+
+  withReviewedVersions<T>(versions: Readonly<Record<string, string>>, operation: () => Promise<T>, verifyAccessToken?: (token: string) => void, onDispatch?: () => void): Promise<T> {
+    return this.msx.withExpectedVersions ? this.msx.withExpectedVersions(versions,
+      () => this.withFreshReadContext(operation), verifyAccessToken, onDispatch) : operation()
+  }
+
   getPortfolioIndex(input: PortfolioReadRequest): Promise<PortfolioIndex> {
     const request = portfolioReadRequestSchema.parse(input)
-    return this.withReadContext(async () => {
+    return this.withFreshReadContext(async () => {
       const options = { ...(request.includeHidden === undefined ? {} : { includeHidden: request.includeHidden }) }
       if (this.msx.getPortfolioIndex) {
         return portfolioIndexSchema.parse({ contractVersion: portfolioReadVersion, ...await this.msx.getPortfolioIndex(options) })
@@ -119,7 +159,7 @@ export class ThinSliceOrchestrator {
 
   getPortfolioWorkspace(input: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace> {
     const request = portfolioWorkspaceRequestSchema.parse(input)
-    return this.withReadContext(async () => {
+    return this.withFreshReadContext(async () => {
       const accounts = await this.listAccounts({ ...(request.includeHidden === undefined ? {} : { includeHidden: request.includeHidden }) })
       const account = request.accountId ? accounts.find((item) => item.id === request.accountId && item.visibility !== 'hidden')
         : accounts.find((item) => item.visibility !== 'hidden')
@@ -136,6 +176,33 @@ export class ThinSliceOrchestrator {
     })
   }
 
+  getDiscoverySnapshot(input: DiscoverySnapshotRequest): Promise<DiscoverySnapshot> {
+    discoverySnapshotRequestSchema.parse(input)
+    return this.withFreshReadContext(async () => {
+      if (this.msx.getDiscoverySnapshot) {
+        return discoverySnapshotSchema.parse({
+          ...await this.msx.getDiscoverySnapshot(),
+          contractVersion: discoverySnapshotVersion,
+          generatedAt: new Date().toISOString()
+        })
+      }
+      const accounts = await this.listAccounts({ includeHidden: true })
+      const visible = new Set(accounts.filter((account) => account.visibility !== 'hidden').map((account) => account.id))
+      const [groups, portfolios] = await Promise.all([
+        Promise.all(seDomainIds.map((domain) => this.msx.discoverOpportunities(domain))),
+        Promise.all([...visible].map((accountId) => this.msx.listOpportunities(accountId)))
+      ])
+      const portfolioOpportunities = portfolios.flat()
+      const memberships = await Promise.all(portfolioOpportunities.map(async (opportunity) =>
+        (await this.msx.listMilestones(opportunity.id)).some((milestone) => milestone.onMilestoneTeam) ? [opportunity.id] : []))
+      return discoverySnapshotSchema.parse({
+        contractVersion: discoverySnapshotVersion, generatedAt: new Date().toISOString(), accounts, portfolioOpportunities,
+        opportunities: groups.flat().filter((opportunity) => visible.has(opportunity.accountId)),
+        milestoneTeamOpportunityIds: memberships.flat()
+      })
+    })
+  }
+
   getRecordCreationCatalog(request: RecordCreationCatalogRequest): Promise<RecordCreationCatalog> {
     return this.withReadContext(() => this.requireRecordCreation().getCatalog(request))
   }
@@ -145,7 +212,7 @@ export class ThinSliceOrchestrator {
   }
 
   commitRecordCreation(request: RecordCreationCommitRequest): Promise<RecordCreationResult> {
-    return this.requireRecordCreation().commit(request)
+    return this.acknowledged('commitRecordCreation', request, () => this.withFreshReadContext(() => this.requireRecordCreation().commit(request)))
   }
 
   exportRecordCreationDraft(request: RecordCreationCommitRequest): Promise<RecordCreationDraftResult> {
@@ -169,14 +236,14 @@ export class ThinSliceOrchestrator {
     if (typeof accountId !== 'string' || accountId.trim().length === 0) {
       throw new Error('An account id is required.')
     }
-    return this.msx.addAccount(accountId)
+    return this.acknowledged('addAccount', { accountId }, () => this.msx.addAccount(accountId))
   }
 
   async setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account> {
     if (typeof accountId !== 'string' || accountId.trim().length === 0) {
       throw new Error('An account id is required.')
     }
-    return this.msx.setAccountVisibility(accountId, accountVisibilitySchema.parse(visibility))
+    return this.acknowledged('setAccountVisibility', { accountId, visibility }, () => this.msx.setAccountVisibility(accountId, accountVisibilitySchema.parse(visibility)))
   }
 
   listOpportunities(accountId: string): Promise<Opportunity[]> {
@@ -201,14 +268,14 @@ export class ThinSliceOrchestrator {
     if (typeof opportunityId !== 'string' || opportunityId.trim().length === 0) {
       throw new Error('An opportunity id is required to join a deal team.')
     }
-    return this.msx.joinDealTeam(opportunityId)
+    return this.acknowledged('joinDealTeam', { opportunityId }, () => this.msx.joinDealTeam(opportunityId))
   }
 
   async leaveDealTeam(opportunityId: string): Promise<DealTeamLeaveResult> {
     if (typeof opportunityId !== 'string' || opportunityId.trim().length === 0) {
       throw new Error('An opportunity id is required to leave a deal team.')
     }
-    return this.msx.leaveDealTeam(opportunityId)
+    return this.acknowledged('leaveDealTeam', { opportunityId }, () => this.msx.leaveDealTeam(opportunityId))
   }
 
   async joinMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamJoinResult> {
@@ -218,7 +285,7 @@ export class ThinSliceOrchestrator {
     if (typeof milestoneId !== 'string' || milestoneId.trim().length === 0) {
       throw new Error('A milestone id is required to join a milestone team.')
     }
-    return this.msx.joinMilestoneTeam(opportunityId, milestoneId)
+    return this.acknowledged('joinMilestoneTeam', { opportunityId, milestoneId }, () => this.msx.joinMilestoneTeam(opportunityId, milestoneId))
   }
 
   async leaveMilestoneTeam(opportunityId: string, milestoneId: string): Promise<MilestoneTeamLeaveResult> {
@@ -228,7 +295,7 @@ export class ThinSliceOrchestrator {
     if (typeof milestoneId !== 'string' || milestoneId.trim().length === 0) {
       throw new Error('A milestone id is required to leave a milestone team.')
     }
-    return this.msx.leaveMilestoneTeam(opportunityId, milestoneId)
+    return this.acknowledged('leaveMilestoneTeam', { opportunityId, milestoneId }, () => this.msx.leaveMilestoneTeam(opportunityId, milestoneId))
   }
 
   listMilestones(opportunityId: string): Promise<Milestone[]> {
@@ -259,15 +326,15 @@ export class ThinSliceOrchestrator {
     if (typeof milestoneId !== 'string' || milestoneId.trim().length === 0) {
       throw new Error('A milestone id is required to create a milestone activity.')
     }
-    return this.msx.createMilestoneActivity(opportunityId, milestoneId, createMilestoneActivityRequestSchema.parse(request))
+    return this.acknowledged('createMilestoneActivity', { opportunityId, milestoneId, request }, () => this.msx.createMilestoneActivity(opportunityId, milestoneId, createMilestoneActivityRequestSchema.parse(request)))
   }
 
   updateMilestone(opportunityId: string, milestoneId: string, update: MilestoneUpdate): Promise<Milestone> {
-    return this.msx.updateMilestone(opportunityId, milestoneId, update)
+    return this.acknowledged('updateMilestone', { opportunityId, milestoneId, update }, () => this.msx.updateMilestone(opportunityId, milestoneId, update))
   }
 
   updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity> {
-    return this.msx.updateOpportunity(opportunityId, update)
+    return this.acknowledged('updateOpportunity', { opportunityId, update }, () => this.msx.updateOpportunity(opportunityId, update))
   }
 
   async transitionOpportunityStage(input: McemStageTransitionRequest): Promise<McemStageTransitionResult> {
@@ -299,18 +366,22 @@ export class ThinSliceOrchestrator {
       : ''
     const auditNote = `[MCEM stage transition ${timestamp}] Stage ${previousStage} -> Stage ${request.targetStage}; disposition: ${disposition}.${detail}${request.reason ? ` Reason: ${request.reason}` : ''}`
     const opportunity = await this.msx.updateOpportunityStage(request.opportunityId, request.targetStage, auditNote)
-    return mcemStageTransitionResultSchema.parse({ opportunity, previousStage, targetStage: request.targetStage, disposition, auditNote })
+    const result = mcemStageTransitionResultSchema.parse({ opportunity, previousStage, targetStage: request.targetStage, disposition, auditNote })
+    this.notifyMutation('transitionOpportunityStage', result, request)
+    return result
   }
 
   async runMcemCoach(input: McemRequest): Promise<McemResponse> {
     const request = mcemRequestSchema.parse(input)
-    return this.withReadContext(async () => {
+    return this.withFreshReadContext(async () => {
       const context = await this.msx.getOpportunityContext(request.opportunityId)
       if (context.account.id !== request.accountId) {
         throw new Error('The selected opportunity does not belong to the selected account.')
       }
-      const milestones = await this.msx.listMilestones(request.opportunityId)
-      const guidance = await this.mcem.getStageGuidance(context.opportunity.recordedStage)
+      const [milestones, guidance] = await Promise.all([
+        this.msx.listMilestones(request.opportunityId),
+        this.mcem.getStageGuidance(context.opportunity.recordedStage)
+      ])
       const localEvaluation = evaluateMcemProgress({ ...context, milestones }, guidance)
       return localEvaluation
     })
@@ -318,7 +389,7 @@ export class ThinSliceOrchestrator {
 
   async runAgentTask(input: AgentTaskRequest): Promise<AgentTaskResponse> {
     const request = agentTaskRequestSchema.parse(input)
-    return this.withReadContext(async () => {
+    return measurePerformance(`agent.task.${request.capability}`, this.performanceReporter, () => this.withFreshReadContext(async () => {
       const configuredAgent = this.taskAgents[request.capability]
       if (!configuredAgent) {
         throw new Error(`The ${request.capability} agent is not configured.`)
@@ -329,10 +400,13 @@ export class ThinSliceOrchestrator {
       if (baseContext.account.id !== request.accountId) {
         throw new Error('The selected opportunity does not belong to the selected account.')
       }
-      const milestones = await this.msx.listMilestones(request.opportunityId)
+      const [milestones, guidance] = await Promise.all([
+        measurePerformance('agent.context.milestones', this.performanceReporter, () =>
+          this.msx.listMilestones(request.opportunityId)),
+        measurePerformance('agent.context.mcem', this.performanceReporter, () =>
+          this.mcem.getStageGuidance(baseContext.opportunity.recordedStage))
+      ])
       const opportunityContext = { ...baseContext, milestones }
-      const guidance = await measurePerformance('agent.context.mcem', this.performanceReporter, () =>
-        this.mcem.getStageGuidance(opportunityContext.opportunity.recordedStage))
       const localEvaluation = evaluateMcemProgress(opportunityContext, guidance)
       const content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke({
         request,
@@ -358,7 +432,7 @@ export class ThinSliceOrchestrator {
         content: responseContent,
         sourceHealth
       }
-    })
+    }))
   }
 }
 

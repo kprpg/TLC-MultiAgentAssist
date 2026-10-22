@@ -39,11 +39,20 @@ export interface StageGuidance {
 }
 
 export interface MsxConnector {
+  refresh?(): void
   withReadContext?<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T>
+  withFreshReadContext?<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T>
   getConcurrencyTokens?(opportunityId: string): Promise<Record<string, string>>
-  withExpectedVersions?<T>(versions: Readonly<Record<string, string>>, operation: () => Promise<T>): Promise<T>
+  conditionalWriteOperations?(): Promise<ReadonlyArray<'updateOpportunity' | 'updateMilestone' | 'transitionOpportunityStage'>>
+  withExpectedVersions?<T>(versions: Readonly<Record<string, string>>, operation: () => Promise<T>, verifyAccessToken?: (token: string) => void, onDispatch?: () => void): Promise<T>
   listAccounts(options?: AccountListOptions): Promise<Account[]>
   getPortfolioIndex?(options?: AccountListOptions): Promise<{ accounts: Account[]; opportunities: Opportunity[] }>
+  getDiscoverySnapshot?(): Promise<{
+    accounts: Account[]
+    portfolioOpportunities: Opportunity[]
+    opportunities: DiscoverableOpportunity[]
+    milestoneTeamOpportunityIds: string[]
+  }>
   searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
   addAccount(accountId: string): Promise<Account>
   setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>

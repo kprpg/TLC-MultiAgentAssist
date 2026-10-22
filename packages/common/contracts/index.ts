@@ -12,6 +12,7 @@ export * from './meeting.js'
 export * from './voice.js'
 export * from './seller-dashboard.js'
 export * from './record-creation.js'
+export * from './cache-sync.js'
 
 export const dataModeSchema = z.enum(['sample', 'live'])
 export const sourceStateSchema = z.enum([
@@ -198,6 +199,21 @@ export const discoverableOpportunitySchema = opportunitySchema.extend({
   technicalCapability: z.string().min(1).optional(),
   onDealTeam: z.boolean()
 })
+
+export const discoverySnapshotVersion = '1.0' as const
+export const discoverySnapshotRequestSchema = z.object({
+  contractVersion: z.literal(discoverySnapshotVersion)
+}).strict()
+export const discoverySnapshotSchema = z.object({
+  contractVersion: z.literal(discoverySnapshotVersion),
+  generatedAt: z.string().datetime(),
+  accounts: z.array(accountSchema.strict()),
+  portfolioOpportunities: z.array(opportunitySchema.strict()),
+  opportunities: z.array(discoverableOpportunitySchema.strict()),
+  milestoneTeamOpportunityIds: z.array(z.string().min(1))
+}).strict()
+export type DiscoverySnapshotRequest = z.infer<typeof discoverySnapshotRequestSchema>
+export type DiscoverySnapshot = z.infer<typeof discoverySnapshotSchema>
 
 export const mcemStageTransitionRequestSchema = z.object({
   contractVersion: z.literal(contractVersion),

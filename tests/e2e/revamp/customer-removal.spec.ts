@@ -237,51 +237,47 @@ test('keeps a failed removal actionable and prevents dismissal or repeat submiss
     }
 })
 
-test('does not let a late opportunity response restore a removed selected customer', async ({ page }) => {
+test('uses cached opportunities when selecting an account and never restores a removed selected customer', async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 950 })
     await hostedWeb(page)
     const accounts = accountsPane(page, 'web')
     await expect(accounts.locator('.account-row')).toHaveCount(8)
-    let release!: () => void
-    let captured!: () => void
-    const pending = new Promise<void>((done) => { release = done })
-    const snapshot = new Promise<void>((done) => { captured = done })
+    let opportunityReads = 0
     await page.route('**/api/accounts/account-contoso/opportunities', async (route) => {
-        const response = await route.fetch()
-        captured()
-        await pending
-        await route.fulfill({ response })
+        opportunityReads++
+        await route.continue()
     })
-    try {
-        await accounts.locator('.account-button').filter({ hasText: 'Contoso Energy' }).click()
-        await snapshot
-        await accounts.locator('.account-row').filter({ hasText: 'Contoso Energy' }).getByRole('button', { name: 'Remove this customer', exact: true }).click()
-        await page.getByRole('dialog', { name: 'Remove customer account' }).getByRole('button', { name: 'Remove customer', exact: true }).click()
-        await expect(accounts.locator('.account-row').filter({ hasText: 'Contoso Energy' })).toHaveCount(0)
-        const response = page.waitForResponse((item) => new URL(item.url()).pathname === '/api/accounts/account-contoso/opportunities')
-        release()
-        await (await response).finished()
-        await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => done())))
-        await expect(page.getByRole('table', { name: 'Contoso Energy opportunities' })).toHaveCount(0)
-        await expect(page.getByRole('region', { name: 'Opportunity workbench' })).not.toContainText('Contoso Energy')
-        await expect(page.getByRole('region', { name: 'Opportunity workbench' })).not.toContainText('Grid operations modernization')
-    } finally {
-        release()
-    }
+    await accounts.locator('.account-button').filter({ hasText: 'Contoso Energy' }).click()
+    await expect(page.getByRole('table', { name: 'Contoso Energy opportunities' })).toBeVisible()
+    expect(opportunityReads).toBe(0)
+    await accounts.locator('.account-row').filter({ hasText: 'Contoso Energy' }).getByRole('button', { name: 'Remove this customer', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Remove customer account' }).getByRole('button', { name: 'Remove customer', exact: true }).click()
+    await expect(accounts.locator('.account-row').filter({ hasText: 'Contoso Energy' })).toHaveCount(0)
+    await expect(page.getByRole('table', { name: 'Contoso Energy opportunities' })).toHaveCount(0)
+    await expect(page.getByRole('region', { name: 'Opportunity workbench' })).not.toContainText('Contoso Energy')
+    await expect(page.getByRole('region', { name: 'Opportunity workbench' })).not.toContainText('Grid operations modernization')
+    expect(opportunityReads).toBe(0)
 })
 
-test('reports a persisted removal separately from a failed portfolio refresh', async ({ page }) => {
+test('keeps a persisted removal local and reports failures only when sources are explicitly refreshed', async ({ page }) => {
     await hostedWeb(page)
     const accounts = accountsPane(page, 'web')
     await expect(accounts.locator('.account-row')).toHaveCount(8)
     await accounts.getByRole('button', { name: 'Remove customer', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Remove customer account' })
     await dialog.getByRole('combobox').selectOption('account-contoso')
-    await page.route('**/api/portfolio/index', (route) => route.fulfill({ status: 500, json: { error: 'Refresh unavailable' } }))
+    let reads = 0
+    await page.route('**/api/discovery/snapshot', (route) => {
+        reads++
+        return route.fulfill({ status: 500, json: { error: 'Refresh unavailable' } })
+    })
     await dialog.getByRole('button', { name: 'Remove customer', exact: true }).click()
-    await expect(page.getByRole('alert')).toContainText('Customer removed, but TLC could not refresh the portfolio.')
     await expect(accounts.locator('.account-row').filter({ hasText: 'Contoso Energy' })).toHaveCount(0)
-    await page.unroute('**/api/portfolio/index')
+    expect(reads).toBe(0)
+    await accounts.getByRole('button', { name: 'Refresh Accounts', exact: true }).click()
+    await expect(page.getByRole('region', { name: 'Source synchronization', exact: true })).toContainText('Refresh unavailable')
+    expect(reads).toBe(3)
+    await page.unroute('**/api/discovery/snapshot')
     await page.reload()
     await expect(accounts.locator('.account-row')).toHaveCount(7)
     await expect(accounts.locator('.account-row').filter({ hasText: 'Contoso Energy' })).toHaveCount(0)

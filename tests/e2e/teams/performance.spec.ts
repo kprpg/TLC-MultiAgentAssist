@@ -2,12 +2,12 @@ import { expect, test } from '@playwright/test'
 import { accountSchema } from '../../../packages/common/contracts/index.js'
 import { post } from './helpers.js'
 
-test('Portfolio waits for the whole workspace and uses one aggregate read without false empty states', async ({ page }) => {
+test('Portfolio waits for its session index and lazy selected detail without false empty states', async ({ page }) => {
   let release = () => {}
   const gate = new Promise<void>((resolve) => { release = resolve })
   const operations: string[] = []
   page.on('request', (request) => { if (request.url().includes('/operations/')) operations.push(request.url().split('/').at(-1)!) })
-  await page.route('**/operations/getPortfolioWorkspace', async (route) => { await gate; await route.continue() })
+  await page.route('**/operations/getPortfolioIndex', async (route) => { await gate; await route.continue() })
   await page.goto('/')
   await expect(page.getByRole('status').filter({ hasText: 'Loading portfolio accounts, opportunities and milestones' })).toBeVisible()
   await expect(page.getByText('No eligible Portfolio opportunities. Use Discover to review your working set.', { exact: true })).toBeHidden()
@@ -15,10 +15,10 @@ test('Portfolio waits for the whole workspace and uses one aggregate read withou
   await expect(page.getByLabel('Customer account', { exact: true })).not.toHaveValue('')
   await expect(page.getByLabel('Opportunity', { exact: true })).not.toHaveValue('')
   await expect(page.locator('.milestone-card').first()).toBeVisible()
-  expect(operations).toEqual(['getPortfolioWorkspace'])
+  expect(operations).toEqual(['getPortfolioIndex', 'listMilestones'])
 })
 
-test('search focus is local and a typed query makes one aggregate read instead of per-account requests', async ({ page, request }) => {
+test('search focus and typed queries reuse the session index instead of per-account requests', async ({ page, request }) => {
   const accounts = accountSchema.array().parse(await post(request, 'listAccounts', {}))
   const account = accounts[0]
   if (!account) throw new Error('No sanitized search account.')
@@ -35,14 +35,14 @@ test('search focus is local and a typed query makes one aggregate read instead o
   await search.fill(account.name)
   const result = page.getByRole('listbox', { name: 'Search results', exact: true }).getByRole('option', { name: account.name, exact: true })
   await expect(result).toBeVisible()
-  expect(operations).toEqual(['getPortfolioIndex'])
+  expect(operations).toEqual([])
   await result.click()
   await expect(page.getByLabel('Customer account', { exact: true })).toHaveValue(account.id)
 })
 
 test('a failed fresh Portfolio read clears data and retries explicitly rather than returning stale success', async ({ page }) => {
   let denied = false
-  await page.route('**/operations/getPortfolioWorkspace', (route) => denied
+  await page.route('**/operations/getDiscoverySnapshot', (route) => denied
     ? route.fulfill({ status: 403, json: { error: 'source_access_denied' } }) : route.continue())
   await page.goto('/')
   await expect(page.getByLabel('Customer account', { exact: true })).not.toHaveValue('')

@@ -3,9 +3,16 @@ import type { Account, AccountCandidate, AccountListOptions, AccountSearchReques
 import type { WorkflowHostOperation } from '../../../../packages/orchestrator/workflows/index.js'
 import type { VoiceRequest, VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 import type { SellerDashboardRequest, SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
-import type { PortfolioReadRequest, PortfolioIndex, PortfolioWorkspaceRequest, PortfolioWorkspace } from '../../../../packages/common/contracts/index.js'
+import type { DiscoverySnapshot, DiscoverySnapshotRequest, PortfolioReadRequest, PortfolioIndex, PortfolioWorkspaceRequest, PortfolioWorkspace } from '../../../../packages/common/contracts/index.js'
+import {
+  cacheControlResponseSchema, mutationSyncResponseSchema, type CacheControlRequest, type CacheControlResponse,
+  type MutationSyncRequest, type MutationSyncResponse, type CacheReadState
+} from '../../../../packages/common/contracts/cache-sync.js'
 
 export interface TlcDesktopApi {
+  invokeMutationSync(request: MutationSyncRequest): Promise<MutationSyncResponse>
+  cacheControl(request: CacheControlRequest): Promise<CacheControlResponse>
+  onCacheChanged(listener: (state: CacheReadState) => void): () => void
   invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
   invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
   exitApplication(): Promise<void>
@@ -14,6 +21,7 @@ export interface TlcDesktopApi {
   listAccounts(options?: AccountListOptions): Promise<Account[]>
   getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
   getPortfolioWorkspace(request: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace>
+  getDiscoverySnapshot(request: DiscoverySnapshotRequest): Promise<DiscoverySnapshot>
   searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
   addAccount(accountId: string): Promise<Account>
   setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
@@ -47,6 +55,13 @@ export interface TlcDesktopApi {
 }
 
 const api: TlcDesktopApi = {
+  invokeMutationSync: async (request) => mutationSyncResponseSchema.parse(await ipcRenderer.invoke('tlc:mutation-sync', request)),
+  cacheControl: async (request) => cacheControlResponseSchema.parse(await ipcRenderer.invoke('tlc:cache-control', request)),
+  onCacheChanged: (listener) => {
+    const changed = (_event: Electron.IpcRendererEvent, value: unknown) => { listener(cacheControlResponseSchema.parse(value).state) }
+    ipcRenderer.on('tlc:cache-changed', changed)
+    return () => { ipcRenderer.removeListener('tlc:cache-changed', changed) }
+  },
   invokeSellerDashboard: (request) => ipcRenderer.invoke('tlc:seller-dashboard', request),
   invokeVoice: (request) => ipcRenderer.invoke('tlc:voice-input', request),
   exitApplication: () => ipcRenderer.invoke('tlc:exit-application'),
@@ -55,6 +70,7 @@ const api: TlcDesktopApi = {
   listAccounts: (options) => ipcRenderer.invoke('tlc:list-accounts', options),
   getPortfolioIndex: (request) => ipcRenderer.invoke('tlc:portfolio-index', request),
   getPortfolioWorkspace: (request) => ipcRenderer.invoke('tlc:portfolio-workspace', request),
+  getDiscoverySnapshot: (request) => ipcRenderer.invoke('tlc:discovery-snapshot', request),
   searchAccounts: (request) => ipcRenderer.invoke('tlc:search-accounts', request),
   addAccount: (accountId) => ipcRenderer.invoke('tlc:add-account', accountId),
   setAccountVisibility: (accountId, visibility) => ipcRenderer.invoke('tlc:set-account-visibility', accountId, visibility),

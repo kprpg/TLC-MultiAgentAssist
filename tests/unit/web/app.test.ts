@@ -59,6 +59,23 @@ describe('hosted web API', () => {
         expect(createRuntime).not.toHaveBeenCalled()
     })
 
+    it('uses an opaque stable identity scope across token renewal but changes it for another source actor', async () => {
+        const token = (oid: string, exp: number) => `synthetic.${Buffer.from(JSON.stringify({
+            tid: '11111111-1111-4111-8111-111111111111', oid, exp
+        })).toString('base64url')}.synthetic`
+        let accessToken = token('22222222-2222-4222-8222-222222222222', 100)
+        const baseUrl = await listen(buildWebApiHandler({
+            createRuntime: () => runtime(),
+            authenticate: () => ({ accessToken, clientPrincipal: 'trusted-principal', userEmail: 'same@example.test' })
+        }))
+        const first = (await fetch(`${baseUrl}/api/me`)).headers.get('x-tlc-source-scope')
+        expect(first).toMatch(/^[a-f0-9]{64}$/)
+        accessToken = token('22222222-2222-4222-8222-222222222222', 200)
+        expect((await fetch(`${baseUrl}/api/me`)).headers.get('x-tlc-source-scope')).toBe(first)
+        accessToken = token('33333333-3333-4333-8333-333333333333', 200)
+        expect((await fetch(`${baseUrl}/api/me`)).headers.get('x-tlc-source-scope')).not.toBe(first)
+    })
+
     it('uses host-provided local authentication without trusting request headers', async () => {
         const authenticate = vi.fn(async () => ({
             accessToken: 'local-azure-cli-token',
@@ -460,6 +477,7 @@ function runtime(): WebRuntime {
     return {
         getPortfolioIndex: vi.fn(),
         getPortfolioWorkspace: vi.fn(),
+        getDiscoverySnapshot: vi.fn(),
         listAccounts: vi.fn(async () => [{ id: 'account-1', name: 'Contoso', segment: 'Live MSX' }]),
         searchAccounts: vi.fn(async () => []),
         addAccount: vi.fn(),

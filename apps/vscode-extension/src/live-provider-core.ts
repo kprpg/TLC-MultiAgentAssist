@@ -30,6 +30,7 @@ export interface MeetingCaptureConnector {
 }
 
 export interface LiveDataProviderParts {
+    getSourceToken?(): Promise<string>
     orchestrator: ThinSliceOrchestrator
     host: WorkflowHost
     account: string
@@ -42,7 +43,7 @@ export interface LiveDataProviderParts {
 
 /** Assembles the provider surface from injected parts so MCEM/agent/Play wiring is unit-testable. */
 export function buildLiveDataProvider(
-    { orchestrator, host, account, dispose, meetingConnector, meetingExtractor }: LiveDataProviderParts,
+    { orchestrator, host, account, dispose, meetingConnector, meetingExtractor, getSourceToken }: LiveDataProviderParts,
     mode: ExtensionDataProvider['mode'] = 'live'
 ): ExtensionDataProvider {
     const requireMeeting = (): MeetingCaptureConnector => {
@@ -50,12 +51,15 @@ export function buildLiveDataProvider(
         return meetingConnector
     }
     return {
+        sourceCore: orchestrator,
+        ...(getSourceToken ? { getSourceToken } : {}),
         mode,
         sellerDashboard: createSellerDashboardHost({ mode, resolveUserEmail: async () => account }),
         getCurrentUserEmail: async () => account,
         listAccounts: (options) => orchestrator.listAccounts(options),
         getPortfolioIndex: (request) => orchestrator.getPortfolioIndex(request),
         getPortfolioWorkspace: (request) => orchestrator.getPortfolioWorkspace(request),
+        getDiscoverySnapshot: (request) => orchestrator.getDiscoverySnapshot(request),
         searchAccounts: (request) => orchestrator.searchAccounts(request),
         addAccount: (accountId) => orchestrator.addAccount(accountId),
         setAccountVisibility: (accountId, visibility) => orchestrator.setAccountVisibility(accountId, visibility),

@@ -1,4 +1,8 @@
 import { z } from 'zod'
+import * as c from '../../../../packages/common/contracts/index.js'
+import { seDomainSchema } from '../../../../packages/common/configuration/se-domains.js'
+import { SessionPortfolio, waitForSessionRead } from '../../../shared/session-portfolio.js'
+import { MutationSyncClient } from '../../../shared/mutation-sync.js'
 import type { TeamsApiBasePath, TeamsDataMode } from '../../../../packages/common/contracts/teams-data-mode.js'
 import {
   actionApprovalSchema, actionPreviewSchema, actionReceiptSchema, collaborationVersion, teamsSessionSchema,
@@ -6,14 +10,30 @@ import {
 } from '../../../../packages/common/contracts/collaboration.js'
 
 export class TeamsRequestError extends Error {
-  constructor(readonly code: string, readonly correlationId?: string, readonly claims?: string) {
+  constructor(readonly code: string, readonly correlationId?: string, readonly claims?: string, readonly status?: number, readonly retryAfterMs?: number) {
     super(`${code.replaceAll('_', ' ')}${correlationId ? ` (reference ${correlationId})` : ''}`)
     this.name = 'TeamsRequestError'
   }
 }
 export class TeamsApiClient {
   private readonly disposed = new AbortController()
-  private readonly reads = new Map<string, { controller: AbortController; promise: Promise<unknown>; users: number }>()
+  private readonly portfolio = new SessionPortfolio({
+    getPortfolioIndex: () => this.request('operations/getPortfolioIndex', c.portfolioIndexSchema, { contractVersion: c.portfolioReadVersion, includeHidden: true }),
+    getDiscoverySnapshot: () => this.request('operations/getDiscoverySnapshot', c.discoverySnapshotSchema, { contractVersion: c.discoverySnapshotVersion }),
+    listMilestones: (opportunityId) => this.request('operations/listMilestones', z.array(c.milestoneSchema), { opportunityId }),
+    listDiscoverableMilestones: (opportunityId) => this.request('operations/listDiscoverableMilestones', z.array(c.milestoneSchema), { opportunityId })
+  })
+  readonly cacheSession = this.portfolio
+  readonly mutationSession = new MutationSyncClient(
+    (input) => this.request('mutation-sync', c.mutationSyncResponseSchema, input),
+    {
+      onConfirmed: (operation, result, input) => { this.portfolio.applyMutation(operation, result); this.portfolio.finishDraft(operation, input) },
+      onRecovered: () => { this.portfolio.refresh(); this.portfolio.cache.changed() },
+      onAccessDenied: () => this.portfolio.clear()
+    }
+  )
+  private readonly syncReviews = new Map<string, c.MutationReview>()
+  private readonly interests = new Map<string, { keys: readonly string[]; active: boolean }>()
   constructor(
     private readonly getToken: () => Promise<string>,
     private readonly onAuthenticationRequired?: (claims?: string) => void,
@@ -48,7 +68,12 @@ export class TeamsApiClient {
       const error = z.object({ error: z.string(), correlationId: z.string().optional(), claims: z.string().max(8192).optional() }).parse(await response.json())
       this.assertCurrentToken(token)
       if (response.status === 401) this.onAuthenticationRequired?.(error.claims)
-      throw new TeamsRequestError(error.error, error.correlationId, error.claims)
+      if (response.status === 401 || response.status === 403) this.portfolio.clear()
+      const retry = response.headers.get('retry-after')
+      const retryAfterMs = retry === null ? undefined : /^\d+(?:\.\d+)?$/.test(retry)
+        ? Number(retry) * 1000 : Math.max(0, Date.parse(retry) - Date.now())
+      throw new TeamsRequestError(error.error, error.correlationId, error.claims, response.status,
+        retryAfterMs !== undefined && Number.isFinite(retryAfterMs) ? retryAfterMs : undefined)
     }
     return { response, token }
   }
@@ -67,49 +92,111 @@ export class TeamsApiClient {
     return session
   }
   operation<T>(name: string, input: unknown, schema: z.ZodType<T>, signal?: AbortSignal): Promise<T> {
-    if (!['getPortfolioIndex', 'getPortfolioWorkspace', 'discoverOpportunities', 'listMilestones', 'listDiscoverableMilestones'].includes(name)) {
-      return this.request(`operations/${encodeURIComponent(name)}`, schema, input, signal)
-    }
-    if (signal?.aborted) return Promise.reject(signal.reason)
-    const key = `${name}:${JSON.stringify(input)}`
-    let pending = this.reads.get(key)
-    if (!pending) {
-      const controller = new AbortController()
-      pending = { controller, promise: this.request(`operations/${encodeURIComponent(name)}`, z.unknown(), input, controller.signal), users: 0 }
-      this.reads.set(key, pending)
-      const current = pending
-      const cleanup = () => { if (this.reads.get(key) === current) this.reads.delete(key) }
-      void pending.promise.then(cleanup, cleanup)
-    }
-    const current = pending
-    current.users++
-    return new Promise<T>((resolve, reject) => {
-      let finished = false
-      const release = () => {
-        if (finished) return false
-        finished = true; signal?.removeEventListener('abort', abort)
-        if (--current.users === 0) {
-          current.controller.abort()
-          if (this.reads.get(key) === current) this.reads.delete(key)
+    let readToken: string | undefined
+    const cached = async (): Promise<unknown> => {
+      readToken = await this.getToken()
+      this.assertCurrentToken(readToken)
+      signal?.throwIfAborted()
+      switch (name) {
+        case 'getPortfolioIndex': return this.portfolio.getPortfolioIndex(c.portfolioReadRequestSchema.parse(input).includeHidden)
+        case 'getPortfolioWorkspace': return this.portfolio.getPortfolioWorkspace(c.portfolioWorkspaceRequestSchema.parse(input))
+        case 'getDiscoverySnapshot':
+          c.discoverySnapshotRequestSchema.parse(input)
+          return this.portfolio.getDiscoverySnapshot()
+        case 'listAccounts': return this.portfolio.listAccounts(c.accountListOptionsSchema.parse(input).includeHidden)
+        case 'listOpportunities': return this.portfolio.listOpportunities(z.object({ accountId: z.string().min(1) }).parse(input).accountId)
+        case 'discoverOpportunities': return this.portfolio.discoverOpportunities(z.object({ domain: seDomainSchema }).parse(input).domain)
+        case 'listMilestones':
+        case 'listDiscoverableMilestones':
+          return this.portfolio.listMilestones(z.object({ opportunityId: z.string().min(1) }).parse(input).opportunityId, name === 'listDiscoverableMilestones')
+        case 'listMilestoneActivities': {
+          const request = z.object({ opportunityId: z.string().min(1), milestoneId: z.string().min(1) }).parse(input)
+          return this.portfolio.readDataset(`activities:${request.opportunityId}:${request.milestoneId}`,
+            () => this.request(`operations/${name}`, schema, input))
         }
-        return true
+        case 'getRecordCreationCatalog': {
+          const request = c.recordCreationCatalogRequestSchema.parse(input)
+          return this.portfolio.readDataset(`catalog:${request.accountId}`, () => this.request(`operations/${name}`, schema, input), { reference: true })
+        }
+        case 'searchAccounts': {
+          const request = c.accountSearchRequestSchema.parse(input)
+          return this.portfolio.readDataset(`search:${request.matchBy}:${request.query}`, () => this.request(`operations/${name}`, schema, input))
+        }
+        default: throw new Error('The operation is not a cached portfolio read.')
       }
-      const abort = () => { if (release()) reject(signal?.reason) }
-      signal?.addEventListener('abort', abort, { once: true })
-      void current.promise.then((value) => {
-        if (!release()) return
-        try { resolve(schema.parse(value)) } catch (error) { reject(error) }
-      }, (error: unknown) => { if (release()) reject(error) })
-    })
+    }
+    if (['getPortfolioIndex', 'getPortfolioWorkspace', 'getDiscoverySnapshot', 'listAccounts', 'listOpportunities', 'discoverOpportunities', 'listMilestones', 'listDiscoverableMilestones', 'listMilestoneActivities', 'getRecordCreationCatalog', 'searchAccounts'].includes(name)) {
+      return waitForSessionRead(cached(), signal).then((value) => {
+        if (readToken === undefined) throw new TeamsRequestError('local_connection_changed')
+        this.assertCurrentToken(readToken)
+        const project = (data: unknown): unknown => {
+          if (Array.isArray(data)) return data.map((item) => {
+            if (name === 'listOpportunities') return this.mutationSession.projectOpportunity(c.opportunitySchema.parse(item))
+            if (name === 'discoverOpportunities') return this.mutationSession.projectDiscovery(c.discoverableOpportunitySchema.parse(item))
+            if (name === 'listMilestones' || name === 'listDiscoverableMilestones') return this.mutationSession.projectMilestone(c.milestoneSchema.parse(item))
+            return item
+          })
+          if (name === 'getPortfolioWorkspace') {
+            const workspace = c.portfolioWorkspaceSchema.parse(data)
+            return { ...workspace, opportunities: workspace.opportunities.map((item) => this.mutationSession.projectOpportunity(item)),
+              milestones: workspace.milestones.map((item) => this.mutationSession.projectMilestone(item)) }
+          }
+          if (name === 'getDiscoverySnapshot') {
+            const snapshot = c.discoverySnapshotSchema.parse(data)
+            return { ...snapshot, opportunities: snapshot.opportunities.map((item) => this.mutationSession.projectDiscovery(item)) }
+          }
+          return data
+        }
+        return schema.parse(project(value))
+      })
+    }
+    return this.request(`operations/${encodeURIComponent(name)}`, schema, input, signal)
   }
-  preview(operation: string, input: unknown): Promise<ActionPreview> {
+  async preview(operation: string, input: unknown): Promise<ActionPreview> {
+    const parsed = c.syncMutationOperationSchema.safeParse(operation)
+    if (parsed.success) {
+      const review = await this.mutationSession.prepareReviewed(parsed.data, z.record(z.string(), z.unknown()).parse(input))
+      if (review) {
+        this.syncReviews.set(review.id, review)
+        const { recordKeys, ...wire } = review
+        void recordKeys
+        return actionPreviewSchema.parse({ ...wire, state: 'awaiting-approval' })
+      }
+    }
     return this.request('actions/preview', actionPreviewSchema, { operation, input })
   }
-  commit(preview: ActionPreview, reason: string): Promise<ActionReceipt> {
-    const approval = actionApprovalSchema.parse({ contractVersion: collaborationVersion, id: preview.id, digest: preview.digest, reason })
-    return this.request('actions/commit', actionReceiptSchema, approval)
+  async commitBackground(preview: ActionPreview, reason: string): Promise<{ admitted: boolean; completion: Promise<ActionReceipt> }> {
+    const review = this.syncReviews.get(preview.id)
+    if (!review) return { admitted: false, completion: this.commit(preview, reason) }
+    const admitted = await this.mutationSession.submitReviewed(review, reason)
+    return {
+      admitted: true,
+      completion: admitted.completion.then((receipt) => {
+        if (receipt.state === 'conflict') throw new Error('Source values changed. Keep your draft and prepare a new review.')
+        return actionReceiptSchema.parse({
+          contractVersion: collaborationVersion, id: receipt.id, operation: receipt.operation, occurredAt: receipt.updatedAt,
+          state: receipt.state === 'confirmed' ? 'confirmed' : receipt.state === 'failed-before-send' ? 'failed-before-send' : 'effect-unknown',
+          ...(receipt.result === undefined ? {} : { result: receipt.result })
+        })
+      })
+    }
   }
-  dispose(): void { this.disposed.abort() }
+  async commit(preview: ActionPreview, reason: string): Promise<ActionReceipt> {
+    if (this.syncReviews.has(preview.id)) return (await this.commitBackground(preview, reason)).completion
+    const approval = actionApprovalSchema.parse({ contractVersion: collaborationVersion, id: preview.id, digest: preview.digest, reason })
+    const receipt = await this.request('actions/commit', actionReceiptSchema, approval)
+    if (receipt.state === 'confirmed') this.portfolio.applyMutation(preview.operation, receipt.result)
+    return receipt
+  }
+  setActiveReads(keys: readonly string[], active: boolean, consumer = 'main'): void {
+    if (!active && !keys.length) this.interests.delete(consumer)
+    else this.interests.set(consumer, { keys, active })
+    const visible = [...this.interests.values()].filter((item) => item.active)
+    this.portfolio.setActiveKeys([...new Set(visible.flatMap((item) => item.keys))])
+    this.portfolio.setActive(visible.length > 0)
+  }
+  refreshSources(): void { this.portfolio.refresh() }
+  dispose(): void { this.disposed.abort(); this.portfolio.dispose(); this.mutationSession.dispose(); this.syncReviews.clear() }
 }
 export type ReviewAction = (operation: string, input: Record<string, unknown>) => Promise<ActionReceipt>
 export type ReviewPreview = (preview: ActionPreview) => Promise<ActionReceipt>

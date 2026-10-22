@@ -1,5 +1,11 @@
 import {
     workflowContractVersion,
+    discoverySnapshotRequestSchema,
+    discoverySnapshotSchema,
+    discoverySnapshotVersion,
+    seDomainIds,
+    type DiscoverySnapshot,
+    type DiscoverySnapshotRequest,
     type Account,
     type AccountCandidate,
     type AccountListOptions,
@@ -56,6 +62,8 @@ import { RecordCreationService } from '../../../packages/orchestrator/record-cre
 import { ExtensionMcemGuidanceConnector } from './mcem-guidance.js'
 import { buildLiveDataProvider, buildLiveTaskAgents } from './live-provider-core.js'
 import { buildFoundryMeetingExtractor } from './live-provider.js'
+import type { SessionPortfolio } from '../../shared/session-portfolio.js'
+import type { MutationSyncRequest, MutationSyncResponse } from '../../../packages/common/contracts/cache-sync.js'
 import {
     buildSampleAgentResponse,
     buildSampleEvaluation,
@@ -90,12 +98,20 @@ export interface MeetingTranscriptSource {
  * decision of sample vs live; the router never learns which mode is active.
  */
 export interface ExtensionDataProvider {
+    readonly sourceCore?: ThinSliceOrchestrator
+    readonly getSourceToken?: () => Promise<string>
+    readonly cacheSession?: SessionPortfolio
+    setCacheInterest?(consumer: string, keys: readonly string[], active: boolean): void
+    setCacheSuspended?(consumer: string, suspended: boolean): void
+    mutationSync?(request: MutationSyncRequest): Promise<MutationSyncResponse>
+    drainMutations?(): Promise<void>
     readonly sellerDashboard?: SellerDashboardHost
     readonly mode: 'sample' | 'live'
     getCurrentUserEmail(): Promise<string | undefined>
     listAccounts(options?: AccountListOptions): Promise<Account[]>
     getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
     getPortfolioWorkspace(request: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace>
+    getDiscoverySnapshot(request: DiscoverySnapshotRequest): Promise<DiscoverySnapshot>
     searchAccounts(request: AccountSearchRequest): Promise<AccountCandidate[]>
     addAccount(accountId: string): Promise<Account>
     setAccountVisibility(accountId: string, visibility: AccountVisibility): Promise<Account>
@@ -187,6 +203,17 @@ export function createSampleDataProvider(): ExtensionDataProvider {
         mode: 'sample',
         sellerDashboard: createSellerDashboardHost({ mode: 'sample', resolveUserEmail: async () => undefined }),
         getCurrentUserEmail: async () => undefined,
+        getDiscoverySnapshot: async (input) => {
+            discoverySnapshotRequestSchema.parse(input)
+            const accounts = listSampleAccounts({ includeHidden: true })
+            const portfolioOpportunities = accounts.filter((account) => account.visibility !== 'hidden').flatMap((account) => listSampleOpportunities(account.id))
+            return discoverySnapshotSchema.parse({
+                contractVersion: discoverySnapshotVersion, generatedAt: new Date().toISOString(), accounts, portfolioOpportunities,
+                opportunities: seDomainIds.flatMap((domain) => discoverSampleOpportunities(domain)),
+                milestoneTeamOpportunityIds: portfolioOpportunities.filter((opportunity) =>
+                    listSampleMilestones(opportunity.id).some((milestone) => milestone.onMilestoneTeam)).map((opportunity) => opportunity.id)
+            })
+        },
         listAccounts: async (options) => listSampleAccounts(options),
         getPortfolioIndex: async (input) => {
             const request = portfolioReadRequestSchema.parse(input)

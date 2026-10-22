@@ -33,6 +33,8 @@ import { workflowGuidanceCapability } from '../../../shared/workflow-guidance.js
 import { AddCustomerButton, type CustomerAccount, type CustomerSearchClient } from '../../../shared/add-customer.js'
 import { RemoveCustomerButton } from '../../../shared/remove-customer.js'
 import { usePortfolioRefresh } from './use-portfolio-refresh.js'
+import { SourceSyncStatus } from '../../../shared/sync-status.js'
+import { usePresentationSession } from '../../../shared/presentation-hooks.js'
 import type {
     AccountView,
     AgentCapability,
@@ -623,6 +625,7 @@ function StagesPane({ accountId, opportunity, onStageChanged, onNote }: { accoun
     useEffect(() => { void load() }, [load])
 
     const move = useCallback(async (targetStage: number) => {
+        dataClient.cacheSession.captureField(opportunity.id, 'recordedStage', opportunity.recordedStage, { reset: true })
         setBusy(true)
         try {
             const result = await dataClient.transitionOpportunityStage(accountId, opportunity.id, targetStage, reason.trim() || undefined)
@@ -635,7 +638,7 @@ function StagesPane({ accountId, opportunity, onStageChanged, onNote }: { accoun
         } finally {
             setBusy(false)
         }
-    }, [accountId, opportunity.id, reason, onStageChanged, load])
+    }, [accountId, opportunity.id, opportunity.recordedStage, reason, onStageChanged, load])
 
     const recorded = opportunity.recordedStage
     const evidenceStage = evaluation.status === 'ready' && evaluation.data ? String(evaluation.data.evidenceBasedStage) : '—'
@@ -705,6 +708,15 @@ function MilestoneActivitiesPanel({ opportunityId, milestoneId, onNote }: { oppo
     const [loading, setLoading] = useState(true)
     const [form, setForm] = useState({ ...emptyActivityForm })
     const [saving, setSaving] = useState(false)
+    usePresentationSession(dataClient, [`activities:${opportunityId}:${milestoneId}`], {
+        onError: (error) => onNote(error instanceof Error ? error.message : 'Could not refresh activities.'),
+        onReset: () => { setActivities([]); setForm({ ...emptyActivityForm }) },
+        onChanged: async () => {
+            if (dataClient.cacheSession.cache.has(`activities:${opportunityId}:${milestoneId}`)) {
+                setActivities(await dataClient.listMilestoneActivities(opportunityId, milestoneId))
+            }
+        }
+    })
 
     useEffect(() => {
         let active = true
@@ -773,6 +785,14 @@ function MilestonesEditor({ opportunityId, currency, milestones, onChanged, onNo
     const [membershipBusyId, setMembershipBusyId] = useState<string | undefined>(undefined)
     const [pendingMembershipRemoval, setPendingMembershipRemoval] = useState<MilestoneView | undefined>(undefined)
     const [activitiesForId, setActivitiesForId] = useState<string | undefined>(undefined)
+    useEffect(() => {
+        if (!edit) return
+        const source = milestones.find((item) => item.id === edit.milestoneId)
+        if (!source) return
+        dataClient.cacheSession.captureField(opportunityId, edit.field,
+            edit.field === 'customerCommitment' ? source.commitment ?? '' : source[edit.field] ?? '', { milestoneId: source.id, reset: true })
+        // Reopening starts a new draft; typing and quiet source updates must not replace its original base.
+    }, [opportunityId, edit?.milestoneId, edit?.field])
 
     const sorted = sortMilestones(filterVisibleMilestones(milestones), sortBy, direction)
 
@@ -882,7 +902,7 @@ function MilestonesEditor({ opportunityId, currency, milestones, onChanged, onNo
                         {edit && edit.milestoneId === milestone.id && (
                             <tr className="record-editor-row">
                                 <td colSpan={3}>
-                                    <div className="record-editor">
+                                    <div className="record-editor" data-draft-opportunity-id={milestone.opportunityId} data-draft-milestone-id={milestone.id} data-draft-field={edit.field}>
                                         <label>{MILESTONE_FIELDS.find((field) => field.id === edit.field)?.label}</label>
                                         {edit.field === 'status' && (
                                             <select value={edit.value} onChange={(event) => setEdit({ ...edit, value: event.target.value })}>{MILESTONE_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}</select>
@@ -1187,6 +1207,7 @@ function StageBoard({ accountId, opportunities, onChanged, onNote }: { accountId
         const opportunity = opportunities.find((item) => item.id === opportunityId)
         if (!opportunity || opportunity.recordedStage === targetStage) return
         if (Math.abs(targetStage - opportunity.recordedStage) !== 1) { onNote('Stage moves must be to an adjacent stage.'); return }
+        dataClient.cacheSession.captureField(opportunity.id, 'recordedStage', opportunity.recordedStage, { reset: true })
         setPending({ opportunityId, opportunityName: opportunity.name, targetStage })
         setReason('')
     }
@@ -1248,13 +1269,14 @@ function StageBoard({ accountId, opportunities, onChanged, onNote }: { accountId
 
 type SubTab = 'overview' | 'guidance' | 'stages'
 
-function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpanded, dataMode, onPortfolioChanged }: {
+function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpanded, dataMode, onPortfolioChanged, sourceRevision = 0 }: {
     dataMode: 'sample' | 'live'
     focus?: { accountId?: string | undefined; opportunityId?: string | undefined } | undefined
     accountsExpanded: boolean
     detailsExpanded: boolean
     actionsExpanded: boolean
     onPortfolioChanged(removedAccountId?: string): void
+    sourceRevision?: number
 }): ReactElement {
     const [accounts, setAccounts] = useState<Loadable<AccountView[]>>({ status: 'idle' })
     const [accountId, setAccountId] = useState<string | undefined>(undefined)
@@ -1268,6 +1290,22 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
     const opportunityRequestId = useRef(0)
     const mcemRequestId = useRef(0)
     const milestoneRequestId = useRef(0)
+    usePresentationSession(dataClient, ['portfolio', ...(opportunityId ? [`milestones:${opportunityId}`] : [])], {
+        ...(opportunityId ? { opportunityId } : {}),
+        onError: (cause) => setNote(cause instanceof Error ? cause.message : 'Source refresh failed.'),
+        onReset: () => {
+            accountRequestId.current++; opportunityRequestId.current++; mcemRequestId.current++; milestoneRequestId.current++
+            setAccounts({ status: 'error', error: 'Source identity or access changed. Refresh or reconnect.' })
+            setOpportunities([]); setMilestones([]); setOpportunityId(undefined); setMcem({ status: 'idle' })
+        },
+        onChanged: async () => {
+            if (!dataClient.cacheSession.cache.has('portfolio')) return
+            const index = await dataClient.getPortfolioIndex()
+            setAccounts({ status: 'ready', data: index.accounts })
+            if (accountId) setOpportunities(index.opportunities.filter((item) => item.accountId === accountId))
+            if (opportunityId && dataClient.cacheSession.cache.has(`milestones:${opportunityId}`)) setMilestones(await dataClient.listMilestones(opportunityId))
+        }
+    })
 
     const loadAccounts = useCallback(async (failureContext = '') => {
         const requestId = ++accountRequestId.current
@@ -1291,7 +1329,7 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
     useEffect(() => {
         void loadAccounts()
         return () => { accountRequestId.current++ }
-    }, [loadAccounts])
+    }, [loadAccounts, sourceRevision])
 
     useEffect(() => {
         if (focus?.accountId && accounts.status === 'ready' && accounts.data?.some((item) => item.id === focus.accountId)) {
@@ -1325,7 +1363,7 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
     useEffect(() => {
         loadOpportunities(focus?.accountId === accountId ? focus?.opportunityId : undefined)
         return () => { opportunityRequestId.current += 1 }
-    }, [loadOpportunities, focus, accountId])
+    }, [loadOpportunities, focus, accountId, sourceRevision])
 
     useEffect(() => {
         const requestId = ++milestoneRequestId.current
@@ -1343,7 +1381,7 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
         })
         setNote(undefined)
         return () => { mcemRequestId.current += 1; milestoneRequestId.current++ }
-    }, [accountId, opportunityId])
+    }, [accountId, opportunityId, sourceRevision])
 
     const selectedOpportunity = useMemo(
         () => opportunities.find((opportunity) => opportunity.id === opportunityId && opportunity.accountId === accountId),
@@ -1430,6 +1468,10 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
         <div className={portfolioLayoutClassName({ accountsExpanded, detailsExpanded, actionsExpanded })}>
             {accountsExpanded && <section id="portfolio-accounts-panel" className="pane">
                 <div className="account-management-header"><h3 className="section-heading">Accounts</h3><div>
+                    <button type="button" disabled={accounts.status === 'loading'} onClick={() => {
+                        dataClient.refreshSources()
+                        onPortfolioChanged()
+                    }}>Refresh Portfolio</button>
                     <AddCustomerButton client={customerSearchClient} dataMode={dataMode} onAdded={async (account) => {
                         onPortfolioChanged()
                         await loadAccounts()
@@ -1485,14 +1527,17 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
                                         </td>
                                         <td className="opportunity-intent-cell">{formatOpportunityIntent(opportunity.opportunityIntent)}</td>
                                         <td><span className="badge">Stage {opportunity.recordedStage}</span></td>
-                                        <td className="opportunity-comments-cell"><CommentsButton title="Opportunity comments" onClick={() => { setCommentsFor(opportunity.id); setCommentsText(opportunity.comments ?? '') }} /></td>
+                                        <td className="opportunity-comments-cell"><CommentsButton title="Opportunity comments" onClick={() => {
+                                            dataClient.cacheSession.captureField(opportunity.id, 'comments', opportunity.comments ?? '', { reset: true })
+                                            setCommentsFor(opportunity.id); setCommentsText(opportunity.comments ?? '')
+                                        }} /></td>
                                     </tr>
                                     {commentsFor === opportunity.id && (
                                         <tr className="record-editor-row">
                                             <td colSpan={4}>
                                                 <div className="record-editor">
                                                     <label>Opportunity comments</label>
-                                                    <textarea rows={2} value={commentsText} onChange={(event) => setCommentsText(event.target.value)} />
+                                                    <textarea data-draft-opportunity-id={opportunity.id} data-draft-field="comments" rows={2} value={commentsText} onChange={(event) => setCommentsText(event.target.value)} />
                                                     <div className="actions">
                                                         <button className="secondary" disabled={savingComments} onClick={() => setCommentsFor(undefined)}>Cancel</button>
                                                         <button className="primary" disabled={savingComments} onClick={() => void saveComments(opportunity.id)}>{savingComments ? 'Saving...' : 'Save'}</button>
@@ -1596,9 +1641,10 @@ const SE_DOMAINS: ReadonlyArray<{ id: SeDomainView; label: string }> = [
 ]
 
 /** Discover tab: lists open opportunities for an SE domain with one-click deal-team join. */
-function DiscoverPanel({ dataMode, onPortfolioChanged }: {
+function DiscoverPanel({ dataMode, onPortfolioChanged, sourceRevision = 0 }: {
     dataMode: 'sample' | 'live'
     onPortfolioChanged(removedAccountId?: string): void
+    sourceRevision?: number
 }): ReactElement {
     const [domain, setDomain] = useState<SeDomainView>('infra')
     const [refreshVersion, setRefreshVersion] = useState(0)
@@ -1613,34 +1659,48 @@ function DiscoverPanel({ dataMode, onPortfolioChanged }: {
     const [milestonesLoadingId, setMilestonesLoadingId] = useState<string | undefined>(undefined)
     const [milestoneBusyId, setMilestoneBusyId] = useState<string | undefined>(undefined)
     const requestId = useRef(0)
+    usePresentationSession(dataClient, ['discovery', ...(expandedId ? [`milestones:${expandedId}`] : [])], {
+        onError: (cause) => setNote(cause instanceof Error ? cause.message : 'Discovery refresh failed.'),
+        onReset: () => { setItems({ status: 'error', error: 'Source identity or access changed. Reconnect before reading private data.' }); setAccounts([]) },
+        onChanged: async () => {
+            if (!dataClient.cacheSession.cache.has('discovery')) return
+            const value = await dataClient.getDiscoverySnapshot()
+            setItems({ status: 'ready', data: value.opportunities })
+            setAccounts(value.accounts.filter((item) => item.visibility !== 'hidden'))
+            if (expandedId && dataClient.cacheSession.cache.has(`milestones:${expandedId}`)) {
+                const milestones = await dataClient.listDiscoverableMilestones(expandedId)
+                setDiscoverMilestones((current) => ({ ...current, [expandedId]: milestones }))
+            }
+        }
+    })
     const [pendingMembershipRemoval, setPendingMembershipRemoval] = useState<
         { kind: 'deal-team'; item: DiscoverableOpportunityView }
         | { kind: 'milestone-team'; opportunityId: string; milestone: MilestoneView }
         | undefined
     >(undefined)
-    const opportunities = items.data ?? []
+    const opportunities = useMemo(() => (items.data ?? []).filter((item) => item.domain === domain), [items.data, domain])
     const visibleOpportunities = useMemo(() => sortDiscoveryOpportunities(filterDiscoveryOpportunities(opportunities, filters), sort), [opportunities, filters, sort])
     const customers = useMemo(() => discoveryCustomers([
-        ...opportunities,
+        ...(items.data ?? []),
         ...accounts
             .filter((item) => item.visibility !== 'hidden')
             .map((item) => ({ accountId: item.id, accountName: item.name }))
-    ]), [opportunities, accounts])
+    ]), [items.data, accounts])
     const displayedDiscoverMilestones = (opportunityId: string): MilestoneView[] =>
         filterVisibleMilestones(discoverMilestones[opportunityId] ?? [])
 
     useEffect(() => {
         const version = ++requestId.current
         setItems({ status: 'loading' })
-        Promise.all([dataClient.discoverOpportunities(domain), dataClient.listAccounts(false)])
-            .then(([data, visibleAccounts]) => {
+        dataClient.getDiscoverySnapshot()
+            .then((snapshot) => {
                 if (version !== requestId.current) return
-                setItems({ status: 'ready', data })
-                setAccounts(visibleAccounts)
+                setItems({ status: 'ready', data: snapshot.opportunities })
+                setAccounts(snapshot.accounts.filter((item) => item.visibility !== 'hidden'))
             })
             .catch((error: unknown) => { if (version === requestId.current) setItems({ status: 'error', error: error instanceof Error ? error.message : 'Discovery failed.' }) })
         return () => { requestId.current++ }
-    }, [domain, refreshVersion])
+    }, [refreshVersion, sourceRevision])
 
     const join = async (opportunityId: string): Promise<void> => {
         setJoining(opportunityId)
@@ -1758,9 +1818,15 @@ function DiscoverPanel({ dataMode, onPortfolioChanged }: {
                             <button key={option.id} role="tab" aria-selected={domain === option.id} className={domain === option.id ? 'tab active' : 'tab'} onClick={() => setDomain(option.id)}>{option.label}</button>
                         ))}
                     </nav>
-                    <button className="secondary" disabled={items.status === 'loading'} onClick={() => setRefreshVersion((version) => version + 1)}>Refresh</button>
+                    <button className="secondary" disabled={items.status === 'loading'} onClick={() => {
+                        dataClient.refreshSources()
+                        setDiscoverMilestones({})
+                        setExpandedId(undefined)
+                        setRefreshVersion((version) => version + 1)
+                    }}>Refresh</button>
                 </div>
             </header>
+            <p className="muted">Session snapshot. Tabs and customer filters use memory; Refresh reloads source data.</p>
             <DiscoveryControls customers={customers} filters={filters} onChange={setFilters} visibleCount={visibleOpportunities.length} totalCount={opportunities.length} loading={items.status === 'idle' || items.status === 'loading'} />
             {note && <p className="discover-note" role="status">{note}</p>}
             {items.status === 'loading' && <p>Loading opportunities…</p>}
@@ -1783,7 +1849,7 @@ function DiscoverPanel({ dataMode, onPortfolioChanged }: {
                                     <td>{item.technicalCapability ?? '-'}</td>
                                     <td>{item.recordedStage}</td>
                                     <td>
-                                        {item.onDealTeam
+                                        {dataClient.mutationSession.pendingMembershipForRecord(item.id) ? <span role="status">Membership change pending</span> : item.onDealTeam
                                             ? <span className="deal-team-actions"><span className="deal-team-joined">On deal team</span><button className="link danger-link" disabled={joining === item.id} onClick={() => setPendingMembershipRemoval({ kind: 'deal-team', item })}>{joining === item.id ? 'Removing…' : 'Remove me'}</button></span>
                                             : <button className="tab" disabled={joining === item.id} onClick={() => void join(item.id)}>{joining === item.id ? 'Adding…' : 'Add me'}</button>}
                                     </td>
@@ -1805,6 +1871,7 @@ function DiscoverPanel({ dataMode, onPortfolioChanged }: {
                                                         onClick={() => void toggleMilestone(item.id, milestone)}
                                                     >{milestoneBusyId === milestone.id ? '…' : milestone.onMilestoneTeam ? '−' : '+'}</button>
                                                     <span><strong>{milestone.name}</strong> · {milestone.status}{milestone.targetDate ? ` · ${milestone.targetDate}` : ''}</span>
+                                                    {dataClient.mutationSession.pendingMembershipForRecord(milestone.id) && <span role="status">Membership change pending</span>}
                                                 </div>
                                             ))}
                                         </td>
@@ -1847,7 +1914,14 @@ export function App(): ReactElement {
 
     useEffect(() => {
         onHostMessage((message) => {
-            if (message.kind === 'event') setMode(message.payload.mode)
+            if (message.kind === 'event') {
+                if (message.type !== 'init') {
+                    if (message.type === 'modeChanged') { dataClient.resetSession(); setFocus(undefined) }
+                    else dataClient.refreshSources()
+                    refreshPortfolio()
+                }
+                setMode(message.payload.mode)
+            }
             else if (message.kind === 'focus') { setTab('portfolio'); setFocus({ accountId: message.accountId, opportunityId: message.opportunityId }) }
             else if (message.kind === 'runPlay') { setTab('plays'); setRunRequest({ workflowId: message.workflowId, token: message.token }) }
         })
@@ -1874,13 +1948,14 @@ export function App(): ReactElement {
                     setDetailsExpanded(true)
                 }}
             />
+            <SourceSyncStatus client={dataClient} showReads={['portfolio', 'discover', 'new'].includes(tab)} />
             <main className={`app-body${tab === 'plays' ? ' app-body--plays' : tab === 'dashboard' ? ' app-body--dashboard' : ''}`}>
                 {tab === 'new' ? <NewWorkspace client={dataClient} onCommitted={(accountId, opportunityId) => {
                     setTab('portfolio')
                     setFocus({ accountId, opportunityId })
                 }} /> : tab === 'portfolio' ? (
-                    <PortfolioPanel focus={focus} accountsExpanded={accountsExpanded} detailsExpanded={detailsExpanded} actionsExpanded={actionsExpanded} dataMode={mode} onPortfolioChanged={portfolioChanged} />
-                ) : tab === 'discover' ? <DiscoverPanel dataMode={mode} onPortfolioChanged={portfolioChanged} /> : tab === 'dashboard'
+                    <PortfolioPanel key={mode} sourceRevision={portfolioRevision} focus={focus} accountsExpanded={accountsExpanded} detailsExpanded={detailsExpanded} actionsExpanded={actionsExpanded} dataMode={mode} onPortfolioChanged={portfolioChanged} />
+                ) : tab === 'discover' ? <DiscoverPanel key={mode} sourceRevision={portfolioRevision} dataMode={mode} onPortfolioChanged={portfolioChanged} /> : tab === 'dashboard'
                     ? <DashboardWorkspace invokeSellerDashboard={dataClient.invokeSellerDashboard} /> : <PlaysPanel runRequest={runRequest} />}
             </main>
         </div>

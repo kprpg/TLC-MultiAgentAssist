@@ -5,6 +5,8 @@ import { join, resolve } from 'node:path'
 import type { Account, DiscoverableOpportunity } from '../../../packages/common/index.js'
 import { opportunitySchema } from '../../../packages/common/contracts/index.js'
 
+declare global { var tlcDiscoveryCaptureCount: number }
+
 const portfolioAccounts: Account[] = [
   { id: 'account-alpha', name: 'Alpha Corp', segment: 'Enterprise' },
   { id: 'account-beta', name: 'Beta Health', segment: 'Enterprise', provenance: 'manual' },
@@ -17,6 +19,15 @@ const discoveryRows: DiscoverableOpportunity[] = [
   { id: 'beta', name: 'Beta platform', accountId: 'account-beta', accountName: 'Beta Health', recordedStage: 1, onDealTeam: false },
   { id: 'alpha-add', name: 'Alpha infrastructure', accountId: 'account-alpha', accountName: 'Alpha Corp', recordedStage: 5, onDealTeam: false }
 ].map((item) => ({ ...item, domain: 'infra', value: 100, currency: 'USD', closeDate: '2026-12-31', technicalCapability: 'Cloud infrastructure' }))
+
+function snapshot(rows: DiscoverableOpportunity[]) {
+  return {
+    contractVersion: '1.0', generatedAt: '2026-10-21T12:00:00.000Z', accounts: portfolioAccounts,
+    portfolioOpportunities: rows.filter((item) => item.onDealTeam).map((item) => opportunitySchema.parse(item)),
+    opportunities: [...rows, ...rows.filter((item) => item.id === 'zulu').map((item) => ({ ...item, domain: 'data' }))],
+    milestoneTeamOpportunityIds: []
+  }
+}
 
 async function expectActionColor(action: Locator, data: Locator, expectedColor: string): Promise<void> {
   await expect(action).toHaveCSS('color', expectedColor)
@@ -107,6 +118,12 @@ async function verifyDiscoveryControls(page: Page, host: 'desktop' | 'web' | 'vs
   const names = table.locator('tbody > tr:not(.discover-milestones-row) > td:first-child strong')
   await expect(names).toHaveText(['Zulu renewal', 'Alpha analysis', 'Beta platform', 'Alpha infrastructure'])
   await expect(panel.getByText('Showing 4 of 4 opportunities', { exact: true })).toBeVisible()
+  await panel.getByRole(host === 'vscode' ? 'tab' : 'button', { name: 'Data', exact: true }).click()
+  await expect(names).toHaveText(['Zulu renewal'])
+  await panel.getByRole(host === 'vscode' ? 'tab' : 'button', { name: 'Services', exact: true }).click()
+  await expect(panel.getByText('Showing 0 of 0 opportunities', { exact: true })).toBeVisible()
+  await panel.getByRole(host === 'vscode' ? 'tab' : 'button', { name: 'Infrastructure', exact: true }).click()
+  await expect(names).toHaveCount(4)
 
   const accountSort = table.getByRole('button', { name: 'Sort by Account' })
   await expectActionColor(accountSort, names.first(), accent)
@@ -267,6 +284,7 @@ async function verifyDiscoveryControls(page: Page, host: 'desktop' | 'web' | 'vs
 
 test('filters and sorts Discovery in the web UI', async ({ page }) => {
   const rows = structuredClone(discoveryRows)
+  let snapshotReads = 0
   let removalAttempts = 0
   const errors: Error[] = []
   page.on('pageerror', (error) => errors.push(error))
@@ -277,6 +295,10 @@ test('filters and sorts Discovery in the web UI', async ({ page }) => {
   await page.route('**/api/**', async (route) => {
     const path = new URL(route.request().url()).pathname
     if (path === '/api/me') await route.fulfill({ json: { email: 'sample@example.test' } })
+    else if (path === '/api/discovery/snapshot') {
+      snapshotReads++
+      await route.fulfill({ json: snapshot(rows) })
+    }
     else if (path === '/api/portfolio/index') await route.fulfill({ json: {
       contractVersion: '1.0', accounts: portfolioAccounts,
       opportunities: rows.filter((item) => item.onDealTeam).map((item) => opportunitySchema.parse(item))
@@ -301,6 +323,7 @@ test('filters and sorts Discovery in the web UI', async ({ page }) => {
   await verifyPortfolioActionColors(page, 'web', 'rgb(15, 108, 189)', 'rgb(17, 94, 163)')
   await page.locator('.rail-button[title="Discover opportunities"]').click()
   await verifyDiscoveryControls(page, 'web')
+  expect(snapshotReads).toBe(3)
   const panel = page.getByRole('region', { name: 'Discover opportunities' })
   await panel.getByRole('button', { name: 'Customers equals all', exact: true }).click()
   await expect(panel.getByRole('dialog', { name: 'Customer filter' }).getByRole('checkbox', { name: 'Beta Health', exact: true })).toBeVisible()
@@ -320,10 +343,23 @@ test('filters and sorts Discovery through the desktop IPC bridge', async () => {
     page.on('pageerror', (error) => errors.push(error))
     await app.evaluate(({ ipcMain }, rows) => {
       let removalAttempts = 0
-      for (const channel of ['tlc:discover-opportunities', 'tlc:join-deal-team', 'tlc:leave-deal-team']) ipcMain.removeHandler(channel)
-      ipcMain.handle('tlc:discover-opportunities', (_event, domain: string) => domain === 'data'
-        ? rows.filter((item) => item.id === 'zulu').map((item) => ({ ...item, domain: 'data' }))
-        : rows)
+      globalThis.tlcDiscoveryCaptureCount = 0
+      for (const channel of ['tlc:discovery-snapshot', 'tlc:join-deal-team', 'tlc:leave-deal-team', 'tlc:cache-control']) ipcMain.removeHandler(channel)
+      // Synthetic Discovery replaces the physical owner here; unrelated real-Portfolio metadata must not invalidate it.
+      ipcMain.handle('tlc:cache-control', () => ({
+        contractVersion: '1.0', state: { revision: 0, dataRevision: 0, generation: 0, refreshing: false, stale: false }
+      }))
+      ipcMain.handle('tlc:discovery-snapshot', () => {
+        globalThis.tlcDiscoveryCaptureCount++
+        return {
+        contractVersion: '1.0', generatedAt: '2026-10-21T12:00:00.000Z',
+        accounts: [...new Map(rows.map((item) => [item.accountId, { id: item.accountId, name: item.accountName!, segment: 'test' }])).values()],
+        portfolioOpportunities: rows.filter((item) => item.onDealTeam).map(({ id, accountId, name, recordedStage, value, currency, closeDate }) =>
+          ({ id, accountId, name, recordedStage, value, currency, closeDate })),
+        opportunities: [...rows, ...rows.filter((item) => item.id === 'zulu').map((item) => ({ ...item, domain: 'data' }))],
+        milestoneTeamOpportunityIds: []
+        }
+      })
       ipcMain.handle('tlc:join-deal-team', (_event, id: string) => {
         for (const row of rows) if (row.id === id) row.onDealTeam = true
         return { opportunityId: id, onDealTeam: true, alreadyMember: false }
@@ -337,6 +373,7 @@ test('filters and sorts Discovery through the desktop IPC bridge', async () => {
     await verifyPortfolioActionColors(page, 'desktop', 'rgb(15, 108, 189)', 'rgb(17, 94, 163)')
     await page.locator('.rail-button[title="Discover opportunities"]').click()
     await verifyDiscoveryControls(page, 'desktop')
+    expect(await app.evaluate(() => globalThis.tlcDiscoveryCaptureCount)).toBe(3)
     expect(errors).toEqual([])
   } finally {
     await app.close()
@@ -355,6 +392,7 @@ for (const theme of [
     body: `<!doctype html><html><head><style>:root{${theme.colors};--vscode-focusBorder:#0078d4;--vscode-font-family:"Segoe UI",sans-serif;--vscode-button-background:#0e639c;--vscode-button-foreground:#ffffff;--vscode-list-hoverBackground:transparent;--vscode-toolbar-hoverBackground:transparent}</style></head><body><div id="root" data-mode="sample"></div></body></html>`
   }))
   await page.addInitScript(({ rows, accounts }) => {
+    globalThis.tlcDiscoveryCaptureCount = 0
     window.confirm = () => false
     let milestoneMember = false
     let removalAttempts = 0
@@ -366,6 +404,20 @@ for (const theme of [
           if (message.kind !== 'request') return
           let result: unknown
           if (message.method === 'getCurrentUserEmail') result = 'sample@example.test'
+          else if (message.method === 'getPortfolioIndex') result = {
+            contractVersion: '1.0', accounts, opportunities: rows.filter((item) => item.onDealTeam)
+              .map(({ id, accountId, name, recordedStage, value, currency, closeDate }) => ({ id, accountId, name, recordedStage, value, currency, closeDate }))
+          }
+          else if (message.method === 'getDiscoverySnapshot') {
+            globalThis.tlcDiscoveryCaptureCount++
+            result = {
+            contractVersion: '1.0', generatedAt: '2026-10-21T12:00:00.000Z', accounts,
+            portfolioOpportunities: rows.filter((item) => item.onDealTeam)
+              .map(({ id, accountId, name, recordedStage, value, currency, closeDate }) => ({ id, accountId, name, recordedStage, value, currency, closeDate })),
+            opportunities: [...rows, ...rows.filter((item) => item.id === 'zulu').map((item) => ({ ...item, domain: 'data' }))],
+            milestoneTeamOpportunityIds: milestoneMember ? ['beta'] : []
+            }
+          }
           else if (message.method === 'listAccounts') result = accounts
           else if (message.method === 'listOpportunities') result = rows.filter((item) => item.accountId === message.params?.accountId && item.onDealTeam)
           else if (message.method === 'listMilestones') result = []
@@ -412,5 +464,6 @@ for (const theme of [
   await verifyPortfolioActionColors(page, 'vscode', theme.accent, theme.hover)
   await page.getByRole('button', { name: 'Discover', exact: true }).click()
   await verifyDiscoveryControls(page, 'vscode', theme.accent, theme.danger)
+  expect(await page.evaluate(() => globalThis.tlcDiscoveryCaptureCount)).toBe(3)
   expect(errors).toEqual([])
 })

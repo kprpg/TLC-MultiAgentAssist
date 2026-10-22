@@ -32,6 +32,7 @@ async function main() {
     'tlc:run-agent-task': (input) => backend.core.runAgentTask(agentTaskRequestSchema.parse(input)),
     ...createPortfolioIpcHandlers({
       getPortfolioIndex: (input) => backend.core.getPortfolioIndex(input),
+      getDiscoverySnapshot: (input) => backend.core.getDiscoverySnapshot(input),
       getPortfolioWorkspace: (input) => backend.core.getPortfolioWorkspace(input)
     })
   }

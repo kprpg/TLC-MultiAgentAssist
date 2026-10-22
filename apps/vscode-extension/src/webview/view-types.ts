@@ -7,10 +7,10 @@
 export interface AccountView {
     id: string
     name: string
-    segment?: string
-    tpid?: string
-    provenance?: 'deal-team' | 'manual' | 'both'
-    visibility?: 'visible' | 'hidden'
+    segment?: string | undefined
+    tpid?: string | undefined
+    provenance?: 'deal-team' | 'manual' | 'both' | undefined
+    visibility?: 'visible' | 'hidden' | undefined
 }
 
 export interface AccountCandidateView extends AccountView {
@@ -21,13 +21,13 @@ export interface OpportunityView {
     id: string
     accountId: string
     name: string
-    owner?: string
-    opportunityIntent?: string[]
+    owner?: string | undefined
+    opportunityIntent?: string[] | undefined
     recordedStage: number
     value: number
     currency: string
     closeDate: string
-    comments?: string
+    comments?: string | undefined
 }
 
 export interface PortfolioIndexView {
@@ -46,9 +46,9 @@ export type SeDomainView = 'infra' | 'data' | 'ai-apps' | 'security' | 'modern-w
 
 export interface DiscoverableOpportunityView extends OpportunityView {
     domain: SeDomainView
-    accountName?: string
-    solutionArea?: string
-    technicalCapability?: string
+    accountName?: string | undefined
+    solutionArea?: string | undefined
+    technicalCapability?: string | undefined
     onDealTeam: boolean
 }
 
@@ -69,13 +69,13 @@ export interface MilestoneView {
     opportunityId: string
     name: string
     status: string
-    targetDate?: string
-    owner?: string
-    commitment?: string
-    estimatedMonthlyUsage?: number
-    riskDetails?: string
-    comments?: string
-    onMilestoneTeam?: boolean
+    targetDate?: string | undefined
+    owner?: string | undefined
+    commitment?: string | undefined
+    estimatedMonthlyUsage?: number | undefined
+    riskDetails?: string | undefined
+    comments?: string | undefined
+    onMilestoneTeam?: boolean | undefined
 }
 
 export interface MilestoneTeamJoinResultView {
@@ -99,14 +99,14 @@ export interface MilestoneActivityView {
     subject: string
     activityType: string
     status: string
-    priority?: 'Low' | 'Normal' | 'High'
-    taskCategory?: string
-    due?: string
-    durationMinutes?: number
-    description?: string
-    owner?: string
-    createdBy?: string
-    createdOn?: string
+    priority?: 'Low' | 'Normal' | 'High' | undefined
+    taskCategory?: string | undefined
+    due?: string | undefined
+    durationMinutes?: number | undefined
+    description?: string | undefined
+    owner?: string | undefined
+    createdBy?: string | undefined
+    createdOn?: string | undefined
 }
 
 export interface CreateMilestoneActivityInput {

@@ -46,6 +46,10 @@ async function offlineNativeFixture(page: Page, cli = false, writeMode: CliWrite
       return json({ contractVersion: '1.0', expiresAt: new Date(Math.min(now + localSessionLeaseMs, sessionExpiresAt)).toISOString(), sessionExpiresAt: new Date(sessionExpiresAt).toISOString() })
     }
     if (path === 'session') return json({ contractVersion: '1.0', mode: 'live', roles: cli ? [] : ['TLC.Teams.User'], displayName: cli ? `Verified local MSX user (${writeMode === 'reviewed' ? 'reviewed read/write' : 'read-only'})` : 'Offline native fixture' })
+    if (path === 'mutation-sync') return json({
+      contractVersion: '1.0', kind: 'capabilities',
+      capabilities: { contractVersion: '1.0', available: false, readCacheOwner: 'client', operations: [], reason: 'Offline fixture uses acknowledged reviewed writes.' }
+    })
     if (path === 'local/status') return json({
       contractVersion: localConnectionVersion, state: 'connected', detail: 'Offline fixture only. No actual source data was accessed.',
       account: 'offline-owner@example.test',
@@ -285,7 +289,7 @@ test('CLI live profile reuses current-user pairing and automatically displays th
   await expect(page.getByLabel('Customer account', { exact: true })).toHaveValue('cli-own-account')
   await expect(page.getByLabel('Customer account', { exact: true }).getByRole('option', { name: 'Offline signed-in user deal-team account' })).toHaveCount(1)
   await expect(page.getByText('Live MSX - Azure CLI read-only', { exact: true })).toBeVisible()
-  expect(fixture.requests).toContain('operations/getPortfolioWorkspace')
+  expect(fixture.requests.filter((path) => path === 'operations/getPortfolioIndex')).toHaveLength(1)
   expect(fixture.requests.some((path) => path.includes('connect') || path.includes('actions/'))).toBe(false)
 })
 test('native bootstrap shows truthful limits and cannot launch sign-in or expose private data before pairing', async ({ page }) => {

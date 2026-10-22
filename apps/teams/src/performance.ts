@@ -8,7 +8,8 @@ export function withTeamsPerformanceContext<T>(correlationId: string, action: ()
 }
 
 export function createTeamsPerformanceReporter(environment: NodeJS.ProcessEnv): PerformanceReporter | undefined {
-  const report = createPerformanceReporter(environment['TLC_TEAMS_PERFORMANCE'] === '1', (message) => console.info(`[teams-performance] ${message}`))
+  const report = createPerformanceReporter(environment['TLC_TEAMS_PERFORMANCE'] === '1' || environment['TLC_PERFORMANCE'] === '1',
+    (message) => console.info(`[teams-performance] ${message}`))
   return report ? (event) => {
     const correlationId = requestContext.getStore()
     report({ ...event, ...(correlationId ? { correlationId } : {}) })

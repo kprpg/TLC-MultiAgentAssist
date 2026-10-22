@@ -12,7 +12,8 @@ import {
     recordCreationResultSchema,
     recordCreationDraftResultSchema
 } from '../../../packages/common/index.js'
-import { portfolioIndexSchema, portfolioWorkspaceSchema } from '../../../packages/common/contracts/index.js'
+import { discoverySnapshotSchema, portfolioIndexSchema, portfolioWorkspaceSchema } from '../../../packages/common/contracts/index.js'
+import { cacheControlResponseSchema, mutationSyncResponseSchema } from '../../../packages/common/contracts/cache-sync.js'
 
 function extractId(raw: unknown): string {
     if (raw && typeof raw === 'object' && 'id' in raw) {
@@ -41,6 +42,24 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
     const { id, method } = parsed.data
     try {
         switch (method) {
+            case 'cacheControl': {
+                const input = parseBridgeParams('cacheControl', parsed.data.params)
+                if (!provider.cacheSession) throw new Error('The presentation cache owner is unavailable.')
+                if (input.operation === 'interest') provider.setCacheInterest?.(`webview:${input.consumer ?? 'main'}`, input.keys, input.active)
+                if (input.operation === 'refresh') provider.cacheSession.refresh(input.opportunityId)
+                return successResponse(id, cacheControlResponseSchema.parse({ contractVersion: '1.0', state: provider.cacheSession.getState() }))
+            }
+            case 'mutationSync': {
+                const input = parseBridgeParams('mutationSync', parsed.data.params)
+                if (!provider.mutationSync) {
+                    if (input.operation !== 'capabilities') throw new Error('Durable source synchronization is not configured.')
+                    return successResponse(id, { contractVersion: '1.0', kind: 'capabilities', capabilities: {
+                        contractVersion: '1.0', available: false, readCacheOwner: 'host', operations: [],
+                        reason: 'Protected durable source synchronization is unavailable in this provider.'
+                    } })
+                }
+                return successResponse(id, mutationSyncResponseSchema.parse(await provider.mutationSync(input)))
+            }
             case 'sellerDashboard': {
                 const params = parseBridgeParams('sellerDashboard', parsed.data.params)
                 if (!provider.sellerDashboard) throw new Error('The Seller Dashboard host is unavailable.')
@@ -58,6 +77,8 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
                 return successResponse(id, portfolioIndexSchema.parse(await provider.getPortfolioIndex(parseBridgeParams('getPortfolioIndex', parsed.data.params))))
             case 'getPortfolioWorkspace':
                 return successResponse(id, portfolioWorkspaceSchema.parse(await provider.getPortfolioWorkspace(parseBridgeParams('getPortfolioWorkspace', parsed.data.params))))
+            case 'getDiscoverySnapshot':
+                return successResponse(id, discoverySnapshotSchema.parse(await provider.getDiscoverySnapshot(parseBridgeParams('getDiscoverySnapshot', parsed.data.params))))
             case 'searchAccounts': {
                 const params = parseBridgeParams('searchAccounts', parsed.data.params)
                 return successResponse(id, await provider.searchAccounts(params))

@@ -257,19 +257,20 @@ describe('native HTTP admission without any real source access', () => {
   it.each(['native', 'cli'] as const)('rejects an old %s review after reconnect and sends an exact ETag only for a fresh approved mock write', async (profile) => {
     const opportunityId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
     const accountId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
-    let description = 'Before'
+    let forecastComments = 'Before'
     let sourceAllowsWrite = true
     const transport = vi.fn<typeof fetch>(async (input, options) => {
       if (options?.method === 'PATCH') {
         expect(new Headers(options.headers).get('if-match')).toBe('W/"1"')
         if (!sourceAllowsWrite) return Response.json({ error: { message: 'Sanitized source permission denied' } }, { status: 403 })
-        description = 'Reviewed offline fixture'
+        expect(JSON.parse(String(options.body))).toEqual({ msp_forecastcomments: 'Reviewed offline fixture' })
+        forecastComments = 'Reviewed offline fixture'
         return new Response(null, { status: 204 })
       }
       const url = new URL(String(input))
       if (url.pathname.endsWith('WhoAmI')) return Response.json({ UserId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' })
       if (url.pathname.endsWith('msp_dealteams')) return Response.json({ value: [{ _msp_parentopportunityid_value: opportunityId }] })
-      if (url.pathname.endsWith('opportunities')) return Response.json({ value: [{ opportunityid: opportunityId, name: 'Offline fixture opportunity', _parentaccountid_value: accountId, msp_activesalesstage: 1, estimatedvalue: 100, description, '@odata.etag': 'W/"1"' }] })
+      if (url.pathname.endsWith('opportunities')) return Response.json({ value: [{ opportunityid: opportunityId, name: 'Offline fixture opportunity', _parentaccountid_value: accountId, msp_activesalesstage: 1, estimatedvalue: 100, description: 'Preserve the customer need.', msp_forecastcomments: forecastComments, '@odata.etag': 'W/"1"' }] })
       if (url.pathname.endsWith('accounts')) return Response.json({ value: [{ accountid: accountId, name: 'Offline fixture account' }] })
       return Response.json({ value: [] })
     })
@@ -310,6 +311,6 @@ describe('native HTTP admission without any real source access', () => {
     const deniedPreview = actionPreviewSchema.parse(JSON.parse((await send('/api/teams/actions/preview', input, headers)).text))
     const denied = await send('/api/teams/actions/commit', { contractVersion: collaborationVersion, id: deniedPreview.id, digest: deniedPreview.digest, reason: 'Source must enforce its current permissions' }, headers)
     expect(JSON.parse(denied.text)).toMatchObject({ state: 'effect-unknown' })
-    expect(description).toBe('Reviewed offline fixture')
+    expect(forecastComments).toBe('Reviewed offline fixture')
   })
 })

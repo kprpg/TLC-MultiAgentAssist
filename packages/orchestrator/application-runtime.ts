@@ -18,6 +18,7 @@ import { GraphMeetingConnector, type GraphAcquisitionResult } from '../connector
 import { createSellerDashboardHost, type SellerDashboardHost } from './seller-dashboard.js'
 import type { MeetingAcquisitionRequest } from './collaboration/meeting-acquisition.js'
 import type { PerformanceReporter } from '../common/telemetry/performance.js'
+import { bindSourceToken } from './mutations/core-adapter.js'
 
 type MeetingConnector = Pick<LiveMeetingCaptureConnector, 'proposeMeetingChangeSet' | 'applyMeetingChangeSet'>
 export interface ApplicationServices {
@@ -102,8 +103,10 @@ export async function createLiveApplicationServices(options: {
     loadMcpToolPolicy(resolve(root, 'config/mcp.tool-policy.json')),
     loadDataverseEntityMap(resolve(root, 'config/dataverse.entity-map.json'))
   ])
+  const sourceToken = options.environment['TLC_BACKGROUND_SYNC'] === '1'
+    ? bindSourceToken(() => options.getToken('msx'), options.msxResource) : () => options.getToken('msx')
   const msx = new LiveMsxConnector(
-    { getAccessToken: () => options.getToken('msx') }, options.fetchImplementation ?? fetch, `${options.msxResource}/api/data/v9.2/`,
+    { getAccessToken: sourceToken }, options.fetchImplementation ?? fetch, `${options.msxResource}/api/data/v9.2/`,
     options.performanceReporter, msxWriteMetadataFromEnvironment(options.environment), options.preferences, { cachePortfolio: false, requireConditionalWrites: true }
   )
   if (registry.servers.some((server) => server.enabled && new URL(server.serverUrl).origin !== options.msxResource)) {
