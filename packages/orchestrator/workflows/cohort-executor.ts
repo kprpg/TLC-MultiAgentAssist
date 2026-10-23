@@ -42,16 +42,17 @@ export class InitialWorkflowConnectorExecutor implements WorkflowConnectorExecut
         const workflowId = requireInitialWorkflowId(context.workflowId)
         const input = parseInitialWorkflowInput(workflowId, context.input)
         if (step.connector === 'dataverse-mcp') {
-            const result = await this.dataverse.query(buildInitialWorkflowQuery(workflowId, input), {
+            const queryContext = {
                 correlationId: context.correlationId,
-                capability: 'account-pulse',
+                capability: 'account-pulse' as const,
                 scope: context.scope,
                 delegatedScope: await this.resolveDelegatedScope(context.scope),
                 signal: context.signal
-            })
+            }
+            const result = await this.dataverse.query(buildInitialWorkflowQuery(workflowId, input), queryContext)
             return {
                 state: result.state,
-                data: result.records,
+                data: await this.attachOpportunityAccounts(workflowId, result.records, queryContext),
                 rowCount: result.recordCount,
                 truncated: result.truncated,
                 lineage: result.lineage,
@@ -69,7 +70,47 @@ export class InitialWorkflowConnectorExecutor implements WorkflowConnectorExecut
             : await this.msx.listPipeline({}, msxContext)
         return fromMsxResult(result)
     }
+
+    // Milestone and activity rows only carry an opportunity id; resolve the owning account so every play result can hand off to its agent.
+    private async attachOpportunityAccounts(
+        workflowId: InitialWorkflowId,
+        records: Array<Record<string, unknown>>,
+        queryContext: Parameters<DataverseReader['query']>[1]
+    ): Promise<Array<Record<string, unknown>>> {
+        if (opportunityScopedWorkflows.has(workflowId) || workflowId === 'WF-009') return records
+        const opportunityIds = [...new Set(records.flatMap((record) => text(record.opportunityId) && !text(record.accountId) ? [text(record.opportunityId)!] : []))]
+        if (opportunityIds.length === 0) return records
+        const accounts = new Map<string, { accountId: string; name?: string }>()
+        try {
+            for (let start = 0; start < opportunityIds.length; start += opportunityLookupBatchSize) {
+                const batch = opportunityIds.slice(start, start + opportunityLookupBatchSize)
+                const lookup = await this.dataverse.query({
+                    entity: 'opportunity', select: ['id', 'accountId', 'name'],
+                    filter: [{ field: 'id', operator: 'in', value: batch }],
+                    orderBy: [], top: batch.length, expand: []
+                }, queryContext)
+                for (const row of lookup.records) {
+                    const id = text(row.id)
+                    const accountId = text(row.accountId)
+                    if (id && accountId) accounts.set(id, { accountId, ...(text(row.name) ? { name: text(row.name)! } : {}) })
+                }
+            }
+        } catch (error) {
+            if (queryContext.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error
+        }
+        return records.map((record) => {
+            const match = accounts.get(text(record.opportunityId) ?? '')
+            if (!match || text(record.accountId)) return record
+            return {
+                ...record,
+                accountId: match.accountId,
+                ...(match.name && !text(record.opportunityName) ? { opportunityName: match.name } : {})
+            }
+        })
+    }
 }
+
+const opportunityLookupBatchSize = 50
 
 export class InitialWorkflowResultAssembler implements WorkflowResultAssembler {
     assemble(context: Parameters<WorkflowResultAssembler['assemble']>[0]): InitialWorkflowOutput {
