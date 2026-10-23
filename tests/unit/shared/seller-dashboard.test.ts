@@ -6,20 +6,22 @@ import {
     defaultSellerDashboardFilters, emptySellerDashboardFilters, filterSellerDashboard,
     sellerAccountGaps, sellerCommitment, sellerFiscalQuarters, sellerIllustrativeCredit,
     sellerMetricScenario, sellerPipelineSummary, sellerRatio
-} from '../../../apps/shared/seller-dashboard-analysis.js'
-import { SellerDashboardOverview, SellerDashboardSectionContent } from '../../../apps/shared/seller-dashboard-sections.js'
-import { SellerDashboardTable } from '../../../apps/shared/seller-dashboard-table.js'
-import { DashboardWorkspace } from '../../../apps/shared/dashboard-workspace.js'
+} from '../../../apps/shared/dashboards/sellerDashboard/seller-dashboard-analysis.js'
+import { SellerDashboardOverview, SellerDashboardSectionContent } from '../../../apps/shared/dashboards/sellerDashboard/seller-dashboard-sections.js'
+import { SellerDashboardTable } from '../../../apps/shared/dashboards/sellerDashboard/seller-dashboard-table.js'
+import { DashboardWorkspace } from '../../../apps/shared/dashboards/dashboard-workspace.js'
 
 describe('Seller Dashboard analysis and rendering', () => {
     it('renders Seller Dashboard beneath the Dashboard workspace navigation', () => {
-        const markup = renderToStaticMarkup(createElement(DashboardWorkspace, { invokeSellerDashboard: vi.fn() }))
+        const invokeSellerDashboard = vi.fn()
+        const markup = renderToStaticMarkup(createElement(DashboardWorkspace, { invokeSellerDashboard }))
 
         expect(markup).toContain('aria-label="Dashboard workspace"')
         expect(markup).toContain('aria-label="Dashboards"')
-        expect(markup).toContain('role="tab"')
+        expect(markup.match(/role="tab"/g)).toHaveLength(1)
         expect(markup).toContain('aria-selected="true"')
-        expect(markup).toContain('Seller Dashboard')
+        expect(markup).toContain('aria-label="Seller Dashboard"')
+        expect(invokeSellerDashboard).not.toHaveBeenCalled()
     })
 
     it('uses Microsoft fiscal boundaries and defaults to the source as-of quarter', () => {

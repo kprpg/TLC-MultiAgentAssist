@@ -6,7 +6,7 @@ import { AddCustomerButton, type CustomerAccount, type CustomerSearchClient } fr
 import { NewWorkspace, type CreationClient } from '../../../shared/record-creation/new-workspace.js'
 import { sortOpportunities, type OpportunitySort, type SortDirection } from '../../../shared/portfolio-sorting.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
-import { sellerMoney } from '../../../shared/seller-dashboard-analysis.js'
+import { sellerMoney } from '../../../shared/dashboards/sellerDashboard/seller-dashboard-analysis.js'
 import { OpportunityWorkbench, type DetailTab } from './opportunity-workbench.js'
 import { DiscoveryWorkspace } from './discovery.js'
 import { defaultPortfolioPanes, type PortfolioPanes } from './workspace-navigation.js'
