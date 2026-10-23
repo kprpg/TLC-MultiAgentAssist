@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process'
+import { randomInt } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
+import { temporaryRoot } from './test-temp-root.js'
 
 const execute = promisify(execFile)
 const helper = resolve(import.meta.dirname, '../../../scripts/teams-launch-session.ps1')
@@ -11,12 +12,13 @@ const folders: string[] = []
 afterEach(async () => { for (const folder of folders.splice(0)) await rm(folder, { recursive: true, force: true }) })
 
 async function fixture(scenario = 'live', code = 'A1B2C3D4') {
-  const folder = await mkdtemp(join(tmpdir(), 'tlc-teams-guided-'))
+  const folder = await mkdtemp(join(temporaryRoot, 'tlc-teams-guided-'))
   folders.push(folder)
   const work = join(folder, 'work')
   const runId = '1'.repeat(32)
   const runtime = join(work, 'releases', runId)
   const packageDirectory = join(work, 'packages', runId)
+  const pid = randomInt(1, 1_000_000_000)
   await mkdir(runtime, { recursive: true })
   await mkdir(packageDirectory, { recursive: true })
   await writeFile(join(runtime, '.runner-owner'), runId)
@@ -36,7 +38,7 @@ $script:opened = $env:TLC_GUIDED_SCENARIO -eq 'already-ready'
 $script:approved = if ($script:connected) { 'A1B2C3D4' } else { '' }
 $sample = $env:TLC_GUIDED_SCENARIO -in @('sample', 'sample-in-live-runtime', 'manual-install', 'install-failure', 'no-guide')
 $record = [pscustomobject]@{
-  pid=2147483000; startTimeUtc='2026-10-19T20:00:00.0000000Z'
+  pid=$env:TLC_GUIDED_PID; startTimeUtc='2026-10-19T20:00:00.0000000Z'
   runId='11111111111111111111111111111111'; runtimeDirectory=$env:TLC_GUIDED_RUNTIME
   origin='https://localhost:49199'; mode=$(if ($sample -and $env:TLC_GUIDED_SCENARIO -ne 'sample-in-live-runtime') { 'sample' } else { 'live' })
   initialDataMode=$(if ($sample) { 'sample' } else { 'live' })
@@ -120,7 +122,8 @@ try {
   const run = () => execute('pwsh', ['-NoProfile', '-File', wrapper], {
     env: {
       ...process.env, TLC_GUIDED_HELPER: helper, TLC_GUIDED_SCENARIO: scenario, TLC_GUIDED_CODE: code,
-      TLC_GUIDED_WORK: work, TLC_GUIDED_RUNTIME: runtime, TLC_GUIDED_ARCHIVE: archive, TLC_GUIDED_TRACE: trace
+      TLC_GUIDED_WORK: work, TLC_GUIDED_RUNTIME: runtime, TLC_GUIDED_ARCHIVE: archive, TLC_GUIDED_TRACE: trace,
+      TLC_GUIDED_PID: String(pid)
     }, timeout: 30_000
   })
   const calls = async () => (await readFile(trace, 'utf8')).trim().split(/\r?\n/).map((line) => JSON.parse(line) as Record<string, unknown>)
