@@ -4,7 +4,7 @@ Creates executive meeting briefs and 30/60 day pursuit plans from grounded accou
 
 ## Inputs
 
-Versioned orchestrator context containing intent, role, account and opportunity evidence, source health, and optional MCEM Coach handoff.
+Versioned orchestrator context containing intent, role, account and opportunity evidence, the bounded evidence pack (dated comment history, notes, activities, milestone detail, and coverage gaps), next-stage MCEM guidance, source health, and optional MCEM Coach handoff.
 
 ## Outputs
 

@@ -99,6 +99,13 @@ export function buildLiveDataProvider(
             opportunityId,
             prompt
         }),
+        runAgentTaskStream: (capability, accountId, opportunityId, prompt, onEvent, signal) => orchestrator.runAgentTaskStream({
+            contractVersion,
+            capability,
+            accountId,
+            opportunityId,
+            prompt
+        }, onEvent, signal),
         listWorkflowDefinitions: async (scope?: ScopeRef['kind']) => host.listDefinitions({ contractVersion: workflowContractVersion, ...(scope ? { scope } : {}) }),
         startWorkflow: async (request) => host.start({
             contractVersion: workflowContractVersion,

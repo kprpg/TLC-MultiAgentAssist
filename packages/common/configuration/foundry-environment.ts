@@ -60,6 +60,10 @@ export const foundryEnvironmentSchema = z.object({
       'Replace the template endpoint with the Microsoft Foundry project endpoint.'
     ),
     requestTimeoutMs: z.number().int().min(1_000).max(300_000),
+    /** Abort a streamed model call that has produced no text by this point, then retry once. */
+    firstTokenTimeoutMs: z.number().int().min(1_000).max(120_000).optional(),
+    /** Upper bound on generated tokens (includes reasoning tokens for reasoning models). */
+    maxOutputTokens: z.number().int().min(256).max(32_000).optional(),
     agents: z.object({
       mcemCoach: foundryAgentSchema,
       riskSolutionPlay: foundryAgentSchema,

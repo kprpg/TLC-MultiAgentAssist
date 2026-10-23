@@ -1,12 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
 import { resolve } from 'node:path'
 import type { AccountView, OpportunityView } from '../../../apps/vscode-extension/src/webview/view-types.js'
+import { briefOffer, conversionOffer, followUpAgentResponse, initialAgentResponse } from './agent-response-fixtures.js'
 
 interface BridgeRequest {
     kind: string
     id: string
     method: string
-    params?: { accountId?: string; opportunityId?: string; url?: string; draft?: unknown; preview?: unknown; update?: { comments: string } }
+    params?: { accountId?: string; opportunityId?: string; capability?: string; prompt?: string; url?: string; draft?: unknown; preview?: unknown; update?: { comments: string } }
 }
 
 declare global {
@@ -21,7 +22,11 @@ declare global {
             rejectEvidence: boolean
             rejectComments: boolean
             delayComments: boolean
+            delayAgent: boolean
+            failAgent: boolean
+            delayedAgent: Array<{ id: string; event: unknown }>
             release(): void
+            releaseAgent(): void
         }
     }
 }
@@ -70,13 +75,17 @@ async function mountWebview(page: Page): Promise<void> {
         contentType: 'text/html',
         body: '<!doctype html><html><head><style>:root{--vscode-editor-background:#fff;--vscode-foreground:#333;--vscode-font-family:"Segoe UI",sans-serif;--vscode-textLink-foreground:#006ab1;--vscode-panel-border:#d1d1d1}</style></head><body><div id="root" data-mode="sample"></div></body></html>'
     }))
-    await page.addInitScript(({ accounts, opportunities, creationCatalog }) => {
+    await page.addInitScript(({ accounts, opportunities, creationCatalog, initialAgentResponse, followUpAgentResponse }) => {
         const reply = (id: string, result: unknown) => window.postMessage({ kind: 'response', id, ok: true, result }, window.location.origin)
         window.portfolioTest = {
             accounts, requests: [], delayed: [], delayCoach: false, failAccounts: false, rejectEvidence: false,
             rejectComments: false, delayComments: false,
+            delayAgent: false, failAgent: false, delayedAgent: [],
             release() {
                 for (const response of this.delayed.splice(0)) reply(response.id, response.result)
+            },
+            releaseAgent() {
+                for (const response of this.delayedAgent.splice(0)) window.postMessage({ kind: 'stream-event', ...response }, window.location.origin)
             }
         }
         Object.defineProperty(window, 'acquireVsCodeApi', {
@@ -84,6 +93,28 @@ async function mountWebview(page: Page): Promise<void> {
                 getState: () => undefined,
                 setState: () => undefined,
                 postMessage: (message: BridgeRequest) => {
+                    if (message.kind === 'stream-cancel') {
+                        window.portfolioTest.requests.push(message)
+                        return
+                    }
+                    if (message.kind === 'stream-request') {
+                        const state = window.portfolioTest
+                        state.requests.push(message)
+                        const content = message.params?.prompt?.includes('Previous assistant response:') ? followUpAgentResponse : initialAgentResponse
+                        const event = state.failAgent ? { type: 'error', code: 'failed', message: 'The follow-up is temporarily unavailable.' } : {
+                            type: 'complete', response: {
+                                contractVersion: '1.2', correlationId: '11111111-1111-4111-8111-111111111111',
+                                capability: message.params?.capability, agentVersion: 'presentation-test', generatedAt: '2026-10-22T12:00:00.000Z',
+                                mode: 'sample', state: 'complete', content,
+                                sourceHealth: [{ source: 'msx', state: 'sample', detail: 'Sanitized test evidence.', checkedAt: '2026-10-22T12:00:00.000Z' }]
+                            }
+                        }
+                        if (state.delayAgent) {
+                            window.postMessage({ kind: 'stream-event', id: message.id, event: { type: 'delta', text: content } }, window.location.origin)
+                            state.delayedAgent.push({ id: message.id, event })
+                        } else window.postMessage({ kind: 'stream-event', id: message.id, event }, window.location.origin)
+                        return
+                    }
                     if (message.kind !== 'request') return
                     const state = window.portfolioTest
                     state.requests.push(message)
@@ -194,12 +225,60 @@ async function mountWebview(page: Page): Promise<void> {
                 }
             })
         })
-    }, { accounts, opportunities, creationCatalog })
+    }, { accounts, opportunities, creationCatalog, initialAgentResponse, followUpAgentResponse })
     await page.goto('/')
     await page.addStyleTag({ path: resolve('apps', 'vscode-extension', 'dist', 'webview', 'webview.css') })
     await page.addScriptTag({ path: resolve('apps', 'vscode-extension', 'dist', 'webview', 'webview.js') })
     await expect(page.locator('#portfolio-details-panel').getByRole('heading', { name: 'Alpha analysis', exact: true })).toBeVisible()
 }
+
+test('VS Code agent follow-ups send scoped context and render the returned email as readable Markdown', async ({ page }) => {
+    await mountWebview(page)
+    await page.getByRole('tab', { name: 'Guidance', exact: true }).click()
+    await page.getByRole('button', { name: 'What should the account team focus on this week?' }).click()
+    await expect(page.locator('.agent-response-markdown h2')).toHaveText(['Summary', 'Observed signals', 'Recommended actions', 'Sources', 'Feedback prompt'])
+    const calls = () => page.evaluate(() => window.portfolioTest.requests.filter((request) => request.kind === 'stream-request'))
+    expect(await calls()).toHaveLength(1)
+    await page.evaluate(() => { window.portfolioTest.delayAgent = true })
+    const send = page.getByRole('button', { name: `Send follow-up: ${conversionOffer}` })
+    await send.focus()
+    await send.press('Enter')
+    await expect(send).toBeDisabled()
+    await expect(page.getByRole('button', { name: `Send follow-up: ${briefOffer}` })).toBeDisabled()
+    const requests = await calls()
+    expect(requests).toHaveLength(2)
+    expect(requests[1]?.params).toMatchObject({ capability: 'account-pulse', accountId: 'alpha', opportunityId: 'alpha-one' })
+    expect(requests[1]?.params?.prompt).toContain(initialAgentResponse)
+    expect(requests[1]?.params?.prompt).toContain(conversionOffer)
+    await page.evaluate(() => window.portfolioTest.releaseAgent())
+    const response = page.getByRole('article', { name: 'Agent follow-up response' })
+    await expect(response.getByRole('heading', { name: 'Customer-ready draft' })).toBeVisible()
+    await expect(response.getByRole('columnheader')).toHaveText(['Owner', 'Action', 'Evidence'])
+    await expect(response.locator('strong').filter({ hasText: 'Subject:' })).toBeVisible()
+    await expect(page.getByRole('button', { name: `Send follow-up: ${briefOffer}` })).toBeEnabled()
+    await expect(page.locator('.agent-response-markdown').first().getByRole('heading', { name: 'Summary', exact: true })).toBeVisible()
+})
+
+test('VS Code agent follow-ups show errors, support retry and cancellation, and ignore late completion', async ({ page }) => {
+    await mountWebview(page)
+    await page.getByRole('tab', { name: 'Guidance', exact: true }).click()
+    await page.getByRole('button', { name: 'What should the account team focus on this week?' }).click()
+    const send = page.getByRole('button', { name: `Send follow-up: ${conversionOffer}` })
+    await page.evaluate(() => { window.portfolioTest.failAgent = true })
+    await send.click()
+    await expect(page.getByRole('alert')).toHaveText('The follow-up is temporarily unavailable.')
+    await expect(send).toBeEnabled()
+    await page.evaluate(() => { window.portfolioTest.failAgent = false; window.portfolioTest.delayAgent = true })
+    await send.click()
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    await expect(page.getByRole('article', { name: 'Agent follow-up response' })).toBeVisible()
+    await page.getByRole('button', { name: 'Cancel follow-up' }).click()
+    await expect(send).toBeEnabled()
+    await expect.poll(() => page.evaluate(() => window.portfolioTest.requests.filter((request) => request.kind === 'stream-cancel').length)).toBe(1)
+    await page.evaluate(() => window.portfolioTest.releaseAgent())
+    await expect(page.getByRole('article', { name: 'Agent follow-up response' })).toHaveCount(0)
+    await expect(page.locator('.agent-response-markdown').first()).toContainText('The approval path is unconfirmed.')
+})
 
 test('opens the focused opportunity in MSX through the VS Code host and tracks selection changes', async ({ page }) => {
     await mountWebview(page)

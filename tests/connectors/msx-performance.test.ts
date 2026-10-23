@@ -113,7 +113,8 @@ describe('bounded Live portfolio performance without stale authorization', () =>
       new MemoryPortfolioPreferenceStore(), { cachePortfolio: false })
     await expect(msx.withReadContext(() => msx.listAccounts(), controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
     expect(transport).toHaveBeenCalledTimes(2)
-    expect(credential).toHaveBeenCalledTimes(2)
+    // Deal-team and milestone-team reads now start together, so a token may be requested for the sibling read; it is never dispatched.
+    expect(credential.mock.calls.length).toBeLessThanOrEqual(3)
     expect(transport.mock.calls.at(-1)?.[1]?.signal).toBe(controller.signal)
   })
   it('reads chunks with at most two concurrent requests and preserves deterministic source order', async () => {

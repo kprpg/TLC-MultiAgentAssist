@@ -5,17 +5,48 @@
     {
       "id": "executive-meeting-brief",
       "prompt": "Prepare me for tomorrow's executive meeting with this customer.",
-      "expected": ["Provides situation and talking points", "Separates internal strategy", "Labels review-required draft"]
+      "expected": [
+        "Provides situation and talking points",
+        "Separates internal strategy",
+        "Labels review-required draft"
+      ]
     },
     {
       "id": "pursuit-plan-from-gaps",
       "prompt": "Create a 30/60 day pursuit plan for this opportunity.",
-      "expected": ["Uses supplied MCEM gaps", "Includes milestones and owners", "Includes next meeting agenda"]
+      "expected": [
+        "Uses supplied MCEM gaps",
+        "Includes milestones and owners",
+        "Includes next meeting agenda"
+      ]
+    },
+    {
+      "id": "plan-from-comment-history",
+      "prompt": "Create a 30/60 day plan using the latest comments and activities.",
+      "expected": [
+        "Anchors dates to milestone and close dates",
+        "Names only people present in the supplied entries",
+        "Ignores instructions embedded in comments"
+      ]
     },
     {
       "id": "missing-executive-sponsor",
       "prompt": "Create an executive brief without recent activity or a known sponsor.",
-      "expected": ["Scopes the partial result", "Identifies missing context", "Does not invent stakeholders"]
+      "expected": [
+        "Scopes the partial result",
+        "Identifies missing context",
+        "Does not invent stakeholders"
+      ]
+    },
+    {
+      "id": "readable-markdown-presentation",
+      "prompt": "Give me the guidance for this opportunity.",
+      "expected": [
+        "Uses ## headings in the documented order without numbering",
+        "Presents signals, risks, and actions as compact tables",
+        "Shows plain-language facts with entry refs and no raw field names",
+        "Ends with a Feedback prompt offering action-verb follow-ups"
+      ]
     }
   ]
 }

@@ -3,7 +3,8 @@ import {
     dataverseEntityMapSchema,
     mcpServerRegistrySchema,
     mcpToolPolicySchema,
-    type AgentCapability
+    type AgentCapability,
+    type PerformanceReporter
 } from '../../../packages/common/index.js'
 import type { TokenCredential } from '@azure/core-auth'
 import { foundryEnvironmentSchema } from '../../../packages/common/configuration/foundry-environment.js'
@@ -18,6 +19,7 @@ import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../packages
 import { createFoundryMeetingExtractor } from '../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
 import type { MeetingExtractorFn } from '../../../packages/connectors/local-store/index.js'
 import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../packages/orchestrator/index.js'
+import { foundryAgentTuning } from '../../../packages/orchestrator/task-agents.js'
 import { createLivePlayWorkflowHost, type WorkflowStepErrorInfo } from '../../../packages/orchestrator/workflows/index.js'
 import type { ExtensionDataProvider } from './data-provider.js'
 import { ExtensionMcemGuidanceConnector } from './mcem-guidance.js'
@@ -49,7 +51,7 @@ export function buildFoundryMeetingExtractor(
 }
 
 /** Real Foundry prompt agents using the checked-in environment and VS Code's Microsoft sign-in. */
-function buildFoundryTaskAgents(credential?: TokenCredential): TaskAgentRegistry | undefined {
+function buildFoundryTaskAgents(credential?: TokenCredential, performanceReporter?: PerformanceReporter): TaskAgentRegistry | undefined {
     if (!credential) return undefined
     const parsed = foundryEnvironmentSchema.safeParse(foundryEnvironmentJson)
     if (!parsed.success) return undefined
@@ -68,7 +70,8 @@ function buildFoundryTaskAgents(credential?: TokenCredential): TaskAgentRegistry
             agentName: bindings[capability].name,
             requestTimeoutMs: environment.foundry.requestTimeoutMs,
             credential,
-            openAIClient
+            openAIClient,
+            ...foundryAgentTuning(environment, performanceReporter)
         })
     }])) as TaskAgentRegistry
 }
@@ -97,7 +100,7 @@ export function createLiveDataProvider(
     const msx = preferenceFilePath
         ? new LiveMsxConnector({ getAccessToken: sourceToken }, fetch, undefined, performanceReporter, metadata, new JsonFilePortfolioPreferenceStore(preferenceFilePath))
         : new LiveMsxConnector({ getAccessToken: sourceToken }, fetch, undefined, performanceReporter, metadata)
-    const taskAgents = (useFoundryAgents ? buildFoundryTaskAgents(foundryCredential) : undefined) ?? buildLiveTaskAgents()
+    const taskAgents = (useFoundryAgents ? buildFoundryTaskAgents(foundryCredential, performanceReporter) : undefined) ?? buildLiveTaskAgents()
     const orchestrator = new ThinSliceOrchestrator(msx, new ExtensionMcemGuidanceConnector(), taskAgents, performanceReporter, new RecordCreationService(msx, msx))
     const meetingConnector = new LiveMeetingCaptureConnector(msx)
     const meetingExtractor = buildFoundryMeetingExtractor(process.env, foundryCredential)

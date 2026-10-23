@@ -4,7 +4,7 @@ Explains evidence-based MCEM stage diagnostics while preserving deterministic lo
 
 ## Inputs
 
-Versioned orchestrator context containing opportunity evidence, current MSX stage, versioned MCEM guidance, role, source health, and local evaluation.
+Versioned orchestrator context containing opportunity evidence, current MSX stage, versioned MCEM guidance for the current and next stage, role, source health, local evaluation, and the bounded evidence pack (dated comment history, notes, activities, milestone detail, staleness signals, and coverage gaps).
 
 ## Outputs
 

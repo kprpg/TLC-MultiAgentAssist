@@ -2,6 +2,7 @@ import {
     accountSchema,
     accountCandidateSchema,
     agentTaskResponseSchema,
+    agentTaskStreamEventSchema,
     contractVersion,
     workflowContractVersion,
     dealTeamJoinResultSchema,
@@ -96,6 +97,7 @@ import { samplePortfolioDiscoveryOpportunities } from '../../../../packages/comm
 import { portfolioReadVersion, portfolioReadRequestSchema, portfolioIndexSchema, portfolioWorkspaceRequestSchema, portfolioWorkspaceSchema, type PortfolioReadRequest, type PortfolioIndex, type PortfolioWorkspaceRequest, type PortfolioWorkspace } from '../../../../packages/common/contracts/index.js'
 import { discoverySnapshotRequestSchema, discoverySnapshotSchema, discoverySnapshotVersion, type DiscoverySnapshot, type DiscoverySnapshotRequest } from '../../../../packages/common/contracts/index.js'
 import { SessionPortfolio } from '../../../shared/session-portfolio.js'
+import { createAgentStreamAccumulator, readNdjson, type AgentStreamProgress } from '../../../shared/agent-stream.js'
 import { MutationSyncClient, type MutationInvoker } from '../../../shared/mutation-sync.js'
 import * as syncContracts from '../../../../packages/common/contracts/index.js'
 
@@ -143,6 +145,8 @@ export interface RevampDataClient {
     transitionOpportunityStage(accountId: string, opportunityId: string, targetStage: number, reason?: string): Promise<McemStageTransitionResult>
     runMcemCoach(accountId: string, opportunityId: string): Promise<McemResponse>
     runAgentTask(capability: AgentCapability, accountId: string, opportunityId: string, prompt: string): Promise<AgentTaskResponse>
+    /** Progressive variant (instant draft, streamed text, authoritative final); callers fall back to `runAgentTask` when absent. */
+    runAgentTaskStream?(capability: AgentCapability, accountId: string, opportunityId: string, prompt: string, onProgress?: (progress: AgentStreamProgress) => void, signal?: AbortSignal): Promise<AgentTaskResponse>
     openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
     exportAgentResponse(request: ExportResponseRequest): Promise<ExportResponseResult>
     openEvidence(url: string): Promise<void>
@@ -303,6 +307,26 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
             method: 'POST',
             body: JSON.stringify({ contractVersion, capability, accountId, opportunityId, prompt })
         })),
+        runAgentTaskStream: async (capability, accountId, opportunityId, prompt, onProgress, signal) => {
+            const generation = fetcher.scopeVersion?.()
+            const response = await fetcher('/api/agent-task/stream', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { accept: 'application/x-ndjson', 'content-type': 'application/json' },
+                body: JSON.stringify({ contractVersion, capability, accountId, opportunityId, prompt }),
+                ...(signal ? { signal } : {})
+            })
+            if (!response.ok || !response.body) {
+                const payload = await response.json().catch(() => null) as { error?: string } | null
+                throw new WebApiRequestError(response.status, payload?.error ?? `The server request failed (${response.status}).`)
+            }
+            const accumulator = createAgentStreamAccumulator(onProgress)
+            await readNdjson(response.body, (value) => {
+                fetcher.assertScope?.(generation)
+                accumulator.push(agentTaskStreamEventSchema.parse(value))
+            }, signal)
+            return accumulator.result()
+        },
         openEmailCompose: async (request) => {
             const response = await fetcher('/api/open-email-compose', {
                 method: 'POST',
@@ -391,6 +415,7 @@ interface DesktopBridge {
     transitionOpportunityStage(request: { contractVersion: typeof contractVersion; accountId: string; opportunityId: string; targetStage: number; reason?: string }): Promise<McemStageTransitionResult>
     runMcemCoach(request: { contractVersion: typeof contractVersion; accountId: string; opportunityId: string; prompt: string }): Promise<McemResponse>
     runAgentTask(request: { contractVersion: typeof contractVersion; capability: AgentCapability; accountId: string; opportunityId: string; prompt: string }): Promise<AgentTaskResponse>
+    runAgentTaskStream?(request: { contractVersion: typeof contractVersion; capability: AgentCapability; accountId: string; opportunityId: string; prompt: string }, onEvent: (event: unknown) => void): { cancel(): void; done: Promise<void> }
     openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
     exportAgentResponse(request: ExportResponseRequest): Promise<ExportResponseResult>
     openEvidence(url: string): Promise<void>
@@ -848,6 +873,23 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         transitionOpportunityStage: (accountId, opportunityId, targetStage, reason) => bridge.transitionOpportunityStage({ contractVersion, accountId, opportunityId, targetStage, ...(reason === undefined ? {} : { reason }) }),
         runMcemCoach: (accountId, opportunityId) => bridge.runMcemCoach({ contractVersion, accountId, opportunityId, prompt: 'How do we move this opportunity to the next MCEM stage?' }),
         runAgentTask: (capability, accountId, opportunityId, prompt) => bridge.runAgentTask({ contractVersion, capability, accountId, opportunityId, prompt }),
+        ...(bridge.runAgentTaskStream ? {
+            runAgentTaskStream: (capability: AgentCapability, accountId: string, opportunityId: string, prompt: string, onProgress?: (progress: AgentStreamProgress) => void, signal?: AbortSignal) =>
+                new Promise<AgentTaskResponse>((resolve, reject) => {
+                    const accumulator = createAgentStreamAccumulator(onProgress)
+                    let settled = false
+                    const finish = (action: () => void) => { if (!settled) { settled = true; action() } }
+                    const handle = bridge.runAgentTaskStream!({ contractVersion, capability, accountId, opportunityId, prompt }, (raw) => {
+                        try {
+                            const event = agentTaskStreamEventSchema.parse(raw)
+                            accumulator.push(event)
+                            if (event.type === 'complete') finish(() => resolve(accumulator.result()))
+                        } catch (error) { finish(() => reject(error)) }
+                    })
+                    handle.done.then(() => finish(() => { try { resolve(accumulator.result()) } catch (error) { reject(error) } }), (error: unknown) => finish(() => reject(error)))
+                    signal?.addEventListener('abort', () => handle.cancel(), { once: true })
+                })
+        } : {}),
         openEmailCompose: (request) => bridge.openEmailCompose(request),
         exportAgentResponse: (request) => bridge.exportAgentResponse(request),
         openEvidence: (url) => bridge.openEvidence(url),

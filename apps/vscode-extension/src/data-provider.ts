@@ -13,6 +13,7 @@ import {
     type AccountVisibility,
     type AgentCapability,
     type AgentTaskResponse,
+    type AgentTaskStreamEvent,
     type DealTeamJoinResult,
     type DealTeamLeaveResult,
     type DiscoverableOpportunity,
@@ -134,6 +135,8 @@ export interface ExtensionDataProvider {
     runMcemCoach(accountId: string, opportunityId: string): Promise<McemResponse>
     transitionOpportunityStage(accountId: string, opportunityId: string, targetStage: number, reason?: string): Promise<McemStageTransitionResult>
     runAgentTask(capability: AgentCapability, accountId: string, opportunityId: string, prompt: string): Promise<AgentTaskResponse>
+    /** Progressive variant; when absent the host falls back to `runAgentTask` and emits one `complete` event. */
+    runAgentTaskStream?(capability: AgentCapability, accountId: string, opportunityId: string, prompt: string, onEvent: (event: AgentTaskStreamEvent) => void, signal?: AbortSignal): Promise<void>
     listWorkflowDefinitions(scope?: ScopeRef['kind']): Promise<WorkflowDefinition[]>
     startWorkflow(request: { workflowId: string; scope: ScopeRef; input?: unknown; correlationId?: string }): Promise<WorkflowRun>
     getWorkflowRun(runId: string): Promise<WorkflowRunView>

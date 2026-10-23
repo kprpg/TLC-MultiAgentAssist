@@ -99,6 +99,20 @@ packages/common/contracts/index.ts   Independently versioned v1.0 Portfolio inde
 packages/orchestrator/application-runtime.ts
 packages/orchestrator/operations.ts   Shared composition and typed operation catalog
 packages/orchestrator/task-agents.ts  Shared Foundry/sample/deterministic-live registries
+packages/orchestrator/instant-draft.ts
+                                     Deterministic evidence-based draft shown instantly while the model runs
+packages/orchestrator/agent-evidence.ts
+                                     Bounded evidence pack (comment history, notes, activities, milestone detail) and model-input serialization
+packages/connectors/msx/evidence.ts  Pure helpers for MSX comment-history parsing and rich-text cleanup
+packages/orchestrator/prewarm.ts      Best-effort Foundry token and MCEM guidance pre-warm
+apps/shared/agent-stream.ts           Browser-safe agent stream accumulator and NDJSON reader (all UIs)
+                                     Desktop IPC acknowledges the validated terminal event before removing its listener
+apps/shared/use-agent-run.ts          Shared React hook: instant draft, streamed text, final response, cancel
+apps/shared/agent-response.tsx        Shared formatted agent replies and explicit, scoped follow-up conversation
+apps/shared/agent-response.css        Theme-aware follow-up controls and response layout
+apps/shared/agent-follow-up.ts        Closing-offer detection and bounded previous-response context
+packages/common/contracts/agent-task-limits.ts
+                                     Browser-safe prompt bound shared by agent request schemas and UI follow-ups
 packages/orchestrator/collaboration/  Reviewed actions, bindings, events, state admission
 packages/orchestrator/mutations/     Immediate confirmed admission, protected journal, actor/version and effect tracking
 packages/connectors/graph/            Delegated meeting/transcript/subscription access

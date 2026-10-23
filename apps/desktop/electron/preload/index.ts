@@ -4,6 +4,7 @@ import type { WorkflowHostOperation } from '../../../../packages/orchestrator/wo
 import type { VoiceRequest, VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 import type { SellerDashboardRequest, SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
 import type { DiscoverySnapshot, DiscoverySnapshotRequest, PortfolioReadRequest, PortfolioIndex, PortfolioWorkspaceRequest, PortfolioWorkspace } from '../../../../packages/common/contracts/index.js'
+import { agentTaskStreamEventSchema } from '../../../../packages/common/contracts/index.js'
 import {
   cacheControlResponseSchema, mutationSyncResponseSchema, type CacheControlRequest, type CacheControlResponse,
   type MutationSyncRequest, type MutationSyncResponse, type CacheReadState
@@ -48,6 +49,8 @@ export interface TlcDesktopApi {
   runMcemCoach(request: McemRequest): Promise<McemResponse>
   transitionOpportunityStage(request: McemStageTransitionRequest): Promise<McemStageTransitionResult>
   runAgentTask(request: AgentTaskRequest): Promise<AgentTaskResponse>
+  /** Progressive run; events are delivered in order and always end with `complete` or `error`. Events are validated by the renderer. */
+  runAgentTaskStream(request: AgentTaskRequest, onEvent: (event: unknown) => void): { cancel(): void; done: Promise<void> }
   openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
   exportAgentResponse(request: ExportResponseRequest): Promise<ExportResponseResult>
   openEvidence(url: string): Promise<void>
@@ -97,6 +100,26 @@ const api: TlcDesktopApi = {
   runMcemCoach: (request) => ipcRenderer.invoke('tlc:run-mcem-coach', request),
   transitionOpportunityStage: (request) => ipcRenderer.invoke('tlc:transition-opportunity-stage', request),
   runAgentTask: (request) => ipcRenderer.invoke('tlc:run-agent-task', request),
+  runAgentTaskStream: (request, onEvent) => {
+    const streamId = globalThis.crypto.randomUUID()
+    let terminalDelivered = false
+    const listener = (_event: Electron.IpcRendererEvent, message: { streamId?: string; event?: unknown }) => {
+      if (message?.streamId !== streamId || terminalDelivered) return
+      const event = message.event
+      if (event && typeof event === 'object' && 'type' in event && (event.type === 'complete' || event.type === 'error')) terminalDelivered = true
+      onEvent(event)
+    }
+    ipcRenderer.on('tlc:agent-task-event', listener)
+    // Invoke replies can overtake queued events; the acknowledgement carries the same terminal event.
+    const done = ipcRenderer.invoke('tlc:run-agent-task-stream', request, streamId)
+      .then((raw: unknown) => {
+        const terminal = agentTaskStreamEventSchema.parse(raw)
+        if (terminal.type !== 'complete' && terminal.type !== 'error') throw new Error('The agent response ended before it completed.')
+        if (!terminalDelivered) { terminalDelivered = true; onEvent(terminal) }
+      })
+      .finally(() => { ipcRenderer.removeListener('tlc:agent-task-event', listener) })
+    return { cancel: () => { void ipcRenderer.invoke('tlc:cancel-agent-task-stream', streamId) }, done }
+  },
   openEmailCompose: (request) => ipcRenderer.invoke('tlc:open-email-compose', request),
   exportAgentResponse: (request) => ipcRenderer.invoke('tlc:export-agent-response', request),
   openEvidence: (url) => ipcRenderer.invoke('tlc:open-evidence', url),

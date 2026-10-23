@@ -9,6 +9,7 @@ import {
     accountVisibilityMutationSchema,
     agentTaskRequestSchema,
     agentTaskResponseSchema,
+    agentTaskStreamEventSchema,
     dealTeamJoinResultSchema,
     dealTeamLeaveResultSchema,
     discoverableOpportunitySchema,
@@ -50,6 +51,7 @@ import {
     type AccountVisibility,
     type AgentTaskRequest,
     type AgentTaskResponse,
+    type AgentTaskStreamEvent,
     type CreateMilestoneActivityRequest,
     type DealTeamJoinResult,
     type DealTeamLeaveResult,
@@ -128,6 +130,7 @@ export interface WebRuntime {
     transitionOpportunityStage(request: McemStageTransitionRequest): Promise<McemStageTransitionResult>
     runMcemCoach(request: McemRequest): Promise<McemResponse>
     runAgentTask(request: AgentTaskRequest): Promise<AgentTaskResponse>
+    runAgentTaskStream(request: AgentTaskRequest, onEvent: (event: AgentTaskStreamEvent) => void, signal?: AbortSignal): Promise<void>
 }
 
 export interface AuthenticatedRequest {
@@ -420,6 +423,34 @@ export function buildWebApiHandler(options: WebApiOptions) {
             if (request.method === 'POST' && url.pathname === '/api/agent-task') {
                 const input = agentTaskRequestSchema.parse(await readJsonBody(request))
                 sendJson(response, 200, agentTaskResponseSchema.parse(await runtime.runAgentTask(input)))
+                return true
+            }
+
+            if (request.method === 'POST' && url.pathname === '/api/agent-task/stream') {
+                const input = agentTaskRequestSchema.strict().parse(await readJsonBody(request))
+                response.statusCode = 200
+                response.setHeader('content-type', 'application/x-ndjson; charset=utf-8')
+                response.setHeader('cache-control', 'no-store, no-transform')
+                response.setHeader('x-accel-buffering', 'no')
+                response.flushHeaders()
+                const controller = new AbortController()
+                const abort = () => { if (!response.writableFinished) controller.abort() }
+                response.once('close', abort)
+                // Blank lines keep intermediaries from idling out while the model reasons.
+                const heartbeat = setInterval(() => { if (!response.writableEnded) response.write('\n') }, 15_000)
+                const write = (event: AgentTaskStreamEvent) => {
+                    if (!response.writableEnded) response.write(`${JSON.stringify(agentTaskStreamEventSchema.parse(event))}\n`)
+                }
+                try {
+                    await runtime.runAgentTaskStream(input, write, controller.signal)
+                } catch (error) {
+                    options.onError?.(error, correlationId)
+                    write({ type: 'error', code: 'failed', message: 'The server could not complete the request.' })
+                } finally {
+                    clearInterval(heartbeat)
+                    response.removeListener('close', abort)
+                    response.end()
+                }
                 return true
             }
 

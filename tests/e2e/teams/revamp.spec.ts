@@ -171,7 +171,7 @@ test('a late guidance response cannot replace the next selected opportunity', as
   let started: () => void = () => undefined
   const waiting = new Promise<void>((resolve) => { started = resolve })
   const blocked = new Promise<void>((resolve) => { unblock = resolve })
-  await page.route('**/api/teams/operations/runAgentTask', async (route) => {
+  await page.route('**/api/teams/agent-stream', async (route) => {
     const response = await route.fetch()
     started()
     await blocked

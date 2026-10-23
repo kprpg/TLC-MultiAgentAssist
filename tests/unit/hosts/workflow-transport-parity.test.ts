@@ -39,7 +39,7 @@ function runtimeStub(): WebRuntime {
         discoverOpportunities: vi.fn(), joinDealTeam: vi.fn(), leaveDealTeam: vi.fn(),
         joinMilestoneTeam: vi.fn(), leaveMilestoneTeam: vi.fn(),
         updateMilestone: vi.fn(), updateOpportunity: vi.fn(), transitionOpportunityStage: vi.fn(),
-        runMcemCoach: vi.fn(), runAgentTask: vi.fn(),
+        runMcemCoach: vi.fn(), runAgentTask: vi.fn(), runAgentTaskStream: vi.fn(),
         listMeetingTranscripts: vi.fn(), getMeetingTranscript: vi.fn(), proposeMeetingChangeSet: vi.fn(), applyMeetingChangeSet: vi.fn()
     }
 }
