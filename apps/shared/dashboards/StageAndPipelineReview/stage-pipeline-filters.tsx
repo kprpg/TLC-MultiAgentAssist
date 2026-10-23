@@ -26,7 +26,16 @@ export function MultiSelect<T extends string>({ label, allLabel, options, select
     useEffect(() => {
         if (!open) return undefined
         const close = (event: MouseEvent | KeyboardEvent) => {
-            if (event instanceof KeyboardEvent) { if (event.key === 'Escape') setOpen(false); return }
+            if (event instanceof KeyboardEvent) {
+                if (event.key === 'Escape') {
+                    if (root.current?.contains(document.activeElement)) {
+                        event.preventDefault()
+                        root.current.querySelector<HTMLButtonElement>('button')?.focus()
+                    }
+                    setOpen(false)
+                }
+                return
+            }
             if (!root.current?.contains(event.target as Node)) setOpen(false)
         }
         document.addEventListener('mousedown', close)

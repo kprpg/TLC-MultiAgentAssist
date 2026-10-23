@@ -67,4 +67,13 @@ describe('SE monthly report presentation', () => {
             expect(html).toContain(value)
         }
     })
+
+    it('authorizes the inline stylesheet by nonce for hosts with a restrictive style policy', () => {
+        const report = buildSeReports(createSeReportingFixture())[0]!
+        const html = renderSeReportHtml(report, { styleNonce: 'AbCdEfGhIjKlMnOp0123456789' })
+        expect(html).toContain("style-src 'nonce-AbCdEfGhIjKlMnOp0123456789'")
+        expect(html).toContain('<style nonce="AbCdEfGhIjKlMnOp0123456789">')
+        expect(html).not.toContain("'unsafe-inline'")
+        expect(renderSeReportHtml(report, { styleNonce: '"><script>' })).toContain("style-src 'unsafe-inline'")
+    })
 })

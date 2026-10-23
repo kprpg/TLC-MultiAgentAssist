@@ -29,15 +29,20 @@ export function createWebSellerDashboardHost(mode: 'sample' | 'live'): SellerDas
     })
 }
 
-export function createWebSeReportingResolver(mode: 'sample' | 'azure-cli' | 'easy-auth', foundryCredential?: TokenCredential) {
-    const hosts = new Map<string, SeReportingHost>()
+export function createWebSeReportingResolver(mode: 'sample' | 'azure-cli' | 'easy-auth', foundryCredential?: TokenCredential, now: () => number = Date.now) {
+    const hosts = new Map<string, { host: SeReportingHost; lastUsed: number; active: number }>()
     const credential = mode === 'azure-cli' ? new AzureCliCredential({ processTimeoutInMs: 30_000 }) : undefined
     return (authentication: AuthenticatedRequest) => {
         const key = authentication.userEmail.toLowerCase()
-        let host = hosts.get(key)
-        if (!host) {
+        let entry = hosts.get(key)
+        if (!entry) {
+            if (hosts.size >= 50) {
+                for (const [existingKey, existing] of hosts) {
+                    if (existing.active === 0 && now() - existing.lastUsed > 3_600_000) hosts.delete(existingKey)
+                }
+            }
             if (hosts.size >= 50) throw new Error('The reporting user-session limit has been reached.')
-            host = createSeReportingHost({
+            const created = createSeReportingHost({
                 mode: mode === 'sample' ? 'sample' : 'live',
                 identity: async () => ({ key: `web:${key}`, email: authentication.userEmail }),
                 ...(credential ? {
@@ -49,9 +54,23 @@ export function createWebSeReportingResolver(mode: 'sample' | 'azure-cli' | 'eas
                 } : {}),
                 ...(foundryCredential ? { foundryCredential } : {})
             })
-            hosts.set(key, host)
+            const createdEntry = { host: created, lastUsed: now(), active: 0 }
+            entry = createdEntry
+            hosts.set(key, createdEntry)
         }
-        return host
+        const tracked = entry
+        tracked.lastUsed = now()
+        return {
+            invoke: async (request: unknown) => {
+                tracked.active += 1
+                try {
+                    return await tracked.host.invoke(request)
+                } finally {
+                    tracked.active -= 1
+                    tracked.lastUsed = now()
+                }
+            }
+        } satisfies SeReportingHost
     }
 }
 

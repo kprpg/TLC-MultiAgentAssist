@@ -8,7 +8,7 @@ import { ConfidentialClientApplication } from '@azure/msal-node'
 import { isLocalConfiguration, isNativeConfiguration, loadTeamsAdmission, loadTeamsConfiguration, loadTeamsRuntimeConfiguration, loadTeamsStateKey, loadTeamsTlsConfiguration } from './configuration.js'
 import { assertNativeHttpRequest, createTeamsHandler } from './app.js'
 import { createDelegatedTokenProvider, type DelegatedTokenProvider } from './authentication.js'
-import { createTeamsStateStore, createTeamsWorkloadCredential } from './runtime-resources.js'
+import { createTeamsStateStore, createTeamsWorkloadCredential, requiresTeamsFoundryCredential } from './runtime-resources.js'
 import { loadFoundryEnvironmentFromEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
 import { ScopedPortfolioPreferenceStore } from '../../../packages/connectors/common/scoped-portfolio-preferences.js'
 import { GraphContextAuthority } from '../../../packages/connectors/teams/context-authority.js'
@@ -66,7 +66,7 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   const performanceReporter = createTeamsPerformanceReporter(runtimeEnvironment)
   const runtime = loadTeamsRuntimeConfiguration(runtimeEnvironment, configuration)
   const stateKey = configuration.mode === 'live' ? loadTeamsStateKey(runtimeEnvironment) : undefined
-  const foundry = hosted || isNativeConfiguration(configuration) && configuration.guidanceMode === 'foundry'
+  const foundry = requiresTeamsFoundryCredential(runtimeEnvironment, Boolean(hosted), isNativeConfiguration(configuration) && configuration.guidanceMode === 'foundry')
     ? await loadFoundryEnvironmentFromEnvironment(runtimeEnvironment) : undefined
   const foundryCredential = foundry ? createTeamsWorkloadCredential(runtime, foundry.authentication.foundryTenantId, runtimeEnvironment) : undefined
   const initialMode = teamsDataModeSchema.parse(environment['TLC_TEAMS_INITIAL_MODE'] ?? configuration.mode)
