@@ -1951,7 +1951,7 @@ export function App(): ReactElement {
                 }} /> : tab === 'portfolio' ? (
                     <PortfolioPanel key={mode} sourceRevision={portfolioRevision} focus={focus} accountsExpanded={accountsExpanded} detailsExpanded={detailsExpanded} actionsExpanded={actionsExpanded} dataMode={mode} onPortfolioChanged={portfolioChanged} />
                 ) : tab === 'discover' ? <DiscoverPanel key={mode} sourceRevision={portfolioRevision} dataMode={mode} onPortfolioChanged={portfolioChanged} /> : tab === 'dashboard'
-                    ? <DashboardWorkspace invokeSellerDashboard={dataClient.invokeSellerDashboard} /> : <PlaysPanel runRequest={runRequest} />}
+                    ? <DashboardWorkspace invokeSellerDashboard={dataClient.invokeSellerDashboard} invokeSeReporting={dataClient.invokeSeReporting} sourceSession={dataClient.cacheSession} /> : <PlaysPanel runRequest={runRequest} />}
             </main>
         </div>
     )

@@ -1,6 +1,7 @@
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose'
 import { isLocalConfiguration, type TeamsConfiguration } from './configuration.js'
 import type { ExecutionPrincipal } from '../../../packages/orchestrator/collaboration/principal.js'
+import { seReportingScopes, type SeReportingResource } from '../../../packages/common/contracts/se-reporting.js'
 
 export class TeamsAuthorizationError extends Error {
   constructor(readonly code: 'authorization_required' | 'fte_ineligible' = 'authorization_required', readonly claims?: string) {
@@ -44,7 +45,10 @@ export function createTeamsAuthenticator(configuration: TeamsConfiguration, reso
 
 export type ResourceName = 'msx' | 'mcp' | 'graph'
 export type AcquireDelegatedToken = (request: { oboAssertion: string; scopes: string[] }) => Promise<{ accessToken: string } | null>
-export interface DelegatedTokenProvider { getToken(resource: ResourceName): Promise<string> }
+export interface DelegatedTokenProvider {
+  getToken(resource: ResourceName): Promise<string>
+  getReportingToken?(resource: SeReportingResource): Promise<string>
+}
 
 export function createDelegatedTokenProvider(configuration: TeamsConfiguration, assertion: string, acquire: AcquireDelegatedToken, expiresAt = Number.POSITIVE_INFINITY): DelegatedTokenProvider {
   if (configuration.mode !== 'live' || isLocalConfiguration(configuration)) throw new Error('OBO source tokens require hosted live configuration.')
@@ -54,6 +58,13 @@ export function createDelegatedTokenProvider(configuration: TeamsConfiguration, 
     graph: 'https://graph.microsoft.com/.default'
   }
   return {
+    async getReportingToken(resource) {
+      if (Date.now() >= expiresAt) throw new TeamsAuthorizationError()
+      let result
+      try { result = await acquire({ oboAssertion: assertion, scopes: seReportingScopes[resource] }) } catch { throw new TeamsAuthorizationError() }
+      if (!result?.accessToken || result.accessToken === assertion) throw new TeamsAuthorizationError()
+      return result.accessToken
+    },
     async getToken(resource) {
       if (Date.now() >= expiresAt) throw new TeamsAuthorizationError()
       const scope = resources[resource]

@@ -584,7 +584,7 @@ var base64url = /^[A-Za-z0-9_-]*$/;
 var httpProtocol = /^https?$/;
 var e164 = /^\+[1-9]\d{6,14}$/;
 var dateSource = `(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))`;
-var date$2 = /*@__PURE__*/ new RegExp(`^${dateSource}$`);
+var date$3 = /*@__PURE__*/ new RegExp(`^${dateSource}$`);
 function timeSource(args) {
 	const hhmm = `(?:[01]\\d|2[0-3]):[0-5]\\d`;
 	return typeof args.precision === "number" ? args.precision === -1 ? `${hhmm}` : args.precision === 0 ? `${hhmm}:[0-5]\\d` : `${hhmm}:[0-5]\\d\\.\\d{${args.precision}}` : `${hhmm}(?::[0-5]\\d(?:\\.\\d+)?)?`;
@@ -1242,7 +1242,7 @@ var $ZodISODateTime = /*@__PURE__*/ $constructor("$ZodISODateTime", (inst, def) 
 	$ZodStringFormat.init(inst, def);
 });
 var $ZodISODate = /*@__PURE__*/ $constructor("$ZodISODate", (inst, def) => {
-	def.pattern ?? (def.pattern = date$2);
+	def.pattern ?? (def.pattern = date$3);
 	$ZodStringFormat.init(inst, def);
 });
 var $ZodISOTime = /*@__PURE__*/ $constructor("$ZodISOTime", (inst, def) => {
@@ -3451,7 +3451,7 @@ var ZodISODate = /*@__PURE__*/ $constructor("ZodISODate", (inst, def) => {
 	$ZodISODate.init(inst, def);
 	ZodStringFormat.init(inst, def);
 });
-function date$1(params) {
+function date$2(params) {
 	return /* @__PURE__ */ _isoDate(ZodISODate, params);
 }
 var ZodISOTime = /*@__PURE__*/ $constructor("ZodISOTime", (inst, def) => {
@@ -3751,7 +3751,7 @@ var ZodString = /*@__PURE__*/ $constructor("ZodString", (inst, def) => {
 	inst.cidrv6 = (params) => inst.check(/* @__PURE__ */ _cidrv6(ZodCIDRv6, params));
 	inst.e164 = (params) => inst.check(/* @__PURE__ */ _e164(ZodE164, params));
 	inst.datetime = (params) => inst.check(datetime(params));
-	inst.date = (params) => inst.check(date$1(params));
+	inst.date = (params) => inst.check(date$2(params));
 	inst.time = (params) => inst.check(time(params));
 	inst.duration = (params) => inst.check(duration(params));
 });
@@ -5094,15 +5094,15 @@ discriminatedUnion("kind", [object({
 	kind: literal("availability"),
 	availability: voiceAvailabilitySchema
 }).strict(), voiceSessionSchema]);
-var text = string().max(3e4);
-var name = string().min(1).max(500);
-var identifier$1 = string().min(1).max(200);
+var text$1 = string().max(3e4);
+var name$1 = string().min(1).max(500);
+var identifier$2 = string().min(1).max(200);
 var tpid = string().regex(/^[1-9][0-9]{0,19}$/);
 var amount = number().finite();
-var nonnegative = amount.nonnegative();
-var count = number().int().nonnegative();
-var date = date$1();
-var timestamp = datetime({ offset: true });
+var nonnegative$1 = amount.nonnegative();
+var count$1 = number().int().nonnegative();
+var date$1 = date$2();
+var timestamp$1 = datetime({ offset: true });
 var quality = _enum([
 	"complete",
 	"partial",
@@ -5115,7 +5115,7 @@ var timing = _enum([
 	"undated"
 ]);
 var bucketSchema = object({
-	name,
+	name: name$1,
 	weight: amount.min(0).max(1),
 	unit: literal("USD"),
 	attainment: amount,
@@ -5123,12 +5123,12 @@ var bucketSchema = object({
 	quota: amount,
 	recurring: amount,
 	calcActual: amount,
-	calcQuota: nonnegative,
-	gap: nonnegative
+	calcQuota: nonnegative$1,
+	gap: nonnegative$1
 }).strict();
 var metricSchema = object({
-	name,
-	bucket: name,
+	name: name$1,
+	bucket: name$1,
 	unit: literal("USD"),
 	mappingSupported: boolean(),
 	scenarioAllowed: boolean(),
@@ -5138,152 +5138,152 @@ var metricSchema = object({
 	recurring: amount,
 	calcActual: amount,
 	calcQuota: amount,
-	gap: nonnegative,
-	closedGap: nonnegative,
+	gap: nonnegative$1,
+	closedGap: nonnegative$1,
 	closedAttainment: amount.nullable(),
 	accountActualDifference: amount,
 	accountQuotaDifference: amount
 }).strict();
 var accountSchema = object({
 	tpid,
-	name,
+	name: name$1,
 	metrics: array(object({
-		metric: name,
-		bucket: name,
-		quota: nonnegative,
+		metric: name$1,
+		bucket: name$1,
+		quota: nonnegative$1,
 		actual: amount.nullable(),
 		variance: amount.nullable(),
-		gap: nonnegative.nullable()
+		gap: nonnegative$1.nullable()
 	}).strict()).max(100),
 	pipeline: object({
 		status: quality,
-		openCount: count,
-		inQuarterCount: count,
+		openCount: count$1,
+		inQuarterCount: count$1,
 		inQuarterValue: amount,
-		productionCount: count,
-		inQuarterProductionCount: count,
+		productionCount: count$1,
+		inQuarterProductionCount: count$1,
 		committedMonthly: amount,
 		uncommittedMonthly: amount,
 		noPipeline: boolean(),
 		noInQuarterPipeline: boolean()
 	}).strict(),
-	nextAction: text
+	nextAction: text$1
 }).strict();
 var opportunitySchema$1 = object({
-	id: identifier$1,
-	number: text,
+	id: identifier$2,
+	number: text$1,
 	tpid,
-	account: name,
-	name,
-	owner: text,
-	stage: text,
-	solutionArea: text,
-	salesPlay: text,
-	intent: text,
+	account: name$1,
+	name: name$1,
+	owner: text$1,
+	stage: text$1,
+	solutionArea: text$1,
+	salesPlay: text$1,
+	intent: text$1,
 	estimatedValue: amount.nullable(),
-	currency: text,
+	currency: text$1,
 	monthlyRunRate: amount.nullable(),
-	closeDate: date.nullable(),
-	state: text,
-	forecastComments: text,
+	closeDate: date$1.nullable(),
+	state: text$1,
+	forecastComments: text$1,
 	timing,
-	relevance: text,
-	modifiedAt: timestamp.optional(),
+	relevance: text$1,
+	modifiedAt: timestamp$1.optional(),
 	estimatedBilledRevenue: amount.nullable().optional(),
 	estimatedSqlRevenue: amount.nullable().optional()
 }).strict();
 var milestoneSchema$1 = object({
-	id: identifier$1,
-	number: text,
-	opportunityId: identifier$1,
-	opportunityName: name,
+	id: identifier$2,
+	number: text$1,
+	opportunityId: identifier$2,
+	opportunityName: name$1,
 	tpid,
-	account: name,
-	name,
-	owner: text,
-	category: text,
-	status: text,
-	commitment: text,
+	account: name$1,
+	name: name$1,
+	owner: text$1,
+	category: text$1,
+	status: text$1,
+	commitment: text$1,
 	monthly: amount.nullable(),
-	date: date.nullable(),
-	workload: text,
-	forecastComments: text,
-	currency: text,
+	date: date$1.nullable(),
+	workload: text$1,
+	forecastComments: text$1,
+	currency: text$1,
 	active: boolean().nullable(),
 	timing,
-	metricCandidates: array(name).max(100),
-	mappingBasis: text,
-	classification: text,
+	metricCandidates: array(name$1).max(100),
+	mappingBasis: text$1,
+	classification: text$1,
 	scenarioCredit: amount.nullable(),
-	modifiedAt: timestamp.optional(),
-	commitmentChangedAt: timestamp.optional(),
-	region: text.optional(),
-	riskDetails: text.optional()
+	modifiedAt: timestamp$1.optional(),
+	commitmentChangedAt: timestamp$1.optional(),
+	region: text$1.optional(),
+	riskDetails: text$1.optional()
 }).strict();
 var coverageSchema = object({
-	metric: name,
-	bucket: name,
-	gap: nonnegative,
-	candidateCount: count,
+	metric: name$1,
+	bucket: name$1,
+	gap: nonnegative$1,
+	candidateCount: count$1,
 	committedMonthly: amount,
 	uncommittedMonthly: amount,
 	verifiedPeriodCredit: _null(),
-	state: text,
+	state: text$1,
 	mappingSupported: boolean(),
 	mappingReviewRequired: boolean(),
 	scenarioAllowed: boolean(),
 	scenarioCommittedCredit: amount.nullable(),
 	scenarioUncommittedCredit: amount.nullable(),
 	scenarioRemainingGap: amount.nullable(),
-	nextAction: text
+	nextAction: text$1
 }).strict();
 var sellerDashboardReportSchema = object({
 	schemaVersion: literal(1),
-	generatedAt: timestamp,
+	generatedAt: timestamp$1,
 	plan: object({
 		currency: literal("USD"),
 		unit: literal("USD"),
 		fiscalYear: number().int().min(2e3).max(2200),
 		sourceUnitsVerified: boolean(),
 		metricMapping: array(object({
-			metric: name,
-			bucket: name,
+			metric: name$1,
+			bucket: name$1,
 			hintSupported: boolean(),
-			state: text,
+			state: text$1,
 			scenarioAllowed: boolean()
 		}).strict()).max(100),
-		unmappedProductionCandidates: count
+		unmappedProductionCandidates: count$1
 	}).strict(),
 	period: object({
-		label: name,
-		start: date,
-		end: date,
-		today: date
+		label: name$1,
+		start: date$1,
+		end: date$1,
+		today: date$1
 	}).strict(),
 	sources: object({
 		earnings: object({
 			status: _enum(["live", "stale"]),
-			generatedAt: timestamp,
-			refreshedAt: timestamp.nullable(),
-			months: array(name).max(12),
+			generatedAt: timestamp$1,
+			refreshedAt: timestamp$1.nullable(),
+			months: array(name$1).max(12),
 			ageDays: number().int().nullable()
 		}).strict(),
 		pipeline: object({
 			status: quality,
-			asOf: timestamp.nullable(),
-			errors: array(text).max(1e3)
+			asOf: timestamp$1.nullable(),
+			errors: array(text$1).max(1e3)
 		}).strict(),
 		quota: object({
-			name,
-			rows: count,
-			accounts: count.max(200)
+			name: name$1,
+			rows: count$1,
+			accounts: count$1.max(200)
 		}).strict()
 	}).strict(),
-	warnings: array(text).max(1e3),
+	warnings: array(text$1).max(1e3),
 	official: object({
 		weightedAttainment: amount,
 		closedMonthAttainment: amount.nullable(),
-		closedThrough: name.nullable(),
+		closedThrough: name$1.nullable(),
 		buckets: array(bucketSchema).min(1).max(100),
 		metrics: array(metricSchema).min(1).max(100)
 	}).strict(),
@@ -5292,19 +5292,19 @@ var sellerDashboardReportSchema = object({
 	milestones: array(milestoneSchema$1).max(5e4),
 	coverage: array(coverageSchema).max(100),
 	actions: array(object({
-		account: name,
+		account: name$1,
 		tpid,
-		metric: name,
+		metric: name$1,
 		priority: _enum([
 			"High",
 			"Medium",
 			"Low"
 		]),
-		issue: text,
-		action: text,
-		owner: text
+		issue: text$1,
+		action: text$1,
+		owner: text$1
 	}).strict()).max(2e4),
-	methodology: array(text).max(100)
+	methodology: array(text$1).max(100)
 }).strict().superRefine((report, context) => {
 	const reject = (message) => context.addIssue({
 		code: "custom",
@@ -5367,12 +5367,12 @@ var sellerDashboardReportSchema = object({
 	for (const row of report.actions) if (!accountMap.has(row.tpid) || !metricMap.has(row.metric)) reject("Action is outside the reporting scope.");
 });
 var supplementSourceSchema = object({
-	name,
+	name: name$1,
 	status: quality,
-	asOf: timestamp,
-	start: date,
-	end: date,
-	detail: text
+	asOf: timestamp$1,
+	start: date$1,
+	end: date$1,
+	detail: text$1
 }).strict().refine((source) => source.start <= source.end, "Invalid supplemental source interval.");
 var sellerDashboardSupplementSchema = object({
 	schemaVersion: literal(1),
@@ -5380,51 +5380,51 @@ var sellerDashboardSupplementSchema = object({
 		source: supplementSourceSchema,
 		accounts: array(object({
 			tpid,
-			actual: nonnegative,
-			previousActual: nonnegative.nullable(),
-			averageDaily: nonnegative,
-			projected: nonnegative.nullable(),
-			daysPosted: count,
+			actual: nonnegative$1,
+			previousActual: nonnegative$1.nullable(),
+			averageDaily: nonnegative$1,
+			projected: nonnegative$1.nullable(),
+			daysPosted: count$1,
 			pillars: array(object({
-				name,
-				actual: nonnegative
+				name: name$1,
+				actual: nonnegative$1
 			}).strict()).max(100)
 		}).strict()).max(200),
 		services: array(object({
-			id: identifier$1,
+			id: identifier$2,
 			tpid,
-			name,
-			pillar: name,
-			previousDaily: nonnegative,
-			currentDaily: nonnegative,
+			name: name$1,
+			pillar: name$1,
+			previousDaily: nonnegative$1,
+			currentDaily: nonnegative$1,
 			isNew: boolean()
 		}).strict()).max(5e4),
 		subscriptions: array(object({
-			id: identifier$1,
+			id: identifier$2,
 			tpid,
-			name,
-			created: date,
-			averageDaily: nonnegative
+			name: name$1,
+			created: date$1,
+			averageDaily: nonnegative$1
 		}).strict()).max(5e4),
 		sqlReclassification: array(object({
-			id: identifier$1,
+			id: identifier$2,
 			tpid,
-			workload: name,
-			monthlyOpportunity: nonnegative,
-			evidence: text
+			workload: name$1,
+			monthlyOpportunity: nonnegative$1,
+			evidence: text$1
 		}).strict()).max(5e4)
 	}).strict().nullable(),
 	conversion: object({
 		source: supplementSourceSchema,
 		accounts: array(object({
 			tpid,
-			territory: text,
-			startingMonthly: nonnegative,
-			convertedMonthly: nonnegative,
-			inQuarterMonthly: nonnegative,
-			shiftedOutMonthly: nonnegative,
-			startingCount: count,
-			convertedCount: count
+			territory: text$1,
+			startingMonthly: nonnegative$1,
+			convertedMonthly: nonnegative$1,
+			inQuarterMonthly: nonnegative$1,
+			shiftedOutMonthly: nonnegative$1,
+			startingCount: count$1,
+			convertedCount: count$1
 		}).strict()).max(200)
 	}).strict().nullable()
 }).strict().superRefine((supplement, context) => {
@@ -5451,7 +5451,7 @@ discriminatedUnion("kind", [object({
 	kind: literal("snapshot"),
 	mode: _enum(["sample", "live"]),
 	state: _enum(["ready", "stale"]),
-	message: text,
+	message: text$1,
 	report: sellerDashboardReportSchema,
 	supplement: sellerDashboardSupplementSchema.nullable()
 }).strict().superRefine((snapshot, context) => {
@@ -5483,7 +5483,7 @@ discriminatedUnion("kind", [object({
 		"runtime-failed",
 		"hosted-profile-denied"
 	]),
-	message: name
+	message: name$1
 }).strict()]);
 discriminatedUnion("operation", [object({
 	contractVersion: literal("1.0"),
@@ -5492,8 +5492,166 @@ discriminatedUnion("operation", [object({
 	contractVersion: literal("1.0"),
 	operation: literal("refresh"),
 	confirmed: literal(true),
-	asOf: date.optional()
+	asOf: date$1.optional()
 }).strict()]);
+var identifier$1 = string().min(1).max(200);
+var name = string().min(1).max(500);
+var text = string().max(3e4);
+var nonnegative = number().finite().nonnegative();
+var count = number().int().nonnegative();
+var date = date$2();
+var timestamp = datetime({ offset: true });
+var month = string().regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/);
+var stagePipelineStages = [
+	"Listen & Consult",
+	"Inspire & Design",
+	"Empower & Achieve",
+	"Realize Value",
+	"Manage & Optimize"
+];
+var stagePipelineMilestoneStatuses = [
+	"On Track",
+	"At Risk",
+	"Blocked",
+	"Completed",
+	"Cancelled",
+	"Hygiene/Duplicate",
+	"Lost to Competitor"
+];
+var stagePipelineStageSchema = _enum(stagePipelineStages);
+var stagePipelineMilestoneStatusSchema = _enum(stagePipelineMilestoneStatuses);
+var stagePipelineScopeSchema = _enum(["azure", "microsoft-services"]);
+var stagePipelineThreatSchema = _enum([
+	"None",
+	"Low",
+	"Medium",
+	"High"
+]);
+var stagePipelineOpportunitySchema = object({
+	id: identifier$1,
+	number: name,
+	customer: name,
+	name,
+	notes: text,
+	contact: text,
+	scope: stagePipelineScopeSchema,
+	solutionArea: name,
+	inbound: boolean(),
+	stage: stagePipelineStageSchema,
+	status: _enum([
+		"In Progress",
+		"On Hold",
+		"Won",
+		"Lost"
+	]),
+	forecast: name,
+	closeDate: date,
+	daysInStage: count,
+	idleDays: count.nullable(),
+	consumedRecurring: nonnegative,
+	consumedNonRecurring: nonnegative,
+	maccCommit: nonnegative,
+	partner: text.nullable(),
+	competitor: object({
+		name: text.nullable(),
+		threat: stagePipelineThreatSchema
+	}).strict(),
+	solutionTagReview: boolean()
+}).strict();
+var stagePipelineMilestoneSchema = object({
+	id: identifier$1,
+	number: name,
+	opportunityId: identifier$1,
+	name,
+	workload: text,
+	estimatedMonthlyAcr: nonnegative,
+	commitment: _enum(["Committed", "Uncommitted"]),
+	status: stagePipelineMilestoneStatusSchema,
+	date: date.nullable(),
+	comment: text,
+	owner: text
+}).strict();
+var stagePipelineAcrSchema = object({
+	syncedAt: date,
+	lastActualMonth: month,
+	accounts: array(object({
+		customer: name,
+		months: array(object({
+			month,
+			actual: nonnegative,
+			baseline: nonnegative,
+			committed: nonnegative,
+			uncommitted: nonnegative,
+			stage1: nonnegative,
+			target: nonnegative
+		}).strict()).length(12)
+	}).strict()).max(500)
+}).strict();
+var stagePipelineSnapshotSchema = object({
+	contractVersion: literal("1.0"),
+	kind: literal("snapshot"),
+	mode: _enum(["sample", "live"]),
+	state: _enum(["fresh", "stale"]),
+	message: text,
+	generatedAt: timestamp,
+	owner: string().max(200),
+	asOf: date,
+	fiscalYear: number().int().min(2e3).max(2100),
+	opportunities: array(stagePipelineOpportunitySchema).max(5e3),
+	milestones: array(stagePipelineMilestoneSchema).max(25e3),
+	acr: stagePipelineAcrSchema
+}).strict().superRefine((value, context) => {
+	const ids = /* @__PURE__ */ new Set();
+	for (const [index, row] of value.opportunities.entries()) {
+		if (ids.has(row.id)) context.addIssue({
+			code: "custom",
+			path: [
+				"opportunities",
+				index,
+				"id"
+			],
+			message: "Opportunity ids must be unique."
+		});
+		ids.add(row.id);
+	}
+	const milestoneIds = /* @__PURE__ */ new Set();
+	for (const [index, row] of value.milestones.entries()) {
+		if (milestoneIds.has(row.id)) context.addIssue({
+			code: "custom",
+			path: [
+				"milestones",
+				index,
+				"id"
+			],
+			message: "Milestone ids must be unique."
+		});
+		milestoneIds.add(row.id);
+		if (!ids.has(row.opportunityId)) context.addIssue({
+			code: "custom",
+			path: [
+				"milestones",
+				index,
+				"opportunityId"
+			],
+			message: "Milestone must reference a listed opportunity."
+		});
+	}
+});
+var stagePipelineUnavailableSchema = object({
+	contractVersion: literal("1.0"),
+	kind: literal("unavailable"),
+	code: _enum([
+		"source-unavailable",
+		"unauthorized",
+		"invalid-snapshot"
+	]),
+	message: text
+}).strict();
+object({
+	contractVersion: literal("1.0"),
+	operation: literal("get")
+}).strict();
+union([stagePipelineSnapshotSchema, stagePipelineUnavailableSchema]);
 //#endregion
 //#region packages/common/contracts/record-creation.ts
 var clientKeySchema = string().trim().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
@@ -6272,6 +6430,7 @@ electron.contextBridge.exposeInMainWorld("tlc", {
 		};
 	},
 	invokeSellerDashboard: (request) => electron.ipcRenderer.invoke("tlc:seller-dashboard", request),
+	invokeSeReporting: (request) => electron.ipcRenderer.invoke("tlc:se-reporting", request),
 	invokeVoice: (request) => electron.ipcRenderer.invoke("tlc:voice-input", request),
 	exitApplication: () => electron.ipcRenderer.invoke("tlc:exit-application"),
 	getDataStatus: () => electron.ipcRenderer.invoke("tlc:get-data-status"),

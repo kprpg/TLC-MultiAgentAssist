@@ -159,6 +159,24 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
         await lifecycle.assertGeneration(principal, generation)
         return token
       },
+      reportingIdentity: async () => ({ key: `teams:${key}`, objectId: principal.userId }),
+      ...(runtimeEnvironment['TLC_SE_REPORTING_ENABLED'] === '1' ? {
+        getReportingToken: async (resource: import('../../../packages/common/contracts/se-reporting.js').SeReportingResource) => {
+          assertNativeOwner()
+          await lifecycle.assertGeneration(principal, generation)
+          if (!tokens.current.getReportingToken) throw new NativeConnectionError('native_resource_unavailable')
+          const result = await tokens.current.getReportingToken(resource)
+          assertNativeOwner()
+          await lifecycle.assertGeneration(principal, generation)
+          return result
+        },
+        reportingFetcher: async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+          assertNativeOwner()
+          const response = await fetch(input, init)
+          assertNativeOwner()
+          return response
+        }
+      } : {}),
       preferences: new ScopedPortfolioPreferenceStore(store, key),
       ...(foundryCredential ? { foundryCredential } : {})
     })

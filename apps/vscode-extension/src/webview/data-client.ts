@@ -2,6 +2,7 @@ import { request, streamRequest } from './bridge.js'
 import { AgentStreamError, createAgentStreamAccumulator, type AgentStreamProgress } from '../../../shared/agent-stream.js'
 import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest } from '../../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema, type SellerDashboardRequest } from '../../../../packages/common/contracts/seller-dashboard.js'
+import { seReportingRequestSchema, seReportingResponseSchema, type SeReportingRequest } from '../../../../packages/common/contracts/se-reporting.js'
 import {
     recordCreationCatalogSchema,
     recordCreationPreviewSchema,
@@ -56,6 +57,9 @@ const POLL_TIMEOUT_MS = 15_000
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 const transport = {
+    invokeSeReporting: async (input: SeReportingRequest) => seReportingResponseSchema.parse(
+        await request('seReporting', seReportingRequestSchema.parse(input))
+    ),
     invokeMutationSync: async (input: syncContracts.MutationSyncRequest) =>
         syncContracts.mutationSyncResponseSchema.parse(await request('mutationSync', input)),
     invokeSellerDashboard: async (input: SellerDashboardRequest) => sellerDashboardResponseSchema.parse(

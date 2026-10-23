@@ -70,6 +70,15 @@ for per-surface setup, forms, CSV import, review/submission, storage locations, 
 Submit-button troubleshooting. The [sanitized CSV/JSON examples](tests/fixtures/record-creation/README.md)
 are ready to import.
 
+### Monthly SE reporting
+
+Open **Dashboards > SE Reporting Dashboard** alongside **Seller Dashboard**.
+The shared reporting workflow supports manager profiles, live-contract/assignment
+checks, monthly draft generation, reporter-owned asks, and reviewed JSON/HTML
+output. Sample mode is offline and publication is a no-write simulation.
+Live reporting requires separate Power BI, Microsoft Graph and Foundry grants;
+see the [SE Reporting Dashboard guide](docs/user-guide/SE-REPORTING-DASHBOARD.md).
+
 ## VS Code extension
 
 Requires **VS Code or VS Code Insiders 1.90.0 or later**. The extension is self-contained (no Node.js, npm, or native binaries), embeds its own MCP registry and tool policy, and starts in sample mode.

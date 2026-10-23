@@ -117,6 +117,11 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
                 if (!provider.sellerDashboard) throw new Error('The Seller Dashboard host is unavailable.')
                 return successResponse(id, await provider.sellerDashboard.invoke(params))
             }
+            case 'seReporting': {
+                const params = parseBridgeParams('seReporting', parsed.data.params)
+                if (!provider.seReporting) throw new Error('The SE Reporting Dashboard host is unavailable.')
+                return successResponse(id, await provider.seReporting.invoke(params))
+            }
             case 'voiceInput':
                 return errorResponse(id, 'Voice input must be handled by the local presentation host.', 'host_only')
             case 'getCurrentUserEmail':

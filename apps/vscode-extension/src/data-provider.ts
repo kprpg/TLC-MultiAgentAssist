@@ -57,6 +57,8 @@ import {
 } from '../../../packages/orchestrator/workflows/index.js'
 import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
 import { createSellerDashboardHost, type SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
+import { createSampleSeReportingHost } from '../../../packages/orchestrator/se-reporting/sample.js'
+import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
 import { LocalStore, LocalStoreMsxConnector } from '../../../packages/connectors/local-store/index.js'
 import { SampleRecordCreationCatalog } from '../../../packages/connectors/local-store/sample-record-creation-catalog.js'
 import { RecordCreationService } from '../../../packages/orchestrator/record-creation/service.js'
@@ -107,6 +109,7 @@ export interface ExtensionDataProvider {
     mutationSync?(request: MutationSyncRequest): Promise<MutationSyncResponse>
     drainMutations?(): Promise<void>
     readonly sellerDashboard?: SellerDashboardHost
+    readonly seReporting?: SeReportingHost
     readonly mode: 'sample' | 'live'
     getCurrentUserEmail(): Promise<string | undefined>
     listAccounts(options?: AccountListOptions): Promise<Account[]>
@@ -205,6 +208,7 @@ export function createSampleDataProvider(): ExtensionDataProvider {
     return {
         mode: 'sample',
         sellerDashboard: createSellerDashboardHost({ mode: 'sample', resolveUserEmail: async () => undefined }),
+        seReporting: createSampleSeReportingHost(),
         getCurrentUserEmail: async () => undefined,
         getDiscoverySnapshot: async (input) => {
             discoverySnapshotRequestSchema.parse(input)

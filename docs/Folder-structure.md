@@ -315,13 +315,20 @@ apps/shared/dashboards/
     stage-pipeline-table.tsx           sortable table
     stage-pipeline-storage.ts          browser-only Focus/Reviewed marks
     stage-pipeline-review.css
+  soltionEngineerDashboard/
+    se-reporting-dashboard.tsx
+    report-setup.tsx
+    report-workflow.tsx
+    se-reporting-dashboard.css
 ```
 
 Each dashboard owns its components, helpers, and feature-scoped styles in its own
 folder. Future dashboards, such as `SE-manager-dashboard` or `AE-dashboard`, belong
 in sibling folders beside `sellerDashboard`. Register their tabs and panes in
 `dashboard-workspace.tsx` and import their styles in each consuming surface's entry
-point. Seller Dashboard and Stage and Pipeline Review are currently registered; no placeholder tabs are shown.
+point. Seller Dashboard, Stage and Pipeline Review and SE Reporting Dashboard are registered; no placeholder
+tabs are shown. The `soltionEngineerDashboard` spelling is intentional for the
+requested module path.
 Stage and Pipeline Review's browser-safe contract is
 `packages/common/contracts/stage-pipeline-review.ts` with a fictitious fixture in
 `packages/common/fixtures/stage-pipeline-review.ts`. It runs in sample mode today; the pane
@@ -330,6 +337,15 @@ takes an optional `invoke` so a shared orchestrator operation can feed live data
 Its prompts and skill live in `.github/skills/stage-pipeline-review-dashboard/` and
 `.github/prompts/generate-stage-pipeline-review.prompt.md`.
 Contracts, data access, and orchestration remain in their existing package layers.
+
+SE Reporting uses independently versioned schemas in
+`packages/common/contracts/se-reporting.ts`, one synthetic fixture in
+`packages/common/fixtures/se-reporting.ts`, the shared generation/review host in
+`packages/orchestrator/se-reporting`, and delegated source/configuration adapters
+in `packages/connectors/se-reporting`. The browser-safe HTML document renderer in
+`packages/documents/se-reporting.ts` is used for both the dashboard preview and
+download/publication. See the [SE Reporting Dashboard guide](user-guide/SE-REPORTING-DASHBOARD.md)
+for setup, source grants, privacy and publication boundaries.
 
 Seller Dashboard's browser-safe, independently versioned
 schemas live in `packages/common/contracts/seller-dashboard.ts`, with one fictitious

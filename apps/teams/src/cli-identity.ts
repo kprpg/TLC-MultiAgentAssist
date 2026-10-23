@@ -7,6 +7,7 @@ import type { ExecutionPrincipal } from '../../../packages/orchestrator/collabor
 import type { CliTeamsConfiguration } from './configuration.js'
 import { NativeConnectionError, type NativeIdentity } from './native-identity.js'
 import { measurePerformance, type PerformanceReporter } from '../../../packages/common/telemetry/performance.js'
+import { seReportingScopes, type SeReportingResource } from '../../../packages/common/contracts/se-reporting.js'
 
 export class CliIdentityProvider {
   private acquisition: { generation: number; promise: Promise<{ token: string; identity: NativeIdentity }> } | undefined
@@ -135,6 +136,14 @@ export class CliIdentityProvider {
       }
       throw error instanceof NativeConnectionError ? error : new NativeConnectionError('native_source_denied')
     }
+  }
+  async getReportingToken(resource: SeReportingResource): Promise<string> {
+    if (resource === 'graph-write') throw new NativeConnectionError('native_resource_unavailable')
+    await this.getToken('msx')
+    const generation = this.generation
+    const token = await this.credential.getToken(seReportingScopes[resource])
+    if (!token || generation !== this.generation) throw new NativeConnectionError('native_connection_changed')
+    return token.token
   }
   async disconnect(): Promise<void> {
     this.generation++; this.acquisition = undefined; this.current = undefined; this.state = 'sign-in-required'; this.mcpState = 'not-connected'

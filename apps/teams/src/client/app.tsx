@@ -11,6 +11,7 @@ import { useWorkspaceNavigation } from './use-workspace-navigation.js'
 import { teamsSurface } from './workspace-navigation.js'
 import { sellerDashboardResponseSchema } from '../../../../packages/common/contracts/seller-dashboard.js'
 import type { SellerDashboardRequest } from '../../../../packages/common/contracts/seller-dashboard.js'
+import { seReportingResponseSchema, type SeReportingRequest } from '../../../../packages/common/contracts/se-reporting.js'
 import { PortfolioLayoutControls } from '../../../shared/portfolio-layout-controls.js'
 import { PortfolioSearch } from './portfolio-search.js'
 import { AccountsWorkspace, type WorkingSelection } from './accounts.js'
@@ -225,6 +226,15 @@ export function TeamsApp() {
     if (!client) throw new Error('Sign in before opening Dashboards.')
     return client.operation('sellerDashboard', input, sellerDashboardResponseSchema)
   }, [client])
+  const invokeSeReporting = useCallback(async (input: SeReportingRequest) => {
+    if (!client) throw new Error('Sign in before opening Dashboards.')
+    if (input.operation === 'publish') {
+      const receipt = await reviewPreview(await client.preview('publishSeReporting', input))
+      if (receipt.state !== 'confirmed') throw new Error('The reporting publication was not confirmed.')
+      return seReportingResponseSchema.parse(receipt.result)
+    }
+    return client.operation(input.operation === 'run' ? 'seReportingRun' : 'seReporting', input, seReportingResponseSchema)
+  }, [client, reviewPreview])
   useEffect(() => {
     if (hostSurface === 'panel') setView('meetings')
     if (hostSurface === 'configure') setView('configure')
@@ -288,7 +298,7 @@ export function TeamsApp() {
         {...(linkedRunId ? { initialRunId: linkedRunId } : {})} {...(bindingId && preferredAccountId ? {
         scope: selection ? { kind: 'opportunity' as const, accountId: selection.account.id, opportunityId: selection.opportunity.id } : { kind: 'account' as const, accountId: preferredAccountId }
       } : {})} />}
-      {workspaceAllowed && view === 'dashboard' && !bindingId && <DashboardWorkspace invokeSellerDashboard={invokeDashboard} />}
+      {workspaceAllowed && view === 'dashboard' && !bindingId && <DashboardWorkspace invokeSellerDashboard={invokeDashboard} invokeSeReporting={invokeSeReporting} />}
       {workspaceAllowed && view === 'meetings' && <MeetingsWorkspace client={client} mode={session.mode} selection={selection} reviewPreview={reviewPreview} compact={hostSurface === 'panel'}
         graphAvailable={!('authentication' in authentication.configuration && authentication.configuration.authentication === 'local-azure-cli')} />}
       {workspaceAllowed && view === 'activity' && <ActivityWorkspace client={client} onDisconnect={() => {

@@ -86,6 +86,7 @@ function servicesFor(backend: ReturnType<typeof createControlledLiveBackend>): A
   return {
     orchestrator: backend.core, workflows: createSampleWorkflowHost(disabled), workflowScopes: new Map(),
     sellerDashboard: { invoke: disabled },
+    seReporting: { invoke: disabled },
     meetings: { proposeMeetingChangeSet: disabled, applyMeetingChangeSet: disabled },
     acquireTranscripts: disabled, resolveMeeting: disabled, listTranscriptSources: disabled, proposeTranscript: disabled,
     refreshSource: () => backend.msx.refresh(),

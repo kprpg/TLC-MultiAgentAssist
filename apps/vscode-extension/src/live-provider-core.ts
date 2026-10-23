@@ -17,6 +17,8 @@ import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-
 import type { MeetingExtractorFn } from '../../../packages/connectors/local-store/index.js'
 import type { ExtensionDataProvider, MeetingTranscriptSource } from './data-provider.js'
 import { createSellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
+import { createSeReportingHost } from '../../../packages/orchestrator/se-reporting/composition.js'
+import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
 
 export const AGENT_CAPABILITIES: readonly AgentCapability[] = workflowAgentCapabilityValues
 const MCEM_COACH_PROMPT = 'Evaluate the current MCEM stage exit criteria and recommend the next best actions.'
@@ -30,6 +32,7 @@ export interface MeetingCaptureConnector {
 }
 
 export interface LiveDataProviderParts {
+    reportingHost?: SeReportingHost
     getSourceToken?(): Promise<string>
     orchestrator: ThinSliceOrchestrator
     host: WorkflowHost
@@ -43,7 +46,7 @@ export interface LiveDataProviderParts {
 
 /** Assembles the provider surface from injected parts so MCEM/agent/Play wiring is unit-testable. */
 export function buildLiveDataProvider(
-    { orchestrator, host, account, dispose, meetingConnector, meetingExtractor, getSourceToken }: LiveDataProviderParts,
+    { orchestrator, host, account, dispose, meetingConnector, meetingExtractor, getSourceToken, reportingHost }: LiveDataProviderParts,
     mode: ExtensionDataProvider['mode'] = 'live'
 ): ExtensionDataProvider {
     const requireMeeting = (): MeetingCaptureConnector => {
@@ -55,6 +58,7 @@ export function buildLiveDataProvider(
         ...(getSourceToken ? { getSourceToken } : {}),
         mode,
         sellerDashboard: createSellerDashboardHost({ mode, resolveUserEmail: async () => account }),
+        seReporting: reportingHost ?? createSeReportingHost({ mode, identity: async () => ({ key: account, email: account }) }),
         getCurrentUserEmail: async () => account,
         listAccounts: (options) => orchestrator.listAccounts(options),
         getPortfolioIndex: (request) => orchestrator.getPortfolioIndex(request),

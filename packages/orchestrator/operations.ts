@@ -10,6 +10,7 @@ import type { ApplicationServices } from './application-runtime.js'
 import { workflowContractVersion } from '../common/contracts/workflows.js'
 import { canonicalJson } from './collaboration/reviewed-actions.js'
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema } from '../common/contracts/seller-dashboard.js'
+import { seReportingRequestSchema, seReportingResponseSchema } from '../common/contracts/se-reporting.js'
 import { measurePerformance } from '../common/telemetry/performance.js'
 import type { ThinSliceOrchestrator } from './index.js'
 import type { SyncMutationOperation } from '../common/contracts/cache-sync.js'
@@ -59,6 +60,13 @@ export function createApplicationOperations(services: ApplicationServices) {
   const operations: Record<string, ApplicationOperation> = {
     ...createCoreMutationOperations(core, (input) => services.meetings.applyMeetingChangeSet(input)),
     sellerDashboard: operation(sellerDashboardRequestSchema, sellerDashboardResponseSchema, (input) => services.sellerDashboard.invoke(input)),
+    seReporting: operation(seReportingRequestSchema.refine((input) => !['run', 'publish'].includes(input.operation)), seReportingResponseSchema, (input) => services.seReporting.invoke(input)),
+    seReportingRun: operation(seReportingRequestSchema.refine((input) => input.operation === 'run'), seReportingResponseSchema, (input) => services.seReporting.invoke(input), 'read', true),
+    publishSeReporting: operation(seReportingRequestSchema.refine((input) => input.operation === 'publish'), seReportingResponseSchema, async (input) => {
+      const response = await services.seReporting.invoke(input)
+      if (response.kind === 'error') throw new Error(response.message)
+      return response
+    }, 'source'),
     listAccounts: operation(c.accountListOptionsSchema.strict(), z.array(c.accountSchema), (input) => core.listAccounts(input)),
     getPortfolioIndex: operation(c.portfolioReadRequestSchema, c.portfolioIndexSchema, (input) => core.getPortfolioIndex(input)),
     getPortfolioWorkspace: operation(c.portfolioWorkspaceRequestSchema, c.portfolioWorkspaceSchema, (input) => core.getPortfolioWorkspace(input)),
@@ -137,6 +145,12 @@ export function createApplicationOperations(services: ApplicationServices) {
     async snapshot(name: string, input: unknown): Promise<unknown> {
       services.refreshSource()
       const parsed = describe(name).parse(input)
+      if (name === 'publishSeReporting') {
+        const state = await services.seReporting.invoke({ contractVersion: '1.0', operation: 'get' })
+        if (state.kind !== 'state' || !state.run || !state.publishPreview ||
+            state.run.id !== parsed['runId'] || state.publishPreview.token !== parsed['token']) throw new Error('Prepare a fresh report publication review.')
+        return { runId: state.run.id, profileId: state.run.profileId, ...state.publishPreview }
+      }
       if (['joinDealTeam', 'joinMilestoneTeam'].includes(name) && parsed['domain']) {
         const domain = seDomainSchema.parse(parsed['domain'])
         const candidate = (await core.discoverOpportunities(domain)).find((entry) => entry.id === parsed['opportunityId'])
