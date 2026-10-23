@@ -1,14 +1,11 @@
 import { execFile } from 'node:child_process'
-import { realpathSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
+import { temporaryRoot } from './test-temp-root.js'
 
 const execute = promisify(execFile)
-// Windows temp paths are 8.3 short (RUNNER~1); the PowerShell scripts under test expand them via GetFullPath.
-const temporaryRoot = realpathSync.native(tmpdir())
 const script = resolve(import.meta.dirname, '../../../scripts/teams-local-connection.ps1')
 const folders: string[] = []
 afterEach(async () => { for (const folder of folders.splice(0)) await rm(folder, { recursive: true, force: true }) })

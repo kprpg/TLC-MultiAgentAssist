@@ -1,10 +1,10 @@
 import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { isCliConfiguration, loadTeamsConfiguration } from '../../../apps/teams/src/configuration.js'
 import { createNativeConnection } from '../../../apps/teams/src/native-connection.js'
 import { prepareOwnerDirectory } from '../../../apps/teams/src/local-owner-control.js'
+import { temporaryRoot } from './test-temp-root.js'
 
 const folders: string[] = []
 afterEach(async () => {
@@ -13,7 +13,7 @@ afterEach(async () => {
 })
 
 async function fixture(writeMode: 'read-only' | 'reviewed') {
-  const directory = await mkdtemp(join(tmpdir(), 'tlc-cli-transport-'))
+  const directory = await mkdtemp(join(temporaryRoot, 'tlc-cli-transport-'))
   folders.push(directory)
   const owner = join(directory, 'owner')
   await prepareOwnerDirectory(owner)
