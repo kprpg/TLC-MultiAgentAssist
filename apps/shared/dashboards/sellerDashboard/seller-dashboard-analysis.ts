@@ -1,6 +1,6 @@
 import type {
     SellerDashboardMilestone, SellerDashboardOpportunity, SellerDashboardReport
-} from '../../packages/common/contracts/seller-dashboard.js'
+} from '../../../../packages/common/contracts/seller-dashboard.js'
 
 export interface SellerDashboardFilters {
     account: string

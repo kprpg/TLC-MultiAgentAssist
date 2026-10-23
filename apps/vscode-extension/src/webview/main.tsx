@@ -4,8 +4,8 @@ import { App } from './app.js'
 import './styles.css'
 import '../../../shared/feedback.css'
 import '../../../shared/record-creation/new-workspace.css'
-import '../../../shared/dashboard-workspace.css'
-import '../../../shared/seller-dashboard.css'
+import '../../../shared/dashboards/dashboard-workspace.css'
+import '../../../shared/dashboards/sellerDashboard/seller-dashboard.css'
 
 const container = document.getElementById('root')
 if (container) {

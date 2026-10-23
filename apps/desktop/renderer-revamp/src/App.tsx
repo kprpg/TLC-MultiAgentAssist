@@ -49,7 +49,7 @@ import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js
 import type { PortfolioSearchResult } from '../../../shared/portfolio-search.js'
 import { PortfolioSearch } from './portfolio-search.js'
 import { scaledDarkTheme, scaledLightTheme } from './scaled-theme.js'
-import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
+import { DashboardWorkspace } from '../../../shared/dashboards/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
 import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'

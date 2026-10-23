@@ -361,7 +361,7 @@ Workspace links below are relative to this Teams documentation folder. Proposed 
 [shared-ui]: ../../apps/shared
 [operation-registry]: ../../packages/orchestrator/operations.ts
 [application-services]: ../../packages/orchestrator/application-runtime.ts
-[dashboard-workspace]: ../../apps/shared/dashboard-workspace.tsx
+[dashboard-workspace]: ../../apps/shared/dashboards/dashboard-workspace.tsx
 [dashboard-host]: ../../packages/orchestrator/seller-dashboard.ts
 [dashboard-contracts]: ../../packages/common/contracts/seller-dashboard.ts
 [teams-browser-auth]: ../../apps/teams/src/client/authentication.ts

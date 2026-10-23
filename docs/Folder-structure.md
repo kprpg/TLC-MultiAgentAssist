@@ -290,9 +290,29 @@ validates external search responses and builds bounded literal typo queries; the
 live connector owns metadata verification, delegated read-back and account preferences.
 No host-specific orchestration or new wire shape is introduced.
 
-Seller Dashboard uses shared `seller-dashboard.tsx`, `seller-dashboard-sections.tsx`,
-`seller-dashboard-table.tsx`, `seller-dashboard-analysis.ts`, and feature-scoped
-`seller-dashboard.css` in `apps/shared`. Its browser-safe, independently versioned
+Dashboard presentation lives in `apps/shared/dashboards`, shared by Desktop/Web,
+the VS Code webview, and the existing Teams client:
+
+```text
+apps/shared/dashboards/
+  dashboard-workspace.tsx
+  dashboard-workspace.css
+  sellerDashboard/
+    seller-dashboard.tsx
+    seller-dashboard-sections.tsx
+    seller-dashboard-table.tsx
+    seller-dashboard-analysis.ts
+    seller-dashboard.css
+```
+
+Each dashboard owns its components, helpers, and feature-scoped styles in its own
+folder. Future dashboards, such as `SE-manager-dashboard` or `AE-dashboard`, belong
+in sibling folders beside `sellerDashboard`. Register their tabs and panes in
+`dashboard-workspace.tsx` and import their styles in each consuming surface's entry
+point. Only Seller Dashboard is currently registered; no placeholder tabs are shown.
+Contracts, data access, and orchestration remain in their existing package layers.
+
+Seller Dashboard's browser-safe, independently versioned
 schemas live in `packages/common/contracts/seller-dashboard.ts`, with one fictitious
 snapshot in `packages/common/fixtures/seller-dashboard.ts`. The shared read-only
 host in `packages/orchestrator/seller-dashboard.ts` fronts the optional

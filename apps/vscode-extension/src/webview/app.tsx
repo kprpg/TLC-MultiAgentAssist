@@ -23,7 +23,7 @@ import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportun
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 import { readTranscriptFile } from '../../../shared/transcript-file.js'
 import { meetingProposalToMarkdown } from '../../../shared/meeting-proposal-markdown.js'
-import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
+import { DashboardWorkspace } from '../../../shared/dashboards/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
 import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'

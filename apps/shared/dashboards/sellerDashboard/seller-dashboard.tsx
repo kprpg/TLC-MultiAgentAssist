@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import {
     sellerDashboardContractVersion, sellerDashboardRequestSchema, sellerDashboardResponseSchema,
     type SellerDashboardRequest, type SellerDashboardResponse, type SellerDashboardSnapshot
-} from '../../packages/common/contracts/seller-dashboard.js'
+} from '../../../../packages/common/contracts/seller-dashboard.js'
 import {
     defaultSellerDashboardFilters, emptySellerDashboardFilters, filterSellerDashboard,
     sellerDate, sellerFiscalQuarters, type SellerDashboardFilters

@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from 'react'
-import { SellerDashboardPane, type InvokeSellerDashboard } from './seller-dashboard.js'
+import { SellerDashboardPane, type InvokeSellerDashboard } from './sellerDashboard/seller-dashboard.js'
 
 type DashboardId = 'seller-dashboard'
 

@@ -29,7 +29,7 @@ interface PendingReview { preview: ActionPreview; resolve(receipt: ActionReceipt
 const WorkflowsWorkspace = lazy(() => import('./workflows.js').then((module) => ({ default: module.WorkflowsWorkspace })))
 const MeetingsWorkspace = lazy(() => import('./meetings.js').then((module) => ({ default: module.MeetingsWorkspace })))
 const ActivityWorkspace = lazy(() => import('./activity.js').then((module) => ({ default: module.ActivityWorkspace })))
-const DashboardWorkspace = lazy(() => import('../../../shared/dashboard-workspace.js').then((module) => ({ default: module.DashboardWorkspace })))
+const DashboardWorkspace = lazy(() => import('../../../shared/dashboards/dashboard-workspace.js').then((module) => ({ default: module.DashboardWorkspace })))
 
 export function TeamsApp() {
   const parameters = new URLSearchParams(location.search)

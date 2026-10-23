@@ -654,6 +654,34 @@ In the browser/Teams **Portfolio > Guidance** response, these controls are at th
 recipient addresses separated by commas or semicolons to download an unsent `.eml` draft;
 the browser does not send it automatically.
 
+### 7.6 Reading evidence references (`O.C1`, `M2.A1`, …)
+
+Agent responses cite the evidence behind each signal and action with short labels in
+backticks, such as "Sponsor approved the pilot budget (`O.C1`, 2 days ago)". Each label
+points to one item in the evidence pack the agent was given for that request.
+
+| Label | Refers to |
+|---|---|
+| `O` | The selected opportunity record |
+| `O.C1`, `O.C2`, … | Opportunity comments (forecast-comment history) |
+| `O.N1`, `O.N2`, … | Opportunity notes |
+| `O.A1`, `O.A2`, … | Opportunity activities |
+| `M1`, `M2`, … | Milestones |
+| `M1.C1`, `M1.C2`, … | Comments on milestone `M1` |
+| `M1.A1`, `M1.A2`, … | Activities on milestone `M1` |
+
+How to read them:
+
+- `M2.A3` means "the third activity entry on the second milestone".
+- Comments, notes, and activities are numbered **newest first** within their category, so `O.C1` is the latest opportunity comment.
+- Milestones are numbered with open milestones first, then by earliest target date.
+- Labels are **specific to one request**. They are not MSX IDs or MCEM stages, and the same label can point to a different item in a later request.
+- There is no milestone-note label; only milestone comments and activities are cited.
+- Entries are capped (and tightened further for very large records). When the response says evidence was truncated or a source could not be read, labels beyond the cap do not exist.
+
+The mapping is built in `packages/orchestrator/agent-evidence.ts`; see
+[Agentic Performance §3.4](../performance/Agentic-Performance.md#34-grounding-the-evidence-pack-all-agents-all-surfaces).
+
 After **Meeting Capture** analyzes a transcript, the same controls appear at the top right
 of **Follow-up > Proposed meeting changes**. The export includes the proposed field changes,
 new milestones and other signals, plus the evidence attribution and a reminder that the
