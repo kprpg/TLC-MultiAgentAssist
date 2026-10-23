@@ -1,0 +1,133 @@
+import { z } from 'zod'
+
+export const stagePipelineReviewContractVersion = '1.0' as const
+
+const identifier = z.string().min(1).max(200)
+const name = z.string().min(1).max(500)
+const text = z.string().max(30_000)
+const amount = z.number().finite()
+const nonnegative = amount.nonnegative()
+const count = z.number().int().nonnegative()
+const date = z.iso.date()
+const timestamp = z.iso.datetime({ offset: true })
+const month = z.string().regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/)
+
+export const stagePipelineStages = [
+    'Listen & Consult', 'Inspire & Design', 'Empower & Achieve', 'Realize Value', 'Manage & Optimize'
+] as const
+export const stagePipelineMilestoneStatuses = [
+    'On Track', 'At Risk', 'Blocked', 'Completed', 'Cancelled', 'Hygiene/Duplicate', 'Lost to Competitor'
+] as const
+
+export const stagePipelineStageSchema = z.enum(stagePipelineStages)
+export const stagePipelineMilestoneStatusSchema = z.enum(stagePipelineMilestoneStatuses)
+export const stagePipelineScopeSchema = z.enum(['azure', 'microsoft-services'])
+export const stagePipelineThreatSchema = z.enum(['None', 'Low', 'Medium', 'High'])
+
+export const stagePipelineOpportunitySchema = z.object({
+    id: identifier,
+    number: name,
+    customer: name,
+    name,
+    notes: text,
+    contact: text,
+    scope: stagePipelineScopeSchema,
+    solutionArea: name,
+    inbound: z.boolean(),
+    stage: stagePipelineStageSchema,
+    status: z.enum(['In Progress', 'On Hold', 'Won', 'Lost']),
+    forecast: name,
+    closeDate: date,
+    daysInStage: count,
+    idleDays: count.nullable(),
+    consumedRecurring: nonnegative,
+    consumedNonRecurring: nonnegative,
+    maccCommit: nonnegative,
+    partner: text.nullable(),
+    competitor: z.object({ name: text.nullable(), threat: stagePipelineThreatSchema }).strict(),
+    solutionTagReview: z.boolean()
+}).strict()
+
+export const stagePipelineMilestoneSchema = z.object({
+    id: identifier,
+    number: name,
+    opportunityId: identifier,
+    name,
+    workload: text,
+    estimatedMonthlyAcr: nonnegative,
+    commitment: z.enum(['Committed', 'Uncommitted']),
+    status: stagePipelineMilestoneStatusSchema,
+    date: date.nullable(),
+    comment: text,
+    owner: text
+}).strict()
+
+const acrMonthSchema = z.object({
+    month,
+    actual: nonnegative,
+    baseline: nonnegative,
+    committed: nonnegative,
+    uncommitted: nonnegative,
+    stage1: nonnegative,
+    target: nonnegative
+}).strict()
+
+export const stagePipelineAcrSchema = z.object({
+    syncedAt: date,
+    lastActualMonth: month,
+    accounts: z.array(z.object({
+        customer: name,
+        months: z.array(acrMonthSchema).length(12)
+    }).strict()).max(500)
+}).strict()
+
+export const stagePipelineSnapshotSchema = z.object({
+    contractVersion: z.literal(stagePipelineReviewContractVersion),
+    kind: z.literal('snapshot'),
+    mode: z.enum(['sample', 'live']),
+    state: z.enum(['fresh', 'stale']),
+    message: text,
+    generatedAt: timestamp,
+    owner: z.string().max(200),
+    asOf: date,
+    fiscalYear: z.number().int().min(2000).max(2100),
+    opportunities: z.array(stagePipelineOpportunitySchema).max(5_000),
+    milestones: z.array(stagePipelineMilestoneSchema).max(25_000),
+    acr: stagePipelineAcrSchema
+}).strict().superRefine((value, context) => {
+    const ids = new Set<string>()
+    for (const [index, row] of value.opportunities.entries()) {
+        if (ids.has(row.id)) context.addIssue({ code: 'custom', path: ['opportunities', index, 'id'], message: 'Opportunity ids must be unique.' })
+        ids.add(row.id)
+    }
+    const milestoneIds = new Set<string>()
+    for (const [index, row] of value.milestones.entries()) {
+        if (milestoneIds.has(row.id)) context.addIssue({ code: 'custom', path: ['milestones', index, 'id'], message: 'Milestone ids must be unique.' })
+        milestoneIds.add(row.id)
+        if (!ids.has(row.opportunityId)) context.addIssue({ code: 'custom', path: ['milestones', index, 'opportunityId'], message: 'Milestone must reference a listed opportunity.' })
+    }
+})
+
+export const stagePipelineUnavailableSchema = z.object({
+    contractVersion: z.literal(stagePipelineReviewContractVersion),
+    kind: z.literal('unavailable'),
+    code: z.enum(['source-unavailable', 'unauthorized', 'invalid-snapshot']),
+    message: text
+}).strict()
+
+export const stagePipelineRequestSchema = z.object({
+    contractVersion: z.literal(stagePipelineReviewContractVersion),
+    operation: z.literal('get')
+}).strict()
+
+export const stagePipelineResponseSchema = z.union([stagePipelineSnapshotSchema, stagePipelineUnavailableSchema])
+
+export type StagePipelineStage = z.infer<typeof stagePipelineStageSchema>
+export type StagePipelineMilestoneStatus = z.infer<typeof stagePipelineMilestoneStatusSchema>
+export type StagePipelineScope = z.infer<typeof stagePipelineScopeSchema>
+export type StagePipelineOpportunity = z.infer<typeof stagePipelineOpportunitySchema>
+export type StagePipelineMilestone = z.infer<typeof stagePipelineMilestoneSchema>
+export type StagePipelineAcr = z.infer<typeof stagePipelineAcrSchema>
+export type StagePipelineSnapshot = z.infer<typeof stagePipelineSnapshotSchema>
+export type StagePipelineRequest = z.infer<typeof stagePipelineRequestSchema>
+export type StagePipelineResponse = z.infer<typeof stagePipelineResponseSchema>

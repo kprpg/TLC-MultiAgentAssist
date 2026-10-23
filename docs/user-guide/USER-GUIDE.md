@@ -98,6 +98,7 @@ The TLC Assist view is organized into these tabs:
 - **Portfolio** — your accounts, opportunities, milestones, MSX evidence, and the four guidance agents, with **Email** and **Word** export on every agent response.
 - **Plays** — the operational Plays catalog in the left rail (ordered by workflow number) and the Operational Queue of results. Each queue item can be dispatched to an agent — for example **Send to Pursuit** or **Send to Risk & Play** — and the returned response can be exported with **Email** or **Word**, just like Portfolio guidance.
 - **Seller Dashboard** — a separate, read-only four-section performance report with fixed official attainment, account gaps, pipeline hygiene, consumption and U2C evidence. It adds no financial export/sharing controls; unavailable live sources remain unknown. See the [Seller Dashboard guide](SELLER-DASHBOARD.md) for filters, methodology and protected local-live setup.
+- **Stage and Pipeline Review** — a second Dashboards tab: consumption opportunities by stage with scope toggles, filters, alert cards, an ACR Actuals and Outlook chart and a milestone view. Read-only and currently sample-data only; see the [Stage and Pipeline Review guide](STAGE-PIPELINE-REVIEW.md).
 
 VS Code also contributes a native **TLC Assist** tree and toolbar commands (**TLC: Refresh Data**, **TLC: Add Customer Account**, **TLC: Toggle Hidden Customers**).
 

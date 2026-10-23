@@ -303,13 +303,32 @@ apps/shared/dashboards/
     seller-dashboard-table.tsx
     seller-dashboard-analysis.ts
     seller-dashboard.css
+  StageAndPipelineReview/
+    stage-pipeline-review.tsx          pane: state, header, tabs
+    stage-pipeline-filters.tsx         scope toggles, filter bar, multi-select, chips
+    stage-pipeline-analysis.ts         pure filter/KPI/alert/ACR/milestone/CSV helpers
+    stage-pipeline-opportunities.tsx   alert cards, KPI tiles, opportunity table
+    stage-pipeline-acr-chart.tsx       ACR Actuals and Outlook chart
+    stage-pipeline-milestones.tsx      milestone status chart, filters, table
+    stage-pipeline-extra-tabs.tsx      Actions, Consumption, MACC & Commits
+    stage-pipeline-parts.tsx           KPI/pill/row-action/CSV-download primitives
+    stage-pipeline-table.tsx           sortable table
+    stage-pipeline-storage.ts          browser-only Focus/Reviewed marks
+    stage-pipeline-review.css
 ```
 
 Each dashboard owns its components, helpers, and feature-scoped styles in its own
 folder. Future dashboards, such as `SE-manager-dashboard` or `AE-dashboard`, belong
 in sibling folders beside `sellerDashboard`. Register their tabs and panes in
 `dashboard-workspace.tsx` and import their styles in each consuming surface's entry
-point. Only Seller Dashboard is currently registered; no placeholder tabs are shown.
+point. Seller Dashboard and Stage and Pipeline Review are currently registered; no placeholder tabs are shown.
+Stage and Pipeline Review's browser-safe contract is
+`packages/common/contracts/stage-pipeline-review.ts` with a fictitious fixture in
+`packages/common/fixtures/stage-pipeline-review.ts`. It runs in sample mode today; the pane
+takes an optional `invoke` so a shared orchestrator operation can feed live data later
+(see `.github/skills/stage-pipeline-review-dashboard/references/data-mapping.md`).
+Its prompts and skill live in `.github/skills/stage-pipeline-review-dashboard/` and
+`.github/prompts/generate-stage-pipeline-review.prompt.md`.
 Contracts, data access, and orchestration remain in their existing package layers.
 
 Seller Dashboard's browser-safe, independently versioned
