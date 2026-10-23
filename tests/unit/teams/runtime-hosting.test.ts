@@ -4,7 +4,7 @@ import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { loadTeamsConfiguration, loadTeamsRuntimeConfiguration } from '../../../apps/teams/src/configuration.js'
-import { createTeamsStateStore, createTeamsWorkloadCredential } from '../../../apps/teams/src/runtime-resources.js'
+import { createTeamsStateStore, createTeamsWorkloadCredential, requiresTeamsFoundryCredential } from '../../../apps/teams/src/runtime-resources.js'
 import { startTeamsServer } from '../../../apps/teams/src/server.js'
 
 const tenant = '11111111-1111-4111-8111-111111111111'
@@ -146,5 +146,12 @@ describe('one Teams runtime, local now and Azure later', () => {
     await expect(createTeamsStateStore(configuration, runtime, {
       ...environment, TLC_TEAMS_STATE_KEY: Buffer.alloc(32, 8).toString('base64')
     })).rejects.toThrow(/authenticate|key/i)
+  })
+
+  it('initializes the narrative credential for reporting in deterministic native and CLI modes', () => {
+    expect(requiresTeamsFoundryCredential({}, false, false)).toBe(false)
+    expect(requiresTeamsFoundryCredential({ TLC_SE_REPORTING_ENABLED: '1' }, false, false)).toBe(true)
+    expect(requiresTeamsFoundryCredential({}, true, false)).toBe(true)
+    expect(requiresTeamsFoundryCredential({}, false, true)).toBe(true)
   })
 })
