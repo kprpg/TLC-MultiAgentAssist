@@ -5,17 +5,48 @@
     {
       "id": "recorded-stage-divergence",
       "prompt": "How do we move this opportunity to the next MCEM stage?",
-      "expected": ["Separates recorded and supported stage", "Evaluates exit criteria", "Returns owner-specific actions"]
+      "expected": [
+        "Separates recorded and supported stage",
+        "Evaluates exit criteria",
+        "Returns owner-specific actions"
+      ]
     },
     {
       "id": "missing-stage-and-stakeholders",
       "prompt": "Coach an opportunity with no recorded stage or stakeholder map.",
-      "expected": ["Does not infer a stage", "Lists missing evidence", "Preserves deterministic evaluation"]
+      "expected": [
+        "Does not infer a stage",
+        "Lists missing evidence",
+        "Preserves deterministic evaluation"
+      ]
+    },
+    {
+      "id": "comment-history-vs-criteria",
+      "prompt": "Does the comment history support moving this opportunity to the next stage?",
+      "expected": [
+        "Maps cited comment and activity refs to exit criteria and the next-stage gate",
+        "Reports contradictions with the local evaluation without changing it",
+        "Names evidence gaps instead of assuming absence"
+      ]
     },
     {
       "id": "pursuit-handoff",
       "prompt": "Prepare MCEM gaps for a pursuit plan.",
-      "expected": ["Prioritizes supported gaps", "Produces a structured handoff", "Does not call another agent"]
+      "expected": [
+        "Prioritizes supported gaps",
+        "Produces a structured handoff",
+        "Does not call another agent"
+      ]
+    },
+    {
+      "id": "readable-markdown-presentation",
+      "prompt": "Give me the guidance for this opportunity.",
+      "expected": [
+        "Uses ## headings in the documented order without numbering",
+        "Presents signals, risks, and actions as compact tables",
+        "Shows plain-language facts with entry refs and no raw field names",
+        "Ends with a Feedback prompt offering action-verb follow-ups"
+      ]
     }
   ]
 }

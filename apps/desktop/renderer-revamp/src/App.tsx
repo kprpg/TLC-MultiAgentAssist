@@ -1,6 +1,4 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import Markdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, DialogTrigger, DrawerBody, DrawerHeader, DrawerHeaderTitle, Field, FluentProvider, Input, Menu, MenuItem, MenuItemRadio, MenuList, MenuPopover, MenuTrigger, MessageBar, OverlayDrawer, Spinner, Textarea, Tooltip } from '@fluentui/react-components'
 import {
   Apps20Regular,
@@ -62,7 +60,8 @@ import { McemStageColumns } from '../../../shared/mcem-stage-board.js'
 import { WorkbenchPane } from './workbench-pane.js'
 import { SourceSyncStatus } from '../../../shared/sync-status.js'
 import { usePresentationSession } from '../../../shared/presentation-hooks.js'
-import { useAgentRun } from '../../../shared/use-agent-run.js'
+import { useAgentRun, type AgentInvoke } from '../../../shared/use-agent-run.js'
+import { AgentResponse } from '../../../shared/agent-response.js'
 
 type Shell = 'desktop' | 'web'
 type WorkspaceView = 'accounts' | 'workflows' | 'discover' | 'dashboard' | 'new'
@@ -214,11 +213,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [centerTab, setCenterTab] = useState<CenterTab>('msx')
   const [capability, setCapability] = useState<AgentCapability>('account-pulse')
   const [taskPrompt, setTaskPrompt] = useState('')
-  const { agentResult, setAgentResult, agentLoading, setAgentLoading, agentPhase, runAgent, cancelAgent } = useAgentRun(
-    (agentCapability, accountId, opportunityId, prompt, onProgress, signal) => client.runAgentTaskStream
+  const invokeAgent: AgentInvoke = (agentCapability, accountId, opportunityId, prompt, onProgress, signal) => client.runAgentTaskStream
       ? client.runAgentTaskStream(agentCapability, accountId, opportunityId, prompt, onProgress, signal)
       : client.runAgentTask(agentCapability, accountId, opportunityId, prompt)
-  )
+  const { agentResult, setAgentResult, agentLoading, setAgentLoading, agentPhase, runAgent, cancelAgent } = useAgentRun(invokeAgent)
   const [emailDialogOpen, setEmailDialogOpen] = useState(false)
   const [emailRecipients, setEmailRecipients] = useState('')
   const [emailSubject, setEmailSubject] = useState('')
@@ -1524,9 +1522,9 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                 </div>
               </header>
               {shareMessage && <MessageBar intent={shareStatus === 'error' ? 'error' : 'success'}>{shareMessage}</MessageBar>}
-              <div className="agent-response-markdown">
-                <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ a: ({ href, children }) => <a href={href} onClick={(event) => { event.preventDefault(); if (href) void client.openEvidence(href) }}>{children}</a> }}>{formatResponseMarkdown(agentResult.content)}</Markdown>
-              </div>
+              <AgentResponse key={agentResult.correlationId} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'}
+                followUp={account ? { capability: agentResult.capability, accountId: account.id, opportunityId: opportunity.id, invoke: invokeAgent } : undefined}
+                onOpenEvidence={client.openEvidence} />
             </article> : !agentLoading && <div className="empty-state compact">Choose a suggested prompt or ask a different question.</div>}
           </div>}
           {!loading && centerTab === 'stages' && <div className="mcem-board-shell">
@@ -1681,7 +1679,8 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           guidanceLoading={workflowGuidanceLoading}
           guidanceLabel={agentCapabilities.find(({ id }) => id === workflowGuidanceCapability(selectedWorkflowOutput.workflowId))?.label ?? 'Guidance'}
           guidanceResults={workflowGuidanceResults}
-          onOpenEvidence={(url) => void client.openEvidence(url)}
+          invokeAgent={invokeAgent}
+          onOpenEvidence={client.openEvidence}
           onSendGuidance={sendWorkflowToGuidance}
         />}
 
@@ -1860,6 +1859,7 @@ function WorkflowResult({
   guidanceLoading,
   guidanceLabel,
   guidanceResults,
+  invokeAgent,
   onOpenEvidence,
   onSendGuidance
 }: {
@@ -1868,7 +1868,8 @@ function WorkflowResult({
   guidanceLoading: string | null
   guidanceLabel: string
   guidanceResults: Readonly<Record<string, AgentTaskResponse>>
-  onOpenEvidence: (url: string) => void
+  invokeAgent: AgentInvoke
+  onOpenEvidence: (url: string) => void | Promise<void>
   onSendGuidance?: (queueItemId: string) => void
 }) {
   const card = output.card
@@ -1885,9 +1886,9 @@ function WorkflowResult({
         <article><span className={`priority ${item.priority.toLowerCase()}`}>{item.priority}</span><div><strong>{item.title}</strong><p>{item.owner ?? 'Unassigned'}{item.dueDate ? ` · Due ${item.dueDate}` : ''}</p></div>{onSendGuidance && item.accountId && item.opportunityId && <Button appearance="subtle" className="text-action" icon={<Sparkle20Regular />} disabled={guidanceLoading !== null} onClick={() => onSendGuidance(item.id)}>{guidanceLoading === item.id ? 'Sending…' : `Send to ${guidanceLabel}`}</Button>}</article>
         {guidanceResult && <section className="workflow-guidance-result" aria-label={`${guidanceLabel} result for ${item.title}`}>
           <header><div><p className="eyebrow">{guidanceLabel}</p><strong>Workflow follow-up</strong></div><span>Agent {guidanceResult.agentVersion}</span></header>
-          <div className="agent-response-markdown">
-            <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ a: ({ href, children }) => <a href={href} onClick={(event) => { event.preventDefault(); if (href) onOpenEvidence(href) }}>{children}</a> }}>{formatResponseMarkdown(guidanceResult.content)}</Markdown>
-          </div>
+          <AgentResponse key={guidanceResult.correlationId} content={guidanceResult.content}
+            followUp={item.accountId && item.opportunityId ? { capability: guidanceResult.capability, accountId: item.accountId, opportunityId: item.opportunityId, invoke: invokeAgent } : undefined}
+            onOpenEvidence={onOpenEvidence} />
         </section>}
       </Fragment>
     })}</section>

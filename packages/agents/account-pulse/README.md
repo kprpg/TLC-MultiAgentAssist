@@ -4,7 +4,7 @@ Prioritizes weekly account and opportunity attention with explainable evidence-b
 
 ## Inputs
 
-Versioned orchestrator context containing role, intent, accounts, opportunities, milestones, activity, source health, freshness, and ranking threshold.
+Versioned orchestrator context containing role, intent, accounts, opportunities, milestones, activity, source health, freshness, ranking threshold, and the bounded evidence pack (dated comment history, notes, activities, milestone detail, staleness signals, and coverage gaps).
 
 ## Outputs
 

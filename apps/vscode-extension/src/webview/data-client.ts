@@ -1,5 +1,5 @@
 import { request, streamRequest } from './bridge.js'
-import { createAgentStreamAccumulator, type AgentStreamProgress } from '../../../shared/agent-stream.js'
+import { AgentStreamError, createAgentStreamAccumulator, type AgentStreamProgress } from '../../../shared/agent-stream.js'
 import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest } from '../../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema, type SellerDashboardRequest } from '../../../../packages/common/contracts/seller-dashboard.js'
 import {
@@ -103,19 +103,32 @@ const transport = {
     /** Progressive run: reports the instant draft and streamed text via `onProgress`, resolves with the authoritative response. */
     runAgentTaskStream: (capability: AgentCapability, accountId: string, opportunityId: string, prompt: string,
         onProgress?: (progress: AgentStreamProgress) => void, signal?: AbortSignal) =>
-        new Promise<AgentTaskView>((resolve, reject) => {
+        new Promise<syncContracts.AgentTaskResponse>((resolve, reject) => {
+            if (signal?.aborted) {
+                reject(new AgentStreamError('cancelled', 'The request was cancelled.'))
+                return
+            }
             const accumulator = createAgentStreamAccumulator(onProgress)
+            const finish = () => {
+                signal?.removeEventListener('abort', onAbort)
+                handle.end()
+            }
+            const onAbort = () => {
+                handle.cancel()
+                finish()
+                reject(new AgentStreamError('cancelled', 'The request was cancelled.'))
+            }
             const handle = streamRequest('runAgentTaskStream', { capability, accountId, opportunityId, prompt }, (raw) => {
                 try {
                     accumulator.push(syncContracts.agentTaskStreamEventSchema.parse(raw))
                     const event = raw as { type?: string }
-                    if (event.type === 'complete') { handle.end(); resolve(accumulator.result()) }
+                    if (event.type === 'complete') { finish(); resolve(accumulator.result()) }
                 } catch (error) {
-                    handle.end()
+                    finish()
                     reject(error)
                 }
             })
-            signal?.addEventListener('abort', () => handle.cancel(), { once: true })
+            signal?.addEventListener('abort', onAbort, { once: true })
         }),
     listWorkflowDefinitions: () => request<WorkflowDefinitionView[]>('listWorkflowDefinitions', { scope: 'portfolio' }),
     listWorkflowRuns: (limit = 10) => request<WorkflowRunView[]>('listWorkflowRuns', { limit }),

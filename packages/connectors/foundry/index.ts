@@ -5,7 +5,7 @@ import { dirname } from 'node:path'
 import { reportMetrics, type PerformanceReporter } from '../../common/telemetry/performance.js'
 import type { AgentInvoker, AgentStreamHandlers, McemAgentContext } from '../../orchestrator/index.js'
 
-export interface FoundryPromptAgentOptions {
+export interface FoundryPromptAgentOptions<TContext = unknown> {
   projectEndpoint: string
   agentName: string
   requestTimeoutMs: number
@@ -15,6 +15,8 @@ export interface FoundryPromptAgentOptions {
   firstTokenTimeoutMs?: number | undefined
   maxOutputTokens?: number | undefined
   performanceReporter?: PerformanceReporter | undefined
+  /** Renders the model input. Defaults to `JSON.stringify(context)`. */
+  serializeContext?: ((context: TContext) => string) | undefined
 }
 
 export type FoundryOpenAIClient = ReturnType<AIProjectClient['getOpenAIClient']>
@@ -50,8 +52,12 @@ function isStreamingUnsupported(error: unknown): boolean {
 export class FoundryPromptAgent<TContext> implements AgentInvoker<TContext> {
   private readonly openAIClient
 
-  constructor(private readonly options: FoundryPromptAgentOptions) {
+  constructor(private readonly options: FoundryPromptAgentOptions<TContext>) {
     this.openAIClient = options.openAIClient ?? createFoundryOpenAIClient(options.projectEndpoint, options.credential)
+  }
+
+  private input(context: TContext): string {
+    return this.options.serializeContext ? this.options.serializeContext(context) : JSON.stringify(context)
   }
 
   async invoke(context: TContext): Promise<string> {
@@ -60,7 +66,7 @@ export class FoundryPromptAgent<TContext> implements AgentInvoker<TContext> {
 
     try {
       const response = await this.openAIClient.responses.create(
-        { input: JSON.stringify(context), ...this.outputLimit() },
+        { input: this.input(context), ...this.outputLimit() },
         {
           body: {
             agent_reference: {
@@ -119,7 +125,7 @@ export class FoundryPromptAgent<TContext> implements AgentInvoker<TContext> {
     let outcome: 'success' | 'failure' = 'failure'
     try {
       const events = await this.openAIClient.responses.create(
-        { input: JSON.stringify(context), stream: true, ...this.outputLimit() },
+        { input: this.input(context), stream: true, ...this.outputLimit() },
         {
           body: { agent_reference: { name: this.options.agentName, type: 'agent_reference' } },
           signal: controller.signal

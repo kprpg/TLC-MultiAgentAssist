@@ -1,0 +1,92 @@
+.agent-follow-ups {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--cp-border, var(--vscode-panel-border));
+}
+
+.agent-follow-ups-hint {
+    color: var(--cp-text-muted, var(--vscode-descriptionForeground));
+    font-size: 0.9em;
+}
+
+.agent-follow-up-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.agent-follow-up-options button,
+.agent-feedback-reply > button {
+    padding: 0.5rem 0.75rem;
+    color: var(--cp-text, var(--vscode-foreground));
+    background: var(--cp-surface-soft, var(--vscode-editorWidget-background));
+    border: 1px solid var(--cp-border, var(--vscode-panel-border));
+    border-radius: 0.375rem;
+    font: inherit;
+    text-align: left;
+    white-space: normal;
+    cursor: pointer;
+}
+
+.agent-follow-up-options button:hover:not(:disabled),
+.agent-follow-up-options button:focus-visible,
+.agent-feedback-reply > button:hover:not(:disabled),
+.agent-feedback-reply > button:focus-visible {
+    border-color: var(--cp-accent, var(--vscode-focusBorder));
+    outline: 2px solid var(--cp-accent, var(--vscode-focusBorder));
+    outline-offset: 2px;
+}
+
+.agent-follow-up-options button:disabled,
+.agent-feedback-reply > button:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.agent-follow-up-response {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--cp-border, var(--vscode-panel-border));
+}
+
+.agent-follow-up-response > header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.agent-follow-up-response > header span {
+    color: var(--cp-text-muted, var(--vscode-descriptionForeground));
+    font-size: 0.9em;
+}
+
+.agent-feedback-reply {
+    display: grid;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.agent-feedback-reply label {
+    display: grid;
+    gap: 0.25rem;
+}
+
+.agent-feedback-reply textarea {
+    width: 100%;
+    padding: 0.5rem;
+    box-sizing: border-box;
+    color: var(--cp-text, var(--vscode-input-foreground));
+    background: var(--cp-surface, var(--vscode-input-background));
+    border: 1px solid var(--cp-border, var(--vscode-input-border, var(--vscode-panel-border)));
+    font: inherit;
+    resize: vertical;
+}
+
+.agent-feedback-reply > button {
+    justify-self: start;
+}
+
+.agent-response-markdown {
+    overflow-wrap: anywhere;
+}

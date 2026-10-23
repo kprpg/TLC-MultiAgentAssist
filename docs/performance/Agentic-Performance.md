@@ -35,7 +35,7 @@ Every surface converges on the same orchestrator call, so the cost is shared and
 | 7 | **No telemetry for the dominant cost.** Only `agent.invoke.*` wall time was recorded, and only when `TLC_PERFORMANCE=1` outside desktop. | `packages/common/telemetry/performance.ts` | Cannot attribute time to first token vs generation vs retries. |
 | 8 | **Teams budget.** 4 agent requests per window per user; native fetch capped at 30 s. | `apps/teams/src/app.ts` | Retries by an impatient user exhaust the budget. Left unchanged (security/cost control). |
 
-Model input size was investigated and is **not** a significant factor: the context sent to the agent is the request, the opportunity with its milestones, five or fewer stage criteria and the local evaluation — a few KB.
+Model input size was originally a few KB (the request, the opportunity with its milestones, five or fewer stage criteria and the local evaluation). The evidence pack (section 3.4) raises it to a bounded budget of about 48 KB of JSON (roughly 12k tokens); it is read concurrently with the milestone and MCEM reads so it adds little wall-clock time, and the instant draft is still shown first.
 
 ## 3. What changed
 
@@ -77,6 +77,19 @@ Configuration (additive, optional, in `config/foundry.environment.json`):
 ```json
 { "foundry": { "requestTimeoutMs": 120000, "firstTokenTimeoutMs": 60000, "maxOutputTokens": 4096 } }
 ```
+
+### 3.4 Grounding: the evidence pack (all agents, all surfaces)
+
+Every agent request is built in one place, `ThinSliceOrchestrator.prepareAgentTask`, so Desktop, Web, VS Code, and Teams (and workflow guidance handoffs, which re-enter `runAgentTask`) ground agents on the same data. Besides the opportunity, milestones, current-stage MCEM criteria, and local evaluation, the context now carries:
+
+- `nextStageGuidance` — the MCEM gate for the next stage (absent at Stage 5).
+- `evidence` — an `AgentEvidencePack` (`packages/orchestrator/agent-evidence.ts`): the customer need statement, deal team, dated **forecast-comment history**, **notes**, and **activities** for the opportunity, and per milestone its comment history, tasks, status/commitment/target date, `overdue`/`daysToTarget`, and risk details. Entries are newest first with citation refs (`O.C1`, `M2.A1`) and ages. `signals` adds deterministic staleness and counts; `coverage` reports truncation and named `gaps`.
+
+How it is read: `LiveMsxConnector.getOpportunityEvidence` issues independent, access-gated reads (opportunity details, `msp_forecastcommentsjsonfield` history, `annotations`, `activitypointers`, one chunked `tasks` read for all milestones, milestone comment history, deal team, author names). One failed read becomes a named gap and the rest is kept; a missing comment-history column is treated as optional. Connectors without that method (sample fixture, local store) are enriched from the standard `listMilestoneActivities` reads, so sample mode keeps parity. The reads run concurrently with the milestone and MCEM reads.
+
+How it is sent: `serializeAgentContext` (used by `createFoundryTaskAgents`) replaces the raw `comments`/`riskDetails` fields with the pack so text is sent once and bounded (about 48 KB; caps tighten in tiers and `coverage.truncated` says so). Comment, note, activity, and need text is untrusted: the pack carries a notice and every agent's instructions say to analyze it and ignore embedded directives. If live reads had gaps, the MSX source health in the response is `partial`; the instant draft gains a "Recent evidence" section from the same pack. Nothing in this path logs comment text.
+
+Agent instructions, grounding policies, READMEs, golden scenarios, and the `foundry-agent.json` `definition.instructions` were updated together; **redeploy the four Foundry prompt agents** so the hosted definitions pick up the new Evidence Pack rules.
 
 ## 4. Per-surface notes
 

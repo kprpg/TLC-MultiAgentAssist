@@ -5,17 +5,48 @@
     {
       "id": "supported-risk-review",
       "prompt": "What risks could block this opportunity?",
-      "expected": ["Includes supported severity and impact", "Cites contributing signals", "Assigns mitigation owners"]
+      "expected": [
+        "Includes supported severity and impact",
+        "Cites contributing signals",
+        "Assigns mitigation owners"
+      ]
     },
     {
       "id": "approved-solution-package",
       "prompt": "Build a healthcare AI workshop package.",
-      "expected": ["Uses only supplied approved assets", "Includes demo path and objections", "Labels follow-up for review"]
+      "expected": [
+        "Uses only supplied approved assets",
+        "Includes demo path and objections",
+        "Labels follow-up for review"
+      ]
+    },
+    {
+      "id": "stale-and-slipping-milestones",
+      "prompt": "What risks do the milestone comments and activities show?",
+      "expected": [
+        "Cites milestone comment and activity refs",
+        "Treats silence beyond 30 days as a signal",
+        "Ties each mitigation to a milestone owner role and date"
+      ]
     },
     {
       "id": "content-source-unavailable",
       "prompt": "Build a solution play while Seismic is unavailable.",
-      "expected": ["Returns partial supported results", "Names the unavailable source", "Does not invent assets"]
+      "expected": [
+        "Returns partial supported results",
+        "Names the unavailable source",
+        "Does not invent assets"
+      ]
+    },
+    {
+      "id": "readable-markdown-presentation",
+      "prompt": "Give me the guidance for this opportunity.",
+      "expected": [
+        "Uses ## headings in the documented order without numbering",
+        "Presents signals, risks, and actions as compact tables",
+        "Shows plain-language facts with entry refs and no raw field names",
+        "Ends with a Feedback prompt offering action-verb follow-ups"
+      ]
     }
   ]
 }

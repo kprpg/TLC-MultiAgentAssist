@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { z } from 'zod'
-import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, agentTaskRequestSchema, createMilestoneActivityRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, mcemRequestSchema, mcemStageTransitionRequestSchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, milestoneUpdateSchema, opportunityUpdateSchema, seDomainSchema, type AuthStatus, type DesktopDataStatus, type McpServer, type PerformanceReporter } from '../../../../packages/common/index.js'
+import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, agentTaskRequestSchema, agentTaskStreamEventSchema, createMilestoneActivityRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, mcemRequestSchema, mcemStageTransitionRequestSchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, milestoneUpdateSchema, opportunityUpdateSchema, seDomainSchema, type AgentTaskStreamEvent, type AuthStatus, type DesktopDataStatus, type McpServer, type PerformanceReporter } from '../../../../packages/common/index.js'
 import {
   loadFoundryEnvironment,
   type FoundryEnvironment
@@ -511,9 +511,14 @@ function registerIpc(): void {
     const controller = new AbortController()
     agentStreams.set(id, controller)
     try {
+      let terminal: AgentTaskStreamEvent | undefined
       await orchestrator.runAgentTaskStream(parsed, (agentEvent) => {
-        if (!event.sender.isDestroyed()) event.sender.send('tlc:agent-task-event', { streamId: id, event: agentEvent })
+        const validated = agentTaskStreamEventSchema.parse(agentEvent)
+        if (validated.type === 'complete' || validated.type === 'error') terminal = validated
+        if (!event.sender.isDestroyed()) event.sender.send('tlc:agent-task-event', { streamId: id, event: validated })
       }, controller.signal)
+      if (!terminal) throw new Error('The agent response ended before it completed.')
+      return terminal
     } finally {
       agentStreams.delete(id)
     }

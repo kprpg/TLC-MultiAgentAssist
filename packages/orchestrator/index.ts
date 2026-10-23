@@ -65,6 +65,7 @@ import {
 } from '../common/index.js'
 import { evaluateMcemProgress } from '../agents/mcem-coach/index.js'
 import { formatLiveAgentGuidance } from './instant-draft.js'
+import { agentSourceHealth, buildAgentEvidencePack, collectOpportunityEvidence, type AgentEvidencePack } from './agent-evidence.js'
 import type {
   McemGuidanceConnector,
   MsxConnector,
@@ -97,7 +98,11 @@ export interface AgentTaskContext {
   request: AgentTaskRequest
   opportunityContext: OpportunityContext
   guidance: StageGuidance
+  /** MCEM gate the opportunity must pass to advance; absent at the final stage or when unavailable. */
+  nextStageGuidance?: StageGuidance
   localEvaluation: McemResponse
+  /** Bounded comment history, notes, activities, and milestone detail shared by every agent and host. */
+  evidence?: AgentEvidencePack
 }
 
 export interface ConfiguredTaskAgent {
@@ -408,15 +413,26 @@ export class ThinSliceOrchestrator {
     if (baseContext.account.id !== request.accountId) {
       throw new Error('The selected opportunity does not belong to the selected account.')
     }
-    const [milestones, guidance] = await Promise.all([
-      measurePerformance('agent.context.milestones', this.performanceReporter, () =>
-        this.msx.listMilestones(request.opportunityId)),
+    const recordedStage = baseContext.opportunity.recordedStage
+    const milestoneRead = measurePerformance('agent.context.milestones', this.performanceReporter, () =>
+      this.msx.listMilestones(request.opportunityId))
+    const [milestones, guidance, nextStageGuidance, evidenceRead] = await Promise.all([
+      milestoneRead,
       measurePerformance('agent.context.mcem', this.performanceReporter, () =>
-        this.mcem.getStageGuidance(baseContext.opportunity.recordedStage))
+        this.mcem.getStageGuidance(recordedStage)),
+      recordedStage < 5
+        ? this.mcem.getStageGuidance(recordedStage + 1).catch(() => undefined)
+        : Promise.resolve(undefined),
+      measurePerformance('agent.context.evidence', this.performanceReporter, () =>
+        collectOpportunityEvidence(this.msx, baseContext, milestoneRead))
     ])
     const opportunityContext = { ...baseContext, milestones }
     const localEvaluation = evaluateMcemProgress(opportunityContext, guidance)
-    return { configuredAgent, context: { request, opportunityContext, guidance, localEvaluation } }
+    const evidence = buildAgentEvidencePack({ context: opportunityContext, milestones, evidence: evidenceRead })
+    return {
+      configuredAgent,
+      context: { request, opportunityContext, guidance, ...(nextStageGuidance ? { nextStageGuidance } : {}), localEvaluation, evidence }
+    }
   }
 
   private buildAgentResponse(
@@ -426,8 +442,8 @@ export class ThinSliceOrchestrator {
     content: string,
     fallback?: string
   ): AgentTaskResponse {
-    const { opportunityContext, guidance } = context
-    const sourceHealth = [opportunityContext.sourceHealth, guidance.sourceHealth]
+    const { opportunityContext } = context
+    const sourceHealth = agentSourceHealth(context)
     const isPartial = fallback !== undefined || sourceHealth.some((source) => ['partial', 'stale', 'unavailable'].includes(source.state))
     const responseContent = addMsxOpportunityLink(content.trim(), opportunityContext.opportunity.id)
     return {
@@ -481,7 +497,7 @@ export class ThinSliceOrchestrator {
         const instantDraft = formatLiveAgentGuidance(request.capability, context)
         emit({
           type: 'context', streamVersion: agentTaskStreamVersion, capability: request.capability, instantDraft,
-          sourceHealth: [context.opportunityContext.sourceHealth, context.guidance.sourceHealth]
+          sourceHealth: agentSourceHealth(context)
         })
         let content: string
         let fallback: string | undefined
@@ -512,6 +528,7 @@ function errorMessage(error: unknown): string {
 }
 
 export { addMsxOpportunityLink }
+export * from './agent-evidence.js'
 export * from './policies/mcp-tool-authorization.js'
 export * from './prewarm.js'
 export * from './progress/index.js'

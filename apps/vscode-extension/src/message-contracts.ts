@@ -4,6 +4,7 @@ import { voiceRequestSchema } from '../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema } from '../../../packages/common/contracts/seller-dashboard.js'
 import { discoverySnapshotRequestSchema, portfolioReadRequestSchema, portfolioWorkspaceRequestSchema, agentTaskStreamEventSchema } from '../../../packages/common/contracts/index.js'
 import { cacheControlRequestSchema, mutationSyncRequestSchema } from '../../../packages/common/contracts/cache-sync.js'
+import { agentTaskPromptMaxLength } from '../../../packages/common/contracts/agent-task-limits.js'
 
 /**
  * Strict, discriminated message envelopes for the webview <-> extension-host bridge.
@@ -122,7 +123,7 @@ export const bridgeParamSchemas = {
         capability: agentCapabilitySchema,
         accountId: z.string().min(1).max(200),
         opportunityId: z.string().min(1).max(200),
-        prompt: z.string().min(1).max(4000)
+        prompt: z.string().min(1).max(agentTaskPromptMaxLength)
     }).strict(),
     listWorkflowDefinitions: z.object({ scope: scopeKindSchema.optional() }).strict().optional(),
     startWorkflow: z.object({

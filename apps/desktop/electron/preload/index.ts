@@ -4,6 +4,7 @@ import type { WorkflowHostOperation } from '../../../../packages/orchestrator/wo
 import type { VoiceRequest, VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 import type { SellerDashboardRequest, SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
 import type { DiscoverySnapshot, DiscoverySnapshotRequest, PortfolioReadRequest, PortfolioIndex, PortfolioWorkspaceRequest, PortfolioWorkspace } from '../../../../packages/common/contracts/index.js'
+import { agentTaskStreamEventSchema } from '../../../../packages/common/contracts/index.js'
 import {
   cacheControlResponseSchema, mutationSyncResponseSchema, type CacheControlRequest, type CacheControlResponse,
   type MutationSyncRequest, type MutationSyncResponse, type CacheReadState
@@ -101,11 +102,21 @@ const api: TlcDesktopApi = {
   runAgentTask: (request) => ipcRenderer.invoke('tlc:run-agent-task', request),
   runAgentTaskStream: (request, onEvent) => {
     const streamId = globalThis.crypto.randomUUID()
+    let terminalDelivered = false
     const listener = (_event: Electron.IpcRendererEvent, message: { streamId?: string; event?: unknown }) => {
-      if (message?.streamId === streamId) onEvent(message.event)
+      if (message?.streamId !== streamId || terminalDelivered) return
+      const event = message.event
+      if (event && typeof event === 'object' && 'type' in event && (event.type === 'complete' || event.type === 'error')) terminalDelivered = true
+      onEvent(event)
     }
     ipcRenderer.on('tlc:agent-task-event', listener)
-    const done = (ipcRenderer.invoke('tlc:run-agent-task-stream', request, streamId) as Promise<void>)
+    // Invoke replies can overtake queued events; the acknowledgement carries the same terminal event.
+    const done = ipcRenderer.invoke('tlc:run-agent-task-stream', request, streamId)
+      .then((raw: unknown) => {
+        const terminal = agentTaskStreamEventSchema.parse(raw)
+        if (terminal.type !== 'complete' && terminal.type !== 'error') throw new Error('The agent response ended before it completed.')
+        if (!terminalDelivered) { terminalDelivered = true; onEvent(terminal) }
+      })
       .finally(() => { ipcRenderer.removeListener('tlc:agent-task-event', listener) })
     return { cancel: () => { void ipcRenderer.invoke('tlc:cancel-agent-task-stream', streamId) }, done }
   },

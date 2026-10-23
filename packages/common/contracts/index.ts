@@ -3,8 +3,10 @@ import { workflowAgentCapabilityValues } from './workflows.js'
 import { seDomainSchema } from '../configuration/se-domains.js'
 import { contractVersion } from './version.js'
 import { accountSchema } from './portfolio.js'
+import { agentTaskPromptMaxLength } from './agent-task-limits.js'
 
 export { contractVersion } from './version.js'
+export { agentTaskPromptMaxLength } from './agent-task-limits.js'
 export * from './mcp.js'
 export * from './portfolio.js'
 export * from './workflows.js'
@@ -286,7 +288,7 @@ export const agentTaskRequestSchema = z.object({
   capability: agentCapabilitySchema,
   accountId: z.string().min(1),
   opportunityId: z.string().min(1),
-  prompt: z.string().min(3).max(1000)
+  prompt: z.string().min(3).max(agentTaskPromptMaxLength)
 })
 
 export const agentTaskResponseSchema = z.object({

@@ -622,6 +622,28 @@ Every agent response follows the same contract:
 - Explicit assumptions and cautions — anything the agent could not confirm from the current evidence.
 - Citations to the underlying MSX/MCEM evidence items.
 
+Desktop, Web, and the VS Code webview display section headings, bold field labels,
+lists, and tables consistently, including numbered or plain-text section labels.
+When a response ends with an offer such as "Would you like me to convert this into
+an email?", **Suggested follow-ups** provides a clickable button. Selecting it sends
+the accepted suggestion and the preceding response to the **same agent for the same
+opportunity**. The original response stays visible, and the new response appears below
+it with the same formatting. Subsequent offers can be continued in the same way.
+Offers in workflow guidance use that queue item's opportunity, not another selected
+opportunity.
+
+For a feedback question that needs your input, choose **Reply to feedback**, enter
+your answer or requested adjustment, and select **Send reply to agent**. No answer is
+chosen on your behalf; your reply is sent with the preceding response as context.
+
+Follow-ups require an explicit click; they never send an email or update MSX.
+Buttons are disabled while a response is being generated. Use **Cancel follow-up**
+to stop a follow-up, or retry after a visible error. Navigating away cancels an
+in-progress follow-up. Conversation context stays in the current view, not persistent
+browser storage. If the preceding response exceeds the bounded request size, the UI
+reports it rather than silently truncating evidence; ask for a shorter response first.
+Sample mode remains deterministic and does not contact a model.
+
 Two actions sit in the header of a completed response:
 
 - **Send Email** — opens a pre-populated draft in your default Outlook client. Nothing is sent automatically; you review and press *Send* yourself.

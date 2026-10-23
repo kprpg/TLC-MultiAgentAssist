@@ -1,6 +1,4 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactElement } from 'react'
-import Markdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import workflowDescriptionsJson from '../../../../config/workflow-descriptions.json' with { type: 'json' }
 import { agentCapabilities } from '../../../../packages/common/types/agent-capabilities.js'
 import { dataClient } from './data-client.js'
@@ -36,11 +34,13 @@ import { RemoveCustomerButton } from '../../../shared/remove-customer.js'
 import { usePortfolioRefresh } from './use-portfolio-refresh.js'
 import { SourceSyncStatus } from '../../../shared/sync-status.js'
 import { usePresentationSession } from '../../../shared/presentation-hooks.js'
-import { useAgentRun } from '../../../shared/use-agent-run.js'
+import { useAgentRun, type AgentInvoke } from '../../../shared/use-agent-run.js'
+import { AgentResponse, type AgentFollowUpContext } from '../../../shared/agent-response.js'
 import type {
     AccountView,
     AgentCapability,
     DiscoverableOpportunityView,
+    GuidanceHandoffView,
     McemView,
     MeetingChangeSetProposalView,
     MeetingChangeSetResultView,
@@ -90,23 +90,11 @@ const today = (): string => new Date().toISOString().slice(0, 10)
 const workflowDescriptions: Readonly<Record<string, { summary: string; reads: string; useIt: string } | undefined>> =
     workflowDescriptionsJson.descriptions
 
-/** Renders agent/guidance markdown identically to the desktop/web hosts; links open evidence. */
-function AgentMarkdown({ content }: { content: string }): ReactElement {
-    return (
-        <div className="agent-response-markdown">
-            <Markdown
-                remarkPlugins={[remarkGfm]}
-                skipHtml
-                components={{
-                    a: ({ href, children }) => (
-                        <a href={href} onClick={(event) => { event.preventDefault(); if (href) void dataClient.openEvidence(href) }}>{children}</a>
-                    )
-                }}
-            >
-                {formatResponseMarkdown(content)}
-            </Markdown>
-        </div>
-    )
+const invokeGuidanceAgent: AgentInvoke = (capability, accountId, opportunityId, prompt, onProgress, signal) =>
+    dataClient.runAgentTaskStream(capability, accountId, opportunityId, prompt, onProgress, signal)
+
+function AgentMarkdown({ content, busy = false, followUp }: { content: string; busy?: boolean; followUp?: AgentFollowUpContext | undefined }): ReactElement {
+    return <AgentResponse content={content} busy={busy} followUp={followUp} onOpenEvidence={dataClient.openEvidence} />
 }
 
 /** True when the card itself has renderable content; action/exception cards are shown via the Operational queue. */
@@ -215,7 +203,7 @@ interface CompletedRun {
     queue: WorkflowOutputView['queueItems']
 }
 
-type GuidanceEntry = { status: 'loading' | 'ready' | 'error'; title: string; evidenceIds?: string[]; content?: string; error?: string }
+type GuidanceEntry = { status: 'loading' | 'ready' | 'error'; title: string; evidenceIds?: string[]; content?: string; error?: string; handoff?: GuidanceHandoffView }
 
 function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: number } | undefined }): ReactElement {
     const [definitions, setDefinitions] = useState<Loadable<WorkflowDefinitionView[]>>({ status: 'idle' })
@@ -303,7 +291,7 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
         setGuidanceByItem((previous) => ({ ...previous, [key]: { status: 'loading', title: itemTitle } }))
         try {
             const { handoff, response } = await dataClient.sendQueueItemToGuidance(runId, itemId, capability)
-            setGuidanceByItem((previous) => ({ ...previous, [key]: { status: 'ready', title: itemTitle, evidenceIds: handoff.context.evidenceIds, content: response.content } }))
+            setGuidanceByItem((previous) => ({ ...previous, [key]: { status: 'ready', title: itemTitle, evidenceIds: handoff.context.evidenceIds, content: response.content, handoff } }))
         } catch (error) {
             setGuidanceByItem((previous) => ({ ...previous, [key]: { status: 'error', title: itemTitle, error: (error as Error).message } }))
         }
@@ -509,7 +497,8 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                                                                                     {entry.evidenceIds && entry.evidenceIds.length > 0 && (
                                                                                         <p className="muted">Evidence cited: {entry.evidenceIds.join(', ')}</p>
                                                                                     )}
-                                                                                    <AgentMarkdown content={entry.content ?? ''} />
+                                                                                    <AgentMarkdown content={entry.content ?? ''}
+                                                                                        followUp={entry.handoff ? { ...entry.handoff.scope, capability: entry.handoff.capability, invoke: invokeGuidanceAgent } : undefined} />
                                                                                 </>
                                                                             )}
                                                                         </div>
@@ -546,12 +535,12 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
 function ResponseActions({ title, markdown, onNote }: { title: string; markdown: string; onNote: (message: string) => void }): ReactElement {
     const onEmail = async (): Promise<void> => {
         onNote('Opening email draft...')
-        try { await dataClient.composeEmail(title, title, markdown); onNote('Email draft opened in your mail client.') }
+        try { await dataClient.composeEmail(title, title, formatResponseMarkdown(markdown)); onNote('Email draft opened in your mail client.') }
         catch (error) { onNote((error as Error).message) }
     }
     const onExport = async (): Promise<void> => {
         onNote('Exporting...')
-        try { const result = await dataClient.exportContent(title, markdown); onNote(result.saved ? 'Exported to the selected file.' : 'Export cancelled.') }
+        try { const result = await dataClient.exportContent(title, formatResponseMarkdown(markdown)); onNote(result.saved ? 'Exported to the selected file.' : 'Export cancelled.') }
         catch (error) { onNote((error as Error).message) }
     }
     return (
@@ -567,9 +556,7 @@ function GuidancePane({ accountId, opportunityId, opportunityName, onNote }: { a
     const [capability, setCapability] = useState<AgentCapability>('account-pulse')
     const [taskPrompt, setTaskPrompt] = useState('')
     const [agentError, setAgentError] = useState('')
-    const { agentResult, agentLoading, agentPhase, runAgent, cancelAgent } = useAgentRun(
-        (agentCapability, agentAccountId, agentOpportunityId, prompt, onProgress, signal) =>
-            dataClient.runAgentTaskStream(agentCapability, agentAccountId, agentOpportunityId, prompt, onProgress, signal))
+    const { agentResult, agentLoading, agentPhase, runAgent, cancelAgent } = useAgentRun(invokeGuidanceAgent)
 
     useEffect(() => { cancelAgent(); setAgentError(''); setTaskPrompt('') }, [capability, opportunityId, cancelAgent])
 
@@ -609,7 +596,8 @@ function GuidancePane({ accountId, opportunityId, opportunityName, onNote }: { a
                         <span className="eyebrow">{label}</span>
                         {!agentLoading && <ResponseActions title={`Guidance - ${opportunityName}`} markdown={agentResult.content} onNote={onNote} />}
                     </header>
-                    <AgentMarkdown content={agentResult.content} />
+                    <AgentResponse key={agentResult.correlationId} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'}
+                        followUp={{ capability, accountId, opportunityId, invoke: invokeGuidanceAgent }} onOpenEvidence={dataClient.openEvidence} />
                 </article>
             )}
             {!agentLoading && !agentResult && !agentError && <p className="muted">Choose a suggested prompt or ask a different question.</p>}

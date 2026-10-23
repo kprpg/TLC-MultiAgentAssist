@@ -3,6 +3,7 @@ import type { FoundryEnvironment } from '../common/configuration/foundry-environ
 import { workflowAgentCapabilityValues } from '../common/contracts/workflows.js'
 import { createFoundryOpenAIClient, FoundryPromptAgent, type FoundryOpenAIClient } from '../connectors/foundry/index.js'
 import { formatLiveAgentGuidance } from './instant-draft.js'
+import { serializeAgentContext } from './agent-evidence.js'
 import type { AgentTaskContext, TaskAgentRegistry } from './index.js'
 import type { PerformanceReporter } from '../common/index.js'
 
@@ -27,6 +28,7 @@ export function createFoundryTaskAgents(environment: FoundryEnvironment, credent
     agent: new FoundryPromptAgent<AgentTaskContext>({
       projectEndpoint: environment.foundry.projectEndpoint, agentName: agents[capability].name,
       requestTimeoutMs: environment.foundry.requestTimeoutMs, credential, openAIClient: client,
+      serializeContext: serializeAgentContext,
       ...foundryAgentTuning(environment, performanceReporter)
     })
   }]))

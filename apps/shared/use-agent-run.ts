@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentCapability, AgentTaskResponse } from '../../packages/common/contracts/index.js'
 import { progressToResponse, type AgentStreamProgress } from './agent-stream.js'
 
@@ -22,6 +22,7 @@ export function useAgentRun(invoke: AgentInvoke) {
     const controller = useRef<AbortController | null>(null)
     const invokeRef = useRef(invoke)
     invokeRef.current = invoke
+    useEffect(() => () => controller.current?.abort(), [])
 
     const cancelAgent = useCallback(() => {
         controller.current?.abort()
