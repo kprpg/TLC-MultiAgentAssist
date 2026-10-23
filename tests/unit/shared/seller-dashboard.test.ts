@@ -18,7 +18,7 @@ describe('Seller Dashboard analysis and rendering', () => {
 
         expect(markup).toContain('aria-label="Dashboard workspace"')
         expect(markup).toContain('aria-label="Dashboards"')
-        expect(markup.match(/role="tab"/g)).toHaveLength(1)
+        expect(markup.match(/role="tab"/g)).toHaveLength(2)
         expect(markup).toContain('aria-selected="true"')
         expect(markup).toContain('aria-label="Seller Dashboard"')
         expect(invokeSellerDashboard).not.toHaveBeenCalled()
