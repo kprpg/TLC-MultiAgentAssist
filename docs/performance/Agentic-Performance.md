@@ -2,7 +2,7 @@
 
 Why Guidance prompts (Account Pulse, MCEM Coach, Pursuit and Executive, Risk and Solution Play) take two minutes or more to answer, what was changed in this repository, and what still has to be done outside it (Foundry project). Applies to all four surfaces: Desktop (legacy and revamp renderers), Web, VS Code webview and Teams.
 
-See also [performance-optimization.md](./performance-optimization.md) for the earlier startup/Foundry-client pass.
+See also [performance-optimization.md](./performance-optimization.md) for the earlier startup/Foundry-client pass, and [Performance-Optimization-Roadmap.md](./Performance-Optimization-Roadmap.md) for the all-layer review. **Correction from that review:** measurements of the deployed agents show zero reasoning tokens and about 1,500 output tokens per answer, so output length (not reasoning effort) dominates model time; see its section 3.1 and AG-1.
 
 > **Evidence status.** No live latency baseline existed when this investigation was done, and the Foundry project could not be inspected from the investigation environment (`agent_get` returned *Workspace not found*; the project is in a separate tenant). Root causes below are established from the code; **no percentage improvement is claimed**. Section 7 defines how to measure one.
 
