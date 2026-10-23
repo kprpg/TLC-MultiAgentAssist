@@ -2,7 +2,6 @@ import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { get, request as httpsRequest } from 'node:https'
 import { createServer } from 'node:net'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -12,6 +11,7 @@ import { invokeProtectedOwnerCommand, prepareOwnerDirectory } from '../../../app
 import { localConnectionVersion } from '../../../packages/common/contracts/local-connection.js'
 import { actionPreviewSchema } from '../../../packages/common/contracts/collaboration.js'
 import { z } from 'zod'
+import { temporaryRoot } from './test-temp-root.js'
 
 const nativeClient = vi.hoisted(() => ({
   interactive: vi.fn(async () => { throw new Error('A TLS/bootstrap test must not trigger source sign-in.') }),
@@ -47,7 +47,7 @@ let directory: string
 let certificatePath: string
 let keyPath: string
 beforeAll(async () => {
-  directory = await mkdtemp(join(tmpdir(), 'tlc-teams-test-tls-'))
+  directory = await mkdtemp(join(temporaryRoot, 'tlc-teams-test-tls-'))
   certificatePath = join(directory, 'localhost.pem')
   keyPath = join(directory, 'localhost-key.pem')
   await execute('pwsh', ['-NoProfile', '-Command', `
