@@ -1,5 +1,9 @@
 import { expect, test, type Page } from '@playwright/test'
 
+function escapeRegExpLiteral(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 async function openStagePipelineReview(page: Page): Promise<void> {
     await page.getByRole('button', { name: 'Dashboards', exact: true }).click()
     await page.getByRole('tab', { name: 'Stage and Pipeline Review', exact: true }).click()
@@ -18,7 +22,7 @@ test('Stage and Pipeline Review is a Dashboards child tab with working scope, st
     await expect(page.getByLabel('Active filters')).toContainText('Solution: Cloud and AI Platforms')
     await expect(page.getByLabel('Active filters')).toContainText('Opportunity: Excluding Inbound')
     for (const name of ['Opportunities', 'Actions', 'Consumption', 'MACC & Commits', 'Milestones']) {
-        await expect(page.getByRole('tab', { name: new RegExp(name.replace('&', '\\&')) })).toBeVisible()
+        await expect(page.getByRole('tab', { name: new RegExp(escapeRegExpLiteral(name)) })).toBeVisible()
     }
     await expect(page.getByRole('region', { name: 'ACR Actuals and Outlook' })).toBeVisible()
 
