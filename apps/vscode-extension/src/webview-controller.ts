@@ -255,12 +255,12 @@ export class WorkbenchPanel {
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource}; font-src ${webview.cspSource}; script-src 'nonce-${cspNonce}';" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'nonce-${cspNonce}'; font-src ${webview.cspSource}; script-src 'nonce-${cspNonce}';" />
 <link href="${styleUri}" rel="stylesheet" />
 <title>TLC Assist</title>
 </head>
 <body>
-<div id="root" data-mode="${provider.mode}" data-cache-owner="${provider.cacheSession ? 'host' : 'client'}" data-background-sync="${provider.mutationSync ? '1' : '0'}">Loading TLC Assist\u2026</div>
+<div id="root" data-mode="${provider.mode}" data-cache-owner="${provider.cacheSession ? 'host' : 'client'}" data-background-sync="${provider.mutationSync ? '1' : '0'}" data-csp-nonce="${cspNonce}">Loading TLC Assist\u2026</div>
 <script nonce="${cspNonce}">window.addEventListener('error',function(e){var r=document.getElementById('root');if(r)r.textContent='TLC Assist error: '+(e.message||'script failed to load');});window.addEventListener('unhandledrejection',function(e){var r=document.getElementById('root');if(r)r.textContent='TLC Assist error: '+((e.reason&&e.reason.message)||e.reason||'promise rejected');});</script>
 <script nonce="${cspNonce}" src="${scriptUri}"></script>
 </body>
