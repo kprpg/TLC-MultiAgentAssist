@@ -13,6 +13,7 @@ export * from './workflows.js'
 export * from './meeting.js'
 export * from './voice.js'
 export * from './seller-dashboard.js'
+export * from './stage-pipeline-review.js'
 export * from './record-creation.js'
 export * from './cache-sync.js'
 

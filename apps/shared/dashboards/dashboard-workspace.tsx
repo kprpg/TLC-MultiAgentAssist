@@ -1,13 +1,18 @@
 import { useState, type ReactElement } from 'react'
 import { SellerDashboardPane, type InvokeSellerDashboard } from './sellerDashboard/seller-dashboard.js'
+import { StagePipelineReviewPane, type InvokeStagePipelineReview } from './StageAndPipelineReview/stage-pipeline-review.js'
 
-type DashboardId = 'seller-dashboard'
+type DashboardId = 'seller-dashboard' | 'stage-and-pipeline-review'
 
 const dashboards: ReadonlyArray<{ id: DashboardId; label: string }> = [
-    { id: 'seller-dashboard', label: 'Seller Dashboard' }
+    { id: 'seller-dashboard', label: 'Seller Dashboard' },
+    { id: 'stage-and-pipeline-review', label: 'Stage and Pipeline Review' }
 ]
 
-export function DashboardWorkspace({ invokeSellerDashboard }: { invokeSellerDashboard: InvokeSellerDashboard }): ReactElement {
+export function DashboardWorkspace({ invokeSellerDashboard, invokeStagePipelineReview }: {
+    invokeSellerDashboard: InvokeSellerDashboard
+    invokeStagePipelineReview?: InvokeStagePipelineReview
+}): ReactElement {
     const [activeDashboard, setActiveDashboard] = useState<DashboardId>('seller-dashboard')
 
     return (
@@ -28,6 +33,9 @@ export function DashboardWorkspace({ invokeSellerDashboard }: { invokeSellerDash
             </nav>
             <div className="dashboard-content">
                 {activeDashboard === 'seller-dashboard' && <SellerDashboardPane invoke={invokeSellerDashboard} />}
+                {activeDashboard === 'stage-and-pipeline-review' && (
+                    invokeStagePipelineReview ? <StagePipelineReviewPane invoke={invokeStagePipelineReview} /> : <StagePipelineReviewPane />
+                )}
             </div>
         </section>
     )
