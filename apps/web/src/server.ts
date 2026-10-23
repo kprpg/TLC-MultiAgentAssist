@@ -5,7 +5,7 @@ import { buildWebApiHandler, type WebRuntime } from './app.js'
 import { assertLoopbackHost, createAzureCliAuthentication, createSampleAuthentication } from './authentication.js'
 import { buildStaticHandler, setSecurityHeaders } from './hosting.js'
 import { listenWebServer } from './listener.js'
-import { createHostedRuntimeFactory, createHostedWorkflowHostResolver, createWebSellerDashboardHost } from './runtime.js'
+import { createHostedRuntimeFactory, createHostedWorkflowHostResolver, createWebSellerDashboardHost, createWebSeReportingResolver } from './runtime.js'
 import { createSampleWorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import { FixtureMsxConnector } from '../../../packages/connectors/msx/index.js'
 import { createLocalStoreMsxConnector } from '../../../packages/connectors/local-store/index.js'
@@ -101,6 +101,7 @@ const handleApi = buildWebApiHandler({
     createRuntime,
     resolveWorkflowHost,
     resolveSellerDashboardHost: () => createWebSellerDashboardHost(mode === 'sample' ? 'sample' : 'live'),
+    resolveSeReportingHost: createWebSeReportingResolver(mode, 'foundryCredential' in createRuntime ? createRuntime.foundryCredential : undefined),
     ...(authenticate ? { authenticate } : {}),
     ...(mode !== 'easy-auth' ? { shutdown: closeLocalServer } : {}),
     onError: (error, correlationId) => {

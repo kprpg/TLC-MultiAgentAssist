@@ -37,6 +37,8 @@ import { SharedVoiceInputHost } from '../../../../packages/orchestrator/voice-in
 import { WindowsVoiceCaptureDriver } from '../../../../packages/connectors/common/windows-voice.js'
 import { createVoiceIpcHandler, voiceIpcChannel } from './voice-ipc.js'
 import { createSellerDashboardHost } from '../../../../packages/orchestrator/seller-dashboard.js'
+import { createSeReportingHost, seReportingScopes } from '../../../../packages/orchestrator/se-reporting/composition.js'
+import { createSeReportingIpcHandler, seReportingIpcChannel } from './se-reporting-ipc.js'
 import { createSellerDashboardIpcHandler, sellerDashboardIpcChannel } from './seller-dashboard-ipc.js'
 import { desktopWindowBounds } from './window-bounds.js'
 import { createMutationSyncIpcHandler, createPortfolioIpcHandlers } from './portfolio-ipc.js'
@@ -119,6 +121,19 @@ const tokenProvider = new AzureCliMsxTokenProvider({
 const sellerDashboardHost = createSellerDashboardHost({
   mode: dataMode,
   resolveUserEmail: async () => (await tokenProvider.getAuthStatus()).userEmail
+})
+const seReportingHost = createSeReportingHost({
+  mode: dataMode,
+  identity: async () => {
+    const email = (await tokenProvider.getAuthStatus()).userEmail
+    return email ? { key: email, email } : undefined
+  },
+  getToken: async (resource) => {
+    const token = await credentials.msx.getToken(seReportingScopes[resource])
+    if (!token) throw new Error('The reporting resource did not return a delegated token.')
+    return token.token
+  },
+  foundryCredential: credentials.foundry
 })
 const reportPerformance: PerformanceReporter = (event) => {
   console.info(`[performance] ${JSON.stringify(event)}`)
@@ -337,6 +352,11 @@ function registerIpc(): void {
     return cacheControlResponseSchema.parse({ contractVersion: '1.0', state: presentation.session.getState() })
   })
   const invokeSellerDashboard = createSellerDashboardIpcHandler(sellerDashboardHost)
+  const invokeSeReporting = createSeReportingIpcHandler(seReportingHost)
+  ipcMain.handle(seReportingIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return invokeSeReporting(request)
+  })
   ipcMain.handle(sellerDashboardIpcChannel, (event, request: unknown) => {
     assertTrustedSender(event)
     return invokeSellerDashboard(request)

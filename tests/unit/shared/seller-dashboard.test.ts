@@ -14,14 +14,17 @@ import { DashboardWorkspace } from '../../../apps/shared/dashboards/dashboard-wo
 describe('Seller Dashboard analysis and rendering', () => {
     it('renders Seller Dashboard beneath the Dashboard workspace navigation', () => {
         const invokeSellerDashboard = vi.fn()
-        const markup = renderToStaticMarkup(createElement(DashboardWorkspace, { invokeSellerDashboard }))
+        const invokeSeReporting = vi.fn()
+        const markup = renderToStaticMarkup(createElement(DashboardWorkspace, { invokeSellerDashboard, invokeSeReporting }))
 
         expect(markup).toContain('aria-label="Dashboard workspace"')
         expect(markup).toContain('aria-label="Dashboards"')
-        expect(markup.match(/role="tab"/g)).toHaveLength(2)
+        expect(markup.match(/role="tab"/g)).toHaveLength(3)
         expect(markup).toContain('aria-selected="true"')
         expect(markup).toContain('aria-label="Seller Dashboard"')
         expect(invokeSellerDashboard).not.toHaveBeenCalled()
+        expect(invokeSeReporting).not.toHaveBeenCalled()
+        expect(markup).toContain('SE Reporting Dashboard')
     })
 
     it('uses Microsoft fiscal boundaries and defaults to the source as-of quarter', () => {

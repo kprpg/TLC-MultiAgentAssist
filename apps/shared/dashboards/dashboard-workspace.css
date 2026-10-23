@@ -46,3 +46,14 @@
     min-height: 0;
     overflow: hidden;
 }
+
+.dashboard-panel {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+}
+
+.dashboard-panel[hidden] {
+    display: none;
+}

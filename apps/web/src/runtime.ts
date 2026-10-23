@@ -1,4 +1,5 @@
 import { AzureCliCredential, ManagedIdentityCredential } from '@azure/identity'
+import type { TokenCredential } from '@azure/core-auth'
 import { resolve } from 'node:path'
 import { createPerformanceReporter, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy } from '../../../packages/common/index.js'
 import { loadFoundryEnvironmentFromEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
@@ -13,6 +14,8 @@ import { ThinSliceOrchestrator, prewarmAgentDependencies } from '../../../packag
 import { createFoundryTaskAgents } from '../../../packages/orchestrator/task-agents.js'
 import { createLivePlayWorkflowHost, type WorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import { createSellerDashboardHost, type SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
+import { createSeReportingHost, seReportingScopes } from '../../../packages/orchestrator/se-reporting/composition.js'
+import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
 import type { AuthenticatedRequest, WebRuntime } from './app.js'
 import { hostedMutationState } from '../../../packages/connectors/common/mutation-state.js'
 import { createMutationSession } from '../../../packages/orchestrator/mutations/composition.js'
@@ -24,6 +27,51 @@ export function createWebSellerDashboardHost(mode: 'sample' | 'live'): SellerDas
         allowLocalProfile: false,
         resolveUserEmail: async () => undefined
     })
+}
+
+export function createWebSeReportingResolver(mode: 'sample' | 'azure-cli' | 'easy-auth', foundryCredential?: TokenCredential, now: () => number = Date.now) {
+    const hosts = new Map<string, { host: SeReportingHost; lastUsed: number; active: number }>()
+    const credential = mode === 'azure-cli' ? new AzureCliCredential({ processTimeoutInMs: 30_000 }) : undefined
+    return (authentication: AuthenticatedRequest) => {
+        const key = authentication.userEmail.toLowerCase()
+        let entry = hosts.get(key)
+        if (!entry) {
+            if (hosts.size >= 50) {
+                for (const [existingKey, existing] of hosts) {
+                    if (existing.active === 0 && now() - existing.lastUsed > 3_600_000) hosts.delete(existingKey)
+                }
+            }
+            if (hosts.size >= 50) throw new Error('The reporting user-session limit has been reached.')
+            const created = createSeReportingHost({
+                mode: mode === 'sample' ? 'sample' : 'live',
+                identity: async () => ({ key: `web:${key}`, email: authentication.userEmail }),
+                ...(credential ? {
+                    getToken: async (resource: keyof typeof seReportingScopes) => {
+                        const result = await credential.getToken(seReportingScopes[resource])
+                        if (!result) throw new Error('No delegated reporting token was returned.')
+                        return result.token
+                    }
+                } : {}),
+                ...(foundryCredential ? { foundryCredential } : {})
+            })
+            const createdEntry = { host: created, lastUsed: now(), active: 0 }
+            entry = createdEntry
+            hosts.set(key, createdEntry)
+        }
+        const tracked = entry
+        tracked.lastUsed = now()
+        return {
+            invoke: async (request: unknown) => {
+                tracked.active += 1
+                try {
+                    return await tracked.host.invoke(request)
+                } finally {
+                    tracked.active -= 1
+                    tracked.lastUsed = now()
+                }
+            }
+        } satisfies SeReportingHost
+    }
 }
 
 export interface HostedRuntimeOptions {
@@ -111,7 +159,7 @@ export async function createHostedRuntimeFactory(options: HostedRuntimeOptions =
             applyMeetingChangeSet: (input: Parameters<LiveMeetingCaptureConnector['applyMeetingChangeSet']>[0]) => meetingConnector.applyMeetingChangeSet(input)
         }) as WebRuntime
     }
-    return Object.assign(factory, { dispose: async () => { await mutationRuntime.drain(); mutationState.close() } })
+    return Object.assign(factory, { foundryCredential, dispose: async () => { await mutationRuntime.drain(); mutationState.close() } })
 }
 
 export async function createHostedWorkflowHostResolver(options: HostedRuntimeOptions = {}) {

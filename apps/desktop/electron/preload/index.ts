@@ -3,6 +3,7 @@ import type { Account, AccountCandidate, AccountListOptions, AccountSearchReques
 import type { WorkflowHostOperation } from '../../../../packages/orchestrator/workflows/index.js'
 import type { VoiceRequest, VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 import type { SellerDashboardRequest, SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
+import type { SeReportingRequest, SeReportingResponse } from '../../../../packages/common/contracts/se-reporting.js'
 import type { DiscoverySnapshot, DiscoverySnapshotRequest, PortfolioReadRequest, PortfolioIndex, PortfolioWorkspaceRequest, PortfolioWorkspace } from '../../../../packages/common/contracts/index.js'
 import { agentTaskStreamEventSchema } from '../../../../packages/common/contracts/index.js'
 import {
@@ -15,6 +16,7 @@ export interface TlcDesktopApi {
   cacheControl(request: CacheControlRequest): Promise<CacheControlResponse>
   onCacheChanged(listener: (state: CacheReadState) => void): () => void
   invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
+  invokeSeReporting(request: SeReportingRequest): Promise<SeReportingResponse>
   invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
   exitApplication(): Promise<void>
   getDataStatus(): Promise<DesktopDataStatus>
@@ -66,6 +68,7 @@ const api: TlcDesktopApi = {
     return () => { ipcRenderer.removeListener('tlc:cache-changed', changed) }
   },
   invokeSellerDashboard: (request) => ipcRenderer.invoke('tlc:seller-dashboard', request),
+  invokeSeReporting: (request) => ipcRenderer.invoke('tlc:se-reporting', request),
   invokeVoice: (request) => ipcRenderer.invoke('tlc:voice-input', request),
   exitApplication: () => ipcRenderer.invoke('tlc:exit-application'),
   getDataStatus: () => ipcRenderer.invoke('tlc:get-data-status'),

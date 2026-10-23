@@ -46,7 +46,7 @@ export class ReviewedActionService {
   }
   private checkRole(principal: ExecutionPrincipal, operation: string): void {
     requireRole(principal, ['addAccount', 'setAccountVisibility'].includes(operation)
-      ? 'TLC.Teams.User' : operation === 'publishSummary' ? 'TLC.Teams.Publisher' : 'TLC.Teams.Writer')
+      ? 'TLC.Teams.User' : ['publishSummary', 'publishSeReporting'].includes(operation) ? 'TLC.Teams.Publisher' : 'TLC.Teams.Writer')
   }
   async prepare(principal: ExecutionPrincipal, operation: string, input: Record<string, unknown>): Promise<ActionPreview> {
     this.checkRole(principal, operation)

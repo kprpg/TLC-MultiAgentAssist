@@ -25,6 +25,8 @@ import type { ExtensionDataProvider } from './data-provider.js'
 import { ExtensionMcemGuidanceConnector } from './mcem-guidance.js'
 import { AGENT_CAPABILITIES, buildLiveDataProvider, buildLiveTaskAgents } from './live-provider-core.js'
 import { bindSourceToken } from '../../../packages/orchestrator/mutations/core-adapter.js'
+import { createSeReportingHost } from '../../../packages/orchestrator/se-reporting/composition.js'
+import type { SeReportingResource } from '../../../packages/common/contracts/se-reporting.js'
 
 export function configuredFoundryTenantId(): string | undefined {
     const parsed = foundryEnvironmentSchema.safeParse(foundryEnvironmentJson)
@@ -88,7 +90,8 @@ export function createLiveDataProvider(
     onStepError?: (info: WorkflowStepErrorInfo) => void,
     useFoundryAgents = true,
     preferenceFilePath?: string,
-    foundryCredential?: TokenCredential
+    foundryCredential?: TokenCredential,
+    getReportingToken?: (resource: SeReportingResource) => Promise<string>
 ): ExtensionDataProvider {
     const sourceToken = bindSourceToken(getToken, 'https://microsoftsales.crm.dynamics.com')
     const registry = mcpServerRegistrySchema.parse(mcpServersJson)
@@ -116,5 +119,10 @@ export function createLiveDataProvider(
             .map((candidate) => candidate.id),
         ...(onStepError ? { onStepError } : {})
     })
-    return buildLiveDataProvider({ orchestrator, host: configured.host, account, meetingConnector, getSourceToken: sourceToken, ...(meetingExtractor ? { meetingExtractor } : {}), dispose: () => configured.dispose() })
+    const reportingHost = createSeReportingHost({
+        mode: 'live', identity: async () => ({ key: account, email: account }),
+        ...(getReportingToken ? { getToken: getReportingToken } : {}),
+        ...(foundryCredential ? { foundryCredential } : {})
+    })
+    return buildLiveDataProvider({ orchestrator, host: configured.host, account, meetingConnector, getSourceToken: sourceToken, reportingHost, ...(meetingExtractor ? { meetingExtractor } : {}), dispose: () => configured.dispose() })
 }

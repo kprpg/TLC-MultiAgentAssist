@@ -86,6 +86,8 @@ import { milestoneRecommendations, summarizeMilestones } from '../../../../packa
 import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest, type VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema, type SellerDashboardRequest, type SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
 import { createSampleSellerDashboard } from '../../../../packages/common/fixtures/seller-dashboard.js'
+import { seReportingRequestSchema, seReportingResponseSchema, type SeReportingRequest, type SeReportingResponse } from '../../../../packages/common/contracts/se-reporting.js'
+import { createSampleSeReportingHost } from '../../../../packages/orchestrator/se-reporting/sample.js'
 import {
     additionalSampleAccounts,
     additionalSampleMilestones,
@@ -110,6 +112,7 @@ export interface RevampDataClient {
     refreshSources?(opportunityId?: string): void
     getDataMode(): Promise<'sample' | 'live'>
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
+    invokeSeReporting(request: SeReportingRequest): Promise<SeReportingResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     readonly mode: 'desktop' | 'web-live' | 'web-sample'
     exitApplication(): Promise<void>
@@ -242,6 +245,9 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
         getDataMode: async () => mode === 'web-live' ? 'live' : 'sample',
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(await apiRequest(fetcher, '/api/seller-dashboard', {
             method: 'POST', body: JSON.stringify(sellerDashboardRequestSchema.parse(request))
+        })),
+        invokeSeReporting: async (request) => seReportingResponseSchema.parse(await apiRequest(fetcher, '/api/se-reporting', {
+            method: 'POST', body: JSON.stringify(seReportingRequestSchema.parse(request))
         })),
         invokeVoice: async (request) => voiceResponseSchema.parse(await apiRequest(fetcher, '/api/voice', {
             method: 'POST', body: JSON.stringify(voiceRequestSchema.parse(request))
@@ -384,6 +390,7 @@ interface DesktopBridge {
     getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
     getPortfolioWorkspace(request: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace>
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
+    invokeSeReporting(request: SeReportingRequest): Promise<SeReportingResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     exitApplication(): Promise<void>
     getDataStatus(): Promise<DesktopDataStatus>
@@ -588,6 +595,7 @@ function buildWebEvaluation(opportunity: Opportunity, opportunityMilestones: rea
 }
 
 function webClient(): RevampDataClient {
+    const seReporting = createSampleSeReportingHost()
     const unavailable = (): never => {
         throw new Error('Record creation needs the hosted Web app or Desktop. The standalone preview does not save records.')
     }
@@ -598,6 +606,7 @@ function webClient(): RevampDataClient {
             sellerDashboardRequestSchema.parse(request)
             return createSampleSellerDashboard()
         },
+        invokeSeReporting: (request) => seReporting.invoke(request),
         exitApplication: async () => { await apiRequest(fetch, '/api/exit', { method: 'POST' }) },
         getCurrentUserEmail: async () => undefined,
         async getDiscoverySnapshot(input = { contractVersion: discoverySnapshotVersion }) {
@@ -829,6 +838,9 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         getDataMode: async () => (await bridge.getDataStatus()).mode,
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(
             await bridge.invokeSellerDashboard(sellerDashboardRequestSchema.parse(request))
+        ),
+        invokeSeReporting: async (request) => seReportingResponseSchema.parse(
+            await bridge.invokeSeReporting(seReportingRequestSchema.parse(request))
         ),
         invokeVoice: async (request) => voiceResponseSchema.parse(await bridge.invokeVoice(voiceRequestSchema.parse(request))),
         exitApplication: () => bridge.exitApplication(),

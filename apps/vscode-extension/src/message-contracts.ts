@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, createMilestoneActivityRequestSchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, meetingTypeSchema, milestoneUpdateSchema, opportunityUpdateSchema, recordCreationCatalogRequestSchema, recordCreationPreviewRequestSchema, recordCreationCommitRequestSchema, scopeRefSchema, seDomainSchema } from '../../../packages/common/index.js'
 import { voiceRequestSchema } from '../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema } from '../../../packages/common/contracts/seller-dashboard.js'
+import { seReportingRequestSchema } from '../../../packages/common/contracts/se-reporting.js'
 import { discoverySnapshotRequestSchema, portfolioReadRequestSchema, portfolioWorkspaceRequestSchema, agentTaskStreamEventSchema } from '../../../packages/common/contracts/index.js'
 import { cacheControlRequestSchema, mutationSyncRequestSchema } from '../../../packages/common/contracts/cache-sync.js'
 import { agentTaskPromptMaxLength } from '../../../packages/common/contracts/agent-task-limits.js'
@@ -23,6 +24,7 @@ export const bridgeMethodSchema = z.enum([
     'cacheControl',
     'mutationSync',
     'sellerDashboard',
+    'seReporting',
     'voiceInput',
     'getCurrentUserEmail',
     'listAccounts',
@@ -74,6 +76,7 @@ export const bridgeParamSchemas = {
     cacheControl: cacheControlRequestSchema,
     mutationSync: mutationSyncRequestSchema,
     sellerDashboard: sellerDashboardRequestSchema,
+    seReporting: seReportingRequestSchema,
     voiceInput: voiceRequestSchema,
     getCurrentUserEmail: z.void().optional(),
     listAccounts: accountListOptionsSchema.optional(),
