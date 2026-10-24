@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { chooseOpportunity, openUtility, post } from './helpers.js'
-import { expectHorizontalPaneScroll, expectPaneResizing } from '../pane-resizing.js'
+import { expectGuidancePaneMaximizing, expectHorizontalPaneScroll, expectPaneResizing } from '../pane-resizing.js'
 
 test('Teams resizes Portfolio panes, preserves hidden drafts and scrolls wide rows', async ({ page, request }) => {
   await page.setViewportSize({ width: 1600, height: 900 })
@@ -27,6 +27,33 @@ test('Teams resizes Portfolio panes, preserves hidden drafts and scrolls wide ro
   await expect(draft).toHaveValue('Keep this private draft while resizing and hiding panes.')
   await page.setViewportSize({ width: 420, height: 850 })
   await expect(page.getByRole('separator')).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
+
+test('Teams maximizes and restores Guidance without losing responses, pane settings or unsent drafts', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/')
+  const { opportunity } = await chooseOpportunity(page, request)
+  const details = page.locator('#portfolio-details-panel')
+  const accounts = page.locator('#portfolio-accounts-panel')
+  const actions = page.locator('#next-best-actions-panel')
+  await page.getByRole('tab', { name: 'Guidance', exact: true }).click()
+  await page.getByRole('button', { name: 'Run guidance', exact: true }).click()
+  const response = details.locator('.agent-response-markdown')
+  await expect(response).not.toBeEmpty()
+  const originalResponse = await response.textContent()
+  const draft = details.getByRole('textbox', { name: 'Ask TLC', exact: true })
+  await draft.fill('Preserve this question while expanding Guidance.')
+  await page.getByRole('separator', { name: 'Resize opportunity details panel', exact: true }).press('ArrowRight')
+  await expectGuidancePaneMaximizing(details, draft, [accounts, actions])
+  await expect(response).toHaveText(originalResponse!)
+  await expect(details.getByRole('heading', { name: opportunity.name, exact: true })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Hide Accounts panel', exact: true }).click()
+  await expectGuidancePaneMaximizing(details, draft, [accounts, actions])
+  await page.getByRole('button', { name: 'Show Accounts panel', exact: true }).click()
+  await page.setViewportSize({ width: 420, height: 850 })
+  await expectGuidancePaneMaximizing(details, draft, [accounts, actions], false)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 

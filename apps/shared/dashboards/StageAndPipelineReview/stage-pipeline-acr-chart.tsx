@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
-import { acrCoverage, formatMoney, type AcrPoint } from './stage-pipeline-analysis.js'
+import type { StagePipelineAcr } from '../../../../packages/common/contracts/stage-pipeline-review.js'
+import { acrConnected, acrCoverage, formatMoney, type AcrPoint } from './stage-pipeline-analysis.js'
 
 const layers = [
     { key: 'actual', label: '$ Actuals YTD', color: 'var(--sprv-green)' },
@@ -22,9 +23,11 @@ function niceMax(value: number): number {
     return Math.max(step, Math.ceil(value / step) * step)
 }
 
-export function AcrChart({ points, accountCount, syncedAt }: { points: readonly AcrPoint[]; accountCount: number; syncedAt: string }): ReactElement {
+export function AcrChart({ points, accountCount, syncedAt, source }: { points: readonly AcrPoint[]; accountCount: number; syncedAt: string | null; source: StagePipelineAcr['source'] }): ReactElement {
+    const connected = acrConnected(source)
+    const visibleLayers = connected ? layers : layers.filter((layer) => layer.key !== 'actual' && layer.key !== 'baseline')
     const coverage = acrCoverage(points)
-    const max = niceMax(Math.max(0, ...points.map((point) => Math.max(point.total, point.target))))
+    const max = niceMax(Math.max(0, ...points.map((point) => Math.max(point.total, point.target ?? 0))))
     const plotWidth = width - margin.left - margin.right
     const plotHeight = height - margin.top - margin.bottom
     const slot = points.length > 0 ? plotWidth / points.length : plotWidth
@@ -35,15 +38,15 @@ export function AcrChart({ points, accountCount, syncedAt }: { points: readonly 
     const lastPoint = points.at(-1)
     const summary = lastPoint && coverage
         ? `Cumulative FY ACR by month. At the final month: target ${formatMoney(coverage.target)}, actuals plus baseline ${formatMoney(coverage.base)}, with all layers ${formatMoney(coverage.all)}.`
-        : 'No ACR data is available for this selection.'
+        : connected ? 'No ACR data is available for this selection.' : 'Pipeline layers derived from open milestones. ACR actuals, baseline and target are not connected.'
     return <section className="sprv-card sprv-acr" aria-label="ACR Actuals and Outlook">
         <header className="sprv-acr-header">
             <h2><span aria-hidden="true">📈</span> ACR Actuals and Outlook</h2>
-            <span className="sprv-muted">{accountCount} {accountCount === 1 ? 'account' : 'accounts'} · cumulative FY YTD · MSXi snapshot synced {syncedAt}</span>
+            <span className="sprv-muted">{accountCount} {accountCount === 1 ? 'account' : 'accounts'} · cumulative FY YTD · {connected ? `MSXi snapshot synced ${syncedAt ?? 'unknown'}` : 'ACR actuals, baseline and target not connected'}</span>
         </header>
         <ul className="sprv-legend">
-            {layers.map((layer) => <li key={layer.key}><span className="sprv-swatch" style={{ background: layer.color }} />{layer.label}</li>)}
-            <li><span className="sprv-swatch" style={{ background: 'var(--sprv-ink)' }} />$ ACR Target (YTD)</li>
+            {visibleLayers.map((layer) => <li key={layer.key}><span className="sprv-swatch" style={{ background: layer.color }} />{layer.label}</li>)}
+            {connected && <li><span className="sprv-swatch" style={{ background: 'var(--sprv-ink)' }} />$ ACR Target (YTD)</li>}
         </ul>
         {coverage && <ul className="sprv-coverage" aria-label="Coverage of the ACR target">
             <li><strong>{formatMoney(coverage.target)}</strong><span>FY ACR target · {accountCount} {accountCount === 1 ? 'account' : 'accounts'}</span></li>
@@ -61,9 +64,9 @@ export function AcrChart({ points, accountCount, syncedAt }: { points: readonly 
             {points.map((point, index) => {
                 let cursor = 0
                 return <g key={point.month}>
-                    {layers.map((layer) => {
+                    {visibleLayers.map((layer) => {
                         const value = point[layer.key]
-                        if (value <= 0) return null
+                        if (value === null || value <= 0) return null
                         const top = y(cursor + value)
                         const heightPx = y(cursor) - top
                         cursor += value
@@ -77,11 +80,13 @@ export function AcrChart({ points, accountCount, syncedAt }: { points: readonly 
                     <text transform={`translate(${x(index)} ${height - margin.bottom + 18}) rotate(-35)`} textAnchor="end" className="sprv-axis">{point.label}{point.lastActual ? '*' : ''}</text>
                 </g>
             })}
-            {points.length > 1 && <polyline className="sprv-target-line" fill="none" points={points.map((point, index) => `${x(index)},${y(point.target)}`).join(' ')} />}
-            {points.map((point, index) => <circle key={point.month} cx={x(index)} cy={y(point.target)} r={5} className="sprv-target-dot"><title>{`${point.label} target ${formatMoney(point.target)}`}</title></circle>)}
+            {connected && points.length > 1 && <polyline className="sprv-target-line" fill="none" points={points.map((point, index) => `${x(index)},${y(point.target ?? 0)}`).join(' ')} />}
+            {connected && points.map((point, index) => point.target === null ? null : <circle key={point.month} cx={x(index)} cy={y(point.target)} r={5} className="sprv-target-dot"><title>{`${point.label} target ${formatMoney(point.target)}`}</title></circle>)}
         </svg>
         <p className="sprv-footnote">
-            Green = actual ACR YTD to date (closed months plus the open month so far), carried flat through the remaining months. Gray = projected ACR baseline, built month by month on top of the green starting the month after the last actual month. Blue / yellow / light yellow = committed, uncommitted and Stage 1 pipeline added on top, accumulated. Black line = ACR target YTD. * = last actual month, still open when MSXi last synced. This chart is account-level Azure ACR from MSXi: it follows the Customer filter only, not the scope or other filters.
+            {connected
+                ? 'Green = actual ACR YTD to date (closed months plus the open month so far), carried flat through the remaining months. Gray = projected ACR baseline, built month by month on top of the green starting the month after the last actual month. Blue / yellow / light yellow = committed, uncommitted and Stage 1 pipeline added on top, accumulated. Black line = ACR target YTD. * = last actual month, still open when MSXi last synced. This chart is account-level Azure ACR from MSXi: it follows the Customer filter only, not the scope or other filters.'
+                : 'ACR actuals, baseline and target are not connected for this source, so they are not shown. Bars are pipeline layers derived from open milestones: each milestone adds its monthly ACR from its milestone month, accumulated. Blue = committed, yellow = uncommitted, light yellow = Stage 1. This chart follows the Customer filter only, not the scope or other filters.'}
         </p>
     </section>
 }

@@ -25,6 +25,29 @@ describe('customer email extraction', () => {
             .toEqual({ subject: 'Confirming next steps', markdown: body })
     })
 
+    it.each([
+        `Subject: Confirming next steps\n\n${body}`,
+        `> **Subject:** Confirming next steps\n>\n${body.split('\n').map((line) => `> ${line}`).join('\n')}`
+    ])('recognizes an explicitly requested email follow-up under a generic heading: %s', (draft) => {
+        const content = `## Follow-up for the sponsor\n\n${draft}\n\n## Sources\n\nInternal source overview.`
+        expect(extractCustomerEmail(content)).toBeUndefined()
+        expect(locateCustomerEmail(content, true)?.draft).toEqual({ subject: 'Confirming next steps', markdown: body })
+    })
+
+    it('recognizes an internal follow-up note within the customer-ready draft section', () => {
+        expect(extractCustomerEmail(`## Customer-ready draft requiring human review\n\nRequires human review.\n\n## Internal follow-up note for the account owner\n\nSubject: Confirming next steps\n\n${body}\n\n## Sources\n\nInternal source overview.`))
+            .toEqual({ subject: 'Confirming next steps', markdown: body })
+    })
+
+    it.each([
+        `## Sources\n\nSubject: Evidence field\n\n${body}`,
+        `## Feedback prompt\n\nSubject: Suggested subject\n\n${body}`,
+        '## Follow-up for the sponsor\n\n```text\nSubject: Code sample\n\nCode body.\n```',
+        '## Follow-up for the sponsor\n\nSubject: No body'
+    ])('does not use internal sections, code, or empty bodies as a requested email: %s', (content) => {
+        expect(locateCustomerEmail(content, true)).toBeUndefined()
+    })
+
     it('keeps customer-facing caveats and evidence in the email rather than inventing certainty', () => {
         const markdown = `${body}\n\nThe approval is not yet confirmed; please review [source](https://example.com/evidence).`
         const draft = extractCustomerEmail(`## Draft e-mail response to customer\n\n**Subject:** Confirming next steps\n\n${markdown}\n\n### Internal reviewer notes\n\nDo not share this note.`)

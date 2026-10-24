@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { resolve } from 'node:path'
 import type { AccountView, OpportunityView } from '../../../apps/vscode-extension/src/webview/view-types.js'
 import { briefOffer, conversionOffer, followUpAgentResponse, initialAgentResponse } from './agent-response-fixtures.js'
-import { expectHorizontalPaneScroll, expectPaneResizing } from '../pane-resizing.js'
+import { expectGuidancePaneMaximizing, expectHorizontalPaneScroll, expectPaneResizing } from '../pane-resizing.js'
 import { expectTextContrast } from '../color-contrast.js'
 import { expectCopiedCustomerEmail, installCustomerEmailClipboard } from '../customer-email.js'
 
@@ -265,6 +265,32 @@ test('VS Code resizes Portfolio panes with dot grips and scrolls wide tables wit
     await expect(accountsHandle).toBeVisible()
     await page.setViewportSize({ width: 420, height: 850 })
     await expect(page.getByRole('separator')).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
+
+test('VS Code maximizes and restores Guidance without losing responses, pane settings or unsent drafts', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await mountWebview(page)
+    const details = page.locator('#portfolio-details-panel')
+    const accounts = page.locator('#portfolio-accounts-panel')
+    const actions = page.locator('#next-best-actions-panel')
+    await page.getByRole('tab', { name: 'Guidance', exact: true }).click()
+    await details.getByRole('button', { name: 'What should the account team focus on this week?', exact: true }).click()
+    const response = details.locator('.agent-response-markdown')
+    await expect(response).not.toBeEmpty()
+    const originalResponse = await response.textContent()
+    const draft = details.getByRole('textbox', { name: 'Agent task', exact: true })
+    await draft.fill('Preserve this question while expanding Guidance.')
+    await page.getByRole('separator', { name: 'Resize opportunity details panel', exact: true }).press('ArrowRight')
+    await expectGuidancePaneMaximizing(details, draft, [accounts, actions])
+    await expect(response).toHaveText(originalResponse!)
+    expect(await page.evaluate(() => window.portfolioTest.requests.filter((request) => request.kind === 'stream-request').length)).toBe(1)
+
+    await page.getByRole('button', { name: 'Hide Accounts panel', exact: true }).click()
+    await expectGuidancePaneMaximizing(details, draft, [accounts, actions])
+    await page.getByRole('button', { name: 'Show Accounts panel', exact: true }).click()
+    await page.setViewportSize({ width: 420, height: 850 })
+    await expectGuidancePaneMaximizing(details, draft, [accounts, actions], false)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 

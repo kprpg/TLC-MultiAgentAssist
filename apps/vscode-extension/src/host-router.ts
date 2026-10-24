@@ -121,6 +121,11 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
                 if (!provider.sellerDashboard) throw new Error('The Seller Dashboard host is unavailable.')
                 return successResponse(id, await provider.sellerDashboard.invoke(params))
             }
+            case 'stagePipelineReview': {
+                const params = parseBridgeParams('stagePipelineReview', parsed.data.params)
+                if (!provider.stagePipelineReview) throw new Error('The Stage and Pipeline Review host is unavailable.')
+                return successResponse(id, await provider.stagePipelineReview.invoke(params))
+            }
             case 'seReporting': {
                 const params = parseBridgeParams('seReporting', parsed.data.params)
                 if (!provider.seReporting) throw new Error('The SE Reporting Dashboard host is unavailable.')

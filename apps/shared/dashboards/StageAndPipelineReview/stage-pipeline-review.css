@@ -173,3 +173,24 @@
     .stage-pipeline-review { padding: 12px; }
     .sprv-bars li > button, .sprv-bars li > div { grid-template-columns: 110px 1fr 64px; }
 }
+.sprv-viewbar { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; margin: 8px 0; }
+.sprv-viewscope { display: flex; flex-direction: column; gap: 8px; flex: 1 1 520px; }
+.sprv-reports { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 8px 12px; border: 1px solid var(--sprv-border); border-radius: 8px; background: var(--sprv-surface); font-size: 12px; }
+.sprv-report-list { display: flex; flex-wrap: wrap; gap: 4px 12px; max-height: 96px; overflow: auto; }
+.sprv-report-option { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.sprv-refresh { padding: 7px 14px; border: 1px solid var(--sprv-brand); border-radius: 8px; background: var(--sprv-surface); color: var(--sprv-brand); font-weight: 600; font-size: 12px; cursor: pointer; }
+.sprv-refresh:disabled { opacity: 0.6; cursor: progress; }
+.sprv-health ul { margin: 0; padding-left: 18px; }
+.sprv-dialog-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: rgb(0 0 0 / 45%); }
+.sprv-dialog { width: min(640px, 94vw); max-height: 90vh; overflow: auto; padding: 18px 20px; border: 1px solid var(--sprv-border); border-radius: 12px; background: var(--sprv-surface); color: var(--sprv-ink); box-shadow: 0 12px 40px rgb(0 0 0 / 35%); }
+.sprv-dialog h2 { margin: 0 0 4px; font-size: 16px; }
+.sprv-dialog form { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.sprv-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; }
+.sprv-field input, .sprv-field select, .sprv-field textarea { padding: 6px 8px; border: 1px solid var(--sprv-border); border-radius: 6px; background: var(--sprv-surface); color: inherit; font: inherit; font-weight: 400; }
+.sprv-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.sprv-review { padding: 8px 10px; border: 1px dashed var(--sprv-border); border-radius: 8px; font-size: 12px; }
+.sprv-review pre { margin: 6px 0 0; white-space: pre-wrap; font: inherit; max-height: 160px; overflow: auto; }
+.sprv-review ul { margin: 6px 0 0; padding-left: 18px; }
+.sprv-primary { align-self: flex-start; padding: 7px 16px; border: 1px solid var(--sprv-brand); border-radius: 8px; background: var(--sprv-brand); color: var(--sprv-on-brand); font-weight: 600; cursor: pointer; }
+.sprv-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+.sprv-dialog-actions { display: flex; justify-content: flex-end; margin-top: 10px; }

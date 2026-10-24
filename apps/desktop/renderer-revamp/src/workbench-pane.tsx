@@ -1,5 +1,6 @@
 import { useState, type PropsWithChildren } from 'react'
-import { ChevronDoubleLeft20Regular, ChevronDoubleRight20Regular, FullScreenMaximize20Regular, FullScreenMinimize20Regular } from '@fluentui/react-icons'
+import { ChevronDoubleLeft20Regular, ChevronDoubleRight20Regular } from '@fluentui/react-icons'
+import { GuidancePaneToggle } from '../../../shared/guidance-pane.js'
 
 export function WorkbenchPane({ collapsed, mobileActive, stageBoardActive, onToggleCollapsed, children }: PropsWithChildren<{
     collapsed: boolean
@@ -13,14 +14,12 @@ export function WorkbenchPane({ collapsed, mobileActive, stageBoardActive, onTog
         <div className="workbench-pane-toolbar desktop-only">
             {!collapsed && <strong>Guidance</strong>}
             <div className="workbench-pane-controls" role="group" aria-label="Guidance pane controls">
-                {!collapsed && <button
-                    type="button"
+                {!collapsed && <GuidancePaneToggle
                     className="icon-button"
-                    onClick={() => setMaximized((current) => !current)}
-                    aria-label={`${maximized ? 'Restore' : 'Maximize'} Guidance pane`}
-                    aria-pressed={maximized}
-                    title={`${maximized ? 'Restore' : 'Maximize'} Guidance pane`}
-                >{maximized ? <FullScreenMinimize20Regular /> : <FullScreenMaximize20Regular />}</button>}
+                    maximized={maximized}
+                    onToggle={() => setMaximized((current) => !current)}
+                    controls="guidance-pane-content"
+                />}
                 <button
                     type="button"
                     className="icon-button"

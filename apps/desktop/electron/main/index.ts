@@ -40,6 +40,8 @@ import { createSellerDashboardHost } from '../../../../packages/orchestrator/sel
 import { createSeReportingHost, seReportingScopes } from '../../../../packages/orchestrator/se-reporting/composition.js'
 import { createSeReportingIpcHandler, seReportingIpcChannel } from './se-reporting-ipc.js'
 import { createSellerDashboardIpcHandler, sellerDashboardIpcChannel } from './seller-dashboard-ipc.js'
+import { createStagePipelineIpcHandler, stagePipelineIpcChannel } from './stage-pipeline-ipc.js'
+import { createStagePipelineReviewHost } from '../../../../packages/orchestrator/stage-pipeline-review.js'
 import { desktopWindowBounds } from './window-bounds.js'
 import { createMutationSyncIpcHandler, createPortfolioIpcHandlers } from './portfolio-ipc.js'
 import { createPresentationOwner } from '../../../shared/presentation-owner.js'
@@ -127,6 +129,11 @@ const sellerDashboardHost = createSellerDashboardHost({
 })
 const seReportingHost = createSeReportingHost({
   mode: dataMode,
+  // The live MSX connector is created below; it is only dereferenced when a report is generated.
+  dataverse: {
+    readRows: (entitySet, parameters) => liveMsxConnector!.readRows(entitySet, parameters),
+    listMilestoneTeamMilestoneIds: (userId) => liveMsxConnector!.listMilestoneTeamMilestoneIds(userId)
+  },
   identity: async () => {
     const email = (await tokenProvider.getAuthStatus()).userEmail
     return email ? { key: email, email } : undefined
@@ -158,6 +165,9 @@ const localStoreMsxConnector = liveMsxConnector ? undefined : createLocalStoreMs
   TLC_DATA_STORE_PATH: process.env['TLC_DATA_STORE_PATH']?.trim() || resolve(app.getPath('userData'), 'sample.sqlite')
 })
 const msxConnector = liveMsxConnector ?? localStoreMsxConnector ?? new FixtureMsxConnector()
+const stagePipelineHost = liveMsxConnector
+  ? createStagePipelineReviewHost({ mode: 'live', source: liveMsxConnector })
+  : createStagePipelineReviewHost({ mode: 'sample' })
 const creationWriter = localStoreMsxConnector?.createRecordCreationWriter()
 const recordCreation = new RecordCreationService(
   msxConnector,
@@ -360,6 +370,11 @@ function registerIpc(): void {
   ipcMain.handle(sellerDashboardIpcChannel, (event, request: unknown) => {
     assertTrustedSender(event)
     return invokeSellerDashboard(request)
+  })
+  const invokeStagePipeline = createStagePipelineIpcHandler(stagePipelineHost)
+  ipcMain.handle(stagePipelineIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return invokeStagePipeline(request)
   })
   const invokeVoice = createVoiceIpcHandler(voiceHost)
   ipcMain.handle(voiceIpcChannel, (event, request: unknown) => {

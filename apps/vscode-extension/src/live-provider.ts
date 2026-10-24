@@ -24,6 +24,7 @@ import { createLivePlayWorkflowHost, type WorkflowStepErrorInfo } from '../../..
 import type { ExtensionDataProvider } from './data-provider.js'
 import { ExtensionMcemGuidanceConnector } from './mcem-guidance.js'
 import { buildLiveDataProvider, buildLiveTaskAgents } from './live-provider-core.js'
+import { createStagePipelineReviewHost } from '../../../packages/orchestrator/stage-pipeline-review.js'
 import { bindSourceToken } from '../../../packages/orchestrator/mutations/core-adapter.js'
 import { createSeReportingHost } from '../../../packages/orchestrator/se-reporting/composition.js'
 import type { SeReportingResource } from '../../../packages/common/contracts/se-reporting.js'
@@ -106,9 +107,10 @@ export function createLiveDataProvider(
         ...(onStepError ? { onStepError } : {})
     })
     const reportingHost = createSeReportingHost({
+        dataverse: msx,
         mode: 'live', identity: async () => ({ key: account, email: account }),
         ...(getReportingToken ? { getToken: getReportingToken } : {}),
         ...(foundryCredential ? { foundryCredential } : {})
     })
-    return buildLiveDataProvider({ orchestrator, host: configured.host, account, meetingConnector, getSourceToken: sourceToken, reportingHost, ...(meetingExtractor ? { meetingExtractor } : {}), dispose: () => configured.dispose() })
+    return buildLiveDataProvider({ orchestrator, host: configured.host, account, meetingConnector, getSourceToken: sourceToken, reportingHost, stagePipelineHost: createStagePipelineReviewHost({ mode: 'live', source: msx }), ...(meetingExtractor ? { meetingExtractor } : {}), dispose: () => configured.dispose() })
 }

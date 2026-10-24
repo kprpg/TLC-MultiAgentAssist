@@ -22,14 +22,15 @@ interface AgentResponseProps {
     busy?: boolean
     followUp?: AgentFollowUpContext | undefined
     emailAction?: CustomerEmailAction | undefined
+    emailDraftRequested?: boolean
     urlTransform?: UrlTransform | undefined
     onOpenEvidence: (url: string) => void | Promise<void>
 }
 
-export function AgentResponse({ content, busy = false, followUp, emailAction, urlTransform, onOpenEvidence }: AgentResponseProps) {
+export function AgentResponse({ content, busy = false, followUp, emailAction, emailDraftRequested = false, urlTransform, onOpenEvidence }: AgentResponseProps) {
     const [linkError, setLinkError] = useState('')
     const formatted = useMemo(() => formatResponseMarkdown(content), [content])
-    const email = useMemo(() => busy ? undefined : locateCustomerEmail(content), [content, busy])
+    const email = useMemo(() => busy ? undefined : locateCustomerEmail(content, emailDraftRequested), [content, busy, emailDraftRequested])
     async function openEvidence(url: string) {
         setLinkError('')
         try { await onOpenEvidence(url) }
@@ -41,11 +42,8 @@ export function AgentResponse({ content, busy = false, followUp, emailAction, ur
         }}>{value}</Markdown>
     </div>
     return <>
-        {email ? <>
-            {markdown(formatted.slice(0, email.end))}
-            <CustomerEmailActions key={content} draft={email.draft} emailAction={emailAction} />
-            {formatted.slice(email.end).trim() && markdown(formatted.slice(email.end))}
-        </> : markdown(formatted)}
+        {email && <CustomerEmailActions key={content} draft={email.draft} emailAction={emailAction} />}
+        {markdown(formatted)}
         {linkError && <p role="alert">{linkError}</p>}
         {followUp && <AgentFollowUps content={content} busy={busy} followUp={followUp} emailAction={emailAction} urlTransform={urlTransform} onOpenEvidence={onOpenEvidence} />}
     </>
@@ -90,7 +88,7 @@ function AgentFollowUps({ content, busy = false, followUp, emailAction, urlTrans
         {error && <p role="alert">{error}</p>}
         {agentResult && <article className="agent-follow-up-response" aria-label="Agent follow-up response">
             <header><strong>Follow-up</strong><span>{selected}</span></header>
-            <AgentResponse key={agentResult.correlationId} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'} followUp={followUp} emailAction={emailAction} urlTransform={urlTransform} onOpenEvidence={onOpenEvidence} />
+            <AgentResponse key={agentResult.correlationId} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'} followUp={followUp} emailAction={emailAction} emailDraftRequested={/\be[-\u2010-\u2015]?mail\b/i.test(selected)} urlTransform={urlTransform} onOpenEvidence={onOpenEvidence} />
         </article>}
     </section>
 }

@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import type { TokenCredential } from '@azure/core-auth'
 import { loadFoundryEnvironmentFromEnvironment } from '../../common/configuration/foundry-environment.js'
 import { createFoundryOpenAIClient } from '../../connectors/foundry/index.js'
+import type { SeDataverseSource } from '../../connectors/se-reporting/dataverse.js'
 import { FileSeProfileStore } from '../../connectors/se-reporting/profiles.js'
 import { LiveSeReportingSource } from '../../connectors/se-reporting/publish.js'
 import { createSeNarrativeSynthesizer } from '../../connectors/se-reporting/synthesis.js'
@@ -10,6 +11,11 @@ import { SeReportingError, type SeReportingResource } from '../../connectors/se-
 export { seReportingScopes } from '../../connectors/se-reporting/types.js'
 import { SharedSeReportingHost, type SeReportingHost, type SeReportingOwner } from './host.js'
 import { createSampleSeReportingHost } from './sample.js'
+
+export function resolveSeSourcePreference(environment: NodeJS.ProcessEnv): 'powerbi' | 'dataverse' | 'auto' {
+    const value = environment['TLC_SE_SOURCE']?.trim().toLowerCase()
+    return value === 'auto' || value === 'dataverse' ? value : 'powerbi'
+}
 
 export function createSeReportingHost(options: {
     mode: 'sample' | 'live'
@@ -19,6 +25,8 @@ export function createSeReportingHost(options: {
     environment?: NodeJS.ProcessEnv
     profileDirectory?: string
     fetcher?: typeof fetch
+    /** Delegated MSX Dataverse access for the Dataverse-first milestone/task provider (see TLC_SE_SOURCE). */
+    dataverse?: SeDataverseSource
 }): SeReportingHost {
     if (options.mode === 'sample') return createSampleSeReportingHost()
     const environment = options.environment ?? process.env
@@ -29,7 +37,9 @@ export function createSeReportingHost(options: {
         },
         expectedEmail: async () => (await options.identity())?.email,
         expectedObjectId: async () => (await options.identity())?.objectId,
-        ...(options.fetcher ? { fetcher: options.fetcher } : {})
+        ...(options.fetcher ? { fetcher: options.fetcher } : {}),
+        ...(options.dataverse ? { dataverse: options.dataverse, sourcePreference: resolveSeSourcePreference(environment) } : {}),
+        ...(environment['TLC_MSX_RISK_DETAILS_FIELD']?.trim() ? { riskField: environment['TLC_MSX_RISK_DETAILS_FIELD'].trim() } : {})
     })
     let model: ReturnType<typeof createSeNarrativeSynthesizer> | undefined
     return new SharedSeReportingHost({

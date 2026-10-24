@@ -16,6 +16,7 @@ import type { MeetingTranscript } from '../common/contracts/meeting.js'
 import type { MeetingTranscriptSummary } from '../common/contracts/meeting.js'
 import { GraphMeetingConnector, type GraphAcquisitionResult } from '../connectors/graph/meetings.js'
 import { createSellerDashboardHost, type SellerDashboardHost } from './seller-dashboard.js'
+import { createStagePipelineReviewHost, type StagePipelineReviewHost } from './stage-pipeline-review.js'
 import { createSeReportingHost } from './se-reporting/composition.js'
 import { createSampleSeReportingHost } from './se-reporting/sample.js'
 import type { SeReportingHost, SeReportingOwner } from './se-reporting/host.js'
@@ -32,6 +33,7 @@ export interface ApplicationServices {
   workflows: WorkflowHost
   sellerDashboard: SellerDashboardHost
   seReporting: SeReportingHost
+  stagePipelineReview: StagePipelineReviewHost
   meetings: MeetingConnector
   proposeTranscript(opportunityId: string, transcript: MeetingTranscript): ReturnType<MeetingConnector['proposeMeetingChangeSet']>
   acquireTranscripts(request: MeetingAcquisitionRequest): Promise<GraphAcquisitionResult>
@@ -44,11 +46,11 @@ export interface ApplicationServices {
   dispose(): Promise<void>
 }
 
-function assemble(msx: MsxConnector, guidance: McemGuidanceConnector, agents: TaskAgentRegistry, recordCreation: RecordCreationService, meetings: MeetingConnector, workflows: WorkflowHost, sellerDashboard: SellerDashboardHost, seReporting: SeReportingHost, knowledge: KnowledgeSearch, source: Pick<ApplicationServices, 'acquireTranscripts' | 'resolveMeeting' | 'listTranscriptSources'>, dispose: () => Promise<void>, refreshSource = () => {}, performanceReporter?: PerformanceReporter): ApplicationServices {
+function assemble(msx: MsxConnector, guidance: McemGuidanceConnector, agents: TaskAgentRegistry, recordCreation: RecordCreationService, meetings: MeetingConnector, workflows: WorkflowHost, sellerDashboard: SellerDashboardHost, seReporting: SeReportingHost, stagePipelineReview: StagePipelineReviewHost, knowledge: KnowledgeSearch, source: Pick<ApplicationServices, 'acquireTranscripts' | 'resolveMeeting' | 'listTranscriptSources'>, dispose: () => Promise<void>, refreshSource = () => {}, performanceReporter?: PerformanceReporter): ApplicationServices {
   return {
     ...(performanceReporter ? { performanceReporter } : {}),
     orchestrator: new ThinSliceOrchestrator(msx, guidance, agents, performanceReporter, recordCreation, knowledge),
-    meetings, workflows, sellerDashboard, seReporting, dispose, workflowScopes: new Map(), ...source,
+    meetings, workflows, sellerDashboard, seReporting, stagePipelineReview, dispose, workflowScopes: new Map(), ...source,
     refreshSource,
     withReadContext: (operation) => msx.withReadContext ? msx.withReadContext(operation) : operation(),
     withReviewedVersions: (before, operation) => {
@@ -72,6 +74,7 @@ export async function createSampleApplicationServices(options: { dataPath?: stri
     msx, new LocalPdfMcemGuidanceConnector(resolve(options.workingDirectory ?? process.cwd(), 'docs/knowledge/MCEM Overview.pdf')),
     createSampleTaskAgents(), new RecordCreationService(msx, writer, { writer }), msx, workflows,
     createSellerDashboardHost({ mode: 'sample', resolveUserEmail: async () => undefined }), createSampleSeReportingHost(),
+    createStagePipelineReviewHost({ mode: 'sample' }),
     createKnowledgeSearch({ mode: 'sample' }), {
       listTranscriptSources: (opportunityId) => msx.listMeetingTranscripts(opportunityId),
       resolveMeeting: async () => { throw new Error('Sample mode uses the bundled transcript picker, not a live meeting URL.') },
@@ -136,11 +139,11 @@ export async function createLiveApplicationServices(options: {
     new RecordCreationService(msx, msx), new LiveMeetingCaptureConnector(msx), configured.host,
     createSellerDashboardHost({ mode: 'live', allowLocalProfile: false, resolveUserEmail: async () => undefined }),
     createSeReportingHost({
-      mode: 'live', identity: options.reportingIdentity ?? (async () => undefined), environment: options.environment,
+      mode: 'live', identity: options.reportingIdentity ?? (async () => undefined), environment: options.environment, dataverse: msx,
       ...(options.getReportingToken ? { getToken: options.getReportingToken } : {}),
       ...(options.foundryCredential ? { foundryCredential: options.foundryCredential } : {}),
       ...(options.reportingFetcher ? { fetcher: options.reportingFetcher } : {})
-    }), createKnowledgeSearch({
+    }), createStagePipelineReviewHost({ mode: 'live', source: msx }), createKnowledgeSearch({
       mode: 'live', environment: options.environment, getGraphToken: () => options.getToken('graph'),
       ...(options.fetchImplementation ? { fetcher: options.fetchImplementation } : {})
     }), {

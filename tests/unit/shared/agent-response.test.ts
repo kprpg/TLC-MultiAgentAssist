@@ -17,18 +17,23 @@ describe('shared AgentResponse', () => {
         expect(markup).toContain('aria-label="Customer email draft actions"')
         expect(markup).toContain('>E-mail</button>')
         expect(markup).toContain('>Copy</button>')
+        expect(markup.indexOf('Customer email draft actions')).toBeLessThan(markup.indexOf('class="agent-response-markdown"'))
+        expect(markup.match(/aria-label="Customer email draft actions"/g)).toHaveLength(1)
         expect(markup).toContain('Nothing is sent automatically.')
         expect(compose).not.toHaveBeenCalled()
     })
 
-    it('places E-mail and Copy immediately after a quoted customer draft and before later review sections', () => {
+    it('places E-mail and Copy above a quoted customer draft while preserving later review sections', () => {
         const markup = renderToStaticMarkup(createElement(AgentResponse, {
             content: '## Customer-ready draft requiring human review\n\n> Requires human review.\n>\n> **Subject:** Aligning next steps\n>\n> Hi [Customer Name],\n\n## Recommended tailoring before send\n\nConfirm timing.',
             emailAction: { kind: 'host', compose: vi.fn() }, onOpenEvidence: vi.fn()
         }))
         const actions = markup.indexOf('Customer email draft actions')
-        expect(markup.indexOf('Hi [Customer Name],')).toBeLessThan(actions)
-        expect(actions).toBeLessThan(markup.indexOf('Recommended tailoring before send'))
+        expect(actions).toBeLessThan(markup.indexOf('<h2>Customer-ready draft requiring human review</h2>'))
+        expect(markup).toContain('<blockquote>')
+        expect(markup).toContain('Hi [Customer Name],')
+        expect(markup).toContain('<h2>Recommended tailoring before send</h2>')
+        expect(markup.match(/class="agent-response-markdown"/g)).toHaveLength(1)
         expect(markup).toContain('Replace the bracketed placeholders')
     })
 
@@ -40,6 +45,17 @@ describe('shared AgentResponse', () => {
         expect(markup).not.toContain('Customer email draft actions')
     })
 
+    it('shows top-of-response actions for a requested email follow-up with a generic heading', () => {
+        const markup = renderToStaticMarkup(createElement(AgentResponse, {
+            content: '## Follow-up for the sponsor\n\nSubject: Confirming next steps\n\nPlease confirm the approval sequence.',
+            emailDraftRequested: true,
+            emailAction: { kind: 'host', compose: vi.fn() }, onOpenEvidence: vi.fn()
+        }))
+        expect(markup).toContain('>E-mail</button>')
+        expect(markup).toContain('>Copy</button>')
+        expect(markup.indexOf('Customer email draft actions')).toBeLessThan(markup.indexOf('<h2>Follow-up for the sponsor</h2>'))
+    })
+
     it('renders sections, bold labels, and an accessible sendable offer without sending automatically', () => {
         const markup = renderToStaticMarkup(createElement(AgentResponse, { content, followUp, onOpenEvidence: vi.fn() }))
         expect(markup).toContain('<h2>Summary</h2>')
@@ -47,6 +63,7 @@ describe('shared AgentResponse', () => {
         expect(markup).toContain('<strong>Owner role:</strong>')
         expect(markup).toContain(`aria-label="Send follow-up: ${offer}"`)
         expect(markup).toContain('Selecting a suggestion sends it with the response above.')
+        expect(markup).not.toContain('Customer email draft actions')
         expect(followUp.invoke).not.toHaveBeenCalled()
     })
 

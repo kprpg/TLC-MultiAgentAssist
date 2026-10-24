@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react'
+import type { StagePipelineOpportunity } from '../../../../packages/common/contracts/stage-pipeline-review.js'
 import {
     alertSummary, formatDollars, formatMoney, opportunityCsv, opportunityKpis, reviewAlerts, sumConsumed,
     type OpportunityView, type ReviewAlert, type ReviewMarks
@@ -40,13 +41,16 @@ export function OpportunityKpis({ views }: { views: readonly OpportunityView[] }
     </div>
 }
 
-export function OpportunityTable({ views, marks, onToggle }: {
+export function OpportunityTable({ views, marks, onToggle, showOwner = false, onEdit }: {
     views: readonly OpportunityView[]
     marks: ReviewMarks
     onToggle(kind: keyof ReviewMarks, id: string): void
+    showOwner?: boolean
+    onEdit?: (row: StagePipelineOpportunity) => void
 }): ReactElement {
     const columns: ReviewColumn<OpportunityView>[] = [
         { key: 'customer', label: 'Customer', value: (view) => view.row.customer },
+        ...(showOwner ? [{ key: 'owner', label: 'Owner', value: (view: OpportunityView) => view.row.owner, render: (view: OpportunityView) => <>{view.row.owner || '—'}{!view.row.editable && <small className="sprv-threat">read-only</small>}</> }] : []),
         {
             key: 'opportunity', label: 'Opportunity', value: (view) => view.row.name,
             render: (view) => <><strong>{view.row.name}</strong>{view.row.notes && <small className="sprv-notes">{view.row.notes}</small>}</>
@@ -73,12 +77,12 @@ export function OpportunityTable({ views, marks, onToggle }: {
                 {view.overdueDays === 0 && view.row.daysInStage < 14 && '—'}
             </span>
         },
-        { key: 'actions', label: 'Actions', value: () => null, render: (view) => <RowActions row={view.row} marks={marks} onToggle={onToggle} /> }
+        { key: 'actions', label: 'Actions', value: () => null, render: (view) => <RowActions row={view.row} marks={marks} onToggle={onToggle} {...(onEdit ? { onEdit } : {})} /> }
     ]
     return <section className="sprv-card" aria-label="Opportunities">
         <div className="sprv-table-heading">
             <span>{views.length} shown · {formatDollars(sumConsumed(views))} consumed</span>
-            <button type="button" onClick={() => downloadCsv('stage-and-pipeline-opportunities.csv', opportunityCsv(views))}>Export CSV</button>
+            <button type="button" onClick={() => downloadCsv('stage-and-pipeline-opportunities.csv', opportunityCsv(views, { includeOwner: showOwner }))}>Export CSV</button>
         </div>
         <ReviewTable caption="Opportunities" columns={columns} rows={views} rowKey={(view) => view.row.id}
             rowClass={(view) => marks.reviewed.has(view.row.id) ? 'sprv-reviewed' : view.overdueDays > 0 ? 'sprv-overdue' : undefined} />

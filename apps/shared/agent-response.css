@@ -92,9 +92,13 @@
 }
 
 .customer-email-actions {
-    margin-top: 1rem;
-    padding-top: 0.75rem;
-    border-top: 1px solid var(--cp-border, var(--vscode-panel-border, var(--colorNeutralStroke2, #d1d1d1)));
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--cp-border, var(--vscode-panel-border, var(--colorNeutralStroke2, #d1d1d1)));
+}
+
+.customer-email-actions > .customer-email-buttons {
+    justify-content: flex-end;
 }
 
 .customer-email-buttons {

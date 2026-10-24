@@ -11,7 +11,19 @@ import { conversionOffer, followUpAgentResponse, initialAgentResponse } from './
 import { agentTaskRequestSchema, contractVersion, emailComposeRequestSchema } from '../../../packages/common/contracts/index.js'
 import { expectCopiedCustomerEmail, installCustomerEmailClipboard } from '../customer-email.js'
 
-test('Desktop agent follow-ups send the previous response through IPC and keep both replies readable', async () => {
+for (const scenario of [
+    {
+        label: 'standard email draft', suggestion: conversionOffer, initialResponse: initialAgentResponse,
+        emailResponse: followUpAgentResponse, heading: 'Customer-ready draft'
+    },
+    {
+        label: 'suggested email prompt with a generic reply heading',
+        suggestion: 'Draft a follow-up e-mail to the sponsor.',
+        initialResponse: initialAgentResponse.replace(conversionOffer, 'Choose a next step:\n\n- Draft a follow-up e-mail to the sponsor.'),
+        emailResponse: followUpAgentResponse.replace('1. Customer-ready draft', '## Follow-up for the sponsor'),
+        heading: 'Follow-up for the sponsor'
+    }
+]) test(`Desktop agent follow-ups send the previous response through IPC and keep both replies readable (${scenario.label})`, async () => {
     const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-agent-follow-up-'))
     const app = await electron.launch({
         args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
@@ -43,7 +55,7 @@ test('Desktop agent follow-ups send the previous response through IPC and keep b
                 event.sender.send('tlc:agent-task-event', { streamId, event: terminal })
                 return terminal
             })
-        }, { initial: initialAgentResponse, followUp: followUpAgentResponse, version: contractVersion })
+        }, { initial: scenario.initialResponse, followUp: scenario.emailResponse, version: contractVersion })
         const window = await app.firstWindow()
         await installCustomerEmailClipboard(window)
         await window.setViewportSize({ width: 1600, height: 1000 })
@@ -55,16 +67,16 @@ test('Desktop agent follow-ups send the previous response through IPC and keep b
         await expect(window.locator('.agent-response-markdown h2')).toHaveText(['Summary', 'Observed signals', 'Recommended actions', 'Sources', 'Feedback prompt'])
         const requests = async () => agentTaskRequestSchema.array().parse(JSON.parse(await app.evaluate(() => process.env.TLC_TEST_AGENT_REQUESTS ?? '[]')))
         expect(await requests()).toHaveLength(1)
-        await window.getByRole('button', { name: `Send follow-up: ${conversionOffer}` }).click()
+        await window.getByRole('button', { name: `Send follow-up: ${scenario.suggestion}` }).click()
         const response = window.getByRole('article', { name: 'Agent follow-up response' })
-        await expect(response.getByRole('heading', { name: 'Customer-ready draft' })).toBeVisible()
+        await expect(response.getByRole('heading', { name: scenario.heading })).toBeVisible()
         await expect(response.getByRole('columnheader')).toHaveText(['Owner', 'Action', 'Evidence'])
         await expect(window.locator('.agent-response-markdown').first().getByRole('heading', { name: 'Summary', exact: true })).toBeVisible()
         const sent = await requests()
         expect(sent).toHaveLength(2)
         expect(sent[1]).toMatchObject({ capability: 'account-pulse', accountId: 'account-contoso', opportunityId: 'opp-grid-modernization' })
-        expect(sent[1]!.prompt).toContain(initialAgentResponse)
-        expect(sent[1]!.prompt).toContain(conversionOffer)
+        expect(sent[1]!.prompt).toContain(scenario.initialResponse)
+        expect(sent[1]!.prompt).toContain(scenario.suggestion)
         const actions = response.getByRole('region', { name: 'Customer email draft actions' })
         await expectCopiedCustomerEmail(window, actions)
         expect(await app.evaluate(() => process.env.TLC_TEST_CUSTOMER_EMAIL)).toBeUndefined()

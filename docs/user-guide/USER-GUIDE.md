@@ -364,10 +364,16 @@ The workspace is organized into vertical *blades*:
 | **Next best actions rail** (right) | Role-based prioritized next steps derived from the opportunity's stage, exit-criteria evidence, and milestone health (status and customer commitment). |
 
 Use the collapse arrows in the blade headers to make room for the center workbench.
+Desktop, Web, the VS Code webview, and Teams provide the square-corner
+**Maximize Guidance pane** control at the top right of the opportunity workbench.
+It temporarily hides the surrounding panes; **Restore Guidance pane** brings them
+back with their previous widths and visibility settings. The selected opportunity,
+Guidance responses, and unsent questions stay in place. The control also works with
+the Overview/MSX and MCEM stage tabs.
+
 In Desktop and Web, the Guidance toolbar stays visible while its content scrolls.
-**Maximize Guidance pane** temporarily hides the surrounding blades; **Restore Guidance pane**
-brings them back with their previous widths and collapse states. **Collapse Guidance pane**
-reduces the workbench to a narrow strip; use **Expand Guidance pane** to reopen it.
+**Collapse Guidance pane** reduces the workbench to a narrow strip; use
+**Expand Guidance pane** to reopen it.
 
 The Desktop window opens within the display's usable work area, leaving the operating-system
 taskbar accessible. Desktop and Web keep the workspace within the current viewport; scroll
@@ -661,8 +667,11 @@ your answer or requested adjustment, and select **Send reply to agent**. No answ
 chosen on your behalf; your reply is sent with the preceding response as context.
 
 Completed customer-email drafts with a **Subject:** line also have their own **E-mail**
-and **Copy** buttons, including drafts returned by a follow-up:
+and **Copy** buttons at the top right of the response, above the draft text, including
+drafts returned by a follow-up. The buttons appear only at the top, not below the draft:
 
+- Email-draft follow-ups retain these actions even when the reply uses a different
+  heading, such as **Follow-up for the sponsor**, or presents the email in a blockquote.
 - **Copy** puts the email subject and plain-text body on the clipboard, ready to paste
   into your mail client.
 - **E-mail** prepares an **unsent** draft using that email's subject and body, not the

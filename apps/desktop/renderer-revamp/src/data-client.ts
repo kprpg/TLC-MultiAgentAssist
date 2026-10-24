@@ -86,6 +86,8 @@ import { buildPreviewEvaluation } from './preview/preview-evaluation.js'
 import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest, type VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema, type SellerDashboardRequest, type SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
 import { createSampleSellerDashboard } from '../../../../packages/common/fixtures/seller-dashboard.js'
+import { stagePipelineRequestSchema, stagePipelineResponseSchema, type StagePipelineRequest, type StagePipelineResponse } from '../../../../packages/common/contracts/stage-pipeline-review.js'
+import { createSampleStagePipelineReview } from '../../../../packages/common/fixtures/stage-pipeline-review.js'
 import { seReportingRequestSchema, seReportingResponseSchema, type SeReportingRequest, type SeReportingResponse } from '../../../../packages/common/contracts/se-reporting.js'
 import { createPreviewSeReportingHost } from './preview/preview-reporting.js'
 import {
@@ -114,6 +116,7 @@ export interface RevampDataClient {
     refreshSources?(opportunityId?: string): void
     getDataMode(): Promise<'sample' | 'live'>
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
+    invokeStagePipelineReview(request: StagePipelineRequest): Promise<StagePipelineResponse>
     invokeSeReporting(request: SeReportingRequest): Promise<SeReportingResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     readonly mode: 'desktop' | 'web-live' | 'web-sample'
@@ -250,6 +253,9 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
         })),
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(await apiRequest(fetcher, '/api/seller-dashboard', {
             method: 'POST', body: JSON.stringify(sellerDashboardRequestSchema.parse(request))
+        })),
+        invokeStagePipelineReview: async (request) => stagePipelineResponseSchema.parse(await apiRequest(fetcher, '/api/stage-pipeline-review', {
+            method: 'POST', body: JSON.stringify(stagePipelineRequestSchema.parse(request))
         })),
         invokeSeReporting: async (request) => seReportingResponseSchema.parse(await apiRequest(fetcher, '/api/se-reporting', {
             method: 'POST', body: JSON.stringify(seReportingRequestSchema.parse(request))
@@ -396,6 +402,7 @@ interface DesktopBridge {
     getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
     getPortfolioWorkspace(request: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace>
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
+    invokeStagePipelineReview(request: StagePipelineRequest): Promise<StagePipelineResponse>
     invokeSeReporting(request: SeReportingRequest): Promise<SeReportingResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     exitApplication(): Promise<void>
@@ -549,6 +556,10 @@ function webClient(): RevampDataClient {
         invokeSellerDashboard: async (request) => {
             sellerDashboardRequestSchema.parse(request)
             return createSampleSellerDashboard()
+        },
+        invokeStagePipelineReview: async (request) => {
+            const input = stagePipelineRequestSchema.parse(request)
+            return createSampleStagePipelineReview({ scope: input.scope, ...(input.reportIds ? { reportIds: input.reportIds } : {}) })
         },
         invokeSeReporting: (request) => seReporting.invoke(request),
         exitApplication: async () => { await apiRequest(fetch, '/api/exit', { method: 'POST' }) },
@@ -782,6 +793,9 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         getDataMode: async () => (await bridge.getDataStatus()).mode,
         searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(
             await bridge.searchKnowledge(knowledgeSearchRequestSchema.parse(request))),
+        invokeStagePipelineReview: async (request) => stagePipelineResponseSchema.parse(
+            await bridge.invokeStagePipelineReview(stagePipelineRequestSchema.parse(request))
+        ),
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(
             await bridge.invokeSellerDashboard(sellerDashboardRequestSchema.parse(request))
         ),

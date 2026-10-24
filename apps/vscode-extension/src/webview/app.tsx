@@ -16,6 +16,7 @@ import { AppHeader } from './app-header.js'
 import { CommentsButton } from './comments-button.js'
 import { portfolioLayoutClassName } from './portfolio-layout.js'
 import { ResizableSplit } from '../../../shared/resizable-split.js'
+import { GuidanceWorkbenchPane } from '../../../shared/guidance-pane.js'
 import type { CustomerEmailAction } from '../../../shared/customer-email.js'
 import { formatMoney, milestoneTooltipContent, opportunityTooltipContent } from './portfolio-record-details.js'
 import { RecordTooltip } from './record-tooltip.js'
@@ -1587,7 +1588,7 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
             {(detailsExpanded || actionsExpanded) && <ResizableSplit className={`portfolio-workbench${detailsExpanded ? '' : ' details-collapsed'}${actionsExpanded ? '' : ' actions-collapsed'}`}
                 label="opportunity details panel" controls="portfolio-details-panel" defaultRatio={2 / 3}
                 minFirst={320} minSecond={240} firstVisible={detailsExpanded} secondVisible={actionsExpanded && !!selectedOpportunity}>
-            {detailsExpanded && <section id="portfolio-details-panel" className="pane portfolio-details-pane pane-scroll">
+            {detailsExpanded && <GuidanceWorkbenchPane id="portfolio-details-panel" className="pane portfolio-details-pane pane-scroll">
                 {selectedOpportunity ? (
                     <div>
                         <h3><MsxOpportunityLink opportunity={selectedOpportunity} onOpen={dataClient.openEvidence} onError={setNote} /></h3>
@@ -1648,7 +1649,7 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
                         {note && <p className="muted">{note}</p>}
                     </div>
                 ) : <p className="muted">Select an opportunity.</p>}
-            </section>}
+            </GuidanceWorkbenchPane>}
             {actionsExpanded && selectedOpportunity && (
                 <NextBestActions
                     evaluation={mcem.status === 'ready' ? mcem.data : undefined}
@@ -1990,7 +1991,7 @@ export function App(): ReactElement {
                 }} /> : tab === 'portfolio' ? (
                     <PortfolioPanel key={mode} sourceRevision={portfolioRevision} focus={focus} accountsExpanded={accountsExpanded} detailsExpanded={detailsExpanded} actionsExpanded={actionsExpanded} dataMode={mode} onPortfolioChanged={portfolioChanged} />
                 ) : tab === 'discover' ? <DiscoverPanel key={mode} sourceRevision={portfolioRevision} dataMode={mode} onPortfolioChanged={portfolioChanged} /> : tab === 'dashboard'
-                    ? <DashboardWorkspace invokeSellerDashboard={dataClient.invokeSellerDashboard} invokeSeReporting={dataClient.invokeSeReporting} sourceSession={dataClient.cacheSession} /> : <PlaysPanel runRequest={runRequest} />}
+                    ? <DashboardWorkspace invokeSellerDashboard={dataClient.invokeSellerDashboard} invokeStagePipelineReview={dataClient.invokeStagePipelineReview} stagePipelineWrites={dataClient} invokeSeReporting={dataClient.invokeSeReporting} sourceSession={dataClient.cacheSession} /> : <PlaysPanel runRequest={runRequest} />}
             </main>
         </div>
     )

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const stagePipelineReviewContractVersion = '1.0' as const
+export const stagePipelineReviewContractVersion = '1.1' as const
 
 const identifier = z.string().min(1).max(200)
 const name = z.string().min(1).max(500)
@@ -23,12 +23,18 @@ export const stagePipelineStageSchema = z.enum(stagePipelineStages)
 export const stagePipelineMilestoneStatusSchema = z.enum(stagePipelineMilestoneStatuses)
 export const stagePipelineScopeSchema = z.enum(['azure', 'microsoft-services'])
 export const stagePipelineThreatSchema = z.enum(['None', 'Low', 'Medium', 'High'])
+export const stagePipelineViewScopes = ['mine', 'reports', 'both'] as const
+export const stagePipelineViewScopeSchema = z.enum(stagePipelineViewScopes)
+export const stagePipelineSourceNames = ['opportunities', 'milestones', 'macc', 'acr', 'hierarchy'] as const
+export const stagePipelineAcrSources = ['sample', 'mint', 'semantic-model', 'derived-pipeline-only', 'unavailable'] as const
 
 export const stagePipelineOpportunitySchema = z.object({
     id: identifier,
     number: name,
     customer: name,
     name,
+    owner: z.string().max(200),
+    editable: z.boolean(),
     notes: text,
     contact: text,
     scope: stagePipelineScopeSchema,
@@ -64,22 +70,43 @@ export const stagePipelineMilestoneSchema = z.object({
 
 const acrMonthSchema = z.object({
     month,
-    actual: nonnegative,
-    baseline: nonnegative,
+    actual: nonnegative.nullable(),
+    baseline: nonnegative.nullable(),
     committed: nonnegative,
     uncommitted: nonnegative,
     stage1: nonnegative,
-    target: nonnegative
+    target: nonnegative.nullable()
 }).strict()
 
 export const stagePipelineAcrSchema = z.object({
-    syncedAt: date,
-    lastActualMonth: month,
+    source: z.enum(stagePipelineAcrSources),
+    syncedAt: date.nullable(),
+    lastActualMonth: month.nullable(),
     accounts: z.array(z.object({
         customer: name,
         months: z.array(acrMonthSchema).length(12)
     }).strict()).max(500)
+}).strict().superRefine((acr, context) => {
+    const connected = acr.source === 'sample' || acr.source === 'mint' || acr.source === 'semantic-model'
+    const measured = acr.accounts.flatMap((account) => account.months).flatMap((row) => [row.actual, row.baseline, row.target])
+    const consistent = connected
+        ? acr.syncedAt !== null && acr.lastActualMonth !== null && measured.every((value) => value !== null)
+        : acr.syncedAt === null && acr.lastActualMonth === null && measured.every((value) => value === null)
+    if (!consistent) {
+        context.addIssue({ code: 'custom', message: connected
+            ? 'A connected ACR source must provide actuals, baseline, target and sync dates.'
+            : 'An unconnected ACR source must not report actuals, baseline, target or sync dates.' })
+    }
+})
+
+export const stagePipelineSourceHealthSchema = z.object({
+    source: z.enum(stagePipelineSourceNames),
+    state: z.enum(['complete', 'partial', 'unavailable']),
+    detail: text,
+    count: count.optional()
 }).strict()
+
+export const stagePipelineReportSchema = z.object({ id: identifier, displayName: name }).strict()
 
 export const stagePipelineSnapshotSchema = z.object({
     contractVersion: z.literal(stagePipelineReviewContractVersion),
@@ -91,10 +118,16 @@ export const stagePipelineSnapshotSchema = z.object({
     owner: z.string().max(200),
     asOf: date,
     fiscalYear: z.number().int().min(2000).max(2100),
+    scope: stagePipelineViewScopeSchema,
+    reports: z.array(stagePipelineReportSchema).max(50),
+    sources: z.array(stagePipelineSourceHealthSchema).max(10),
     opportunities: z.array(stagePipelineOpportunitySchema).max(5_000),
     milestones: z.array(stagePipelineMilestoneSchema).max(25_000),
     acr: stagePipelineAcrSchema
 }).strict().superRefine((value, context) => {
+    if (value.scope === 'mine' && value.reports.length > 0) context.addIssue({ code: 'custom', path: ['reports'], message: 'The seller portfolio scope has no direct reports.' })
+    if (new Set(value.reports.map((row) => row.id)).size !== value.reports.length) context.addIssue({ code: 'custom', path: ['reports'], message: 'Report ids must be unique.' })
+    if (new Set(value.sources.map((row) => row.source)).size !== value.sources.length) context.addIssue({ code: 'custom', path: ['sources'], message: 'Each source may be reported once.' })
     const ids = new Set<string>()
     for (const [index, row] of value.opportunities.entries()) {
         if (ids.has(row.id)) context.addIssue({ code: 'custom', path: ['opportunities', index, 'id'], message: 'Opportunity ids must be unique.' })
@@ -111,14 +144,20 @@ export const stagePipelineSnapshotSchema = z.object({
 export const stagePipelineUnavailableSchema = z.object({
     contractVersion: z.literal(stagePipelineReviewContractVersion),
     kind: z.literal('unavailable'),
-    code: z.enum(['source-unavailable', 'unauthorized', 'invalid-snapshot']),
+    code: z.enum(['source-unavailable', 'unauthorized', 'forbidden', 'throttled', 'invalid-snapshot']),
     message: text
 }).strict()
 
 export const stagePipelineRequestSchema = z.object({
     contractVersion: z.literal(stagePipelineReviewContractVersion),
-    operation: z.literal('get')
-}).strict()
+    operation: z.enum(['get', 'refresh']),
+    scope: stagePipelineViewScopeSchema.default('mine'),
+    reportIds: z.array(identifier).max(50).optional()
+}).strict().superRefine((value, context) => {
+    if (value.reportIds && value.scope === 'mine') {
+        context.addIssue({ code: 'custom', path: ['reportIds'], message: 'Direct reports can only be selected for a reports scope.' })
+    }
+})
 
 export const stagePipelineResponseSchema = z.union([stagePipelineSnapshotSchema, stagePipelineUnavailableSchema])
 
@@ -129,5 +168,8 @@ export type StagePipelineOpportunity = z.infer<typeof stagePipelineOpportunitySc
 export type StagePipelineMilestone = z.infer<typeof stagePipelineMilestoneSchema>
 export type StagePipelineAcr = z.infer<typeof stagePipelineAcrSchema>
 export type StagePipelineSnapshot = z.infer<typeof stagePipelineSnapshotSchema>
+export type StagePipelineViewScope = z.infer<typeof stagePipelineViewScopeSchema>
+export type StagePipelineSourceHealth = z.infer<typeof stagePipelineSourceHealthSchema>
 export type StagePipelineRequest = z.infer<typeof stagePipelineRequestSchema>
+export type StagePipelineRequestInput = z.input<typeof stagePipelineRequestSchema>
 export type StagePipelineResponse = z.infer<typeof stagePipelineResponseSchema>

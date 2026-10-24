@@ -1,7 +1,7 @@
 import {
     stagePipelineReviewContractVersion, stagePipelineSnapshotSchema, stagePipelineStages,
     type StagePipelineAcr, type StagePipelineMilestone, type StagePipelineMilestoneStatus,
-    type StagePipelineOpportunity, type StagePipelineSnapshot
+    type StagePipelineOpportunity, type StagePipelineSnapshot, type StagePipelineViewScope
 } from '../contracts/stage-pipeline-review.js'
 
 const asOf = '2026-10-21'
@@ -43,6 +43,8 @@ function opportunity(index: number): StagePipelineOpportunity {
         id: `sample-opp-${String(index + 1).padStart(3, '0')}`,
         number: `7-SAMPLE${String(index + 1).padStart(3, '0')}`,
         customer,
+        owner: 'Sample Seller',
+        editable: true,
         name: microsoftServices ? `Unified support plan ${index - 43}` : `${inbound ? 'Inbound: ' : ''}${label}`,
         notes: index % 3 === 0 ? `AB - 12/Oct - sample note: partner is validating the workload plan for ${label.toLowerCase()}.` : '',
         contact: `Contact ${index % 9 + 1}`,
@@ -91,6 +93,7 @@ function acrFor(): StagePipelineAcr {
     const weights = [0.3, 0.25, 0.2, 0.15, 0.1]
     const round = (value: number) => Math.round(value / 1_000) * 1_000
     return {
+        source: 'sample',
         syncedAt: '2026-09-30',
         lastActualMonth: '2026-09',
         accounts: customers.map((customer, accountIndex) => {
@@ -114,8 +117,47 @@ function acrFor(): StagePipelineAcr {
     }
 }
 
-export function createSampleStagePipelineReview(): StagePipelineSnapshot {
-    const opportunities = Array.from({ length: 46 }, (_, index) => opportunity(index))
+export type SampleStagePipelineOptions = {
+    scope?: StagePipelineViewScope
+    reportIds?: readonly string[]
+}
+
+const sampleReports = [
+    { id: 'sample-report-a', displayName: 'Sample Report A' },
+    { id: 'sample-report-b', displayName: 'Sample Report B' },
+    { id: 'sample-report-c', displayName: 'Sample Report C' }
+] as const
+
+function reportPortfolio(): { opportunities: StagePipelineOpportunity[]; milestones: StagePipelineMilestone[] } {
+    const opportunities: StagePipelineOpportunity[] = []
+    const milestones: StagePipelineMilestone[] = []
+    for (let index = 0; index < 18; index += 1) {
+        const base = opportunity(index)
+        const owner = sampleReports[index % sampleReports.length]!.displayName
+        const row: StagePipelineOpportunity = {
+            ...base, id: `sample-rpt-opp-${String(index + 1).padStart(3, '0')}`, number: `7-SAMPLER${String(index + 1).padStart(3, '0')}`,
+            name: `${base.name} (team)`, owner, editable: false
+        }
+        opportunities.push(row)
+        milestones.push(...milestonesFor(row, index).map((milestone) => ({
+            ...milestone, id: milestone.id.replace('sample-ms-', 'sample-rpt-ms-'), number: milestone.number.replace('SAMPLEM', 'SAMPLERM'), owner
+        })))
+    }
+    return { opportunities, milestones }
+}
+
+export function createSampleStagePipelineReview(options: SampleStagePipelineOptions = {}): StagePipelineSnapshot {
+    const scope = options.scope ?? 'mine'
+    const own = Array.from({ length: 46 }, (_, index) => opportunity(index))
+    const ownMilestones = own.flatMap((row, index) => milestonesFor(row, index))
+    const team = scope === 'mine' ? { opportunities: [], milestones: [] } : reportPortfolio()
+    const selected = options.reportIds?.length
+        ? new Set<string>(sampleReports.filter((report) => options.reportIds!.includes(report.id)).map((report) => report.displayName))
+        : undefined
+    const teamOpportunities = selected ? team.opportunities.filter((row) => selected.has(row.owner)) : team.opportunities
+    const opportunities = scope === 'reports' ? teamOpportunities : [...own, ...teamOpportunities]
+    const included = new Set(opportunities.map((row) => row.id))
+    const milestones = [...(scope === 'reports' ? [] : ownMilestones), ...team.milestones].filter((row) => included.has(row.opportunityId))
     return stagePipelineSnapshotSchema.parse({
         contractVersion: stagePipelineReviewContractVersion,
         kind: 'snapshot',
@@ -126,8 +168,17 @@ export function createSampleStagePipelineReview(): StagePipelineSnapshot {
         owner: 'Sample Seller',
         asOf,
         fiscalYear: 2027,
+        scope,
+        reports: scope === 'mine' ? [] : sampleReports.map((report) => ({ ...report })),
+        sources: [
+            ...(scope === 'mine' ? [] : [{ source: 'hierarchy', state: 'complete', detail: 'Synthetic sample direct reports.', count: sampleReports.length }]),
+            { source: 'opportunities', state: 'complete', detail: 'Synthetic sample opportunities.', count: opportunities.length },
+            { source: 'milestones', state: 'complete', detail: 'Synthetic sample milestones.' },
+            { source: 'macc', state: 'complete', detail: 'Synthetic sample MACC commitments.' },
+            { source: 'acr', state: 'complete', detail: 'Synthetic sample ACR series.' }
+        ],
         opportunities,
-        milestones: opportunities.flatMap((row, index) => milestonesFor(row, index)),
+        milestones,
         acr: acrFor()
     })
 }

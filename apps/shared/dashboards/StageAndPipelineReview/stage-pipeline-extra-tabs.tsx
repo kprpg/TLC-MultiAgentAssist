@@ -65,7 +65,12 @@ export function ConsumptionTab({ views, marks, onToggle }: { views: readonly Opp
     </>
 }
 
-export function MaccTab({ views, marks, onToggle }: { views: readonly OpportunityView[]; marks: ReviewMarks; onToggle: Toggle }): ReactElement {
+export function MaccTab({ views, marks, onToggle, unavailable }: { views: readonly OpportunityView[]; marks: ReviewMarks; onToggle: Toggle; unavailable?: string | undefined }): ReactElement {
+    if (unavailable) {
+        return <section className="sprv-card" aria-label="MACC source unavailable">
+            <p className="sprv-muted" role="status"><strong>MACC & Commits is not available from this source.</strong> {unavailable}</p>
+        </section>
+    }
     const macc = views.filter((view) => view.row.maccCommit > 0)
     const committed = macc.filter((view) => view.row.forecast === 'Committed')
     const columns: ReviewColumn<OpportunityView>[] = [

@@ -21,11 +21,23 @@ export async function installCustomerEmailClipboard(page: Page): Promise<void> {
 }
 
 export async function expectCopiedCustomerEmail(page: Page, actions: Locator): Promise<void> {
-    await expect(actions.getByRole('button', { name: 'E-mail', exact: true })).toBeEnabled()
-    await expectTextContrast(actions.getByRole('button', { name: 'E-mail', exact: true }))
-    await expectTextContrast(actions.getByRole('button', { name: 'Copy', exact: true }))
+    const email = actions.getByRole('button', { name: 'E-mail', exact: true })
+    const copy = actions.getByRole('button', { name: 'Copy', exact: true })
+    const markdown = actions.locator('..').locator(':scope > .agent-response-markdown')
+    await expect(email).toBeEnabled()
+    await expect(markdown).toHaveCount(1)
+    const [emailBounds, copyBounds, markdownBounds, actionsBounds] = await Promise.all([
+        email.boundingBox(), copy.boundingBox(), markdown.boundingBox(), actions.boundingBox()
+    ])
+    if (!emailBounds || !copyBounds || !markdownBounds || !actionsBounds) throw new Error('The customer email actions and response must be visible.')
+    expect(emailBounds.y).toBeCloseTo(copyBounds.y, 0)
+    expect(emailBounds.y + emailBounds.height).toBeLessThanOrEqual(markdownBounds.y)
+    expect(copyBounds.y + copyBounds.height).toBeLessThanOrEqual(markdownBounds.y)
+    expect(copyBounds.x + copyBounds.width).toBeCloseTo(actionsBounds.x + actionsBounds.width, 0)
+    await expectTextContrast(email)
+    await expectTextContrast(copy)
     await expect(actions).toContainText('Nothing is sent automatically.')
-    await actions.getByRole('button', { name: 'Copy', exact: true }).click()
+    await copy.click()
     await expect(actions.getByRole('status')).toContainText('copied')
     const text = await page.evaluate(() => window.customerEmailClipboard.texts.at(-1))
     expect(text).toContain('Subject: Confirming the approval path\n\nPlease confirm the sponsor and approval sequence.')

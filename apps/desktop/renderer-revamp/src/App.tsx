@@ -1214,7 +1214,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           ...refreshedOpportunities
         ])
       }} />}
-      {workspaceView === 'dashboard' && <DashboardWorkspace invokeSellerDashboard={client.invokeSellerDashboard} invokeSeReporting={client.invokeSeReporting} sourceSession={client.cacheSession} />}
+      {workspaceView === 'dashboard' && <DashboardWorkspace invokeSellerDashboard={client.invokeSellerDashboard} invokeStagePipelineReview={client.invokeStagePipelineReview} stagePipelineWrites={client} invokeSeReporting={client.invokeSeReporting} sourceSession={client.cacheSession} />}
 
       {workspaceView === 'accounts' && <>
       <section className={`blade account-blade ${collapsed.has('accounts') ? 'collapsed' : ''} ${mobileBlade === 'accounts' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('accounts') ? undefined : bladeWidths.accounts }} aria-label="Accounts blade">

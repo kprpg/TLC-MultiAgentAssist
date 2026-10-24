@@ -57,6 +57,7 @@ import {
 } from '../../../packages/orchestrator/workflows/index.js'
 import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
 import { createSellerDashboardHost, type SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
+import { createStagePipelineReviewHost, type StagePipelineReviewHost } from '../../../packages/orchestrator/stage-pipeline-review.js'
 import { createSampleSeReportingHost } from '../../../packages/orchestrator/se-reporting/sample.js'
 import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
 import { LocalStore, LocalStoreMsxConnector } from '../../../packages/connectors/local-store/index.js'
@@ -112,6 +113,7 @@ export interface ExtensionDataProvider {
     mutationSync?(request: MutationSyncRequest): Promise<MutationSyncResponse>
     drainMutations?(): Promise<void>
     readonly sellerDashboard?: SellerDashboardHost
+    readonly stagePipelineReview?: StagePipelineReviewHost
     readonly seReporting?: SeReportingHost
     readonly mode: 'sample' | 'live'
     getCurrentUserEmail(): Promise<string | undefined>
@@ -213,6 +215,7 @@ export function createSampleDataProvider(): ExtensionDataProvider {
         mode: 'sample',
         searchKnowledge: (request) => knowledge.searchKnowledge(request),
         sellerDashboard: createSellerDashboardHost({ mode: 'sample', resolveUserEmail: async () => undefined }),
+        stagePipelineReview: createStagePipelineReviewHost({ mode: 'sample' }),
         seReporting: createSampleSeReportingHost(),
         getCurrentUserEmail: async () => undefined,
         getDiscoverySnapshot: async (input) => {

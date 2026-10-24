@@ -125,3 +125,19 @@ use explicit degraded-mode approval; no missing evidence is labelled as used.
 
 No MSX/Dataverse record, source contract or other colleague's report is changed by
 generation or review.
+
+## Milestone and task source (Dataverse or Power BI)
+
+By default milestones and tasks come from the Power BI semantic model. Set `TLC_SE_SOURCE` on the Desktop, VS Code or Teams host to change this (it requires the host's delegated MSX access):
+
+- `powerbi` (default): current behavior.
+- `dataverse`: read the reporter's milestone-team milestones and owned tasks directly from MSX Dataverse.
+- `auto`: read both; use Dataverse only when its milestone and task id sets match Power BI (at least 99%), otherwise use Power BI and record the parity result. If Dataverse cannot be read, Power BI is used.
+
+Account assignment (Primary/Backup, ATU, workload) comes from the semantic model **permanently**; no Dataverse equivalent exists and Dataverse is never used to widen scope. The Dynamics manager hierarchy is maintained for the target teams, so **Check source access** also confirms (counts and yes/no only) whether the reporter is a direct report of the contract manager; a mismatch is shown as a warning and does not change scope.
+
+Hosted Web (Easy Auth or local Azure CLI) now gives the Dataverse provider the signed-in caller's own delegated MSX token (never a server identity), and Teams uses the caller's MSX access already. Assignments still need the Power BI grant, so hosted Web still cannot generate a full report until a caller-bound Power BI/Graph token provider exists. The report's MSX source line records which provider was used and the parity counts (no identifiers). `TLC_MSX_RISK_DETAILS_FIELD` enables the blocker text from Dataverse.
+
+## Microsoft 365 evidence
+
+Mail, Teams chats (including meeting chats) and meeting calendar entries are read by a dedicated read-only Graph connector (`packages/connectors/graph/se-evidence.ts`) with your delegated Mail/Chat/Calendar read grants. Calendar entries are context only and never count as engagement on their own. Records are matched to assigned accounts by whole account name, private HR/compensation/legal text is dropped, only HTTPS references are kept, and a source that exceeds its budget fails rather than reporting truncated data. Teams channel messages and meeting transcripts are not read because they need additional admin-consented permissions.

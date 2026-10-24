@@ -64,7 +64,7 @@ export function MultiSelect<T extends string>({ label, allLabel, options, select
     </div>
 }
 
-function Segmented<T extends string>({ name, label, value, options, onChange }: {
+export function Segmented<T extends string>({ name, label, value, options, onChange }: {
     name: string
     label: string
     value: T

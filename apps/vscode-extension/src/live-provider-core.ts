@@ -17,6 +17,7 @@ import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-
 import type { MeetingExtractorFn } from '../../../packages/connectors/local-store/index.js'
 import type { ExtensionDataProvider, MeetingTranscriptSource } from './data-provider.js'
 import { createSellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
+import { createStagePipelineReviewHost, createUnavailableStagePipelineReviewHost, type StagePipelineReviewHost } from '../../../packages/orchestrator/stage-pipeline-review.js'
 import { createSeReportingHost } from '../../../packages/orchestrator/se-reporting/composition.js'
 import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
 
@@ -33,6 +34,7 @@ export interface MeetingCaptureConnector {
 
 export interface LiveDataProviderParts {
     reportingHost?: SeReportingHost
+    stagePipelineHost?: StagePipelineReviewHost
     getSourceToken?(): Promise<string>
     orchestrator: ThinSliceOrchestrator
     host: WorkflowHost
@@ -46,7 +48,7 @@ export interface LiveDataProviderParts {
 
 /** Assembles the provider surface from injected parts so MCEM/agent/Play wiring is unit-testable. */
 export function buildLiveDataProvider(
-    { orchestrator, host, account, dispose, meetingConnector, meetingExtractor, getSourceToken, reportingHost }: LiveDataProviderParts,
+    { orchestrator, host, account, dispose, meetingConnector, meetingExtractor, getSourceToken, reportingHost, stagePipelineHost }: LiveDataProviderParts,
     mode: ExtensionDataProvider['mode'] = 'live'
 ): ExtensionDataProvider {
     const requireMeeting = (): MeetingCaptureConnector => {
@@ -59,6 +61,9 @@ export function buildLiveDataProvider(
         mode,
         searchKnowledge: (request) => orchestrator.searchKnowledge(request),
         sellerDashboard: createSellerDashboardHost({ mode, resolveUserEmail: async () => account }),
+        stagePipelineReview: stagePipelineHost ?? (mode === 'sample'
+            ? createStagePipelineReviewHost({ mode: 'sample' })
+            : createUnavailableStagePipelineReviewHost('The live Stage and Pipeline Review source is not configured for this provider.')),
         seReporting: reportingHost ?? createSeReportingHost({ mode, identity: async () => ({ key: account, email: account }) }),
         getCurrentUserEmail: async () => account,
         listAccounts: (options) => orchestrator.listAccounts(options),

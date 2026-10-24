@@ -93,6 +93,8 @@ apps/shared/transcript-file.ts       Shared UTF-8 VTT/text reader for Desktop/We
 apps/shared/pane-resize-handle.tsx   Accessible shared three-dot width divider for all four surfaces
 apps/shared/resizable-split.tsx      Responsive two-region Portfolio sizing without unmounting hidden drafts
 apps/shared/pane-resizing.css        Blue hover/drag divider lines and native horizontal pane scrollbars
+apps/shared/guidance-pane.tsx        Shared Guidance maximize/restore control and VS Code/Teams pane frame
+apps/shared/guidance-pane.css        Temporary full-width split layout without unmounting neighboring panes
 apps/shared/customer-email.ts        Browser-safe customer-email extraction excluding later internal sections
 apps/shared/customer-email-actions.tsx
                                      Copy and human-reviewed unsent draft actions shared by all four surfaces
@@ -356,6 +358,10 @@ apps/shared/dashboards/
     stage-pipeline-parts.tsx           KPI/pill/row-action/CSV-download primitives
     stage-pipeline-table.tsx           sortable table
     stage-pipeline-storage.ts          browser-only Focus/Reviewed marks
+    stage-pipeline-scope.tsx           portfolio scope (mine/reports/both), direct-report picker, source-health notice
+    stage-pipeline-writes.ts           comment/milestone edit review, sample-mode write simulation
+    stage-pipeline-write-dialog.tsx    reviewed write dialog (forecast comment, milestone update, task)
+    stage-pipeline-dispatch.ts         routes reviewed actions to the existing MSX write operations
     stage-pipeline-review.css
   soltionEngineerDashboard/
     se-reporting-dashboard.tsx

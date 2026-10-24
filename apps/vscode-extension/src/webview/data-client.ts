@@ -3,6 +3,7 @@ import { AgentStreamError, createAgentStreamAccumulator, type AgentStreamProgres
 import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest } from '../../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema, type SellerDashboardRequest } from '../../../../packages/common/contracts/seller-dashboard.js'
 import { seReportingRequestSchema, seReportingResponseSchema, type SeReportingRequest } from '../../../../packages/common/contracts/se-reporting.js'
+import { stagePipelineRequestSchema, stagePipelineResponseSchema, type StagePipelineRequest } from '../../../../packages/common/contracts/stage-pipeline-review.js'
 import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest } from '../../../../packages/common/contracts/knowledge.js'
 import {
     recordCreationCatalogSchema,
@@ -63,6 +64,9 @@ const transport = {
         syncContracts.mutationSyncResponseSchema.parse(await request('mutationSync', input)),
     invokeSellerDashboard: async (input: SellerDashboardRequest) => sellerDashboardResponseSchema.parse(
         await request('sellerDashboard', sellerDashboardRequestSchema.parse(input))
+    ),
+    invokeStagePipelineReview: async (input: StagePipelineRequest) => stagePipelineResponseSchema.parse(
+        await request('stagePipelineReview', stagePipelineRequestSchema.parse(input))
     ),
     invokeVoice: async (input: VoiceRequest) => voiceResponseSchema.parse(await request('voiceInput', voiceRequestSchema.parse(input))),
     getCurrentUserEmail: () => request<string | null>('getCurrentUserEmail'),

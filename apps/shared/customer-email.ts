@@ -15,7 +15,7 @@ export type CustomerEmailAction =
     | { kind: 'recipients'; compose(draft: CustomerEmailDraft, recipients: string[]): Promise<'opened' | 'downloaded'> }
 
 const parser = unified().use(remarkParse).use(remarkGfm)
-const emailHeading = /\b(?:e-?mail|customer[- ](?:ready|facing)\s+(?:draft|message|response))\b/i
+const emailHeading = /\b(?:e[-\u2010-\u2015]?mail|customer[- ](?:ready|facing)\s+(?:draft|message|response)|follow[-\u2010-\u2015 ]up\s+(?:draft|note|message))\b/i
 const internalHeading = /^(?:assumptions?\b|missing (?:data|information)\b|sources?\b|feedback prompt\b|suggested follow-ups?\b|internal\b|review(?:er)? notes?\b|notes? (?:for|to) (?:the )?(?:seller|reviewer)\b|human review\b|cautions?\b)/i
 
 export interface LocatedCustomerEmail {
@@ -28,7 +28,7 @@ export function extractCustomerEmail(content: string): CustomerEmailDraft | unde
     return locateCustomerEmail(content)?.draft
 }
 
-export function locateCustomerEmail(content: string): LocatedCustomerEmail | undefined {
+export function locateCustomerEmail(content: string, emailDraftRequested = false): LocatedCustomerEmail | undefined {
     const markdown = formatResponseMarkdown(content)
     const nodes = parser.parse(markdown).children
     const text = (node: RootContent): string => markdownToEmailText(markdown.slice(node.position?.start.offset, node.position?.end.offset)).split('\n')[0] ?? ''
@@ -45,11 +45,12 @@ export function locateCustomerEmail(content: string): LocatedCustomerEmail | und
             if (emailHeading.test(text(node))) section = { index, depth: node.depth }
             else if (section && node.depth <= section.depth) section = undefined
         }
-        // Agents often present the draft as a quoted block under an email heading.
-        const quoted = node.type === 'blockquote' && section !== undefined
-        if (node.type !== 'paragraph' && !subjectHeading && !quoted) continue
         const precedingHeading = nodes.slice(0, index).reverse().find((item) => item.type === 'heading')
-        if (!section && precedingHeading) continue
+        const requestedDraft = emailDraftRequested && (!precedingHeading || !internalHeading.test(text(precedingHeading)))
+        // Requested email follow-ups may use a generic heading instead of an email heading.
+        const quoted = node.type === 'blockquote' && (section !== undefined || requestedDraft)
+        if (node.type !== 'paragraph' && !subjectHeading && !quoted) continue
+        if (!section && precedingHeading && !requestedDraft) continue
         const start = node.position?.start.offset
         const nodeEnd = node.position?.end.offset
         if (start === undefined || nodeEnd === undefined) continue
@@ -67,8 +68,9 @@ export function locateCustomerEmail(content: string): LocatedCustomerEmail | und
         for (const line of markdown.slice(start, nodeEnd).split('\n')) {
             const subject = subjectOf(line)
             if (subject) {
+                const depth = section?.depth ?? (requestedDraft ? precedingHeading?.depth : undefined)
                 const end = nodes.slice(index + 1).find((item) => item.type === 'heading' &&
-                    (internalHeading.test(text(item)) || (section !== undefined && item.depth <= section.depth)))?.position?.start.offset
+                    (internalHeading.test(text(item)) || (depth !== undefined && item.depth <= depth)))?.position?.start.offset
                 const body = cleanBody(markdown.slice(lineStart + line.length, end))
                 if (markdownToEmailText(body)) return { draft: { subject, markdown: body }, end: end ?? markdown.length }
             }

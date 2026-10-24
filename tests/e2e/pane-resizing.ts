@@ -34,3 +34,30 @@ export async function expectHorizontalPaneScroll(area: Locator): Promise<void> {
     await area.evaluate((element) => { element.scrollLeft = element.scrollWidth })
     expect(await area.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
 }
+
+export async function expectGuidancePaneMaximizing(pane: Locator, draft: Locator, surroundingPanes: Locator[], expectGrowth = true): Promise<void> {
+    const initialWidth = (await pane.boundingBox())!.width
+    const initialDraft = await draft.inputValue()
+    const visibility = await Promise.all(surroundingPanes.map((item) => item.isVisible()))
+    const maximize = pane.getByRole('button', { name: 'Maximize Guidance pane', exact: true })
+    await expect(maximize).toHaveAttribute('aria-pressed', 'false')
+    await maximize.focus()
+    await maximize.press('Enter')
+    const restore = pane.getByRole('button', { name: 'Restore Guidance pane', exact: true })
+    await expect(restore).toHaveAttribute('aria-pressed', 'true')
+    await expect(restore).toBeFocused()
+    for (const [index, item] of surroundingPanes.entries()) {
+        await expect(item).toBeHidden()
+        if (visibility[index]) await expect(item).toHaveCount(1)
+    }
+    if (expectGrowth) await expect.poll(async () => (await pane.boundingBox())!.width).toBeGreaterThan(initialWidth + 100)
+    await expect(draft).toHaveValue(initialDraft)
+    await restore.press('Space')
+    await expect(maximize).toHaveAttribute('aria-pressed', 'false')
+    for (const [index, item] of surroundingPanes.entries()) {
+        if (visibility[index]) await expect(item).toBeVisible()
+        else await expect(item).toBeHidden()
+    }
+    await expect.poll(async () => (await pane.boundingBox())!.width).toBeCloseTo(initialWidth, 0)
+    await expect(draft).toHaveValue(initialDraft)
+}
