@@ -1,7 +1,7 @@
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as vscode from 'vscode'
-import { routeBridgeMessage } from './host-router.js'
+import { createAgentStreamRouter, routeBridgeMessage } from './host-router.js'
 import { exportBlockedReason, sanitizeFileName } from './export-document.js'
 import { hostEventSchema, type HostEvent } from './message-contracts.js'
 import { contractVersion } from '../../../packages/common/index.js'
@@ -28,6 +28,7 @@ export class WorkbenchPanel {
     private readonly disposables: vscode.Disposable[] = []
     private ready = false
     private readonly voiceHost: SharedVoiceInputHost
+    private readonly agentStreams = createAgentStreamRouter(() => this.getProvider(), (message) => { void this.panel.webview.postMessage(message) })
     private pending: { kind: 'focus'; accountId?: string; opportunityId?: string } | { kind: 'runPlay'; workflowId: string; token: number } | undefined
 
     private constructor(
@@ -40,6 +41,7 @@ export class WorkbenchPanel {
             () => this.panel.visible && this.panel.active && vscode.window.state.focused
         )
         this.panel.webview.onDidReceiveMessage((message) => void this.onMessage(message), undefined, this.disposables)
+        this.disposables.push({ dispose: () => this.agentStreams.dispose() })
         this.panel.onDidDispose(() => this.dispose(), undefined, this.disposables)
         this.panel.onDidChangeViewState(() => {
             if (!this.panel.visible || !this.panel.active) this.voiceHost.cancel()
@@ -118,6 +120,10 @@ export class WorkbenchPanel {
         if (kind === 'ready') {
             this.ready = true
             this.flushPending()
+            return
+        }
+        if (this.agentStreams.handles(message)) {
+            await this.agentStreams.handle(message)
             return
         }
         if (message && typeof message === 'object' && (message as { method?: unknown }).method === 'voiceInput') {
@@ -249,12 +255,12 @@ export class WorkbenchPanel {
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource}; font-src ${webview.cspSource}; script-src 'nonce-${cspNonce}';" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'nonce-${cspNonce}'; font-src ${webview.cspSource}; script-src 'nonce-${cspNonce}';" />
 <link href="${styleUri}" rel="stylesheet" />
 <title>TLC Assist</title>
 </head>
 <body>
-<div id="root" data-mode="${provider.mode}" data-cache-owner="${provider.cacheSession ? 'host' : 'client'}" data-background-sync="${provider.mutationSync ? '1' : '0'}">Loading TLC Assist\u2026</div>
+<div id="root" data-mode="${provider.mode}" data-cache-owner="${provider.cacheSession ? 'host' : 'client'}" data-background-sync="${provider.mutationSync ? '1' : '0'}" data-csp-nonce="${cspNonce}">Loading TLC Assist\u2026</div>
 <script nonce="${cspNonce}">window.addEventListener('error',function(e){var r=document.getElementById('root');if(r)r.textContent='TLC Assist error: '+(e.message||'script failed to load');});window.addEventListener('unhandledrejection',function(e){var r=document.getElementById('root');if(r)r.textContent='TLC Assist error: '+((e.reason&&e.reason.message)||e.reason||'promise rejected');});</script>
 <script nonce="${cspNonce}" src="${scriptUri}"></script>
 </body>

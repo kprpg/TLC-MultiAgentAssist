@@ -461,6 +461,41 @@ describe('hosted web API', () => {
         })
     })
 
+    it('streams agent events as NDJSON and cancels the run when the client disconnects', async () => {
+        const events = [
+            { type: 'context', streamVersion: '1.0', capability: 'mcem-coach', instantDraft: 'Draft', sourceHealth: [{ source: 'msx', state: 'live', detail: 'Live.', checkedAt: '2026-01-01T00:00:00.000Z' }] },
+            { type: 'delta', text: 'Hello' },
+            { type: 'error', code: 'failed', message: 'stop' }
+        ]
+        const runAgentTaskStream = vi.fn(async (_request: unknown, onEvent: (event: never) => void) => { for (const event of events) onEvent(event as never) })
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => ({ ...runtime(), runAgentTaskStream }) }))
+
+        const response = await fetch(`${baseUrl}/api/agent-task/stream`, {
+            method: 'POST',
+            headers: { ...authenticationHeaders, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+            body: JSON.stringify({ contractVersion, capability: 'mcem-coach', accountId: 'a', opportunityId: 'o', prompt: 'Hello there' })
+        })
+
+        expect(response.status).toBe(200)
+        expect(response.headers.get('content-type')).toContain('application/x-ndjson')
+        expect(response.headers.get('cache-control')).toContain('no-transform')
+        const lines = (await response.text()).split('\n').filter(Boolean).map((line) => JSON.parse(line))
+        expect(lines).toEqual(events)
+        expect(runAgentTaskStream).toHaveBeenCalledWith(expect.objectContaining({ capability: 'mcem-coach' }), expect.any(Function), expect.any(AbortSignal))
+    })
+
+    it('rejects malformed stream requests before opening the stream', async () => {
+        const runAgentTaskStream = vi.fn()
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => ({ ...runtime(), runAgentTaskStream }) }))
+        const response = await fetch(`${baseUrl}/api/agent-task/stream`, {
+            method: 'POST',
+            headers: { ...authenticationHeaders, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+            body: JSON.stringify({ contractVersion, capability: 'mcem-coach', accountId: 'a', opportunityId: 'o', prompt: 'x' })
+        })
+        expect(response.status).toBe(400)
+        expect(runAgentTaskStream).not.toHaveBeenCalled()
+    })
+
     function listen(handler: ReturnType<typeof buildWebApiHandler>): Promise<string> {
         server = createServer((request, response) => void handler(request, response))
         return new Promise((resolve) => {
@@ -475,6 +510,7 @@ describe('hosted web API', () => {
 
 function runtime(): WebRuntime {
     return {
+        searchKnowledge: vi.fn(),
         getPortfolioIndex: vi.fn(),
         getPortfolioWorkspace: vi.fn(),
         getDiscoverySnapshot: vi.fn(),
@@ -501,6 +537,7 @@ function runtime(): WebRuntime {
         transitionOpportunityStage: vi.fn(),
         runMcemCoach: vi.fn(),
         runAgentTask: vi.fn(),
+        runAgentTaskStream: vi.fn(),
         listMeetingTranscripts: vi.fn(async () => []),
         getMeetingTranscript: vi.fn(async () => null),
         proposeMeetingChangeSet: vi.fn(),

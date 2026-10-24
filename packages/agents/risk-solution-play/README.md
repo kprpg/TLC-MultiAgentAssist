@@ -4,7 +4,7 @@ Produces supported execution-risk reviews and approved solution engagement packa
 
 ## Inputs
 
-Versioned orchestrator context containing intent, role, account and opportunity signals, source health, and approved SharePoint or Seismic asset evidence.
+Versioned orchestrator context containing intent, role, account and opportunity signals, the bounded evidence pack (dated comment history, notes, activities, milestone detail, staleness signals, and coverage gaps), source health, and approved SharePoint or Seismic asset evidence.
 
 ## Outputs
 

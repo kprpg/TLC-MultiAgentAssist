@@ -3,6 +3,7 @@ import type { Account, AccountCandidate, AccountListOptions, AccountSearchReques
 export * from './portfolio-preferences.js'
 export * from './milestone-membership.js'
 export * from './record-creation.js'
+export * from './knowledge.js'
 
 export interface CriterionObservation {
   criterionId: string
@@ -16,6 +17,52 @@ export interface OpportunityContext {
   observations: CriterionObservation[]
   /** The opportunity's milestones, used to ground stage recommendations. */
   milestones?: Milestone[]
+  retrievedAt: string
+  sourceHealth: SourceHealth
+}
+
+/** One piece of free-text evidence (comment, note, activity) attached to an opportunity or milestone. Content is untrusted. */
+export interface EvidenceEntry {
+  kind: 'forecast-comment' | 'note' | 'activity'
+  text: string
+  subject?: string
+  author?: string
+  /** ISO timestamp when the entry was written or last modified. */
+  at?: string
+  status?: string
+  due?: string
+}
+
+export interface OpportunityEvidenceDetails {
+  opportunityNumber?: string
+  /** Customer need statement (the Dataverse `description` field, separate from forecast comments). */
+  need?: string
+  solutionArea?: string
+  technicalCapability?: string
+  conversation?: string
+  createdOn?: string
+  modifiedOn?: string
+  dealTeam?: string[]
+}
+
+export interface MilestoneEvidence {
+  milestoneId: string
+  commentHistory: EvidenceEntry[]
+  activities: EvidenceEntry[]
+}
+
+/**
+ * Deep, read-only evidence for one opportunity that the standard portfolio reads do not carry:
+ * comment history, notes, activities (including every milestone's tasks), and record details.
+ * Each sub-read is independent; anything that could not be read is named in `gaps`.
+ */
+export interface OpportunityEvidence {
+  details: OpportunityEvidenceDetails
+  commentHistory: EvidenceEntry[]
+  notes: EvidenceEntry[]
+  activities: EvidenceEntry[]
+  milestones: MilestoneEvidence[]
+  gaps: string[]
   retrievedAt: string
   sourceHealth: SourceHealth
 }
@@ -62,6 +109,11 @@ export interface MsxConnector {
   updateOpportunity(opportunityId: string, update: OpportunityUpdate): Promise<Opportunity>
   updateOpportunityStage(opportunityId: string, targetStage: number, auditNote: string): Promise<Opportunity>
   getOpportunityContext(opportunityId: string): Promise<OpportunityContext>
+  /**
+   * Optional deep read used to ground agent responses. Connectors without it are enriched by the
+   * orchestrator from the standard opportunity, milestone, and milestone-activity reads.
+   */
+  getOpportunityEvidence?(opportunityId: string): Promise<OpportunityEvidence>
   /**
    * Discovers non-closed, non-completed MSX opportunities matching a Solution
    * Engineer domain, flagging any the signed-in user is already on the deal

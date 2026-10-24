@@ -70,6 +70,23 @@ for per-surface setup, forms, CSV import, review/submission, storage locations, 
 Submit-button troubleshooting. The [sanitized CSV/JSON examples](tests/fixtures/record-creation/README.md)
 are ready to import.
 
+### Monthly SE reporting
+
+Open **Dashboards > SE Reporting Dashboard** alongside **Seller Dashboard**.
+The shared reporting workflow supports manager profiles, live-contract/assignment
+checks, monthly draft generation, reporter-owned asks, and reviewed JSON/HTML
+output. Sample mode is offline and publication is a no-write simulation.
+Live reporting requires separate Power BI, Microsoft Graph and Foundry grants;
+see the [SE Reporting Dashboard guide](docs/user-guide/SE-REPORTING-DASHBOARD.md).
+
+### Knowledge connector foundation
+
+TLC exposes a read-only `searchKnowledge` operation for future content/PPT features.
+The Seismic M365 provider searches a configured Microsoft Graph external connection;
+direct Seismic MCP is an explicitly unavailable placeholder until approved and wired.
+Sample mode uses offline synthetic documents. There is no new search UI or automatic
+agent dispatch yet. See [Knowledge search setup and provider contract](docs/Knowledge-Search-Connectors.md).
+
 ## VS Code extension
 
 Requires **VS Code or VS Code Insiders 1.90.0 or later**. The extension is self-contained (no Node.js, npm, or native binaries), embeds its own MCP registry and tool policy, and starts in sample mode.

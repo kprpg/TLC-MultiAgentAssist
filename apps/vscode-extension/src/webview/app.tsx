@@ -1,6 +1,4 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactElement } from 'react'
-import Markdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import workflowDescriptionsJson from '../../../../config/workflow-descriptions.json' with { type: 'json' }
 import { agentCapabilities } from '../../../../packages/common/types/agent-capabilities.js'
 import { dataClient } from './data-client.js'
@@ -25,21 +23,24 @@ import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportun
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 import { readTranscriptFile } from '../../../shared/transcript-file.js'
 import { meetingProposalToMarkdown } from '../../../shared/meeting-proposal-markdown.js'
-import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
+import { DashboardWorkspace } from '../../../shared/dashboards/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
 import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
+import { MsxOpportunityLink } from '../../../shared/msx-opportunity-link.js'
 import { workflowGuidanceCapability } from '../../../shared/workflow-guidance.js'
 import { AddCustomerButton, type CustomerAccount, type CustomerSearchClient } from '../../../shared/add-customer.js'
 import { RemoveCustomerButton } from '../../../shared/remove-customer.js'
 import { usePortfolioRefresh } from './use-portfolio-refresh.js'
 import { SourceSyncStatus } from '../../../shared/sync-status.js'
 import { usePresentationSession } from '../../../shared/presentation-hooks.js'
+import { useAgentRun, type AgentInvoke } from '../../../shared/use-agent-run.js'
+import { AgentResponse, type AgentFollowUpContext } from '../../../shared/agent-response.js'
 import type {
     AccountView,
     AgentCapability,
-    AgentTaskView,
     DiscoverableOpportunityView,
+    GuidanceHandoffView,
     McemView,
     MeetingChangeSetProposalView,
     MeetingChangeSetResultView,
@@ -89,23 +90,11 @@ const today = (): string => new Date().toISOString().slice(0, 10)
 const workflowDescriptions: Readonly<Record<string, { summary: string; reads: string; useIt: string } | undefined>> =
     workflowDescriptionsJson.descriptions
 
-/** Renders agent/guidance markdown identically to the desktop/web hosts; links open evidence. */
-function AgentMarkdown({ content }: { content: string }): ReactElement {
-    return (
-        <div className="agent-response-markdown">
-            <Markdown
-                remarkPlugins={[remarkGfm]}
-                skipHtml
-                components={{
-                    a: ({ href, children }) => (
-                        <a href={href} onClick={(event) => { event.preventDefault(); if (href) void dataClient.openEvidence(href) }}>{children}</a>
-                    )
-                }}
-            >
-                {formatResponseMarkdown(content)}
-            </Markdown>
-        </div>
-    )
+const invokeGuidanceAgent: AgentInvoke = (capability, accountId, opportunityId, prompt, onProgress, signal) =>
+    dataClient.runAgentTaskStream(capability, accountId, opportunityId, prompt, onProgress, signal)
+
+function AgentMarkdown({ content, busy = false, followUp }: { content: string; busy?: boolean; followUp?: AgentFollowUpContext | undefined }): ReactElement {
+    return <AgentResponse content={content} busy={busy} followUp={followUp} onOpenEvidence={dataClient.openEvidence} />
 }
 
 /** True when the card itself has renderable content; action/exception cards are shown via the Operational queue. */
@@ -214,7 +203,7 @@ interface CompletedRun {
     queue: WorkflowOutputView['queueItems']
 }
 
-type GuidanceEntry = { status: 'loading' | 'ready' | 'error'; title: string; evidenceIds?: string[]; content?: string; error?: string }
+type GuidanceEntry = { status: 'loading' | 'ready' | 'error'; title: string; evidenceIds?: string[]; content?: string; error?: string; handoff?: GuidanceHandoffView }
 
 function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: number } | undefined }): ReactElement {
     const [definitions, setDefinitions] = useState<Loadable<WorkflowDefinitionView[]>>({ status: 'idle' })
@@ -302,7 +291,7 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
         setGuidanceByItem((previous) => ({ ...previous, [key]: { status: 'loading', title: itemTitle } }))
         try {
             const { handoff, response } = await dataClient.sendQueueItemToGuidance(runId, itemId, capability)
-            setGuidanceByItem((previous) => ({ ...previous, [key]: { status: 'ready', title: itemTitle, evidenceIds: handoff.context.evidenceIds, content: response.content } }))
+            setGuidanceByItem((previous) => ({ ...previous, [key]: { status: 'ready', title: itemTitle, evidenceIds: handoff.context.evidenceIds, content: response.content, handoff } }))
         } catch (error) {
             setGuidanceByItem((previous) => ({ ...previous, [key]: { status: 'error', title: itemTitle, error: (error as Error).message } }))
         }
@@ -508,7 +497,8 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                                                                                     {entry.evidenceIds && entry.evidenceIds.length > 0 && (
                                                                                         <p className="muted">Evidence cited: {entry.evidenceIds.join(', ')}</p>
                                                                                     )}
-                                                                                    <AgentMarkdown content={entry.content ?? ''} />
+                                                                                    <AgentMarkdown content={entry.content ?? ''}
+                                                                                        followUp={entry.handoff ? { ...entry.handoff.scope, capability: entry.handoff.capability, invoke: invokeGuidanceAgent } : undefined} />
                                                                                 </>
                                                                             )}
                                                                         </div>
@@ -545,12 +535,12 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
 function ResponseActions({ title, markdown, onNote }: { title: string; markdown: string; onNote: (message: string) => void }): ReactElement {
     const onEmail = async (): Promise<void> => {
         onNote('Opening email draft...')
-        try { await dataClient.composeEmail(title, title, markdown); onNote('Email draft opened in your mail client.') }
+        try { await dataClient.composeEmail(title, title, formatResponseMarkdown(markdown)); onNote('Email draft opened in your mail client.') }
         catch (error) { onNote((error as Error).message) }
     }
     const onExport = async (): Promise<void> => {
         onNote('Exporting...')
-        try { const result = await dataClient.exportContent(title, markdown); onNote(result.saved ? 'Exported to the selected file.' : 'Export cancelled.') }
+        try { const result = await dataClient.exportContent(title, formatResponseMarkdown(markdown)); onNote(result.saved ? 'Exported to the selected file.' : 'Export cancelled.') }
         catch (error) { onNote((error as Error).message) }
     }
     return (
@@ -565,20 +555,21 @@ function ResponseActions({ title, markdown, onNote }: { title: string; markdown:
 function GuidancePane({ accountId, opportunityId, opportunityName, onNote }: { accountId: string; opportunityId: string; opportunityName: string; onNote: (message: string) => void }): ReactElement {
     const [capability, setCapability] = useState<AgentCapability>('account-pulse')
     const [taskPrompt, setTaskPrompt] = useState('')
-    const [agent, setAgent] = useState<Loadable<AgentTaskView>>({ status: 'idle' })
+    const [agentError, setAgentError] = useState('')
+    const { agentResult, agentLoading, agentPhase, runAgent, cancelAgent } = useAgentRun(invokeGuidanceAgent)
 
-    useEffect(() => { setAgent({ status: 'idle' }); setTaskPrompt('') }, [capability, opportunityId])
+    useEffect(() => { cancelAgent(); setAgentError(''); setTaskPrompt('') }, [capability, opportunityId, cancelAgent])
 
     const runAgentPrompt = useCallback(async (prompt?: string) => {
         const finalPrompt = (prompt ?? taskPrompt).trim()
         if (finalPrompt.length < 3) return
-        setAgent({ status: 'loading' })
+        setAgentError('')
         try {
-            setAgent({ status: 'ready', data: await dataClient.runAgentTask(capability, accountId, opportunityId, finalPrompt) })
+            await runAgent(capability, accountId, opportunityId, finalPrompt)
         } catch (error) {
-            setAgent({ status: 'error', error: (error as Error).message })
+            setAgentError((error as Error).message)
         }
-    }, [capability, accountId, opportunityId, taskPrompt])
+    }, [capability, accountId, opportunityId, taskPrompt, runAgent])
 
     const label = agentCapabilities.find((item) => item.id === capability)?.label ?? 'Guidance'
 
@@ -587,25 +578,29 @@ function GuidancePane({ accountId, opportunityId, opportunityName, onNote }: { a
             <GuidanceAgentTabs capability={capability} onSelect={setCapability} />
             <div className="prompt-suggestions" aria-label={`${label} suggested prompts`}>
                 {suggestedPrompts[capability].map((prompt) => (
-                    <button key={prompt} type="button" className="prompt-chip" disabled={agent.status === 'loading'} onClick={() => selectGuidancePrompt(prompt, setTaskPrompt, (selectedPrompt) => void runAgentPrompt(selectedPrompt))}>{prompt}</button>
+                    <button key={prompt} type="button" className="prompt-chip" disabled={agentLoading} onClick={() => selectGuidancePrompt(prompt, setTaskPrompt, (selectedPrompt) => void runAgentPrompt(selectedPrompt))}>{prompt}</button>
                 ))}
             </div>
             <div className="agent-composer">
                 <textarea aria-label="Agent task" placeholder="Ask a different question..." rows={2} value={taskPrompt} onChange={(event) => setTaskPrompt(event.target.value)} />
-                <button className="primary" disabled={agent.status === 'loading' || taskPrompt.trim().length < 3} onClick={() => void runAgentPrompt()}>{agent.status === 'loading' ? 'Analyzing...' : 'Send'}</button>
+                <button className="primary" disabled={agentLoading || taskPrompt.trim().length < 3} onClick={() => void runAgentPrompt()}>{agentLoading ? 'Analyzing...' : 'Send'}</button>
             </div>
-            {agent.status === 'loading' && <p className="muted">Running {label}...</p>}
-            {agent.status === 'error' && <p className="error">{agent.error}</p>}
-            {agent.status === 'ready' && agent.data && ((data: AgentTaskView) => (
+            {agentLoading && <p className="muted" role="status">
+                {agentPhase === 'streaming' ? `Receiving ${label} response...` : agentPhase === 'draft' ? 'Evidence-based draft shown; the AI response is in progress...' : `Running ${label}...`}
+                {' '}<button type="button" className="action-button" onClick={cancelAgent}>Cancel</button>
+            </p>}
+            {agentError && <p className="error">{agentError}</p>}
+            {agentResult && (
                 <article className="agent-response">
                     <header className="agent-response-header">
                         <span className="eyebrow">{label}</span>
-                        <ResponseActions title={`Guidance - ${opportunityName}`} markdown={data.content} onNote={onNote} />
+                        {!agentLoading && <ResponseActions title={`Guidance - ${opportunityName}`} markdown={agentResult.content} onNote={onNote} />}
                     </header>
-                    <AgentMarkdown content={data.content} />
+                    <AgentResponse key={agentResult.correlationId} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'}
+                        followUp={{ capability, accountId, opportunityId, invoke: invokeGuidanceAgent }} onOpenEvidence={dataClient.openEvidence} />
                 </article>
-            ))(agent.data)}
-            {agent.status === 'idle' && <p className="muted">Choose a suggested prompt or ask a different question.</p>}
+            )}
+            {!agentLoading && !agentResult && !agentError && <p className="muted">Choose a suggested prompt or ask a different question.</p>}
         </div>
     )
 }
@@ -1556,7 +1551,7 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
             {detailsExpanded && <section id="portfolio-details-panel" className="pane portfolio-details-pane">
                 {selectedOpportunity ? (
                     <div>
-                        <h3>{selectedOpportunity.name}</h3>
+                        <h3><MsxOpportunityLink opportunity={selectedOpportunity} onOpen={dataClient.openEvidence} onError={setNote} /></h3>
                         <p className="muted">Owner: {selectedOpportunity.owner ?? 'Account team'} - Stage {selectedOpportunity.recordedStage} - Close: {selectedOpportunity.closeDate}</p>
                         <nav className="subtabs" role="tablist">
                             <button role="tab" aria-selected={sub === 'overview'} className={sub === 'overview' ? 'tab active' : 'tab'} onClick={() => setSub('overview')}>Overview</button>
@@ -1956,7 +1951,7 @@ export function App(): ReactElement {
                 }} /> : tab === 'portfolio' ? (
                     <PortfolioPanel key={mode} sourceRevision={portfolioRevision} focus={focus} accountsExpanded={accountsExpanded} detailsExpanded={detailsExpanded} actionsExpanded={actionsExpanded} dataMode={mode} onPortfolioChanged={portfolioChanged} />
                 ) : tab === 'discover' ? <DiscoverPanel key={mode} sourceRevision={portfolioRevision} dataMode={mode} onPortfolioChanged={portfolioChanged} /> : tab === 'dashboard'
-                    ? <DashboardWorkspace invokeSellerDashboard={dataClient.invokeSellerDashboard} /> : <PlaysPanel runRequest={runRequest} />}
+                    ? <DashboardWorkspace invokeSellerDashboard={dataClient.invokeSellerDashboard} invokeSeReporting={dataClient.invokeSeReporting} sourceSession={dataClient.cacheSession} /> : <PlaysPanel runRequest={runRequest} />}
             </main>
         </div>
     )

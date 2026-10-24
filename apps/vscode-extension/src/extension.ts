@@ -13,6 +13,7 @@ import { localMutationState, protectedMutationKey } from '../../../packages/conn
 import { createMutationSession } from '../../../packages/orchestrator/mutations/composition.js'
 import { MutationSyncClient } from '../../shared/mutation-sync.js'
 import { accountSchema } from '../../../packages/common/contracts/index.js'
+import { seismicGraphScopes } from '../../../packages/common/configuration/knowledge-sources.js'
 
 let disposeCurrentProvider: (() => Promise<void>) | undefined
 
@@ -362,7 +363,18 @@ export function activate(context: vscode.ExtensionContext): void {
             },
             vscode.workspace.getConfiguration('tlc').get<boolean>('useFoundryAgents', true),
             vscode.Uri.joinPath(context.globalStorageUri, 'portfolio-preferences.json').fsPath,
-            foundryCredential))
+            foundryCredential, async (reportingResource) => {
+                const resourceUrl = reportingResource === 'powerbi' ? 'https://analysis.windows.net/powerbi/api' : 'https://graph.microsoft.com'
+                const granted = await acquireDelegatedToken(resourceUrl, true)
+                if (granted.account.toLowerCase() !== account.toLowerCase()) throw new Error('The reporting source account must match the TLC account.')
+                return granted.token
+            }, async () => {
+                const session = await vscode.authentication.getSession('microsoft', [...seismicGraphScopes], { createIfNone: true })
+                if (!session || session.account.label.toLowerCase() !== account.toLowerCase()) {
+                    throw new Error('The Seismic Graph session must match the TLC account.')
+                }
+                return session.accessToken
+            }))
             void vscode.window.showInformationMessage(`TLC Assist is now using live data for ${account} (MSX OData + Dataverse MCP).`)
         } catch (error) {
             const detail = error instanceof Error ? error.message : String(error)

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { app } from '@microsoft/teams-js'
 import * as c from '../../../../packages/common/contracts/index.js'
 import { NextBestActions } from '../../../shared/next-best-actions.js'
+import { MsxOpportunityLink } from '../../../shared/msx-opportunity-link.js'
 import { sortMilestones, type MilestoneSort, type SortDirection } from '../../../shared/portfolio-sorting.js'
 import { GuidanceWorkspace } from './guidance-workspace.js'
 import { MilestoneCard, OpportunityCommentsEditor, StageChange } from './record-actions.js'
@@ -12,6 +14,14 @@ import { TeamsMcemStageBoard } from './mcem-stage-board.js'
 
 export type DetailTab = 'overview' | 'guidance' | 'stages'
 const tabs: Array<{ id: DetailTab; label: string }> = [{ id: 'overview', label: 'Overview' }, { id: 'guidance', label: 'Guidance' }, { id: 'stages', label: 'MCEM Stages' }]
+
+async function openOpportunityInBrowser(url: string): Promise<void> {
+  if (app.isInitialized()) {
+    await app.openLink(url)
+    return
+  }
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
 
 export function OpportunityWorkbench({ client, selection, opportunities, milestones, panes, tab, onTabChange, onSelectOpportunity, onAction, onMeeting, onDraftChange }: {
   client: TeamsApiClient; selection: WorkingSelection; opportunities: c.Opportunity[]; milestones: c.Milestone[]; panes: PortfolioPanes
@@ -50,7 +60,7 @@ export function OpportunityWorkbench({ client, selection, opportunities, milesto
   }
   return <>
     <section id="portfolio-details-panel" className="pane opportunity-details" hidden={!panes.detailsExpanded} aria-label="Opportunity details">
-      <header className="opportunity-heading"><h2>{selection.opportunity.name}</h2>
+      <header className="opportunity-heading"><h2><MsxOpportunityLink opportunity={selection.opportunity} onOpen={openOpportunityInBrowser} onError={setError} /></h2>
         <p className="muted">{selection.account.name} | Owner: {selection.opportunity.owner ?? 'Account team'} | Stage {selection.opportunity.recordedStage} | Close: {selection.opportunity.closeDate}</p>
       </header>
       <nav className="detail-tabs" role="tablist" aria-label="Opportunity sections">

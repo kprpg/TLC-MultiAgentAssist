@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from 'vitest'
-import { assertLoopbackHost, createAzureCliAuthentication, createSampleAuthentication } from '../../../apps/web/src/authentication.js'
+import { assertLoopbackHost, createAzureCliAuthentication, createAzureCliGraphKnowledgeTokenProvider, createSampleAuthentication } from '../../../apps/web/src/authentication.js'
 
 describe('local web authentication', () => {
+    it('uses a separate read-only Graph grant for the same authenticated web user', async () => {
+        const token = createToken({ preferred_username: 'signed-in-user@microsoft.com' })
+        const credential = { getToken: vi.fn().mockResolvedValue({ token, expiresOnTimestamp: Date.now() + 60_000 }) }
+        const authentication = { accessToken: 'synthetic-msx-token', clientPrincipal: 'synthetic', userEmail: 'signed-in-user@microsoft.com' }
+        const provider = createAzureCliGraphKnowledgeTokenProvider(credential)
+        await expect(provider(authentication)).resolves.toBe(token)
+        expect(credential.getToken).toHaveBeenCalledWith('https://graph.microsoft.com/.default')
+        await expect(provider({ ...authentication, userEmail: 'another-user@microsoft.com' })).rejects.toThrow('must match')
+    })
     it('acquires an MSX token and validates the signed-in corporate identity', async () => {
         const token = createToken({ preferred_username: 'signed-in-user@microsoft.com' })
         const credential = {

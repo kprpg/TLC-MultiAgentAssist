@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { agentTaskPromptMaxLength } from './agent-task-limits.js'
 
 export const workflowContractVersion = '1.0' as const
 export const workflowAgentCapabilityValues = [
@@ -207,7 +208,7 @@ export const scopeAwareAgentTaskRequestSchema = z.object({
     contractVersion: z.literal(workflowContractVersion),
     capability: workflowAgentCapabilitySchema,
     scope: scopeRefSchema,
-    prompt: z.string().min(3).max(1_000)
+    prompt: z.string().min(3).max(agentTaskPromptMaxLength)
 }).strict()
 
 const workflowGuidanceFactSchema = z.object({

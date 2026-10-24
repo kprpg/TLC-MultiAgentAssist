@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as c from '../../../../packages/common/contracts/index.js'
 import { suggestedPrompts } from '../../../shared/prompt-catalog.js'
 import { formatResponseMarkdown } from '../../../shared/response-markdown.js'
+import { progressToResponse, type AgentStreamProgress } from '../../../shared/agent-stream.js'
 import { AgentResultView } from './result-view.js'
 import { ResponseActions } from './response-actions.js'
 import type { TeamsApiClient } from './data-client.js'
@@ -13,20 +14,24 @@ export function GuidanceWorkspace({ client, selection }: { client: TeamsApiClien
   const [result, setResult] = useState<c.AgentTaskResponse | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [phase, setPhase] = useState<AgentStreamProgress['phase'] | null>(null)
   const request = useRef<AbortController | null>(null)
   useEffect(() => () => request.current?.abort(), [])
   async function run() {
     request.current?.abort()
     const controller = new AbortController()
     request.current = controller
-    setBusy(true); setError(''); setResult(null)
+    setBusy(true); setError(''); setResult(null); setPhase(null)
     try {
-      const response = await client.operation('runAgentTask', {
+      const response = await client.runAgentTaskStream({
         contractVersion: c.contractVersion, capability, accountId: selection.account.id, opportunityId: selection.opportunity.id, prompt
-      }, c.agentTaskResponseSchema, controller.signal)
+      }, (progress) => {
+        if (controller.signal.aborted) return
+        setPhase(progress.phase); setResult(progressToResponse(progress, capability))
+      }, controller.signal)
       if (!controller.signal.aborted) setResult(response)
     } catch (cause) { if (!controller.signal.aborted) setError(String(cause)) }
-    finally { if (!controller.signal.aborted) setBusy(false) }
+    finally { if (!controller.signal.aborted) { setBusy(false); setPhase(null) } }
   }
   return <div>
     <label className="field">Guidance capability<select value={capability} onChange={(event) => {
@@ -37,9 +42,12 @@ export function GuidanceWorkspace({ client, selection }: { client: TeamsApiClien
     <div className="starter-prompts">{suggestedPrompts[capability].slice(0, 4).map((item) => <button type="button" key={item} onClick={() => setPrompt(item)}>{item}</button>)}</div>
     <label className="field">Ask TLC<textarea aria-label="Ask TLC" value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={1000} /></label>
     <button type="button" className="primary" disabled={busy || prompt.trim().length < 3} onClick={() => { void run() }}>{busy ? 'Grounding response...' : 'Run guidance'}</button>
-    {busy && <p role="status">Checking current MSX evidence, milestones and MCEM guidance before preparing the response. No source records will be changed.</p>}
+    {busy && <button type="button" onClick={() => request.current?.abort()}>Cancel</button>}
+    {busy && <p role="status">{phase === 'streaming' ? 'Receiving the AI response. The evidence-based draft is replaced as it arrives.'
+      : phase === 'draft' ? 'Showing the evidence-based draft from current MSX evidence while the AI response is prepared. No source records will be changed.'
+      : 'Checking current MSX evidence, milestones and MCEM guidance before preparing the response. No source records will be changed.'}</p>}
     {error && <p role="alert" className="error-banner">{error}</p>}
-    {result && <AgentResultView result={result} actions={<ResponseActions client={client} opportunityId={selection.opportunity.id}
+    {result && <AgentResultView result={result} actions={busy ? null : <ResponseActions client={client} opportunityId={selection.opportunity.id}
       title={`TLC guidance - ${selection.opportunity.name}`} markdown={formatResponseMarkdown(result.content)} generatedAt={result.generatedAt} />} />}
   </div>
 }

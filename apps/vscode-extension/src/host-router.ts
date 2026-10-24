@@ -2,10 +2,14 @@ import {
     errorResponse,
     parseBridgeParams,
     requestEnvelopeSchema,
+    streamCancelEnvelopeSchema,
+    streamRequestEnvelopeSchema,
     successResponse,
-    type ResponseEnvelope
+    type ResponseEnvelope,
+    type StreamEventEnvelope
 } from './message-contracts.js'
 import type { ExtensionDataProvider } from './data-provider.js'
+import type { AgentTaskStreamEvent } from '../../../packages/common/contracts/index.js'
 import {
     recordCreationCatalogSchema,
     recordCreationPreviewSchema,
@@ -14,6 +18,7 @@ import {
 } from '../../../packages/common/index.js'
 import { discoverySnapshotSchema, portfolioIndexSchema, portfolioWorkspaceSchema } from '../../../packages/common/contracts/index.js'
 import { cacheControlResponseSchema, mutationSyncResponseSchema } from '../../../packages/common/contracts/cache-sync.js'
+import { knowledgeSearchResponseSchema } from '../../../packages/common/contracts/knowledge.js'
 
 function extractId(raw: unknown): string {
     if (raw && typeof raw === 'object' && 'id' in raw) {
@@ -26,6 +31,54 @@ function extractId(raw: unknown): string {
 function sanitizeMessage(error: unknown): string {
     if (error instanceof Error && error.message) return error.message.slice(0, 1000)
     return 'The request could not be completed.'
+}
+
+/**
+ * Pure router for progressive agent runs. Contains no VS Code API; the controller supplies `post`.
+ * Every run ends with exactly one terminal `complete` or `error` event on the bridge.
+ */
+export function createAgentStreamRouter(getProvider: () => ExtensionDataProvider, post: (message: StreamEventEnvelope) => void) {
+    const active = new Map<string, AbortController>()
+    const emit = (id: string, event: AgentTaskStreamEvent) => post({ kind: 'stream-event', id, event })
+    return {
+        handles(raw: unknown): boolean {
+            const kind = raw && typeof raw === 'object' ? (raw as { kind?: unknown }).kind : undefined
+            return kind === 'stream-request' || kind === 'stream-cancel'
+        },
+        async handle(raw: unknown): Promise<void> {
+            const cancel = streamCancelEnvelopeSchema.safeParse(raw)
+            if (cancel.success) {
+                active.get(cancel.data.id)?.abort()
+                return
+            }
+            const parsed = streamRequestEnvelopeSchema.safeParse(raw)
+            if (!parsed.success) {
+                emit(extractId(raw), { type: 'error', code: 'failed', message: 'The request envelope was rejected.' })
+                return
+            }
+            const { id, params } = parsed.data
+            if (active.has(id)) return
+            const controller = new AbortController()
+            active.set(id, controller)
+            try {
+                const provider = getProvider()
+                if (provider.runAgentTaskStream) {
+                    await provider.runAgentTaskStream(params.capability, params.accountId, params.opportunityId, params.prompt, (event) => emit(id, event), controller.signal)
+                } else {
+                    const response = await provider.runAgentTask(params.capability, params.accountId, params.opportunityId, params.prompt)
+                    emit(id, { type: 'complete', response })
+                }
+            } catch (error) {
+                emit(id, { type: 'error', code: controller.signal.aborted ? 'cancelled' : 'failed', message: sanitizeMessage(error) })
+            } finally {
+                active.delete(id)
+            }
+        },
+        dispose(): void {
+            for (const controller of active.values()) controller.abort()
+            active.clear()
+        }
+    }
 }
 
 /**
@@ -42,6 +95,9 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
     const { id, method } = parsed.data
     try {
         switch (method) {
+            case 'searchKnowledge':
+                return successResponse(id, knowledgeSearchResponseSchema.parse(
+                    await provider.searchKnowledge(parseBridgeParams('searchKnowledge', parsed.data.params))))
             case 'cacheControl': {
                 const input = parseBridgeParams('cacheControl', parsed.data.params)
                 if (!provider.cacheSession) throw new Error('The presentation cache owner is unavailable.')
@@ -64,6 +120,11 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
                 const params = parseBridgeParams('sellerDashboard', parsed.data.params)
                 if (!provider.sellerDashboard) throw new Error('The Seller Dashboard host is unavailable.')
                 return successResponse(id, await provider.sellerDashboard.invoke(params))
+            }
+            case 'seReporting': {
+                const params = parseBridgeParams('seReporting', parsed.data.params)
+                if (!provider.seReporting) throw new Error('The SE Reporting Dashboard host is unavailable.')
+                return successResponse(id, await provider.seReporting.invoke(params))
             }
             case 'voiceInput':
                 return errorResponse(id, 'Voice input must be handled by the local presentation host.', 'host_only')

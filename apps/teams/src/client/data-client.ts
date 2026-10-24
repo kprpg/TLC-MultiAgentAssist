@@ -3,6 +3,7 @@ import * as c from '../../../../packages/common/contracts/index.js'
 import { seDomainSchema } from '../../../../packages/common/configuration/se-domains.js'
 import { SessionPortfolio, waitForSessionRead } from '../../../shared/session-portfolio.js'
 import { MutationSyncClient } from '../../../shared/mutation-sync.js'
+import { createAgentStreamAccumulator, readNdjson, type AgentStreamProgress } from '../../../shared/agent-stream.js'
 import type { TeamsApiBasePath, TeamsDataMode } from '../../../../packages/common/contracts/teams-data-mode.js'
 import {
   actionApprovalSchema, actionPreviewSchema, actionReceiptSchema, collaborationVersion, teamsSessionSchema,
@@ -76,6 +77,18 @@ export class TeamsApiClient {
         retryAfterMs !== undefined && Number.isFinite(retryAfterMs) ? retryAfterMs : undefined)
     }
     return { response, token }
+  }
+  /** Progressive guidance run: reports the instant draft and streamed text, resolves with the authoritative response. */
+  async runAgentTaskStream(input: unknown, onProgress?: (progress: AgentStreamProgress) => void, signal?: AbortSignal): Promise<c.AgentTaskResponse> {
+    const { response, token } = await this.fetchResponse('agent-stream', input, signal)
+    if (!response.body) throw new TeamsRequestError('stream_unavailable')
+    const accumulator = createAgentStreamAccumulator(onProgress)
+    const combined = AbortSignal.any([this.disposed.signal, ...(signal ? [signal] : [])])
+    await readNdjson(response.body, (value) => {
+      this.assertCurrentToken(token)
+      accumulator.push(c.agentTaskStreamEventSchema.parse(value))
+    }, combined)
+    return accumulator.result()
   }
   async download(path: string, input: unknown, name: string): Promise<void> {
     const { response, token } = await this.fetchResponse(path, input)

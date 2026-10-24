@@ -10,8 +10,28 @@ import { TeamsApiClient } from '../../../apps/teams/src/client/data-client.js'
 import { TeamsLaunchStatusPanel } from '../../../apps/teams/src/client/launch-status.js'
 import { ResponseActions } from '../../../apps/teams/src/client/response-actions.js'
 import { OpportunityCommentsEditor } from '../../../apps/teams/src/client/record-actions.js'
+import { OpportunityWorkbench } from '../../../apps/teams/src/client/opportunity-workbench.js'
 
 describe('Teams-native presentation', () => {
+  it('links the focused opportunity heading to its MSX record', () => {
+    const opportunity = {
+      id: 'opp-1', accountId: 'account', name: 'Selected opportunity', recordedStage: 1,
+      value: 100, currency: 'USD', closeDate: '2099-12-31'
+    }
+    const html = renderToStaticMarkup(createElement(OpportunityWorkbench, {
+      client: new TeamsApiClient(async () => ''),
+      selection: { account: { id: 'account', name: 'Sample account', segment: 'Enterprise' }, opportunity },
+      opportunities: [opportunity], milestones: [],
+      panes: { accountsExpanded: true, detailsExpanded: true, actionsExpanded: true },
+      tab: 'overview', onTabChange: vi.fn(), onSelectOpportunity: vi.fn(),
+      onAction: vi.fn(), onMeeting: vi.fn(), onDraftChange: vi.fn()
+    }))
+
+    expect(html).toContain('<h2><a class="msx-opportunity-link"')
+    expect(html).toContain('href="https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=opportunity&amp;id=opp-1"')
+    expect(html).toContain('>Selected opportunity</a></h2>')
+  })
+
   it('shows a pending backend check rather than claiming Teams is already connected before initialization', () => {
     const html = renderToStaticMarkup(createElement(TeamsLaunchStatusPanel, { authentication: undefined, client: undefined, connected: false }))
     expect(html).toContain('Checking backend connection')

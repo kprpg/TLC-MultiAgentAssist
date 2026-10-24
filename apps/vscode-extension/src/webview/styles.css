@@ -182,6 +182,7 @@ button {
 
 .tab:focus-visible,
 .link:focus-visible,
+.msx-opportunity-link:focus-visible,
 button.secondary:focus-visible,
 .account-search-box button:focus-visible {
     outline: 1px solid var(--vscode-focusBorder);
@@ -895,6 +896,10 @@ ul {
 .link.active {
     font-weight: 700;
     text-decoration: underline;
+}
+
+.msx-opportunity-link {
+    color: var(--vscode-textLink-foreground);
 }
 
 .link:not(.record-link):not(.danger-link):not(:disabled):hover,

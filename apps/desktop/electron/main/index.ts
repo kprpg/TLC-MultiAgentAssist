@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { z } from 'zod'
-import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, agentTaskRequestSchema, createMilestoneActivityRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, mcemRequestSchema, mcemStageTransitionRequestSchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, milestoneUpdateSchema, opportunityUpdateSchema, seDomainSchema, type AuthStatus, type DesktopDataStatus, type McpServer, type PerformanceReporter } from '../../../../packages/common/index.js'
+import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, agentTaskRequestSchema, agentTaskStreamEventSchema, createMilestoneActivityRequestSchema, emailComposeRequestSchema, exportResponseRequestSchema, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy, mcemRequestSchema, mcemStageTransitionRequestSchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, milestoneUpdateSchema, opportunityUpdateSchema, seDomainSchema, type AgentTaskStreamEvent, type AuthStatus, type DesktopDataStatus, type McpServer, type PerformanceReporter } from '../../../../packages/common/index.js'
 import {
   loadFoundryEnvironment,
   type FoundryEnvironment
@@ -19,7 +19,8 @@ import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/s
 import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../../packages/connectors/foundry/index.js'
 import { createFoundryMeetingExtractor } from '../../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
 import { parseTranscriptContent } from '../../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
-import { ThinSliceOrchestrator, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
+import { ThinSliceOrchestrator, prewarmAgentDependencies, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
+import { foundryAgentTuning } from '../../../../packages/orchestrator/task-agents.js'
 import { RecordCreationService } from '../../../../packages/orchestrator/record-creation/service.js'
 import { createLivePlayWorkflowHost, createSampleWorkflowHost } from '../../../../packages/orchestrator/workflows/index.js'
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
@@ -36,6 +37,8 @@ import { SharedVoiceInputHost } from '../../../../packages/orchestrator/voice-in
 import { WindowsVoiceCaptureDriver } from '../../../../packages/connectors/common/windows-voice.js'
 import { createVoiceIpcHandler, voiceIpcChannel } from './voice-ipc.js'
 import { createSellerDashboardHost } from '../../../../packages/orchestrator/seller-dashboard.js'
+import { createSeReportingHost, seReportingScopes } from '../../../../packages/orchestrator/se-reporting/composition.js'
+import { createSeReportingIpcHandler, seReportingIpcChannel } from './se-reporting-ipc.js'
 import { createSellerDashboardIpcHandler, sellerDashboardIpcChannel } from './seller-dashboard-ipc.js'
 import { desktopWindowBounds } from './window-bounds.js'
 import { createMutationSyncIpcHandler, createPortfolioIpcHandlers } from './portfolio-ipc.js'
@@ -44,6 +47,9 @@ import { localMutationState, protectedMutationKey, type MutationState } from '..
 import { createMutationSession, type MutationSession } from '../../../../packages/orchestrator/mutations/composition.js'
 import { bindSourceToken } from '../../../../packages/orchestrator/mutations/core-adapter.js'
 import { cacheControlRequestSchema, cacheControlResponseSchema } from '../../../../packages/common/contracts/cache-sync.js'
+import { createKnowledgeSearch } from '../../../../packages/orchestrator/knowledge-search.js'
+import { seismicGraphDefaultScope, seismicGraphScopes } from '../../../../packages/common/configuration/knowledge-sources.js'
+import { createKnowledgeSearchIpcHandler, knowledgeSearchIpcChannel } from './knowledge-ipc.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -119,6 +125,19 @@ const sellerDashboardHost = createSellerDashboardHost({
   mode: dataMode,
   resolveUserEmail: async () => (await tokenProvider.getAuthStatus()).userEmail
 })
+const seReportingHost = createSeReportingHost({
+  mode: dataMode,
+  identity: async () => {
+    const email = (await tokenProvider.getAuthStatus()).userEmail
+    return email ? { key: email, email } : undefined
+  },
+  getToken: async (resource) => {
+    const token = await credentials.msx.getToken(seReportingScopes[resource])
+    if (!token) throw new Error('The reporting resource did not return a delegated token.')
+    return token.token
+  },
+  foundryCredential: credentials.foundry
+})
 const reportPerformance: PerformanceReporter = (event) => {
   console.info(`[performance] ${JSON.stringify(event)}`)
 }
@@ -180,7 +199,8 @@ const taskAgents: TaskAgentRegistry = Object.fromEntries(
         agentName: binding.name,
         requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
         credential: credentials.foundry,
-        openAIClient: foundryOpenAIClient
+        openAIClient: foundryOpenAIClient,
+        ...foundryAgentTuning(runtimeEnvironment, reportPerformance)
       })
     }]
   })
@@ -190,7 +210,15 @@ const orchestrator = new ThinSliceOrchestrator(
   mcemConnector,
   taskAgents,
   reportPerformance,
-  recordCreation
+  recordCreation,
+  createKnowledgeSearch({
+    mode: dataMode,
+    getGraphToken: async () => {
+      const token = await credentials.msx.getToken(authentication?.mode === 'interactive-browser' ? [...seismicGraphScopes] : seismicGraphDefaultScope)
+      if (!token) throw new Error('A delegated Microsoft Graph token was not returned.')
+      return token.token
+    }
+  })
 )
 const presentation = createPresentationOwner(orchestrator)
 const clearSourceSession = () => presentation.session.clear()
@@ -281,6 +309,8 @@ const workflowHost = configuredWorkflowHost?.host ?? createSampleWorkflowHost(as
   }
 })
 
+let agentPrewarmed = false
+const agentStreams = new Map<string, AbortController>()
 async function getDataStatus(): Promise<DesktopDataStatus> {
   if (dataMode === 'sample') {
     return {
@@ -288,7 +318,15 @@ async function getDataStatus(): Promise<DesktopDataStatus> {
       auth: { state: 'ready', detail: 'Automated fixture mode is active.' }
     }
   }
-  return { mode: 'live', auth: await tokenProvider.getAuthStatus() }
+  const auth = await tokenProvider.getAuthStatus()
+  if (auth.state === 'ready' && !agentPrewarmed && runtimeEnvironment) {
+    agentPrewarmed = true
+    void prewarmAgentDependencies({
+      credential: credentials.foundry, scopes: runtimeEnvironment.authentication.scopes.foundry,
+      guidance: mcemConnector, performanceReporter: reportPerformance
+    })
+  }
+  return { mode: 'live', auth }
 }
 
 async function connectMcem(): Promise<AuthStatus> {
@@ -325,6 +363,16 @@ function registerIpc(): void {
     return cacheControlResponseSchema.parse({ contractVersion: '1.0', state: presentation.session.getState() })
   })
   const invokeSellerDashboard = createSellerDashboardIpcHandler(sellerDashboardHost)
+  const invokeSeReporting = createSeReportingIpcHandler(seReportingHost)
+  const searchKnowledge = createKnowledgeSearchIpcHandler(orchestrator)
+  ipcMain.handle(knowledgeSearchIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return searchKnowledge(request)
+  })
+  ipcMain.handle(seReportingIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return invokeSeReporting(request)
+  })
   ipcMain.handle(sellerDashboardIpcChannel, (event, request: unknown) => {
     assertTrustedSender(event)
     return invokeSellerDashboard(request)
@@ -491,6 +539,29 @@ function registerIpc(): void {
   ipcMain.handle('tlc:run-agent-task', (event, request: unknown) => {
     assertTrustedSender(event)
     return orchestrator.runAgentTask(agentTaskRequestSchema.parse(request))
+  })
+  ipcMain.handle('tlc:run-agent-task-stream', async (event, request: unknown, streamId: unknown) => {
+    assertTrustedSender(event)
+    const id = z.string().uuid().parse(streamId)
+    const parsed = agentTaskRequestSchema.parse(request)
+    const controller = new AbortController()
+    agentStreams.set(id, controller)
+    try {
+      let terminal: AgentTaskStreamEvent | undefined
+      await orchestrator.runAgentTaskStream(parsed, (agentEvent) => {
+        const validated = agentTaskStreamEventSchema.parse(agentEvent)
+        if (validated.type === 'complete' || validated.type === 'error') terminal = validated
+        if (!event.sender.isDestroyed()) event.sender.send('tlc:agent-task-event', { streamId: id, event: validated })
+      }, controller.signal)
+      if (!terminal) throw new Error('The agent response ended before it completed.')
+      return terminal
+    } finally {
+      agentStreams.delete(id)
+    }
+  })
+  ipcMain.handle('tlc:cancel-agent-task-stream', (event, streamId: unknown) => {
+    assertTrustedSender(event)
+    agentStreams.get(z.string().uuid().parse(streamId))?.abort()
   })
   ipcMain.handle('tlc:open-email-compose', async (event, rawRequest: unknown) => {
     assertTrustedSender(event)

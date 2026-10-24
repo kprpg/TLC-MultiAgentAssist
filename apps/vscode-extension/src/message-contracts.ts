@@ -2,8 +2,11 @@ import { z } from 'zod'
 import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, createMilestoneActivityRequestSchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, meetingTypeSchema, milestoneUpdateSchema, opportunityUpdateSchema, recordCreationCatalogRequestSchema, recordCreationPreviewRequestSchema, recordCreationCommitRequestSchema, scopeRefSchema, seDomainSchema } from '../../../packages/common/index.js'
 import { voiceRequestSchema } from '../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema } from '../../../packages/common/contracts/seller-dashboard.js'
-import { discoverySnapshotRequestSchema, portfolioReadRequestSchema, portfolioWorkspaceRequestSchema } from '../../../packages/common/contracts/index.js'
+import { seReportingRequestSchema } from '../../../packages/common/contracts/se-reporting.js'
+import { discoverySnapshotRequestSchema, portfolioReadRequestSchema, portfolioWorkspaceRequestSchema, agentTaskStreamEventSchema } from '../../../packages/common/contracts/index.js'
 import { cacheControlRequestSchema, mutationSyncRequestSchema } from '../../../packages/common/contracts/cache-sync.js'
+import { agentTaskPromptMaxLength } from '../../../packages/common/contracts/agent-task-limits.js'
+import { knowledgeSearchRequestSchema } from '../../../packages/common/contracts/knowledge.js'
 
 /**
  * Strict, discriminated message envelopes for the webview <-> extension-host bridge.
@@ -19,9 +22,11 @@ export const agentCapabilitySchema = z.enum([
 ])
 
 export const bridgeMethodSchema = z.enum([
+    'searchKnowledge',
     'cacheControl',
     'mutationSync',
     'sellerDashboard',
+    'seReporting',
     'voiceInput',
     'getCurrentUserEmail',
     'listAccounts',
@@ -70,9 +75,11 @@ export type BridgeMethod = z.infer<typeof bridgeMethodSchema>
 const scopeKindSchema = z.enum(['portfolio', 'account', 'opportunity'])
 
 export const bridgeParamSchemas = {
+    searchKnowledge: knowledgeSearchRequestSchema,
     cacheControl: cacheControlRequestSchema,
     mutationSync: mutationSyncRequestSchema,
     sellerDashboard: sellerDashboardRequestSchema,
+    seReporting: seReportingRequestSchema,
     voiceInput: voiceRequestSchema,
     getCurrentUserEmail: z.void().optional(),
     listAccounts: accountListOptionsSchema.optional(),
@@ -122,7 +129,7 @@ export const bridgeParamSchemas = {
         capability: agentCapabilitySchema,
         accountId: z.string().min(1).max(200),
         opportunityId: z.string().min(1).max(200),
-        prompt: z.string().min(1).max(4000)
+        prompt: z.string().min(1).max(agentTaskPromptMaxLength)
     }).strict(),
     listWorkflowDefinitions: z.object({ scope: scopeKindSchema.optional() }).strict().optional(),
     startWorkflow: z.object({
@@ -199,6 +206,27 @@ export const responseEnvelopeSchema = z.discriminatedUnion('ok', [
 ])
 
 export type ResponseEnvelope = z.infer<typeof responseEnvelopeSchema>
+
+/** Progressive agent run: one `stream-request`, many `stream-event`s (ending in `complete` or `error`), optional `stream-cancel`. */
+export const streamRequestEnvelopeSchema = z.object({
+    kind: z.literal('stream-request'),
+    id: z.string().min(1).max(MAX_MESSAGE_ID),
+    method: z.literal('runAgentTaskStream'),
+    params: bridgeParamSchemas.runAgentTask
+}).strict()
+
+export const streamCancelEnvelopeSchema = z.object({
+    kind: z.literal('stream-cancel'),
+    id: z.string().min(1).max(MAX_MESSAGE_ID)
+}).strict()
+
+export const streamEventEnvelopeSchema = z.object({
+    kind: z.literal('stream-event'),
+    id: z.string().min(1).max(MAX_MESSAGE_ID),
+    event: agentTaskStreamEventSchema
+}).strict()
+
+export type StreamEventEnvelope = z.infer<typeof streamEventEnvelopeSchema>
 
 export const hostEventSchema = z.object({
     kind: z.literal('event'),

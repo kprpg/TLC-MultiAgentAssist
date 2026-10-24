@@ -118,7 +118,7 @@ describe('initial deterministic workflow cohort', () => {
             harness.setActiveWorkflow(workflowId)
             await harness.runtime.wait(harness.runtime.start({ workflowId, scope: { kind: 'portfolio' }, input: input(workflowId) }).runId)
         }
-        const queries = harness.dataverse.query.mock.calls.map(([query]) => query)
+        const queries = harness.dataverse.query.mock.calls.map(([query]) => query).filter(({ filter }) => !filter.some(({ field }) => field === 'id'))
         expect(queries.map(({ entity }) => entity)).toEqual([
             'opportunity', 'engagementMilestone', 'engagementMilestone', 'engagementMilestone', 'opportunity', 'activity', 'opportunity', 'activity', 'engagementMilestone'
         ])
@@ -137,6 +137,46 @@ describe('initial deterministic workflow cohort', () => {
         const output = initialWorkflowOutputSchema.parse(harness.runtime.getResult(run.resultRef!)?.output)
         expect(output.queueItems).toEqual([])
         expect(output.card).toMatchObject({ kind: 'action-list', actions: [] })
+    })
+
+    it('resolves the owning account for milestone and activity items so every play can hand off to an agent', async () => {
+        const lookups: GuardedQueryRequest[] = []
+        const rowsFor = (entity: string): Array<Record<string, unknown>> => entity === 'engagementMilestone'
+            ? [{ id: 'ms-1', opportunityId: 'opp-9', name: 'Architecture sign-off', status: 'At Risk', targetDate: '2026-09-01' }]
+            : entity === 'activity'
+                ? [{ id: 'act-1', opportunityId: 'opp-9', subject: 'Customer follow-up', ownerId: 'owner-1', dueDate: '2026-08-01', status: 'Open' }]
+                : [{ id: 'opp-9', accountId: 'account-9', name: 'Fabrikam rollout' }]
+        const dataverse = {
+            query: vi.fn(async (query: GuardedQueryRequest): Promise<DataverseMcpQueryResult> => {
+                if (query.filter.some(({ field }) => field === 'id')) lookups.push(query)
+                const records = rowsFor(query.entity)
+                return {
+                    state: 'complete', records, recordCount: records.length, truncated: false,
+                    sourceHealth: { source: 'dataverse-mcp', state: 'live', detail: 'Fixture Dataverse data.', checkedAt },
+                    lineage: { connector: 'dataverse-mcp', operation: 'read_query', toolCallId: 'dv-1' }
+                }
+            })
+        } satisfies Pick<DataverseMcpReadAdapter, 'query'>
+        const emptyMsx = {
+            state: 'complete', data: [], rowCount: 0, truncated: false,
+            sourceHealth: { source: 'msx-mcp', state: 'live', detail: 'Fixture MSX data.', checkedAt },
+            lineage: { connector: 'msx-mcp', operation: 'list_pipeline', toolCallId: 'msx-1' }
+        } as const
+        const msx = { listPipeline: vi.fn(async () => emptyMsx), getForecastSnapshot: vi.fn(async () => emptyMsx) } as unknown as MsxReadConnector
+        const executor = new InitialWorkflowConnectorExecutor(dataverse, msx, () => ({
+            delegatedUserAccountIds: ['account-9'], delegatedUserOpportunityIds: ['opp-9']
+        }))
+        const runtime = new WorkflowRuntime(new WorkflowRegistry(initialWorkflowDefinitions), executor, {
+            resultAssembler: new InitialWorkflowResultAssembler()
+        })
+
+        for (const workflowId of ['WF-002', 'WF-007', 'WF-010'] as const) {
+            const run = await runtime.wait(runtime.start({ workflowId, scope: { kind: 'portfolio' }, input: input(workflowId) }).runId)
+            const output = initialWorkflowOutputSchema.parse(runtime.getResult(run.resultRef!)?.output)
+            expect(output.queueItems[0], workflowId).toMatchObject({ accountId: 'account-9', opportunityId: 'opp-9', opportunityName: 'Fabrikam rollout' })
+        }
+        expect(lookups).toHaveLength(3)
+        expect(lookups[0]).toMatchObject({ entity: 'opportunity', filter: [{ field: 'id', operator: 'in', value: ['opp-9'] }] })
     })
 
     it('embeds descriptive queue labels without exposing owner identifiers', async () => {

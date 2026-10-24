@@ -7,6 +7,97 @@ import { workflowDefinitions, workflowOutput, workflowRun } from './workflow-fix
 import { expectCompleteSamplePortfolio } from './sample-portfolio.js'
 import { expectOpportunityAndMilestoneRemoval } from './membership-removal.js'
 import { expectOpportunitiesToFillCollapsedWorkspace } from './opportunities-layout.js'
+import { conversionOffer, followUpAgentResponse, initialAgentResponse } from './agent-response-fixtures.js'
+import { agentTaskRequestSchema, contractVersion } from '../../../packages/common/contracts/index.js'
+
+test('Desktop agent follow-ups send the previous response through IPC and keep both replies readable', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-agent-follow-up-'))
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_UI_MODE: '' }
+    })
+    try {
+        await app.evaluate(({ ipcMain }, { initial, followUp, version }) => {
+            process.env.TLC_TEST_AGENT_REQUESTS = '[]'
+            ipcMain.removeHandler('tlc:run-agent-task-stream')
+            ipcMain.handle('tlc:run-agent-task-stream', (event, request: { capability: string }, streamId: string) => {
+                const requests: unknown[] = JSON.parse(process.env.TLC_TEST_AGENT_REQUESTS ?? '[]')
+                requests.push(request)
+                process.env.TLC_TEST_AGENT_REQUESTS = JSON.stringify(requests)
+                const terminal = {
+                        type: 'complete',
+                        response: {
+                            contractVersion: version, correlationId: '11111111-1111-4111-8111-111111111111',
+                            capability: request.capability, agentVersion: 'presentation-test', generatedAt: '2026-10-22T12:00:00.000Z',
+                            mode: 'sample', state: 'complete', content: requests.length === 1 ? initial : followUp,
+                            sourceHealth: [{ source: 'msx', state: 'sample', detail: 'Sanitized test evidence.', checkedAt: '2026-10-22T12:00:00.000Z' }]
+                        }
+                }
+                event.sender.send('tlc:agent-task-event', { streamId, event: terminal })
+                return terminal
+            })
+        }, { initial: initialAgentResponse, followUp: followUpAgentResponse, version: contractVersion })
+        const window = await app.firstWindow()
+        await window.setViewportSize({ width: 1600, height: 1000 })
+        await window.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'Portfolio', exact: true }).click()
+        await window.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
+        await window.getByRole('table', { name: 'Contoso Energy opportunities' }).getByRole('button', { name: /^Grid operations modernization / }).click()
+        await window.getByRole('tab', { name: 'Multi-Agent Guidance' }).click()
+        await window.getByRole('button', { name: 'What should the account team focus on this week?' }).click()
+        await expect(window.locator('.agent-response-markdown h2')).toHaveText(['Summary', 'Observed signals', 'Recommended actions', 'Sources', 'Feedback prompt'])
+        const requests = async () => agentTaskRequestSchema.array().parse(JSON.parse(await app.evaluate(() => process.env.TLC_TEST_AGENT_REQUESTS ?? '[]')))
+        expect(await requests()).toHaveLength(1)
+        await window.getByRole('button', { name: `Send follow-up: ${conversionOffer}` }).click()
+        const response = window.getByRole('article', { name: 'Agent follow-up response' })
+        await expect(response.getByRole('heading', { name: 'Customer-ready draft' })).toBeVisible()
+        await expect(response.getByRole('columnheader')).toHaveText(['Owner', 'Action', 'Evidence'])
+        await expect(window.locator('.agent-response-markdown').first().getByRole('heading', { name: 'Summary', exact: true })).toBeVisible()
+        const sent = await requests()
+        expect(sent).toHaveLength(2)
+        expect(sent[1]).toMatchObject({ capability: 'account-pulse', accountId: 'account-contoso', opportunityId: 'opp-grid-modernization' })
+        expect(sent[1]!.prompt).toContain(initialAgentResponse)
+        expect(sent[1]!.prompt).toContain(conversionOffer)
+    } finally {
+        await app.close()
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
+
+test('opens the focused opportunity in MSX through the Desktop browser bridge', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-opportunity-link-'))
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_UI_MODE: '' }
+    })
+
+    try {
+        await app.evaluate(({ shell }) => {
+            delete process.env.TLC_TEST_OPENED_MSX_URL
+            shell.openExternal = async (url) => { process.env.TLC_TEST_OPENED_MSX_URL = url }
+        })
+        const window = await app.firstWindow()
+        await window.setViewportSize({ width: 1600, height: 900 })
+        await window.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'Portfolio', exact: true }).click()
+        await window.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
+        const opportunities = window.getByRole('table', { name: 'Contoso Energy opportunities' })
+        await opportunities.getByRole('button', { name: /^Grid operations modernization / }).click()
+        expect(await app.evaluate(() => process.env.TLC_TEST_OPENED_MSX_URL)).toBeUndefined()
+        await expect(opportunities.getByRole('link')).toHaveCount(0)
+
+        const heading = window.getByRole('region', { name: 'Opportunity workbench' }).getByRole('heading', { name: 'Grid operations modernization', exact: true })
+        const link = heading.getByRole('link')
+        const expectedUrl = 'https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=opportunity&id=opp-grid-modernization'
+        await expect(link).toHaveAttribute('href', expectedUrl)
+        await link.focus()
+        await link.press('Enter')
+        await expect.poll(() => app.evaluate(() => process.env.TLC_TEST_OPENED_MSX_URL)).toBe(expectedUrl)
+        await expect(heading).toBeVisible()
+        await expect(opportunities.locator('tr.selected')).toContainText('Grid operations modernization')
+    } finally {
+        await app.close()
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
 
 test('opens a dedicated New pane before Discover in Desktop', async () => {
     const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-new-tab-'))

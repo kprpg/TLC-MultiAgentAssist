@@ -1,6 +1,32 @@
 import { expect, test } from '@playwright/test'
 import { chooseOpportunity, openUtility, post } from './helpers.js'
 
+test('opens the focused opportunity in MSX from the standalone Teams workbench', async ({ page, request }) => {
+  await page.addInitScript(() => {
+    const testWindow = window as Window & { openedMsxLinks?: string[][] }
+    const openedMsxLinks: string[][] = []
+    testWindow.openedMsxLinks = openedMsxLinks
+    window.open = (url, target, features) => {
+      openedMsxLinks.push([String(url), target ?? '', features ?? ''])
+      return null
+    }
+  })
+  await page.goto('/')
+  const { opportunity } = await chooseOpportunity(page, request)
+  const openedLinks = () => page.evaluate(() => (window as Window & { openedMsxLinks?: string[][] }).openedMsxLinks)
+  expect(await openedLinks()).toEqual([])
+  await expect(page.locator('.opportunity-table').getByRole('link')).toHaveCount(0)
+  const heading = page.locator('#portfolio-details-panel').getByRole('heading', { name: opportunity.name, exact: true })
+  const link = heading.getByRole('link')
+  const expectedUrl = `https://microsoftsales.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=opportunity&id=${encodeURIComponent(opportunity.id)}`
+  await expect(link).toHaveAttribute('href', expectedUrl)
+  await link.focus()
+  await link.press('Enter')
+  await expect.poll(openedLinks).toEqual([[expectedUrl, '_blank', 'noopener,noreferrer']])
+  await expect(heading).toBeVisible()
+  await expect(page.getByLabel('Opportunity', { exact: true })).toHaveValue(opportunity.id)
+})
+
 test('extension-first destinations are real workspaces and Portfolio is the default', async ({ page }) => {
   await page.goto('/')
   const navigation = page.getByRole('navigation', { name: 'TLC navigation' })
@@ -145,7 +171,7 @@ test('a late guidance response cannot replace the next selected opportunity', as
   let started: () => void = () => undefined
   const waiting = new Promise<void>((resolve) => { started = resolve })
   const blocked = new Promise<void>((resolve) => { unblock = resolve })
-  await page.route('**/api/teams/operations/runAgentTask', async (route) => {
+  await page.route('**/api/teams/agent-stream', async (route) => {
     const response = await route.fetch()
     started()
     await blocked

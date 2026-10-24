@@ -98,6 +98,8 @@ The TLC Assist view is organized into these tabs:
 - **Portfolio** — your accounts, opportunities, milestones, MSX evidence, and the four guidance agents, with **Email** and **Word** export on every agent response.
 - **Plays** — the operational Plays catalog in the left rail (ordered by workflow number) and the Operational Queue of results. Each queue item can be dispatched to an agent — for example **Send to Pursuit** or **Send to Risk & Play** — and the returned response can be exported with **Email** or **Word**, just like Portfolio guidance.
 - **Seller Dashboard** — a separate, read-only four-section performance report with fixed official attainment, account gaps, pipeline hygiene, consumption and U2C evidence. It adds no financial export/sharing controls; unavailable live sources remain unknown. See the [Seller Dashboard guide](SELLER-DASHBOARD.md) for filters, methodology and protected local-live setup.
+- **Stage and Pipeline Review** — a second Dashboards tab: consumption opportunities by stage with scope toggles, filters, alert cards, an ACR Actuals and Outlook chart and a milestone view. Read-only and currently sample-data only; see the [Stage and Pipeline Review guide](STAGE-PIPELINE-REVIEW.md).
+- **SE Reporting Dashboard** — a sibling under **Dashboards** for manager-scoped monthly pod reports: live-contract/profile setup, verified assignments, draft generation, reporter-owned asks, and reviewed JSON/HTML output. It does not change Seller Dashboard or CRM records. See the [SE Reporting Dashboard guide](SE-REPORTING-DASHBOARD.md).
 
 VS Code also contributes a native **TLC Assist** tree and toolbar commands (**TLC: Refresh Data**, **TLC: Add Customer Account**, **TLC: Toggle Hidden Customers**).
 
@@ -449,6 +451,13 @@ Each row summarizes one active opportunity with:
 
 Hovering an opportunity shows a full tooltip with the stage owner and additional context.
 
+Select an opportunity in the list to focus it in the middle Guidance/details pane. Its title in that
+pane is an **MSX hyperlink**: click it, or focus it and press **Enter**, to open that opportunity in your
+browser without leaving TLC or changing the selected opportunity. This works in Desktop, Web,
+the VS Code webview, and Teams. List clicks still select opportunities; they do not launch MSX.
+MSX requires your usual sign-in and record access. Sample-mode links use sanitized sample IDs,
+not real MSX records.
+
 ### 4.1 Sorting opportunities
 
 Click the sort icon (⇅) in the Opportunities blade header. A menu lets you sort by:
@@ -615,6 +624,28 @@ Every agent response follows the same contract:
 - Explicit assumptions and cautions — anything the agent could not confirm from the current evidence.
 - Citations to the underlying MSX/MCEM evidence items.
 
+Desktop, Web, and the VS Code webview display section headings, bold field labels,
+lists, and tables consistently, including numbered or plain-text section labels.
+When a response ends with an offer such as "Would you like me to convert this into
+an email?", **Suggested follow-ups** provides a clickable button. Selecting it sends
+the accepted suggestion and the preceding response to the **same agent for the same
+opportunity**. The original response stays visible, and the new response appears below
+it with the same formatting. Subsequent offers can be continued in the same way.
+Offers in workflow guidance use that queue item's opportunity, not another selected
+opportunity.
+
+For a feedback question that needs your input, choose **Reply to feedback**, enter
+your answer or requested adjustment, and select **Send reply to agent**. No answer is
+chosen on your behalf; your reply is sent with the preceding response as context.
+
+Follow-ups require an explicit click; they never send an email or update MSX.
+Buttons are disabled while a response is being generated. Use **Cancel follow-up**
+to stop a follow-up, or retry after a visible error. Navigating away cancels an
+in-progress follow-up. Conversation context stays in the current view, not persistent
+browser storage. If the preceding response exceeds the bounded request size, the UI
+reports it rather than silently truncating evidence; ask for a shorter response first.
+Sample mode remains deterministic and does not contact a model.
+
 Two actions sit in the header of a completed response:
 
 - **Send Email** — opens a pre-populated draft in your default Outlook client. Nothing is sent automatically; you review and press *Send* yourself.
@@ -624,6 +655,34 @@ In the browser/Teams **Portfolio > Guidance** response, these controls are at th
 **Export Word**, **Email draft recipients**, and **Download unsent email draft**. Enter
 recipient addresses separated by commas or semicolons to download an unsent `.eml` draft;
 the browser does not send it automatically.
+
+### 7.6 Reading evidence references (`O.C1`, `M2.A1`, …)
+
+Agent responses cite the evidence behind each signal and action with short labels in
+backticks, such as "Sponsor approved the pilot budget (`O.C1`, 2 days ago)". Each label
+points to one item in the evidence pack the agent was given for that request.
+
+| Label | Refers to |
+|---|---|
+| `O` | The selected opportunity record |
+| `O.C1`, `O.C2`, … | Opportunity comments (forecast-comment history) |
+| `O.N1`, `O.N2`, … | Opportunity notes |
+| `O.A1`, `O.A2`, … | Opportunity activities |
+| `M1`, `M2`, … | Milestones |
+| `M1.C1`, `M1.C2`, … | Comments on milestone `M1` |
+| `M1.A1`, `M1.A2`, … | Activities on milestone `M1` |
+
+How to read them:
+
+- `M2.A3` means "the third activity entry on the second milestone".
+- Comments, notes, and activities are numbered **newest first** within their category, so `O.C1` is the latest opportunity comment.
+- Milestones are numbered with open milestones first, then by earliest target date.
+- Labels are **specific to one request**. They are not MSX IDs or MCEM stages, and the same label can point to a different item in a later request.
+- There is no milestone-note label; only milestone comments and activities are cited.
+- Entries are capped (and tightened further for very large records). When the response says evidence was truncated or a source could not be read, labels beyond the cap do not exist.
+
+The mapping is built in `packages/orchestrator/agent-evidence.ts`; see
+[Agentic Performance §3.4](../performance/Agentic-Performance.md#34-grounding-the-evidence-pack-all-agents-all-surfaces).
 
 After **Meeting Capture** analyzes a transcript, the same controls appear at the top right
 of **Follow-up > Proposed meeting changes**. The export includes the proposed field changes,

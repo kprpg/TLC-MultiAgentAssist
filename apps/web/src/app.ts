@@ -9,6 +9,7 @@ import {
     accountVisibilityMutationSchema,
     agentTaskRequestSchema,
     agentTaskResponseSchema,
+    agentTaskStreamEventSchema,
     dealTeamJoinResultSchema,
     dealTeamLeaveResultSchema,
     discoverableOpportunitySchema,
@@ -50,6 +51,7 @@ import {
     type AccountVisibility,
     type AgentTaskRequest,
     type AgentTaskResponse,
+    type AgentTaskStreamEvent,
     type CreateMilestoneActivityRequest,
     type DealTeamJoinResult,
     type DealTeamLeaveResult,
@@ -85,17 +87,20 @@ import { createResponseDocumentBuffer } from '../../../packages/documents/respon
 import { invokeWorkflowHost, type WorkflowHost, type WorkflowHostOperation } from '../../../packages/orchestrator/workflows/index.js'
 import { createBrowserOnlyVoiceHost, type SharedVoiceInputHost } from '../../../packages/orchestrator/voice-input.js'
 import type { SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
+import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
 import { RecordCreationError } from '../../../packages/orchestrator/record-creation/service.js'
 import { portfolioReadRequestSchema, portfolioIndexSchema, portfolioWorkspaceRequestSchema, portfolioWorkspaceSchema, type PortfolioReadRequest, type PortfolioIndex, type PortfolioWorkspaceRequest, type PortfolioWorkspace } from '../../../packages/common/contracts/index.js'
 import { mutationSyncRequestSchema, mutationSyncResponseSchema, type MutationSyncRequest, type MutationSyncResponse } from '../../../packages/common/contracts/cache-sync.js'
 import { MutationDispatchPreventedError } from '../../../packages/orchestrator/mutations/host.js'
 import { MutationJournalError } from '../../../packages/orchestrator/mutations/journal.js'
 import { sourceHttpFailure } from '../../../packages/common/source-failure.js'
+import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest, type KnowledgeSearchResponse } from '../../../packages/common/contracts/knowledge.js'
 
 const accountIdSchema = z.string().min(1).max(200)
 const maximumBodyBytes = 1_048_576
 
 export interface WebRuntime {
+    searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
     mutationSync?(request: MutationSyncRequest): Promise<MutationSyncResponse>
     withReadContext?<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T>
     getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
@@ -128,6 +133,7 @@ export interface WebRuntime {
     transitionOpportunityStage(request: McemStageTransitionRequest): Promise<McemStageTransitionResult>
     runMcemCoach(request: McemRequest): Promise<McemResponse>
     runAgentTask(request: AgentTaskRequest): Promise<AgentTaskResponse>
+    runAgentTaskStream(request: AgentTaskRequest, onEvent: (event: AgentTaskStreamEvent) => void, signal?: AbortSignal): Promise<void>
 }
 
 export interface AuthenticatedRequest {
@@ -137,6 +143,7 @@ export interface AuthenticatedRequest {
 }
 
 export interface WebApiOptions {
+    resolveSeReportingHost?(authentication: AuthenticatedRequest): Promise<SeReportingHost> | SeReportingHost
     resolveSellerDashboardHost?(authentication: AuthenticatedRequest): Promise<SellerDashboardHost> | SellerDashboardHost
     resolveVoiceHost?(authentication: AuthenticatedRequest): SharedVoiceInputHost
     createRuntime(authentication: AuthenticatedRequest): Promise<WebRuntime> | WebRuntime
@@ -222,6 +229,11 @@ export function buildWebApiHandler(options: WebApiOptions) {
                 sendJson(response, 200, await host.invoke(await readJsonBody(request)))
                 return true
             }
+            if (request.method === 'POST' && url.pathname === '/api/se-reporting' && options.resolveSeReportingHost) {
+                const host = await options.resolveSeReportingHost(authentication)
+                sendJson(response, 200, await host.invoke(await readJsonBody(request)))
+                return true
+            }
             if (request.method === 'POST' && url.pathname === '/api/voice') {
                 const host = options.resolveVoiceHost?.(authentication) ?? browserOnlyVoice
                 sendJson(response, 200, await host.invoke(await readJsonBody(request)))
@@ -261,6 +273,11 @@ export function buildWebApiHandler(options: WebApiOptions) {
 
             const runtime = await options.createRuntime(authentication)
 
+            if (request.method === 'POST' && url.pathname === '/api/knowledge/search') {
+                const input = knowledgeSearchRequestSchema.parse(await readJsonBody(request))
+                sendJson(response, 200, knowledgeSearchResponseSchema.parse(await runtime.searchKnowledge(input)))
+                return true
+            }
             if (request.method === 'POST' && url.pathname === '/api/mutation-sync') {
                 const input = mutationSyncRequestSchema.parse(await readJsonBody(request))
                 if (!runtime.mutationSync) {
@@ -420,6 +437,34 @@ export function buildWebApiHandler(options: WebApiOptions) {
             if (request.method === 'POST' && url.pathname === '/api/agent-task') {
                 const input = agentTaskRequestSchema.parse(await readJsonBody(request))
                 sendJson(response, 200, agentTaskResponseSchema.parse(await runtime.runAgentTask(input)))
+                return true
+            }
+
+            if (request.method === 'POST' && url.pathname === '/api/agent-task/stream') {
+                const input = agentTaskRequestSchema.strict().parse(await readJsonBody(request))
+                response.statusCode = 200
+                response.setHeader('content-type', 'application/x-ndjson; charset=utf-8')
+                response.setHeader('cache-control', 'no-store, no-transform')
+                response.setHeader('x-accel-buffering', 'no')
+                response.flushHeaders()
+                const controller = new AbortController()
+                const abort = () => { if (!response.writableFinished) controller.abort() }
+                response.once('close', abort)
+                // Blank lines keep intermediaries from idling out while the model reasons.
+                const heartbeat = setInterval(() => { if (!response.writableEnded) response.write('\n') }, 15_000)
+                const write = (event: AgentTaskStreamEvent) => {
+                    if (!response.writableEnded) response.write(`${JSON.stringify(agentTaskStreamEventSchema.parse(event))}\n`)
+                }
+                try {
+                    await runtime.runAgentTaskStream(input, write, controller.signal)
+                } catch (error) {
+                    options.onError?.(error, correlationId)
+                    write({ type: 'error', code: 'failed', message: 'The server could not complete the request.' })
+                } finally {
+                    clearInterval(heartbeat)
+                    response.removeListener('close', abort)
+                    response.end()
+                }
                 return true
             }
 

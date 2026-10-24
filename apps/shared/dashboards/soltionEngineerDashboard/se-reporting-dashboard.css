@@ -1,0 +1,47 @@
+.se-reporting-dashboard {
+    --se-bg: var(--colorNeutralBackground1, var(--cp-surface, var(--vscode-editor-background, #ffffff)));
+    --se-fg: var(--colorNeutralForeground1, var(--cp-text, var(--vscode-foreground, #242424)));
+    --se-muted: var(--colorNeutralForeground2, var(--cp-text-muted, var(--vscode-descriptionForeground, #616161)));
+    --se-line: var(--colorNeutralStroke2, var(--cp-border, var(--vscode-panel-border, #d1d1d1)));
+    --se-accent: var(--colorBrandForeground1, var(--cp-accent, var(--vscode-textLink-foreground, #0f6cbd)));
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    color: var(--se-fg);
+    background: var(--se-bg);
+}
+.se-report-shell { box-sizing: border-box; width: 100%; min-width: 0; padding: 20px; overflow-wrap: anywhere; }
+.se-report-shell a { color: var(--se-accent); }
+.se-report-header, .se-report-actions { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.se-report-header { align-items: start; justify-content: space-between; }
+.se-report-header h1 { margin: 4px 0; font-size: 26px; }
+.se-report-header p { color: var(--se-muted); }
+.se-report-eyebrow { margin: 0; font-size: 11px; letter-spacing: 0.08em; font-weight: 700; }
+.se-report-mode { border: 1px solid var(--se-line); border-radius: 16px; padding: 4px 10px; font-size: 11px; }
+.se-reporting-dashboard label { display: flex; flex-direction: column; gap: 5px; margin: 8px 0; font-weight: 600; }
+.se-reporting-dashboard input:not([type="checkbox"]), .se-reporting-dashboard select, .se-reporting-dashboard textarea {
+    min-height: 34px; padding: 6px 9px; border: 1px solid var(--se-line); border-radius: 5px; color: inherit; background: var(--se-bg); font: inherit; min-width: 0;
+}
+.se-reporting-dashboard textarea { min-height: 80px; resize: vertical; width: 100%; }
+.se-reporting-dashboard button { padding: 8px 12px; border: 1px solid var(--se-line); border-radius: 5px; background: var(--se-bg); color: var(--se-accent); font: inherit; cursor: pointer; }
+.se-reporting-dashboard button:disabled { opacity: 0.55; cursor: not-allowed; }
+.se-reporting-dashboard :is(button, input, select, textarea, summary):focus-visible { outline: 2px solid var(--se-accent); outline-offset: 2px; }
+.se-reporting-dashboard details { margin: 14px 0; border: 1px solid var(--se-line); border-radius: 6px; padding: 10px 14px; }
+.se-reporting-dashboard summary { cursor: pointer; font-weight: 600; }
+.se-reporting-dashboard fieldset { border: 1px solid var(--se-line); margin: 12px 0; }
+.se-reporting-dashboard .se-report-check { flex-direction: row; align-items: start; font-weight: 400; }
+.se-report-check input { margin-top: 4px; }
+.se-report-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
+.se-report-generation { padding: 12px 0; border-bottom: 1px solid var(--se-line); }
+.se-report-error { padding: 12px; border: 1px solid var(--colorPaletteRedBorderActive, #c4314b); border-radius: 6px; margin: 12px 0; }
+.se-report-notice, .se-report-scope { padding: 10px; border: 1px solid var(--se-line); border-radius: 6px; }
+.se-report-empty { color: var(--se-muted); padding: 24px 0; }
+.se-report-preview { display: block; width: 100%; min-height: 1050px; height: 75vh; margin-top: 16px; border: 1px solid var(--se-line); border-radius: 8px; background: var(--se-bg); }
+@media (max-width: 650px) {
+    .se-report-shell { padding: 12px; }
+    .se-report-form-grid { grid-template-columns: 1fr; }
+    .se-report-actions > label { flex: 1 1 100%; }
+    .se-report-actions > button { flex: 1 1 auto; }
+}

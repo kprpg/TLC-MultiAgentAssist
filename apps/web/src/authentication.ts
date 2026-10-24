@@ -1,6 +1,7 @@
 import { AzureCliCredential } from '@azure/identity'
 import type { TokenCredential } from '@azure/core-auth'
 import type { AuthenticatedRequest } from './app.js'
+import { seismicGraphDefaultScope } from '../../../packages/common/configuration/knowledge-sources.js'
 
 const defaultMsxScope = 'https://microsoftsales.crm.dynamics.com/.default'
 
@@ -56,4 +57,14 @@ export function createSampleAuthentication() {
         clientPrincipal: 'sample-user',
         userEmail: 'sample.user@example.com'
     })
+}
+
+export function createAzureCliGraphKnowledgeTokenProvider(credential: TokenCredential = new AzureCliCredential({ processTimeoutInMs: 30_000 })) {
+    return async (authentication: AuthenticatedRequest): Promise<string> => {
+        const token = await credential.getToken(seismicGraphDefaultScope)
+        if (!token || readMicrosoftCorpId(token.token, '@microsoft.com').toLowerCase() !== authentication.userEmail.toLowerCase()) {
+            throw new Error('The delegated Graph account must match the authenticated TLC web user.')
+        }
+        return token.token
+    }
 }

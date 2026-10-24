@@ -27,6 +27,27 @@ The structure supports these boundaries:
 - [Backlog screenshot assets](./media/product-backlog/) contains redacted,
   ID-labelled references linked from each entry. Sensitive originals stay outside Git.
 
+### Knowledge connector foundation
+
+The read-only knowledge operation is implemented in these focused modules:
+
+```text
+packages/common/contracts/knowledge.ts        Independent v1.0 query/evidence/result contracts
+packages/common/configuration/knowledge-sources.ts
+                                             Seismic connection and retrievable-property mappings
+packages/common/fixtures/knowledge.ts         Canonical offline content/PPT search fixtures
+packages/connectors/common/knowledge.ts       KnowledgeSource interface and typed source errors
+packages/connectors/seismic/graph.ts          Scoped delegated Microsoft Graph external-item search
+packages/connectors/seismic/mcp.ts            Explicitly unavailable direct-MCP placeholder
+packages/orchestrator/knowledge-search.ts     Shared provider composition and source dispatch
+apps/desktop/electron/main/knowledge-ipc.ts   Validated Desktop knowledge operation adapter
+docs/Knowledge-Search-Connectors.md            Phased rollout, authentication and future UI contract
+```
+
+Desktop, Web, VS Code, and the shared operation catalog expose the same operation.
+No content-search UI or MCEM portal connector is added. See the
+[knowledge connector guide](./Knowledge-Search-Connectors.md).
+
 ### Teams implementation additions
 
 The original proposal below is retained as historical context. The Teams development
@@ -99,6 +120,20 @@ packages/common/contracts/index.ts   Independently versioned v1.0 Portfolio inde
 packages/orchestrator/application-runtime.ts
 packages/orchestrator/operations.ts   Shared composition and typed operation catalog
 packages/orchestrator/task-agents.ts  Shared Foundry/sample/deterministic-live registries
+packages/orchestrator/instant-draft.ts
+                                     Deterministic evidence-based draft shown instantly while the model runs
+packages/orchestrator/agent-evidence.ts
+                                     Bounded evidence pack (comment history, notes, activities, milestone detail) and model-input serialization
+packages/connectors/msx/evidence.ts  Pure helpers for MSX comment-history parsing and rich-text cleanup
+packages/orchestrator/prewarm.ts      Best-effort Foundry token and MCEM guidance pre-warm
+apps/shared/agent-stream.ts           Browser-safe agent stream accumulator and NDJSON reader (all UIs)
+                                     Desktop IPC acknowledges the validated terminal event before removing its listener
+apps/shared/use-agent-run.ts          Shared React hook: instant draft, streamed text, final response, cancel
+apps/shared/agent-response.tsx        Shared formatted agent replies and explicit, scoped follow-up conversation
+apps/shared/agent-response.css        Theme-aware follow-up controls and response layout
+apps/shared/agent-follow-up.ts        Closing-offer detection and bounded previous-response context
+packages/common/contracts/agent-task-limits.ts
+                                     Browser-safe prompt bound shared by agent request schemas and UI follow-ups
 packages/orchestrator/collaboration/  Reviewed actions, bindings, events, state admission
 packages/orchestrator/mutations/     Immediate confirmed admission, protected journal, actor/version and effect tracking
 packages/connectors/graph/            Delegated meeting/transcript/subscription access
@@ -276,9 +311,64 @@ validates external search responses and builds bounded literal typo queries; the
 live connector owns metadata verification, delegated read-back and account preferences.
 No host-specific orchestration or new wire shape is introduced.
 
-Seller Dashboard uses shared `seller-dashboard.tsx`, `seller-dashboard-sections.tsx`,
-`seller-dashboard-table.tsx`, `seller-dashboard-analysis.ts`, and feature-scoped
-`seller-dashboard.css` in `apps/shared`. Its browser-safe, independently versioned
+Dashboard presentation lives in `apps/shared/dashboards`, shared by Desktop/Web,
+the VS Code webview, and the existing Teams client:
+
+```text
+apps/shared/dashboards/
+  dashboard-workspace.tsx
+  dashboard-workspace.css
+  sellerDashboard/
+    seller-dashboard.tsx
+    seller-dashboard-sections.tsx
+    seller-dashboard-table.tsx
+    seller-dashboard-analysis.ts
+    seller-dashboard.css
+  StageAndPipelineReview/
+    stage-pipeline-review.tsx          pane: state, header, tabs
+    stage-pipeline-filters.tsx         scope toggles, filter bar, multi-select, chips
+    stage-pipeline-analysis.ts         pure filter/KPI/alert/ACR/milestone/CSV helpers
+    stage-pipeline-opportunities.tsx   alert cards, KPI tiles, opportunity table
+    stage-pipeline-acr-chart.tsx       ACR Actuals and Outlook chart
+    stage-pipeline-milestones.tsx      milestone status chart, filters, table
+    stage-pipeline-extra-tabs.tsx      Actions, Consumption, MACC & Commits
+    stage-pipeline-parts.tsx           KPI/pill/row-action/CSV-download primitives
+    stage-pipeline-table.tsx           sortable table
+    stage-pipeline-storage.ts          browser-only Focus/Reviewed marks
+    stage-pipeline-review.css
+  soltionEngineerDashboard/
+    se-reporting-dashboard.tsx
+    report-setup.tsx
+    report-workflow.tsx
+    se-reporting-dashboard.css
+```
+
+Each dashboard owns its components, helpers, and feature-scoped styles in its own
+folder. Future dashboards, such as `SE-manager-dashboard` or `AE-dashboard`, belong
+in sibling folders beside `sellerDashboard`. Register their tabs and panes in
+`dashboard-workspace.tsx` and import their styles in each consuming surface's entry
+point. Seller Dashboard, Stage and Pipeline Review and SE Reporting Dashboard are registered; no placeholder
+tabs are shown. The `soltionEngineerDashboard` spelling is intentional for the
+requested module path.
+Stage and Pipeline Review's browser-safe contract is
+`packages/common/contracts/stage-pipeline-review.ts` with a fictitious fixture in
+`packages/common/fixtures/stage-pipeline-review.ts`. It runs in sample mode today; the pane
+takes an optional `invoke` so a shared orchestrator operation can feed live data later
+(see `.github/skills/stage-pipeline-review-dashboard/references/data-mapping.md`).
+Its prompts and skill live in `.github/skills/stage-pipeline-review-dashboard/` and
+`.github/prompts/generate-stage-pipeline-review.prompt.md`.
+Contracts, data access, and orchestration remain in their existing package layers.
+
+SE Reporting uses independently versioned schemas in
+`packages/common/contracts/se-reporting.ts`, one synthetic fixture in
+`packages/common/fixtures/se-reporting.ts`, the shared generation/review host in
+`packages/orchestrator/se-reporting`, and delegated source/configuration adapters
+in `packages/connectors/se-reporting`. The browser-safe HTML document renderer in
+`packages/documents/se-reporting.ts` is used for both the dashboard preview and
+download/publication. See the [SE Reporting Dashboard guide](user-guide/SE-REPORTING-DASHBOARD.md)
+for setup, source grants, privacy and publication boundaries.
+
+Seller Dashboard's browser-safe, independently versioned
 schemas live in `packages/common/contracts/seller-dashboard.ts`, with one fictitious
 snapshot in `packages/common/fixtures/seller-dashboard.ts`. The shared read-only
 host in `packages/orchestrator/seller-dashboard.ts` fronts the optional

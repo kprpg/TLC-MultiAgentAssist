@@ -30,6 +30,7 @@ function harness() {
 
 function runtime(): WebRuntime {
     return {
+        searchKnowledge: vi.fn(),
         getPortfolioIndex: vi.fn(), getPortfolioWorkspace: vi.fn(), getDiscoverySnapshot: vi.fn(),
         listAccounts: vi.fn(), searchAccounts: vi.fn(), addAccount: vi.fn(), setAccountVisibility: vi.fn(),
         listOpportunities: vi.fn(), getRecordCreationCatalog: vi.fn(), previewRecordCreation: vi.fn(),
@@ -37,7 +38,7 @@ function runtime(): WebRuntime {
         discoverOpportunities: vi.fn(), joinDealTeam: vi.fn(), leaveDealTeam: vi.fn(),
         joinMilestoneTeam: vi.fn(), leaveMilestoneTeam: vi.fn(), listMilestones: vi.fn(), listDiscoverableMilestones: vi.fn(),
         listMilestoneActivities: vi.fn(), createMilestoneActivity: vi.fn(), updateMilestone: vi.fn(),
-        updateOpportunity: vi.fn(), transitionOpportunityStage: vi.fn(), runMcemCoach: vi.fn(), runAgentTask: vi.fn(),
+        updateOpportunity: vi.fn(), transitionOpportunityStage: vi.fn(), runMcemCoach: vi.fn(), runAgentTask: vi.fn(), runAgentTaskStream: vi.fn(),
         listMeetingTranscripts: vi.fn(), getMeetingTranscript: vi.fn(), proposeMeetingChangeSet: vi.fn(), applyMeetingChangeSet: vi.fn()
     }
 }

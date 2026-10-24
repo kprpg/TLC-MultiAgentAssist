@@ -1,7 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import Markdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, DialogTrigger, DrawerBody, DrawerHeader, DrawerHeaderTitle, Field, FluentProvider, Input, Menu, MenuItem, MenuItemRadio, MenuList, MenuPopover, MenuTrigger, MessageBar, OverlayDrawer, Spinner, Textarea, Tooltip, webDarkTheme, webLightTheme } from '@fluentui/react-components'
+import { Button, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, DialogTrigger, DrawerBody, DrawerHeader, DrawerHeaderTitle, Field, FluentProvider, Input, Menu, MenuItem, MenuItemRadio, MenuList, MenuPopover, MenuTrigger, MessageBar, OverlayDrawer, Spinner, Textarea, Tooltip } from '@fluentui/react-components'
 import {
   Apps20Regular,
   Add20Regular,
@@ -50,16 +48,20 @@ import { FeedbackButton } from '../../../shared/feedback-button.js'
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 import type { PortfolioSearchResult } from '../../../shared/portfolio-search.js'
 import { PortfolioSearch } from './portfolio-search.js'
-import { DashboardWorkspace } from '../../../shared/dashboard-workspace.js'
+import { scaledDarkTheme, scaledLightTheme } from './scaled-theme.js'
+import { DashboardWorkspace } from '../../../shared/dashboards/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
 import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
+import { MsxOpportunityLink } from '../../../shared/msx-opportunity-link.js'
 import { AddCustomerButton, type CustomerAccount } from '../../../shared/add-customer.js'
 import { RemoveCustomerButton } from '../../../shared/remove-customer.js'
 import { McemStageColumns } from '../../../shared/mcem-stage-board.js'
 import { WorkbenchPane } from './workbench-pane.js'
 import { SourceSyncStatus } from '../../../shared/sync-status.js'
 import { usePresentationSession } from '../../../shared/presentation-hooks.js'
+import { useAgentRun, type AgentInvoke } from '../../../shared/use-agent-run.js'
+import { AgentResponse } from '../../../shared/agent-response.js'
 
 type Shell = 'desktop' | 'web'
 type WorkspaceView = 'accounts' | 'workflows' | 'discover' | 'dashboard' | 'new'
@@ -211,8 +213,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const [centerTab, setCenterTab] = useState<CenterTab>('msx')
   const [capability, setCapability] = useState<AgentCapability>('account-pulse')
   const [taskPrompt, setTaskPrompt] = useState('')
-  const [agentResult, setAgentResult] = useState<AgentTaskResponse | null>(null)
-  const [agentLoading, setAgentLoading] = useState(false)
+  const invokeAgent: AgentInvoke = (agentCapability, accountId, opportunityId, prompt, onProgress, signal) => client.runAgentTaskStream
+      ? client.runAgentTaskStream(agentCapability, accountId, opportunityId, prompt, onProgress, signal)
+      : client.runAgentTask(agentCapability, accountId, opportunityId, prompt)
+  const { agentResult, setAgentResult, agentLoading, setAgentLoading, agentPhase, runAgent, cancelAgent } = useAgentRun(invokeAgent)
   const [emailDialogOpen, setEmailDialogOpen] = useState(false)
   const [emailRecipients, setEmailRecipients] = useState('')
   const [emailSubject, setEmailSubject] = useState('')
@@ -442,12 +446,9 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setWorkflowError('')
     try {
       const handoff = await client.prepareWorkflowGuidance(selectedWorkflowRun.runId, queueItemId, nextCapability)
-      const response = await client.runAgentTask(
-        handoff.capability,
-        handoff.scope.accountId,
-        handoff.scope.opportunityId,
-        handoff.prompt
-      )
+      const response = await (client.runAgentTaskStream
+        ? client.runAgentTaskStream(handoff.capability, handoff.scope.accountId, handoff.scope.opportunityId, handoff.prompt)
+        : client.runAgentTask(handoff.capability, handoff.scope.accountId, handoff.scope.opportunityId, handoff.prompt))
       const resultKey = `${selectedWorkflowRun.runId}:${queueItemId}`
       setWorkflowGuidanceResults((current) => ({ ...current, [resultKey]: response }))
     } catch (cause) {
@@ -735,18 +736,13 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     const request = detailRequest.current
     setCapability(selectedCapability)
     setTaskPrompt(selectedPrompt)
-    setAgentResult(null)
-    setAgentLoading(true)
     setError('')
     setShareStatus('ready')
     setShareMessage('')
     try {
-      const response = await client.runAgentTask(selectedCapability, account.id, opportunity.id, prompt)
-      if (request === detailRequest.current) setAgentResult(response)
+      await runAgent(selectedCapability, account.id, opportunity.id, prompt, () => request === detailRequest.current)
     } catch (cause) {
       if (request === detailRequest.current) handleError(cause)
-    } finally {
-      if (request === detailRequest.current) setAgentLoading(false)
     }
   }
 
@@ -1079,10 +1075,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       if (resultOutcome.status === 'rejected' && milestonesOutcome.status === 'rejected') handleError(resultOutcome.reason)
       else if (resultOutcome.status === 'rejected') setError(`MCEM guidance is unavailable: ${resultOutcome.reason instanceof Error ? resultOutcome.reason.message : String(resultOutcome.reason)}`)
       else if (milestonesOutcome.status === 'rejected') setError(`Milestones are unavailable: ${milestonesOutcome.reason instanceof Error ? milestonesOutcome.reason.message : String(milestonesOutcome.reason)}`)
-      if (centerTab === 'guidance' && taskPrompt.trim().length >= 3) {
-        const response = await client.runAgentTask(capability, account.id, opportunity.id, taskPrompt.trim())
-        if (request === detailRequest.current) setAgentResult(response)
-      }
+      if (centerTab === 'guidance' && taskPrompt.trim().length >= 3) void runAgentPrompt(taskPrompt.trim())
     } catch (cause) {
       if (request === detailRequest.current) handleError(cause)
     } finally {
@@ -1098,8 +1091,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     setExpandedOpportunityId(null)
     setMilestones([])
     setResult(null)
-    setAgentResult(null)
-    setAgentLoading(false)
+    cancelAgent()
     setTaskPrompt('')
     setMilestoneEdit(null)
     setOpportunityCommentsOpen(false)
@@ -1244,7 +1236,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           ...refreshedOpportunities
         ])
       }} />}
-      {workspaceView === 'dashboard' && <DashboardWorkspace invokeSellerDashboard={client.invokeSellerDashboard} />}
+      {workspaceView === 'dashboard' && <DashboardWorkspace invokeSellerDashboard={client.invokeSellerDashboard} invokeSeReporting={client.invokeSeReporting} sourceSession={client.cacheSession} />}
 
       {workspaceView === 'accounts' && <>
       <section className={`blade account-blade ${collapsed.has('accounts') ? 'collapsed' : ''} ${mobileBlade === 'accounts' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('accounts') ? undefined : bladeWidths.accounts }} aria-label="Accounts blade">
@@ -1467,7 +1459,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         {opportunity && <>
           <header className="workbench-header">
             <button className="icon-button mobile-only" onClick={() => setMobileBlade('opportunities')} title="Back to opportunities" aria-label="Back to opportunities"><ChevronLeft20Regular /></button>
-            <div><p className="eyebrow">{account?.name}</p><h1>{opportunity.name}</h1><span>{opportunity.owner ?? 'Owner not assigned'} · Stage {opportunity.recordedStage} · {formatMoney(opportunity.value, opportunity.currency)} · closes {opportunity.closeDate}</span></div>
+            <div><p className="eyebrow">{account?.name}</p><h1><MsxOpportunityLink opportunity={opportunity} onOpen={client.openEvidence} onError={setError} /></h1><span>{opportunity.owner ?? 'Owner not assigned'} · Stage {opportunity.recordedStage} · {formatMoney(opportunity.value, opportunity.currency)} · closes {opportunity.closeDate}</span></div>
           </header>
           <div className="center-tabs" role="tablist" aria-label="Opportunity view">
             <button role="tab" aria-selected={centerTab === 'msx'} onClick={() => setCenterTab('msx')}>MSX</button>
@@ -1504,14 +1496,17 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
               <Textarea aria-label="Agent task" placeholder="Ask a different question..." resize="vertical" rows={2} value={taskPrompt} onChange={(_, data) => setTaskPrompt(data.value)} />
               <Button appearance="primary" disabled={agentLoading || taskPrompt.trim().length < 3} onClick={() => void runAgentPrompt()}>{agentLoading ? 'Analyzing...' : 'Send'}</Button>
             </div>
-            {agentLoading && <Spinner label={`Running ${agentCapabilities.find((item) => item.id === capability)?.label}`} />}
-            {agentResult && !agentLoading ? <article className="agent-response">
+            {agentLoading && <div className="agent-run-status">
+              <Spinner size="tiny" label={agentPhase === 'streaming' ? `Receiving ${agentCapabilities.find((item) => item.id === capability)?.label} response` : agentPhase === 'draft' ? 'Evidence-based draft shown; AI response in progress' : `Running ${agentCapabilities.find((item) => item.id === capability)?.label}`} />
+              <Button size="small" onClick={() => cancelAgent()}>Cancel</Button>
+            </div>}
+            {agentResult ? <article className="agent-response">
               <header className="agent-response-header">
                 <div><p className="eyebrow">{agentCapabilities.find((item) => item.id === agentResult.capability)?.label}</p><small>Agent {agentResult.agentVersion}</small></div>
                 <div className="response-actions" aria-label="Response actions">
                   <Dialog open={emailDialogOpen} onOpenChange={(_, data) => setEmailDialogOpen(data.open)}>
                     <DialogTrigger disableButtonEnhancement>
-                      <Button icon={<Mail20Regular />} disabled={shareStatus === 'running'}>Send Email</Button>
+                      <Button icon={<Mail20Regular />} disabled={shareStatus === 'running' || agentLoading}>Send Email</Button>
                     </DialogTrigger>
                     <DialogSurface><DialogBody><DialogTitle>{client.mode === 'desktop' ? 'Open email message' : 'Download email draft'}</DialogTitle><DialogContent className="email-draft-form">
                       <p>{client.mode === 'desktop' ? 'The prepared message opens in your default mail application for review before sending.' : 'A rich Outlook email draft downloads for review before sending.'}</p>
@@ -1523,13 +1518,13 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                       <Button appearance="primary" icon={<Mail20Regular />} disabled={shareStatus === 'running' || !emailRecipients.trim() || !emailSubject.trim()} onClick={() => void openEmailCompose()}>{shareStatus === 'running' ? (client.mode === 'desktop' ? 'Opening...' : 'Preparing...') : (client.mode === 'desktop' ? 'Open Email' : 'Download Draft')}</Button>
                     </DialogActions></DialogBody></DialogSurface>
                   </Dialog>
-                  <Button icon={<ArrowDownload20Regular />} disabled={shareStatus === 'running'} onClick={() => void exportAgentResponse()}>Export</Button>
+                  <Button icon={<ArrowDownload20Regular />} disabled={shareStatus === 'running' || agentLoading} onClick={() => void exportAgentResponse()}>Export</Button>
                 </div>
               </header>
               {shareMessage && <MessageBar intent={shareStatus === 'error' ? 'error' : 'success'}>{shareMessage}</MessageBar>}
-              <div className="agent-response-markdown">
-                <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ a: ({ href, children }) => <a href={href} onClick={(event) => { event.preventDefault(); if (href) void client.openEvidence(href) }}>{children}</a> }}>{formatResponseMarkdown(agentResult.content)}</Markdown>
-              </div>
+              <AgentResponse key={agentResult.correlationId} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'}
+                followUp={account ? { capability: agentResult.capability, accountId: account.id, opportunityId: opportunity.id, invoke: invokeAgent } : undefined}
+                onOpenEvidence={client.openEvidence} />
             </article> : !agentLoading && <div className="empty-state compact">Choose a suggested prompt or ask a different question.</div>}
           </div>}
           {!loading && centerTab === 'stages' && <div className="mcem-board-shell">
@@ -1684,7 +1679,8 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           guidanceLoading={workflowGuidanceLoading}
           guidanceLabel={agentCapabilities.find(({ id }) => id === workflowGuidanceCapability(selectedWorkflowOutput.workflowId))?.label ?? 'Guidance'}
           guidanceResults={workflowGuidanceResults}
-          onOpenEvidence={(url) => void client.openEvidence(url)}
+          invokeAgent={invokeAgent}
+          onOpenEvidence={client.openEvidence}
           onSendGuidance={sendWorkflowToGuidance}
         />}
 
@@ -1863,6 +1859,7 @@ function WorkflowResult({
   guidanceLoading,
   guidanceLabel,
   guidanceResults,
+  invokeAgent,
   onOpenEvidence,
   onSendGuidance
 }: {
@@ -1871,7 +1868,8 @@ function WorkflowResult({
   guidanceLoading: string | null
   guidanceLabel: string
   guidanceResults: Readonly<Record<string, AgentTaskResponse>>
-  onOpenEvidence: (url: string) => void
+  invokeAgent: AgentInvoke
+  onOpenEvidence: (url: string) => void | Promise<void>
   onSendGuidance?: (queueItemId: string) => void
 }) {
   const card = output.card
@@ -1888,9 +1886,9 @@ function WorkflowResult({
         <article><span className={`priority ${item.priority.toLowerCase()}`}>{item.priority}</span><div><strong>{item.title}</strong><p>{item.owner ?? 'Unassigned'}{item.dueDate ? ` · Due ${item.dueDate}` : ''}</p></div>{onSendGuidance && item.accountId && item.opportunityId && <Button appearance="subtle" className="text-action" icon={<Sparkle20Regular />} disabled={guidanceLoading !== null} onClick={() => onSendGuidance(item.id)}>{guidanceLoading === item.id ? 'Sending…' : `Send to ${guidanceLabel}`}</Button>}</article>
         {guidanceResult && <section className="workflow-guidance-result" aria-label={`${guidanceLabel} result for ${item.title}`}>
           <header><div><p className="eyebrow">{guidanceLabel}</p><strong>Workflow follow-up</strong></div><span>Agent {guidanceResult.agentVersion}</span></header>
-          <div className="agent-response-markdown">
-            <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{ a: ({ href, children }) => <a href={href} onClick={(event) => { event.preventDefault(); if (href) onOpenEvidence(href) }}>{children}</a> }}>{formatResponseMarkdown(guidanceResult.content)}</Markdown>
-          </div>
+          <AgentResponse key={guidanceResult.correlationId} content={guidanceResult.content}
+            followUp={item.accountId && item.opportunityId ? { capability: guidanceResult.capability, accountId: item.accountId, opportunityId: item.opportunityId, invoke: invokeAgent } : undefined}
+            onOpenEvidence={onOpenEvidence} />
         </section>}
       </Fragment>
     })}</section>
@@ -1899,7 +1897,7 @@ function WorkflowResult({
 
 export function RevampApp() {
   const shell = document.documentElement.dataset['shell'] === 'desktop' ? 'desktop' : 'web'
-  const theme = document.documentElement.dataset['theme'] === 'dark' ? webDarkTheme : webLightTheme
+  const theme = document.documentElement.dataset['theme'] === 'dark' ? scaledDarkTheme : scaledLightTheme
   const [client] = useState(() => createDataClient(shell))
   return <FluentProvider className="fluent-provider" theme={theme}>
     <div className="fluent-root">

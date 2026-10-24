@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import type {
     SellerDashboardMilestone, SellerDashboardOpportunity, SellerDashboardSnapshot
-} from '../../packages/common/contracts/seller-dashboard.js'
+} from '../../../../packages/common/contracts/seller-dashboard.js'
 import {
     sellerAccountGaps, sellerCommitment, sellerDate, sellerDaysSince, sellerIsActive,
     sellerMetricScenario, sellerMoney, sellerPercent,

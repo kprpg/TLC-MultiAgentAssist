@@ -2,6 +2,7 @@ import {
     accountSchema,
     accountCandidateSchema,
     agentTaskResponseSchema,
+    agentTaskStreamEventSchema,
     contractVersion,
     workflowContractVersion,
     dealTeamJoinResultSchema,
@@ -85,6 +86,8 @@ import { milestoneRecommendations, summarizeMilestones } from '../../../../packa
 import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest, type VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema, type SellerDashboardRequest, type SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
 import { createSampleSellerDashboard } from '../../../../packages/common/fixtures/seller-dashboard.js'
+import { seReportingRequestSchema, seReportingResponseSchema, type SeReportingRequest, type SeReportingResponse } from '../../../../packages/common/contracts/se-reporting.js'
+import { createSampleSeReportingHost } from '../../../../packages/orchestrator/se-reporting/sample.js'
 import {
     additionalSampleAccounts,
     additionalSampleMilestones,
@@ -96,10 +99,14 @@ import { samplePortfolioDiscoveryOpportunities } from '../../../../packages/comm
 import { portfolioReadVersion, portfolioReadRequestSchema, portfolioIndexSchema, portfolioWorkspaceRequestSchema, portfolioWorkspaceSchema, type PortfolioReadRequest, type PortfolioIndex, type PortfolioWorkspaceRequest, type PortfolioWorkspace } from '../../../../packages/common/contracts/index.js'
 import { discoverySnapshotRequestSchema, discoverySnapshotSchema, discoverySnapshotVersion, type DiscoverySnapshot, type DiscoverySnapshotRequest } from '../../../../packages/common/contracts/index.js'
 import { SessionPortfolio } from '../../../shared/session-portfolio.js'
+import { createAgentStreamAccumulator, readNdjson, type AgentStreamProgress } from '../../../shared/agent-stream.js'
 import { MutationSyncClient, type MutationInvoker } from '../../../shared/mutation-sync.js'
 import * as syncContracts from '../../../../packages/common/contracts/index.js'
+import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest, type KnowledgeSearchResponse } from '../../../../packages/common/contracts/knowledge.js'
+import { sampleKnowledgeSearchResponse } from '../../../../packages/common/fixtures/knowledge.js'
 
 export interface RevampDataClient {
+    searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
     cacheSession?: SessionPortfolio
     mutationSession?: MutationSyncClient
     invokeMutationSync?: MutationInvoker
@@ -108,6 +115,7 @@ export interface RevampDataClient {
     refreshSources?(opportunityId?: string): void
     getDataMode(): Promise<'sample' | 'live'>
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
+    invokeSeReporting(request: SeReportingRequest): Promise<SeReportingResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     readonly mode: 'desktop' | 'web-live' | 'web-sample'
     exitApplication(): Promise<void>
@@ -143,6 +151,8 @@ export interface RevampDataClient {
     transitionOpportunityStage(accountId: string, opportunityId: string, targetStage: number, reason?: string): Promise<McemStageTransitionResult>
     runMcemCoach(accountId: string, opportunityId: string): Promise<McemResponse>
     runAgentTask(capability: AgentCapability, accountId: string, opportunityId: string, prompt: string): Promise<AgentTaskResponse>
+    /** Progressive variant (instant draft, streamed text, authoritative final); callers fall back to `runAgentTask` when absent. */
+    runAgentTaskStream?(capability: AgentCapability, accountId: string, opportunityId: string, prompt: string, onProgress?: (progress: AgentStreamProgress) => void, signal?: AbortSignal): Promise<AgentTaskResponse>
     openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
     exportAgentResponse(request: ExportResponseRequest): Promise<ExportResponseResult>
     openEvidence(url: string): Promise<void>
@@ -236,8 +246,14 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
             syncContracts.mutationSyncResponseSchema.parse(await apiRequest(fetcher, '/api/mutation-sync', { method: 'POST', body: JSON.stringify(request) })) } : {}),
         mode,
         getDataMode: async () => mode === 'web-live' ? 'live' : 'sample',
+        searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(await apiRequest(fetcher, '/api/knowledge/search', {
+            method: 'POST', body: JSON.stringify(knowledgeSearchRequestSchema.parse(request))
+        })),
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(await apiRequest(fetcher, '/api/seller-dashboard', {
             method: 'POST', body: JSON.stringify(sellerDashboardRequestSchema.parse(request))
+        })),
+        invokeSeReporting: async (request) => seReportingResponseSchema.parse(await apiRequest(fetcher, '/api/se-reporting', {
+            method: 'POST', body: JSON.stringify(seReportingRequestSchema.parse(request))
         })),
         invokeVoice: async (request) => voiceResponseSchema.parse(await apiRequest(fetcher, '/api/voice', {
             method: 'POST', body: JSON.stringify(voiceRequestSchema.parse(request))
@@ -303,6 +319,26 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
             method: 'POST',
             body: JSON.stringify({ contractVersion, capability, accountId, opportunityId, prompt })
         })),
+        runAgentTaskStream: async (capability, accountId, opportunityId, prompt, onProgress, signal) => {
+            const generation = fetcher.scopeVersion?.()
+            const response = await fetcher('/api/agent-task/stream', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { accept: 'application/x-ndjson', 'content-type': 'application/json' },
+                body: JSON.stringify({ contractVersion, capability, accountId, opportunityId, prompt }),
+                ...(signal ? { signal } : {})
+            })
+            if (!response.ok || !response.body) {
+                const payload = await response.json().catch(() => null) as { error?: string } | null
+                throw new WebApiRequestError(response.status, payload?.error ?? `The server request failed (${response.status}).`)
+            }
+            const accumulator = createAgentStreamAccumulator(onProgress)
+            await readNdjson(response.body, (value) => {
+                fetcher.assertScope?.(generation)
+                accumulator.push(agentTaskStreamEventSchema.parse(value))
+            }, signal)
+            return accumulator.result()
+        },
         openEmailCompose: async (request) => {
             const response = await fetcher('/api/open-email-compose', {
                 method: 'POST',
@@ -353,6 +389,7 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
 }
 
 interface DesktopBridge {
+    searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
     invokeMutationSync?: MutationInvoker
     onCacheChanged?(listener: (state: syncContracts.CacheReadState) => void): () => void
     cacheControl?(request: syncContracts.CacheControlRequest): Promise<syncContracts.CacheControlResponse>
@@ -360,6 +397,7 @@ interface DesktopBridge {
     getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
     getPortfolioWorkspace(request: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace>
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
+    invokeSeReporting(request: SeReportingRequest): Promise<SeReportingResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     exitApplication(): Promise<void>
     getDataStatus(): Promise<DesktopDataStatus>
@@ -391,6 +429,7 @@ interface DesktopBridge {
     transitionOpportunityStage(request: { contractVersion: typeof contractVersion; accountId: string; opportunityId: string; targetStage: number; reason?: string }): Promise<McemStageTransitionResult>
     runMcemCoach(request: { contractVersion: typeof contractVersion; accountId: string; opportunityId: string; prompt: string }): Promise<McemResponse>
     runAgentTask(request: { contractVersion: typeof contractVersion; capability: AgentCapability; accountId: string; opportunityId: string; prompt: string }): Promise<AgentTaskResponse>
+    runAgentTaskStream?(request: { contractVersion: typeof contractVersion; capability: AgentCapability; accountId: string; opportunityId: string; prompt: string }, onEvent: (event: unknown) => void): { cancel(): void; done: Promise<void> }
     openEmailCompose(request: EmailComposeRequest): Promise<EmailComposeResult>
     exportAgentResponse(request: ExportResponseRequest): Promise<ExportResponseResult>
     openEvidence(url: string): Promise<void>
@@ -563,16 +602,19 @@ function buildWebEvaluation(opportunity: Opportunity, opportunityMilestones: rea
 }
 
 function webClient(): RevampDataClient {
+    const seReporting = createSampleSeReportingHost()
     const unavailable = (): never => {
         throw new Error('Record creation needs the hosted Web app or Desktop. The standalone preview does not save records.')
     }
     return {
         mode: 'web-sample',
         getDataMode: async () => 'sample',
+        searchKnowledge: async (request) => sampleKnowledgeSearchResponse(request),
         invokeSellerDashboard: async (request) => {
             sellerDashboardRequestSchema.parse(request)
             return createSampleSellerDashboard()
         },
+        invokeSeReporting: (request) => seReporting.invoke(request),
         exitApplication: async () => { await apiRequest(fetch, '/api/exit', { method: 'POST' }) },
         getCurrentUserEmail: async () => undefined,
         async getDiscoverySnapshot(input = { contractVersion: discoverySnapshotVersion }) {
@@ -802,8 +844,13 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         } : {}),
         mode: 'desktop',
         getDataMode: async () => (await bridge.getDataStatus()).mode,
+        searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(
+            await bridge.searchKnowledge(knowledgeSearchRequestSchema.parse(request))),
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(
             await bridge.invokeSellerDashboard(sellerDashboardRequestSchema.parse(request))
+        ),
+        invokeSeReporting: async (request) => seReportingResponseSchema.parse(
+            await bridge.invokeSeReporting(seReportingRequestSchema.parse(request))
         ),
         invokeVoice: async (request) => voiceResponseSchema.parse(await bridge.invokeVoice(voiceRequestSchema.parse(request))),
         exitApplication: () => bridge.exitApplication(),
@@ -848,6 +895,23 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         transitionOpportunityStage: (accountId, opportunityId, targetStage, reason) => bridge.transitionOpportunityStage({ contractVersion, accountId, opportunityId, targetStage, ...(reason === undefined ? {} : { reason }) }),
         runMcemCoach: (accountId, opportunityId) => bridge.runMcemCoach({ contractVersion, accountId, opportunityId, prompt: 'How do we move this opportunity to the next MCEM stage?' }),
         runAgentTask: (capability, accountId, opportunityId, prompt) => bridge.runAgentTask({ contractVersion, capability, accountId, opportunityId, prompt }),
+        ...(bridge.runAgentTaskStream ? {
+            runAgentTaskStream: (capability: AgentCapability, accountId: string, opportunityId: string, prompt: string, onProgress?: (progress: AgentStreamProgress) => void, signal?: AbortSignal) =>
+                new Promise<AgentTaskResponse>((resolve, reject) => {
+                    const accumulator = createAgentStreamAccumulator(onProgress)
+                    let settled = false
+                    const finish = (action: () => void) => { if (!settled) { settled = true; action() } }
+                    const handle = bridge.runAgentTaskStream!({ contractVersion, capability, accountId, opportunityId, prompt }, (raw) => {
+                        try {
+                            const event = agentTaskStreamEventSchema.parse(raw)
+                            accumulator.push(event)
+                            if (event.type === 'complete') finish(() => resolve(accumulator.result()))
+                        } catch (error) { finish(() => reject(error)) }
+                    })
+                    handle.done.then(() => finish(() => { try { resolve(accumulator.result()) } catch (error) { reject(error) } }), (error: unknown) => finish(() => reject(error)))
+                    signal?.addEventListener('abort', () => handle.cancel(), { once: true })
+                })
+        } : {}),
         openEmailCompose: (request) => bridge.openEmailCompose(request),
         exportAgentResponse: (request) => bridge.exportAgentResponse(request),
         openEvidence: (url) => bridge.openEvidence(url),

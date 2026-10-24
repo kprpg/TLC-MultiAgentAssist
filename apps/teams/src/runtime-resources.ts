@@ -8,6 +8,10 @@ import { SqliteDocumentStore, type ScopedDocumentStore } from '../../../packages
 import { TableDocumentStore } from '../../../packages/connectors/common/table-document-store.js'
 import { loadTeamsStateKey, type TeamsConfiguration, type TeamsRuntimeConfiguration } from './configuration.js'
 
+export function requiresTeamsFoundryCredential(environment: NodeJS.ProcessEnv, hosted: boolean, nativeFoundryGuidance: boolean): boolean {
+  return hosted || nativeFoundryGuidance || environment['TLC_SE_REPORTING_ENABLED'] === '1'
+}
+
 export function createTeamsWorkloadCredential(runtime: TeamsRuntimeConfiguration, foundryTenantId: string, environment: NodeJS.ProcessEnv): TokenCredential {
   return runtime.profile === 'local'
     ? new AzureCliCredential({ tenantId: foundryTenantId, processTimeoutInMs: 30_000 })

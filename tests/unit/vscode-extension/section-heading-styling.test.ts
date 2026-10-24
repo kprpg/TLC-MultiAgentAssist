@@ -24,17 +24,19 @@ describe('Portfolio section heading styling', () => {
 
     const eyebrow = styleBlock(styles, '.eyebrow')
     expect(eyebrow).toContain('color: var(--tlc-section-heading-foreground);')
+
+    const opportunityLink = styleBlock(styles, '.msx-opportunity-link')
+    expect(opportunityLink).toContain('color: var(--vscode-textLink-foreground);')
   })
 
-  it('tags only static category headers, never customer/opportunity data', async () => {
+  it('uses category styling for static headings and a link for the focused opportunity', async () => {
     const app = await readFile(webview('app.tsx'), 'utf8')
 
     expect(app).toContain('<h3 className="section-heading">Accounts</h3>')
     expect(app).toContain('<h3 className="section-heading">Opportunities</h3>')
     expect(app).toContain('<h4 className="section-heading">Milestones</h4>')
 
-    // The selected opportunity name is data and must keep plain (unclassed) styling.
-    expect(app).toContain('<h3>{selectedOpportunity.name}</h3>')
+    expect(app).toContain('<h3><MsxOpportunityLink opportunity={selectedOpportunity}')
   })
 
   it('tags the Next Best Actions panel heading', async () => {

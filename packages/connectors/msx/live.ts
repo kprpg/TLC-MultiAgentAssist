@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { accountSearchLimit, assertAccountNameIndex, fuzzyAccountName, indexedAccountIds, parseAccountSearchPage } from './account-search.js'
+import { commentHistoryEntries, isoTimestamp, newestFirst, parseCommentHistoryRows, plainText } from './evidence.js'
 import {
   accountSearchRequestSchema,
   createMilestoneActivityRequestSchema,
@@ -43,11 +44,17 @@ import {
   type PortfolioPreferenceStore,
   type PortfolioPreferences,
   type CriterionObservation,
+  type EvidenceEntry,
   type MsxConnector,
-  type OpportunityContext
+  type OpportunityContext,
+  type OpportunityEvidence
 } from '../common/index.js'
 
 const defaultBaseUrl = 'https://microsoftsales.crm.dynamics.com/api/data/v9.2/'
+/** Dataverse column holding MSX's forecast-comment history as a JSON array of `{ userId, modifiedOn, comment }`. */
+const commentHistoryField = 'msp_forecastcommentsjsonfield'
+/** Newest rows read per evidence source; the orchestrator trims further to its prompt budget. */
+const evidenceRowLimit = 25
 const formattedValueSuffix = '@OData.Community.Display.V1.FormattedValue'
 const guidPattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
 
@@ -769,6 +776,9 @@ export class LiveMsxConnector implements MsxConnector {
   }
 
   async getOpportunityContext(opportunityId: string): Promise<OpportunityContext> {
+    // Milestone rows do not depend on the portfolio read, so start them together; they are discarded
+    // (and their failure swallowed) when the access gate below rejects the opportunity.
+    if (guidPattern.test(opportunityId)) this.getMilestoneRows(opportunityId).catch(() => undefined)
     const portfolio = await this.getPortfolio()
     const opportunity = portfolio.opportunities.find((candidate) => candidate.id === opportunityId)
     if (!opportunity) throw new Error('The opportunity is not in the signed-in user’s active MSX portfolio.')
@@ -1038,6 +1048,145 @@ export class LiveMsxConnector implements MsxConnector {
     }
   }
 
+  async getOpportunityEvidence(opportunityId: string): Promise<OpportunityEvidence> {
+    if (!guidPattern.test(opportunityId)) throw new Error('The opportunity id must be a valid MSX GUID.')
+    const portfolio = await this.getPortfolio()
+    if (!portfolio.opportunities.some((opportunity) => opportunity.id === opportunityId)) {
+      throw new Error('The opportunity is not in the signed-in user’s active MSX portfolio.')
+    }
+    const gaps: string[] = []
+    // Each sub-read stands alone: a field or privilege missing in one environment must not discard the rest.
+    // `optional` reads (history fields that older environments lack) stay silent on a 400.
+    const attempt = async <T>(label: string, fallback: T, read: () => Promise<T>, optional = false): Promise<T> => {
+      try {
+        return await read()
+      } catch (error) {
+        this.readContext.getStore()?.signal?.throwIfAborted()
+        const status = error instanceof MsxRequestError ? error.status : undefined
+        if (!(optional && status === 400)) gaps.push(`${label} could not be read${status ? ` (HTTP ${status})` : ''}.`)
+        return fallback
+      }
+    }
+    const filter = `_regardingobjectid_value eq ${opportunityId}`
+    const categoryField = this.writeMetadata.taskCategoryField
+    const activitySelect = (extra: string[]) => ['activityid', 'subject', 'description', 'statecode', 'scheduledend', 'createdon', '_ownerid_value', ...extra].join(',')
+
+    const milestoneRows = await attempt('Milestones', [] as MilestoneRow[], () => this.getMilestoneRows(opportunityId))
+    const milestoneIds = milestoneRows.map((row) => row.msp_engagementmilestoneid)
+    type Row = Record<string, unknown>
+    const [details, historyRaw, notes, activities, milestoneHistoryRaw, milestoneTasks, dealTeam] = await Promise.all([
+      attempt<Row | undefined>('Opportunity details', undefined, () => this.requestJson<Row>(
+        `opportunities(${opportunityId})?$select=description,createdon,modifiedon,msp_solutionarea,msp_technicalcapability,msp_conversation`)),
+      attempt<Row | undefined>('Opportunity comment history', undefined, () => this.requestJson<Row>(
+        `opportunities(${opportunityId})?$select=${commentHistoryField}`), true),
+      attempt('Opportunity notes', [] as Row[], () => this.requestAll<Row>('annotations', {
+        '$select': 'subject,notetext,createdon,_createdby_value',
+        '$filter': `_objectid_value eq ${opportunityId} and isdocument eq false`,
+        '$orderby': 'createdon desc',
+        '$top': String(evidenceRowLimit)
+      })),
+      attempt('Opportunity activities', [] as TaskRow[], () => this.requestAll<TaskRow>('activitypointers', {
+        '$select': activitySelect(['activitytypecode']),
+        '$filter': filter,
+        '$orderby': 'createdon desc',
+        '$top': String(evidenceRowLimit)
+      })),
+      attempt('Milestone comment history', [] as Row[], () => this.requestAll<Row>('msp_engagementmilestones', {
+        '$select': `msp_engagementmilestoneid,${commentHistoryField}`,
+        '$filter': `statecode eq 0 and _msp_opportunityid_value eq ${opportunityId}`
+      }), true),
+      attempt('Milestone activities', [] as TaskRow[], () => this.collectChunks(milestoneIds, (chunk) => this.requestAll<TaskRow>('tasks', {
+        '$select': activitySelect(['_regardingobjectid_value', 'prioritycode', ...(categoryField ? [categoryField] : [])]),
+        '$filter': chunk.map((id) => `_regardingobjectid_value eq ${id}`).join(' or '),
+        '$orderby': 'createdon desc',
+        '$top': String(evidenceRowLimit * 4)
+      }))),
+      attempt('Deal team', [] as Row[], () => this.requestAll<Row>('msp_dealteams', {
+        '$select': '_msp_dealteamuserid_value',
+        '$filter': `statecode eq 0 and _msp_parentopportunityid_value eq ${opportunityId}`,
+        '$top': '50'
+      }))
+    ])
+
+    const opportunityHistory = parseCommentHistoryRows(historyRaw?.[commentHistoryField])
+    const milestoneHistory = new Map(milestoneHistoryRaw.map((row) => [String(row.msp_engagementmilestoneid), parseCommentHistoryRows(row[commentHistoryField])]))
+    const userIds = unique([...opportunityHistory, ...[...milestoneHistory.values()].flat()].map((row) => row.userId).filter(isPresent)).slice(0, 80)
+    const names = await attempt('Comment author names', new Map<string, string>(), async () => new Map(
+      (await this.collectChunks(userIds, (chunk) => this.requestAll<{ systemuserid: string; fullname?: string }>('systemusers', {
+        '$select': 'systemuserid,fullname',
+        '$filter': chunk.map((id) => `systemuserid eq ${id}`).join(' or ')
+      }))).flatMap((user) => user.fullname ? [[user.systemuserid.toLowerCase(), user.fullname] as const] : [])
+    ), true)
+    const authorOf = (userId: string) => names.get(userId.toLowerCase())
+
+    const tasksByMilestone = new Map<string, EvidenceEntry[]>()
+    for (const row of milestoneTasks) {
+      const milestoneId = typeof row._regardingobjectid_value === 'string' ? row._regardingobjectid_value : undefined
+      if (!milestoneId) continue
+      tasksByMilestone.set(milestoneId, [...(tasksByMilestone.get(milestoneId) ?? []), this.toActivityEntry(row)])
+    }
+    const retrievedAt = new Date().toISOString()
+    const dealTeamNames = unique(dealTeam.map((row) => formattedValue(row, '_msp_dealteamuserid_value')).filter(isPresent))
+    const detailRow: Record<string, unknown> = details ?? {}
+    const need = plainText(detailRow.description)
+    const optionDetail = (field: string) => formattedValue(detailRow, field)
+    const createdOn = isoTimestamp(detailRow.createdon)
+    const modifiedOn = isoTimestamp(detailRow.modifiedon)
+    return {
+      details: {
+        ...(need ? { need } : {}),
+        ...(optionDetail('msp_solutionarea') ? { solutionArea: optionDetail('msp_solutionarea')! } : {}),
+        ...(optionDetail('msp_technicalcapability') ? { technicalCapability: optionDetail('msp_technicalcapability')! } : {}),
+        ...(optionDetail('msp_conversation') ? { conversation: optionDetail('msp_conversation')! } : {}),
+        ...(createdOn ? { createdOn } : {}),
+        ...(modifiedOn ? { modifiedOn } : {}),
+        ...(dealTeamNames.length > 0 ? { dealTeam: dealTeamNames } : {})
+      },
+      commentHistory: commentHistoryEntries(opportunityHistory, authorOf, evidenceRowLimit),
+      notes: notes.flatMap((row): EvidenceEntry[] => {
+        const text = plainText(row.notetext, 2_000)
+        const subject = plainText(row.subject, 200)
+        if (!text && !subject) return []
+        const at = isoTimestamp(row.createdon)
+        const author = formattedValue(row, '_createdby_value')
+        return [{ kind: 'note', text: text || subject, ...(text && subject ? { subject } : {}), ...(at ? { at } : {}), ...(author ? { author } : {}) }]
+      }),
+      activities: activities.map((row) => this.toActivityEntry(row)),
+      milestones: milestoneIds.map((milestoneId) => ({
+        milestoneId,
+        commentHistory: commentHistoryEntries(milestoneHistory.get(milestoneId) ?? [], authorOf, evidenceRowLimit),
+        activities: (tasksByMilestone.get(milestoneId) ?? []).sort(newestFirst).slice(0, evidenceRowLimit)
+      })),
+      gaps,
+      retrievedAt,
+      sourceHealth: {
+        source: 'msx',
+        state: gaps.length > 0 ? 'partial' : 'live',
+        detail: gaps.length > 0
+          ? `Live MSX evidence was read with gaps: ${gaps.join(' ')}`
+          : 'Live MSX comment history, notes, and activities for the opportunity and its milestones.',
+        checkedAt: retrievedAt
+      }
+    }
+  }
+
+  private toActivityEntry(row: TaskRow): EvidenceEntry {
+    const type = formattedValue(row, 'activitytypecode')
+    const subject = plainText(row.subject, 200) || 'Untitled activity'
+    const text = plainText(row.description, 1_500)
+    const at = isoTimestamp(row.createdon)
+    const author = formattedValue(row, '_ownerid_value')
+    return {
+      kind: 'activity',
+      text,
+      subject: type ? `${type}: ${subject}` : subject,
+      ...(at ? { at } : {}),
+      ...(author ? { author } : {}),
+      status: typeof row.statecode === 'number' ? (taskStatusByState[row.statecode] ?? 'Open') : 'Open',
+      ...(row.scheduledend ? { due: row.scheduledend.slice(0, 10) } : {})
+    }
+  }
+
   private resolveMilestoneTeamTemplateId(): Promise<string> {
     const configured = resolveMilestoneTeamAccessMetadata(this.writeMetadata.milestoneTeam)
     if (configured.templateId && guidPattern.test(configured.templateId)) {
@@ -1292,12 +1441,14 @@ export class LiveMsxConnector implements MsxConnector {
 
   private async loadPortfolio(): Promise<MsxPortfolio> {
     const userId = await measurePerformance('msx.identity', this.performanceReporter, () => this.getCurrentUserId())
-    const preferences = await this.preferenceStore.read(userId)
-    const dealTeamRows = await measurePerformance('msx.deal-team', this.performanceReporter, () => this.requestAll<DealTeamRow>('msp_dealteams', {
-      '$select': '_msp_parentopportunityid_value',
-      '$filter': `statecode eq 0 and _msp_dealteamuserid_value eq ${userId}`
-    }))
-    const milestoneOpportunityIds = await this.milestoneTeamOpportunityIds()
+    const [preferences, dealTeamRows, milestoneOpportunityIds] = await Promise.all([
+      this.preferenceStore.read(userId),
+      measurePerformance('msx.deal-team', this.performanceReporter, () => this.requestAll<DealTeamRow>('msp_dealteams', {
+        '$select': '_msp_parentopportunityid_value',
+        '$filter': `statecode eq 0 and _msp_dealteamuserid_value eq ${userId}`
+      })),
+      measurePerformance('msx.milestone-team', this.performanceReporter, () => this.milestoneTeamOpportunityIds())
+    ])
     const dealTeamOpportunityIds = new Set(dealTeamRows.map((row) => row._msp_parentopportunityid_value).filter(isPresent))
     const opportunityIds = unique([
       ...dealTeamOpportunityIds,

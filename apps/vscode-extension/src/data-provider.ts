@@ -13,6 +13,7 @@ import {
     type AccountVisibility,
     type AgentCapability,
     type AgentTaskResponse,
+    type AgentTaskStreamEvent,
     type DealTeamJoinResult,
     type DealTeamLeaveResult,
     type DiscoverableOpportunity,
@@ -56,6 +57,8 @@ import {
 } from '../../../packages/orchestrator/workflows/index.js'
 import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
 import { createSellerDashboardHost, type SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
+import { createSampleSeReportingHost } from '../../../packages/orchestrator/se-reporting/sample.js'
+import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
 import { LocalStore, LocalStoreMsxConnector } from '../../../packages/connectors/local-store/index.js'
 import { SampleRecordCreationCatalog } from '../../../packages/connectors/local-store/sample-record-creation-catalog.js'
 import { RecordCreationService } from '../../../packages/orchestrator/record-creation/service.js'
@@ -64,6 +67,8 @@ import { buildLiveDataProvider, buildLiveTaskAgents } from './live-provider-core
 import { buildFoundryMeetingExtractor } from './live-provider.js'
 import type { SessionPortfolio } from '../../shared/session-portfolio.js'
 import type { MutationSyncRequest, MutationSyncResponse } from '../../../packages/common/contracts/cache-sync.js'
+import type { KnowledgeSearchRequest, KnowledgeSearchResponse } from '../../../packages/common/contracts/knowledge.js'
+import { createKnowledgeSearch } from '../../../packages/orchestrator/knowledge-search.js'
 import {
     buildSampleAgentResponse,
     buildSampleEvaluation,
@@ -98,6 +103,7 @@ export interface MeetingTranscriptSource {
  * decision of sample vs live; the router never learns which mode is active.
  */
 export interface ExtensionDataProvider {
+    searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
     readonly sourceCore?: ThinSliceOrchestrator
     readonly getSourceToken?: () => Promise<string>
     readonly cacheSession?: SessionPortfolio
@@ -106,6 +112,7 @@ export interface ExtensionDataProvider {
     mutationSync?(request: MutationSyncRequest): Promise<MutationSyncResponse>
     drainMutations?(): Promise<void>
     readonly sellerDashboard?: SellerDashboardHost
+    readonly seReporting?: SeReportingHost
     readonly mode: 'sample' | 'live'
     getCurrentUserEmail(): Promise<string | undefined>
     listAccounts(options?: AccountListOptions): Promise<Account[]>
@@ -134,6 +141,8 @@ export interface ExtensionDataProvider {
     runMcemCoach(accountId: string, opportunityId: string): Promise<McemResponse>
     transitionOpportunityStage(accountId: string, opportunityId: string, targetStage: number, reason?: string): Promise<McemStageTransitionResult>
     runAgentTask(capability: AgentCapability, accountId: string, opportunityId: string, prompt: string): Promise<AgentTaskResponse>
+    /** Progressive variant; when absent the host falls back to `runAgentTask` and emits one `complete` event. */
+    runAgentTaskStream?(capability: AgentCapability, accountId: string, opportunityId: string, prompt: string, onEvent: (event: AgentTaskStreamEvent) => void, signal?: AbortSignal): Promise<void>
     listWorkflowDefinitions(scope?: ScopeRef['kind']): Promise<WorkflowDefinition[]>
     startWorkflow(request: { workflowId: string; scope: ScopeRef; input?: unknown; correlationId?: string }): Promise<WorkflowRun>
     getWorkflowRun(runId: string): Promise<WorkflowRunView>
@@ -168,7 +177,7 @@ export function createLocalStoreDataProvider(options: { foundryCredential?: Toke
     const connector = new LocalStoreMsxConnector(store)
     const writer = connector.createRecordCreationWriter()
     const creation = new RecordCreationService(connector, writer, { writer })
-    const orchestrator = new ThinSliceOrchestrator(connector, new ExtensionMcemGuidanceConnector(), buildLiveTaskAgents(), undefined, creation)
+    const orchestrator = new ThinSliceOrchestrator(connector, new ExtensionMcemGuidanceConnector(), buildLiveTaskAgents(), undefined, creation, createKnowledgeSearch({ mode: 'sample' }))
     const host: WorkflowHost = createSampleWorkflowHost(async () => {
         const { accounts, opportunities } = await connector.getPortfolioIndex()
         return {
@@ -186,6 +195,7 @@ export function createLocalStoreDataProvider(options: { foundryCredential?: Toke
  * milestone, and agent data on top.
  */
 export function createSampleDataProvider(): ExtensionDataProvider {
+    const knowledge = createKnowledgeSearch({ mode: 'sample' })
     const sampleMsx = {
         listAccounts: async (options?: AccountListOptions) => listSampleAccounts(options),
         listOpportunities: async (accountId: string) => listSampleOpportunities(accountId)
@@ -201,7 +211,9 @@ export function createSampleDataProvider(): ExtensionDataProvider {
     })
     return {
         mode: 'sample',
+        searchKnowledge: (request) => knowledge.searchKnowledge(request),
         sellerDashboard: createSellerDashboardHost({ mode: 'sample', resolveUserEmail: async () => undefined }),
+        seReporting: createSampleSeReportingHost(),
         getCurrentUserEmail: async () => undefined,
         getDiscoverySnapshot: async (input) => {
             discoverySnapshotRequestSchema.parse(input)

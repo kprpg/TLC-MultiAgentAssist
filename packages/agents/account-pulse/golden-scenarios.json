@@ -5,17 +5,48 @@
     {
       "id": "weekly-focus-grounded",
       "prompt": "What should I focus on this week?",
-      "expected": ["Ranks supported priorities", "Explains signals and freshness", "Assigns owner roles"]
+      "expected": [
+        "Ranks supported priorities",
+        "Explains signals and freshness",
+        "Assigns owner roles"
+      ]
     },
     {
       "id": "insufficient-evidence-no-ranking",
       "prompt": "Rank these opportunities when activity and milestone evidence are missing.",
-      "expected": ["Does not rank", "Lists missing information", "Requests evidence needed"]
+      "expected": [
+        "Does not rank",
+        "Lists missing information",
+        "Requests evidence needed"
+      ]
+    },
+    {
+      "id": "comment-history-grounded",
+      "prompt": "What should I focus on this week for this opportunity?",
+      "expected": [
+        "Cites dated comment and activity refs",
+        "Flags entries older than 30 days as stale",
+        "Names evidence gaps instead of assuming absence"
+      ]
     },
     {
       "id": "stale-partial-sources",
       "prompt": "Create a weekly focus with stale activity and an unavailable source.",
-      "expected": ["Labels stale and partial data", "Preserves supported results", "Avoids invented signals"]
+      "expected": [
+        "Labels stale and partial data",
+        "Preserves supported results",
+        "Avoids invented signals"
+      ]
+    },
+    {
+      "id": "readable-markdown-presentation",
+      "prompt": "Give me the guidance for this opportunity.",
+      "expected": [
+        "Uses ## headings in the documented order without numbering",
+        "Presents signals, risks, and actions as compact tables",
+        "Shows plain-language facts with entry refs and no raw field names",
+        "Ends with a Feedback prompt offering action-verb follow-ups"
+      ]
     }
   ]
 }

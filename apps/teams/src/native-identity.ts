@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { localConnectionVersion, nativeCapabilities, type NativeConnectionStatus, type NativeResource } from '../../../packages/common/contracts/local-connection.js'
 import type { ExecutionPrincipal } from '../../../packages/orchestrator/collaboration/principal.js'
 import type { NativeTeamsConfiguration } from './configuration.js'
+import { seReportingScopes, type SeReportingResource } from '../../../packages/common/contracts/se-reporting.js'
 
 export type NativeErrorCode = 'native_sign_in_required' | 'native_sign_in_in_progress' | 'native_identity_rejected' | 'native_source_denied' | 'native_consent_required' | 'native_resource_unavailable' | 'native_connection_changed'
 export class NativeConnectionError extends Error {
@@ -180,6 +181,18 @@ export class NativeIdentityProvider {
       if (generation === this.generation && (renewSession || error instanceof NativeConnectionError && error.code === 'native_identity_rejected')) await this.disconnect()
       throw this.failure(resource, error)
     }
+  }
+  async getReportingToken(resource: SeReportingResource): Promise<string> {
+    const identity = this.identity()
+    if (!identity || !this.current) throw new NativeConnectionError('native_sign_in_required')
+    const generation = this.generation
+    let result: NativeAuthenticationResult
+    try { result = await this.client.silent(seReportingScopes[resource], this.current.account) } catch {
+      throw new NativeConnectionError('native_consent_required')
+    }
+    const verified = await this.validate(result)
+    if (generation !== this.generation || !this.sameAuthority(verified.identity, identity)) throw new NativeConnectionError('native_connection_changed')
+    return result.accessToken
   }
   async disconnect(): Promise<void> {
     this.generation++; this.current = undefined; this.tokens.clear(); this.states.clear(); this.blocked = false

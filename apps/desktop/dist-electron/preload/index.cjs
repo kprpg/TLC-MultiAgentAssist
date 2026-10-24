@@ -584,7 +584,7 @@ var base64url = /^[A-Za-z0-9_-]*$/;
 var httpProtocol = /^https?$/;
 var e164 = /^\+[1-9]\d{6,14}$/;
 var dateSource = `(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))`;
-var date$1 = /*@__PURE__*/ new RegExp(`^${dateSource}$`);
+var date$3 = /*@__PURE__*/ new RegExp(`^${dateSource}$`);
 function timeSource(args) {
 	const hhmm = `(?:[01]\\d|2[0-3]):[0-5]\\d`;
 	return typeof args.precision === "number" ? args.precision === -1 ? `${hhmm}` : args.precision === 0 ? `${hhmm}:[0-5]\\d` : `${hhmm}:[0-5]\\d\\.\\d{${args.precision}}` : `${hhmm}(?::[0-5]\\d(?:\\.\\d+)?)?`;
@@ -607,6 +607,7 @@ var string$1 = (params) => {
 var integer = /^-?\d+$/;
 var number$1 = /^-?\d+(?:\.\d+)?$/;
 var boolean$1 = /^(?:true|false)$/i;
+var _null$2 = /^null$/i;
 var lowercase = /^[^A-Z]*$/;
 var uppercase = /^[^a-z]*$/;
 //#endregion
@@ -1241,7 +1242,7 @@ var $ZodISODateTime = /*@__PURE__*/ $constructor("$ZodISODateTime", (inst, def) 
 	$ZodStringFormat.init(inst, def);
 });
 var $ZodISODate = /*@__PURE__*/ $constructor("$ZodISODate", (inst, def) => {
-	def.pattern ?? (def.pattern = date$1);
+	def.pattern ?? (def.pattern = date$3);
 	$ZodStringFormat.init(inst, def);
 });
 var $ZodISOTime = /*@__PURE__*/ $constructor("$ZodISOTime", (inst, def) => {
@@ -1416,6 +1417,22 @@ var $ZodBoolean = /*@__PURE__*/ $constructor("$ZodBoolean", (inst, def) => {
 		if (typeof input === "boolean") return payload;
 		payload.issues.push({
 			expected: "boolean",
+			code: "invalid_type",
+			input,
+			inst
+		});
+		return payload;
+	};
+});
+var $ZodNull = /*@__PURE__*/ $constructor("$ZodNull", (inst, def) => {
+	$ZodType.init(inst, def);
+	inst._zod.pattern = _null$2;
+	inst._zod.values = /* @__PURE__ */ new Set([null]);
+	inst._zod.parse = (payload, _ctx) => {
+		const input = payload.value;
+		if (input === null) return payload;
+		payload.issues.push({
+			expected: "null",
 			code: "invalid_type",
 			input,
 			inst
@@ -2645,6 +2662,13 @@ function _boolean(Class, params) {
 	});
 }
 // @__NO_SIDE_EFFECTS__
+function _null$1(Class, params) {
+	return new Class({
+		type: "null",
+		...normalizeParams(params)
+	});
+}
+// @__NO_SIDE_EFFECTS__
 function _unknown(Class) {
 	return new Class({ type: "unknown" });
 }
@@ -3197,6 +3221,13 @@ var numberProcessor = (schema, ctx, _json, _params) => {
 var booleanProcessor = (_schema, _ctx, json, _params) => {
 	json.type = "boolean";
 };
+var nullProcessor = (_schema, ctx, json, _params) => {
+	if (ctx.target === "openapi-3.0") {
+		json.type = "string";
+		json.nullable = true;
+		json.enum = [null];
+	} else json.type = "null";
+};
 var neverProcessor = (_schema, _ctx, json, _params) => {
 	json.not = {};
 };
@@ -3420,7 +3451,7 @@ var ZodISODate = /*@__PURE__*/ $constructor("ZodISODate", (inst, def) => {
 	$ZodISODate.init(inst, def);
 	ZodStringFormat.init(inst, def);
 });
-function date(params) {
+function date$2(params) {
 	return /* @__PURE__ */ _isoDate(ZodISODate, params);
 }
 var ZodISOTime = /*@__PURE__*/ $constructor("ZodISOTime", (inst, def) => {
@@ -3720,7 +3751,7 @@ var ZodString = /*@__PURE__*/ $constructor("ZodString", (inst, def) => {
 	inst.cidrv6 = (params) => inst.check(/* @__PURE__ */ _cidrv6(ZodCIDRv6, params));
 	inst.e164 = (params) => inst.check(/* @__PURE__ */ _e164(ZodE164, params));
 	inst.datetime = (params) => inst.check(datetime(params));
-	inst.date = (params) => inst.check(date(params));
+	inst.date = (params) => inst.check(date$2(params));
 	inst.time = (params) => inst.check(time(params));
 	inst.duration = (params) => inst.check(duration(params));
 });
@@ -3887,6 +3918,14 @@ var ZodBoolean = /*@__PURE__*/ $constructor("ZodBoolean", (inst, def) => {
 });
 function boolean(params) {
 	return /* @__PURE__ */ _boolean(ZodBoolean, params);
+}
+var ZodNull = /*@__PURE__*/ $constructor("ZodNull", (inst, def) => {
+	$ZodNull.init(inst, def);
+	ZodType.init(inst, def);
+	inst._zod.processJSONSchema = (ctx, json, params) => nullProcessor(inst, ctx, json, params);
+});
+function _null(params) {
+	return /* @__PURE__ */ _null$1(ZodNull, params);
 }
 var ZodUnknown = /*@__PURE__*/ $constructor("ZodUnknown", (inst, def) => {
 	$ZodUnknown.init(inst, def);
@@ -4278,6 +4317,1571 @@ function refine(fn, _params = {}) {
 function superRefine(fn, params) {
 	return /* @__PURE__ */ _superRefine(fn, params);
 }
+//#endregion
+//#region packages/common/contracts/agent-task-limits.ts
+var agentTaskPromptMaxLength = 64e3;
+var workflowAgentCapabilityValues = [
+	"account-pulse",
+	"mcem-coach",
+	"pursuit-executive",
+	"risk-solution-play"
+];
+var workflowAgentCapabilitySchema = _enum(workflowAgentCapabilityValues);
+var scopeRefSchema = discriminatedUnion("kind", [
+	object({ kind: literal("portfolio") }).strict(),
+	object({
+		kind: literal("account"),
+		accountId: string().min(1)
+	}).strict(),
+	object({
+		kind: literal("opportunity"),
+		accountId: string().min(1),
+		opportunityId: string().min(1)
+	}).strict()
+]);
+var workflowExecutionModeSchema = _enum([
+	"deterministic",
+	"composite",
+	"agentic"
+]);
+var workflowOutcomeStateSchema = _enum([
+	"complete",
+	"partial",
+	"unauthorized"
+]);
+var workflowRunStatusSchema = _enum([
+	"queued",
+	"running",
+	"completed",
+	"failed",
+	"cancelled"
+]);
+var workflowConnectorStepSchema = object({
+	connector: _enum(["dataverse-mcp", "msx-mcp"]),
+	operation: string().regex(/^[a-z][a-z0-9_]*$/),
+	required: boolean()
+}).strict();
+object({
+	contractVersion: literal("1.0"),
+	id: string().regex(/^WF-[0-9]{3}$/),
+	name: string().min(1).max(120),
+	version: string().regex(/^\d+\.\d+\.\d+$/),
+	scope: _enum([
+		"portfolio",
+		"account",
+		"opportunity"
+	]),
+	personaTargets: array(string().min(1)).min(1),
+	category: string().regex(/^[a-z][a-z0-9-]*$/),
+	executionMode: workflowExecutionModeSchema,
+	connectorPlan: array(workflowConnectorStepSchema).min(1).max(6),
+	inputSchemaRef: string().min(1),
+	outputSchemaRef: string().min(1),
+	sla: object({
+		targetMs: number().int().min(1),
+		timeoutMs: number().int().min(1)
+	}).strict().refine((sla) => sla.timeoutMs >= sla.targetMs, "Workflow timeout must not be less than its target."),
+	auth: object({
+		requiresDelegatedUser: literal(true),
+		allowedWrite: boolean()
+	}).strict(),
+	ui: object({
+		cardStyle: _enum([
+			"exception-list",
+			"metric-strip",
+			"record-table",
+			"timeline",
+			"action-list"
+		]),
+		resultPriority: _enum([
+			"high",
+			"medium",
+			"low"
+		]),
+		showInQuickLaunch: boolean()
+	}).strict()
+}).strict();
+var workflowConnectorCallSchema = object({
+	connector: _enum(["dataverse-mcp", "msx-mcp"]),
+	operation: string().regex(/^[a-z][a-z0-9_]*$/),
+	status: _enum([
+		"success",
+		"partial",
+		"unauthorized",
+		"failed",
+		"cancelled"
+	]),
+	durationMs: number().int().nonnegative(),
+	recordCount: number().int().nonnegative(),
+	truncated: boolean()
+}).strict();
+object({
+	contractVersion: literal("1.0"),
+	runId: string().uuid(),
+	workflowId: string().regex(/^WF-[0-9]{3}$/),
+	status: workflowRunStatusSchema,
+	state: workflowOutcomeStateSchema.optional(),
+	scope: scopeRefSchema,
+	startedAt: string().datetime().optional(),
+	completedAt: string().datetime().optional(),
+	connectorCalls: array(workflowConnectorCallSchema),
+	resultRef: string().min(1).optional(),
+	telemetry: object({
+		correlationId: string().uuid(),
+		firstResultMs: number().int().nonnegative().optional(),
+		cacheHit: boolean()
+	}).strict()
+}).strict().superRefine((run, context) => {
+	if (run.status === "queued" && (run.startedAt || run.completedAt || run.state)) context.addIssue({
+		code: "custom",
+		path: ["status"],
+		message: "Queued runs cannot have execution results."
+	});
+	if (run.status === "running" && (!run.startedAt || run.completedAt || run.state)) context.addIssue({
+		code: "custom",
+		path: ["status"],
+		message: "Running runs require startedAt and cannot be complete."
+	});
+	if (run.status === "completed" && (!run.startedAt || !run.completedAt || !run.state || !run.resultRef)) context.addIssue({
+		code: "custom",
+		path: ["status"],
+		message: "Completed runs require timestamps, outcome state, and a result."
+	});
+	if ((run.status === "failed" || run.status === "cancelled") && (!run.startedAt || !run.completedAt || run.state)) context.addIssue({
+		code: "custom",
+		path: ["status"],
+		message: "Terminal runs require timestamps and no outcome state."
+	});
+});
+var cardBaseSchema = object({
+	title: string().min(1),
+	evidenceIds: array(string().min(1))
+});
+discriminatedUnion("kind", [
+	cardBaseSchema.extend({
+		kind: literal("exception-list"),
+		exceptions: array(object({
+			id: string().min(1),
+			title: string().min(1),
+			priority: _enum([
+				"P0",
+				"P1",
+				"P2"
+			]),
+			detail: string().min(1),
+			evidenceIds: array(string().min(1))
+		}).strict())
+	}).strict(),
+	cardBaseSchema.extend({
+		kind: literal("metric-strip"),
+		metrics: array(object({
+			label: string().min(1),
+			value: union([string(), number()])
+		}).strict()).min(1)
+	}).strict(),
+	cardBaseSchema.extend({
+		kind: literal("record-table"),
+		columns: array(string().min(1)).min(1),
+		rows: array(record(string(), union([
+			string(),
+			number(),
+			boolean(),
+			_null()
+		])))
+	}).strict(),
+	cardBaseSchema.extend({
+		kind: literal("timeline"),
+		events: array(object({
+			at: string().datetime(),
+			label: string().min(1)
+		}).strict())
+	}).strict(),
+	cardBaseSchema.extend({
+		kind: literal("action-list"),
+		actions: array(object({
+			id: string().min(1),
+			label: string().min(1),
+			priority: _enum([
+				"P0",
+				"P1",
+				"P2"
+			])
+		}).strict())
+	}).strict()
+]);
+object({
+	connector: _enum(["dataverse-mcp", "msx-mcp"]),
+	operation: string().regex(/^[a-z][a-z0-9_]*$/),
+	queryTemplateId: string().min(1).optional(),
+	toolCallId: string().min(1)
+}).strict();
+var changeSetItemSchema = object({
+	itemId: string().uuid(),
+	entity: string().min(1),
+	recordId: string().min(1),
+	field: string().min(1),
+	before: unknown(),
+	after: unknown(),
+	rationale: string().min(1),
+	evidenceIds: array(string().min(1)).min(1)
+}).strict().refine((item) => !Object.is(item.before, item.after), "A change-set item must change its value.");
+object({
+	contractVersion: literal("1.0"),
+	changeSetId: string().uuid(),
+	proposedByCorrelationId: string().uuid(),
+	scope: scopeRefSchema,
+	proposedAt: string().datetime(),
+	expiresAt: string().datetime(),
+	items: array(changeSetItemSchema).min(1)
+}).strict().refine((proposal) => proposal.expiresAt > proposal.proposedAt, "Change-set expiry must follow proposal time.");
+object({
+	contractVersion: literal("1.0"),
+	changeSetId: string().uuid(),
+	approvedItemIds: array(string().uuid()).min(1),
+	approvedAt: string().datetime(),
+	reason: string().trim().min(3).max(1e3)
+}).strict();
+object({
+	contractVersion: literal("1.0"),
+	changeSetId: string().uuid(),
+	state: _enum([
+		"applied",
+		"conflict",
+		"failed"
+	]),
+	auditNote: string().min(1),
+	itemResults: array(object({
+		itemId: string().uuid(),
+		state: _enum([
+			"applied",
+			"conflict",
+			"failed"
+		]),
+		detail: string().min(1)
+	}).strict()).min(1)
+}).strict();
+object({
+	contractVersion: literal("1.0"),
+	capability: workflowAgentCapabilitySchema,
+	scope: scopeRefSchema,
+	prompt: string().min(3).max(agentTaskPromptMaxLength)
+}).strict();
+var workflowGuidanceFactSchema = object({
+	label: string().trim().min(1).max(80),
+	value: string().trim().min(1).max(500)
+}).strict();
+object({
+	contractVersion: literal("1.0"),
+	workflowId: string().regex(/^WF-[0-9]{3}$/),
+	resultRef: string().min(1).max(200),
+	capability: workflowAgentCapabilitySchema,
+	scope: object({
+		kind: literal("opportunity"),
+		accountId: string().min(1).max(200),
+		opportunityId: string().min(1).max(200)
+	}).strict(),
+	prompt: string().trim().min(3).max(1e3),
+	context: object({
+		cardTitle: string().trim().min(1).max(120),
+		queueItemId: string().min(1).max(200).optional(),
+		queueItemTitle: string().trim().min(1).max(240).optional(),
+		facts: array(workflowGuidanceFactSchema).max(20),
+		evidenceIds: array(string().min(1).max(200)).min(1).max(20)
+	}).strict()
+}).strict();
+//#endregion
+//#region packages/common/configuration/se-domains.ts
+/**
+* Solution Engineer domains used to route MSX opportunity discovery.
+*
+* The classification is derived from the MSX `opportunity` Dataverse schema:
+* `msp_solutionarea` is too coarse to separate Infrastructure, Data, and
+* AI/Apps work (all three fall under "Cloud and AI Platforms"), so the fine
+* grained `msp_technicalcapability` choice is used as the primary discriminator.
+*/
+var seDomainIds = [
+	"infra",
+	"data",
+	"ai-apps",
+	"security",
+	"modern-work",
+	"biz-apps",
+	"devices",
+	"services"
+];
+var seDomainSchema = _enum(seDomainIds);
+/**
+* `msp_solutionarea` option code for "Cloud and AI Platforms". All three SE
+* domains sit under this single solution area, so it is shared across them and
+* used only as a coarse gate.
+*/
+var CLOUD_AND_AI_PLATFORMS = 39438e4;
+var seDomainDefinitions = {
+	infra: {
+		id: "infra",
+		label: "Infrastructure",
+		description: "Azure infrastructure, migration, networking, and hybrid/edge opportunities.",
+		solutionAreaCodes: [CLOUD_AND_AI_PLATFORMS],
+		technicalCapabilityCodes: [
+			86198e4,
+			861980074,
+			861980075,
+			861980076,
+			861980005,
+			861980029,
+			861980011,
+			861980008,
+			861980015,
+			861980024,
+			861980030,
+			861980072,
+			861980028,
+			861980026,
+			861980019,
+			861980018,
+			861980014
+		],
+		conversationCodes: [884800006, 884800001]
+	},
+	data: {
+		id: "data",
+		label: "Data",
+		description: "Analytics, data platform, and database modernization opportunities.",
+		solutionAreaCodes: [CLOUD_AND_AI_PLATFORMS],
+		technicalCapabilityCodes: [
+			861980073,
+			861980077,
+			861980085,
+			861980020,
+			861980049,
+			861980027
+		],
+		conversationCodes: [
+			884800007,
+			884800015,
+			884800002
+		]
+	},
+	"ai-apps": {
+		id: "ai-apps",
+		label: "AI & Apps",
+		description: "AI, machine learning, app modernization, and cloud-native application opportunities.",
+		solutionAreaCodes: [CLOUD_AND_AI_PLATFORMS],
+		technicalCapabilityCodes: [
+			861980002,
+			861980009,
+			861980023,
+			861980007,
+			861980071,
+			861980041,
+			861980082
+		],
+		conversationCodes: [8848e5, 884800012]
+	},
+	security: {
+		id: "security",
+		label: "Security",
+		description: "Security, identity, threat protection, and information governance opportunities.",
+		solutionAreaCodes: [861980005],
+		technicalCapabilityCodes: [
+			861980063,
+			861980059,
+			861980054,
+			861980056,
+			861980062,
+			861980052,
+			861980061
+		],
+		conversationCodes: [884800003, 884800013]
+	},
+	"modern-work": {
+		id: "modern-work",
+		label: "Modern Work",
+		description: "Teams, collaboration, frontline, and workplace productivity opportunities.",
+		solutionAreaCodes: [],
+		technicalCapabilityCodes: [
+			861980068,
+			861980057,
+			861980058,
+			861980067,
+			861980086,
+			861980069,
+			861980065,
+			861980084,
+			861980070
+		],
+		conversationCodes: [884800004, 884800011]
+	},
+	"biz-apps": {
+		id: "biz-apps",
+		label: "BizApps / Power Platform / D365",
+		description: "Dynamics 365 and Power Platform business application opportunities.",
+		solutionAreaCodes: [394380002],
+		technicalCapabilityCodes: [
+			861980034,
+			861980050,
+			861980046,
+			861980047,
+			861980051,
+			861980078,
+			861980035,
+			861980032,
+			861980079,
+			861980080,
+			861980081,
+			861980083,
+			861980031,
+			861980033
+		],
+		conversationCodes: [884800005, 884800014]
+	},
+	devices: {
+		id: "devices",
+		label: "Devices / Mixed Reality",
+		description: "Surface, device deployment/management, and mixed reality opportunities.",
+		solutionAreaCodes: [861980012],
+		technicalCapabilityCodes: [
+			861980064,
+			861980060,
+			861980022
+		],
+		conversationCodes: [884800009]
+	},
+	services: {
+		id: "services",
+		label: "Services",
+		description: "Microsoft advisory and consulting services opportunities.",
+		solutionAreaCodes: [861980011],
+		technicalCapabilityCodes: [861980055],
+		conversationCodes: [884800008]
+	}
+};
+seDomainIds.map((id) => seDomainDefinitions[id]);
+//#endregion
+//#region packages/common/contracts/portfolio.ts
+var accountProvenanceSchema = _enum([
+	"deal-team",
+	"manual",
+	"both"
+]);
+var accountVisibilitySchema = _enum(["visible", "hidden"]);
+var accountSchema$1 = object({
+	id: string().min(1),
+	name: string().min(1),
+	segment: string().min(1),
+	tpid: string().min(1).optional(),
+	provenance: accountProvenanceSchema.optional(),
+	visibility: accountVisibilitySchema.optional()
+});
+object({
+	query: string().trim().min(1).max(120),
+	matchBy: _enum(["name", "tpid"])
+}).strict().superRefine((value, context) => {
+	if (value.matchBy === "name" && value.query.length < 2) context.addIssue({
+		code: "custom",
+		path: ["query"],
+		message: "Account name searches require at least two characters."
+	});
+});
+accountSchema$1.extend({ state: _enum([
+	"not-added",
+	"visible",
+	"hidden"
+]) }).strict();
+object({ includeHidden: boolean().optional() }).strict();
+object({ visibility: accountVisibilitySchema }).strict();
+object({
+	opportunityId: string().min(1),
+	onDealTeam: literal(true),
+	alreadyMember: boolean()
+}).strict();
+object({
+	opportunityId: string().min(1),
+	onDealTeam: literal(false),
+	alreadyAbsent: boolean()
+}).strict();
+//#endregion
+//#region packages/common/contracts/mcp.ts
+var canonicalFieldSchema = string().regex(/^[a-z][a-zA-Z0-9]*$/);
+var guardedQueryValueSchema = union([
+	string(),
+	number(),
+	boolean(),
+	array(union([string(), number()])).min(1).max(50)
+]);
+var guardedQueryFilterSchema = object({
+	field: canonicalFieldSchema,
+	operator: _enum([
+		"eq",
+		"ne",
+		"gt",
+		"ge",
+		"lt",
+		"le",
+		"contains",
+		"startswith",
+		"in",
+		"on-or-after",
+		"on-or-before"
+	]),
+	value: guardedQueryValueSchema
+}).strict();
+var guardedQueryOrderSchema = object({
+	field: canonicalFieldSchema,
+	direction: _enum(["asc", "desc"])
+}).strict();
+var guardedQueryExpandSchema = object({
+	relationship: canonicalFieldSchema,
+	select: array(canonicalFieldSchema).min(1).max(12).refine(isUnique, "Expanded select fields must be unique.")
+}).strict();
+object({
+	entity: canonicalFieldSchema,
+	select: array(canonicalFieldSchema).min(1).max(40).refine(isUnique, "Select fields must be unique."),
+	filter: array(guardedQueryFilterSchema).max(12).default([]),
+	orderBy: array(guardedQueryOrderSchema).max(3).default([]).refine((orders) => isUnique(orders.map((order) => order.field)), "Order fields must be unique."),
+	top: number().int().min(1).max(2e3).default(200),
+	expand: array(guardedQueryExpandSchema).max(3).default([]).refine((expands) => isUnique(expands.map((expand) => expand.relationship)), "Expanded relationships must be unique.")
+}).strict();
+function isUnique(values) {
+	return new Set(values).size === values.length;
+}
+//#endregion
+//#region packages/common/contracts/meeting.ts
+/**
+* Contracts for the meeting-signal extraction → review → injection flow.
+* See docs/MeetingCapture.md (Parts B, D, H). The transcript is untrusted input; the
+* proposal/approval/result mirror the generic change-set contract with the fields the
+* review UI needs (MCEM criterion, confidence, evidence, target kind).
+*/
+var meetingTypeSchema = _enum(["customer", "internal"]);
+var meetingSourceSchema = _enum([
+	"teams",
+	"upload",
+	"paste"
+]);
+var transcriptMaximumCharacters = 15e4;
+var transcriptMaximumBytes = 512e3;
+var transcriptContentSchema = string().trim().min(11, "Paste at least 11 characters of transcript text.").max(transcriptMaximumCharacters, "Transcript text must not exceed 150,000 characters.").refine((value) => !value.includes("\0"), "Use a UTF-8 text transcript, not a binary file.").refine((value) => new TextEncoder().encode(value).byteLength <= transcriptMaximumBytes, "Transcript text must not exceed 500 KiB.");
+object({
+	contractVersion: literal("1.0"),
+	opportunityId: string().min(1).max(200),
+	meetingType: meetingTypeSchema,
+	source: _enum(["paste", "upload"]),
+	content: transcriptContentSchema,
+	format: _enum(["vtt", "text"]).optional()
+}).strict();
+var meetingTargetKindSchema = _enum([
+	"opportunity",
+	"milestone",
+	"new-milestone"
+]);
+var meetingValueTypeSchema = _enum([
+	"text",
+	"money",
+	"date",
+	"optionset",
+	"boolean",
+	"percent"
+]);
+var mcemCriterionSchema = _enum([
+	"customer-outcome",
+	"decision-team",
+	"technical-validation",
+	"business-case",
+	"next-step",
+	"risk",
+	"sentiment",
+	"stage",
+	"notes"
+]);
+object({
+	id: string().min(1),
+	subject: string().min(1),
+	occurredAt: string().datetime(),
+	meetingType: meetingTypeSchema,
+	source: meetingSourceSchema,
+	opportunityId: string().min(1).optional(),
+	opportunityName: string().min(1).optional(),
+	segmentCount: number().int().nonnegative()
+}).strict();
+var meetingTranscriptSegmentSchema = object({
+	segmentId: string().min(1),
+	startMs: number().int().nonnegative().optional(),
+	endMs: number().int().nonnegative().optional(),
+	speaker: string().min(1).optional(),
+	speakerRole: meetingTypeSchema.optional(),
+	text: string().min(1)
+}).strict();
+object({
+	id: string().min(1),
+	opportunityId: string().min(1).optional(),
+	meetingType: meetingTypeSchema,
+	title: string().min(1).optional(),
+	source: meetingSourceSchema,
+	segments: array(meetingTranscriptSegmentSchema)
+}).strict();
+/** One proposed field change, rendered as a review-table row. */
+var meetingSlotSchema = object({
+	slotId: string().min(1),
+	label: string().min(1),
+	mcemCriterion: mcemCriterionSchema,
+	targetKind: meetingTargetKindSchema,
+	targetRecordId: string().min(1).optional(),
+	targetField: string().min(1),
+	valueType: meetingValueTypeSchema,
+	before: unknown().optional(),
+	after: unknown(),
+	displayBefore: string().optional(),
+	displayAfter: string().min(1),
+	confidence: number().min(0).max(1),
+	checkedByDefault: boolean(),
+	blocked: boolean(),
+	blockedReason: string().min(1).optional(),
+	sensitive: boolean(),
+	rationale: string().min(1),
+	evidence: array(string().min(1))
+}).strict();
+var meetingNewMilestoneSchema = object({
+	tempId: string().min(1),
+	name: string().min(1),
+	milestoneDate: string().date().optional(),
+	ownerName: string().min(1).optional(),
+	commitment: _enum(["Uncommitted", "Committed"]).optional(),
+	confidence: number().min(0).max(1),
+	checkedByDefault: boolean(),
+	evidence: array(string().min(1))
+}).strict();
+var meetingUnmappedSignalSchema = object({
+	label: string().min(1),
+	text: string().min(1),
+	mcemCriterion: mcemCriterionSchema,
+	evidence: array(string().min(1))
+}).strict();
+object({
+	changeSetId: string().min(1),
+	transcriptId: string().min(1),
+	opportunityId: string().min(1),
+	meetingType: meetingTypeSchema,
+	slots: array(meetingSlotSchema),
+	newMilestones: array(meetingNewMilestoneSchema),
+	suggestedMilestoneIds: array(string().min(1)),
+	unmappedSignals: array(meetingUnmappedSignalSchema),
+	proposedAt: string().datetime()
+}).strict();
+object({
+	changeSetId: string().min(1),
+	opportunityId: string().min(1),
+	approvedSlotIds: array(string().min(1)),
+	approvedNewMilestoneTempIds: array(string().min(1)),
+	selectedMilestoneIds: array(string().min(1)),
+	reason: string().trim().min(3).max(1e3)
+}).strict();
+var meetingInjectItemResultSchema = object({
+	id: string().min(1),
+	kind: _enum(["field", "new-milestone"]),
+	state: _enum([
+		"applied",
+		"conflict",
+		"failed",
+		"skipped"
+	]),
+	detail: string().min(1)
+}).strict();
+object({
+	changeSetId: string().min(1),
+	state: _enum(["applied", "rolled-back"]),
+	items: array(meetingInjectItemResultSchema),
+	auditNote: string().min(1)
+}).strict();
+var voiceLimits = {
+	maxAudioMs: 3e4,
+	silenceMs: 1e4,
+	maxTranscriptChars: 2e3,
+	maxSegments: 64,
+	finalizationMs: 1e3
+};
+var voiceAvailabilitySchema = discriminatedUnion("available", [object({
+	available: literal(true),
+	processing: literal("on-device"),
+	engine: _enum(["windows-offline", "browser-offline"])
+}).strict(), object({
+	available: literal(false),
+	reason: _enum([
+		"unsupported-platform",
+		"remote-host",
+		"missing-language",
+		"not-configured"
+	]),
+	message: string().min(1).max(400)
+}).strict()]);
+var voiceSegmentSchema = object({
+	id: string().min(1).max(80),
+	sequence: number().int().nonnegative(),
+	text: string().max(voiceLimits.maxTranscriptChars),
+	isFinal: boolean()
+}).strict();
+var voiceErrorCodeSchema = _enum([
+	"permission-denied",
+	"no-speech",
+	"device-lost",
+	"provider-error",
+	"cancelled"
+]);
+discriminatedUnion("type", [
+	object({
+		contractVersion: literal("1.0"),
+		type: literal("started")
+	}).strict(),
+	object({
+		contractVersion: literal("1.0"),
+		type: literal("segment"),
+		segment: voiceSegmentSchema.extend({ text: string().max(16384) }).strict()
+	}).strict(),
+	object({
+		contractVersion: literal("1.0"),
+		type: literal("ended")
+	}).strict(),
+	object({
+		contractVersion: literal("1.0"),
+		type: literal("error"),
+		code: voiceErrorCodeSchema,
+		message: string().min(1).max(400)
+	}).strict()
+]);
+var envelope$1 = { contractVersion: literal("1.0") };
+var voiceStartRequestSchema = object({
+	...envelope$1,
+	operation: literal("start"),
+	sessionId: string().uuid(),
+	locale: literal("en-US"),
+	consent: literal(true),
+	hints: array(string().trim().min(1).max(200)).max(64).default([])
+}).strict();
+discriminatedUnion("operation", [
+	object({
+		...envelope$1,
+		operation: literal("availability")
+	}).strict(),
+	voiceStartRequestSchema,
+	object({
+		...envelope$1,
+		operation: _enum([
+			"read",
+			"stop",
+			"cancel"
+		]),
+		sessionId: string().uuid()
+	}).strict()
+]);
+var voiceSessionSchema = object({
+	...envelope$1,
+	kind: literal("session"),
+	sessionId: string().uuid(),
+	status: _enum([
+		"arming",
+		"listening",
+		"finalizing",
+		"ended",
+		"cancelled",
+		"error"
+	]),
+	segments: array(voiceSegmentSchema).max(voiceLimits.maxSegments),
+	message: string().max(400),
+	errorCode: voiceErrorCodeSchema.optional()
+}).strict();
+discriminatedUnion("kind", [object({
+	...envelope$1,
+	kind: literal("availability"),
+	availability: voiceAvailabilitySchema
+}).strict(), voiceSessionSchema]);
+var text$1 = string().max(3e4);
+var name$1 = string().min(1).max(500);
+var identifier$2 = string().min(1).max(200);
+var tpid = string().regex(/^[1-9][0-9]{0,19}$/);
+var amount = number().finite();
+var nonnegative$1 = amount.nonnegative();
+var count$1 = number().int().nonnegative();
+var date$1 = date$2();
+var timestamp$1 = datetime({ offset: true });
+var quality = _enum([
+	"complete",
+	"partial",
+	"unavailable"
+]);
+var timing = _enum([
+	"overdue",
+	"in-quarter",
+	"future",
+	"undated"
+]);
+var bucketSchema = object({
+	name: name$1,
+	weight: amount.min(0).max(1),
+	unit: literal("USD"),
+	attainment: amount,
+	actual: amount,
+	quota: amount,
+	recurring: amount,
+	calcActual: amount,
+	calcQuota: nonnegative$1,
+	gap: nonnegative$1
+}).strict();
+var metricSchema = object({
+	name: name$1,
+	bucket: name$1,
+	unit: literal("USD"),
+	mappingSupported: boolean(),
+	scenarioAllowed: boolean(),
+	attainment: amount,
+	actual: amount,
+	quota: amount,
+	recurring: amount,
+	calcActual: amount,
+	calcQuota: amount,
+	gap: nonnegative$1,
+	closedGap: nonnegative$1,
+	closedAttainment: amount.nullable(),
+	accountActualDifference: amount,
+	accountQuotaDifference: amount
+}).strict();
+var accountSchema = object({
+	tpid,
+	name: name$1,
+	metrics: array(object({
+		metric: name$1,
+		bucket: name$1,
+		quota: nonnegative$1,
+		actual: amount.nullable(),
+		variance: amount.nullable(),
+		gap: nonnegative$1.nullable()
+	}).strict()).max(100),
+	pipeline: object({
+		status: quality,
+		openCount: count$1,
+		inQuarterCount: count$1,
+		inQuarterValue: amount,
+		productionCount: count$1,
+		inQuarterProductionCount: count$1,
+		committedMonthly: amount,
+		uncommittedMonthly: amount,
+		noPipeline: boolean(),
+		noInQuarterPipeline: boolean()
+	}).strict(),
+	nextAction: text$1
+}).strict();
+var opportunitySchema$1 = object({
+	id: identifier$2,
+	number: text$1,
+	tpid,
+	account: name$1,
+	name: name$1,
+	owner: text$1,
+	stage: text$1,
+	solutionArea: text$1,
+	salesPlay: text$1,
+	intent: text$1,
+	estimatedValue: amount.nullable(),
+	currency: text$1,
+	monthlyRunRate: amount.nullable(),
+	closeDate: date$1.nullable(),
+	state: text$1,
+	forecastComments: text$1,
+	timing,
+	relevance: text$1,
+	modifiedAt: timestamp$1.optional(),
+	estimatedBilledRevenue: amount.nullable().optional(),
+	estimatedSqlRevenue: amount.nullable().optional()
+}).strict();
+var milestoneSchema$1 = object({
+	id: identifier$2,
+	number: text$1,
+	opportunityId: identifier$2,
+	opportunityName: name$1,
+	tpid,
+	account: name$1,
+	name: name$1,
+	owner: text$1,
+	category: text$1,
+	status: text$1,
+	commitment: text$1,
+	monthly: amount.nullable(),
+	date: date$1.nullable(),
+	workload: text$1,
+	forecastComments: text$1,
+	currency: text$1,
+	active: boolean().nullable(),
+	timing,
+	metricCandidates: array(name$1).max(100),
+	mappingBasis: text$1,
+	classification: text$1,
+	scenarioCredit: amount.nullable(),
+	modifiedAt: timestamp$1.optional(),
+	commitmentChangedAt: timestamp$1.optional(),
+	region: text$1.optional(),
+	riskDetails: text$1.optional()
+}).strict();
+var coverageSchema = object({
+	metric: name$1,
+	bucket: name$1,
+	gap: nonnegative$1,
+	candidateCount: count$1,
+	committedMonthly: amount,
+	uncommittedMonthly: amount,
+	verifiedPeriodCredit: _null(),
+	state: text$1,
+	mappingSupported: boolean(),
+	mappingReviewRequired: boolean(),
+	scenarioAllowed: boolean(),
+	scenarioCommittedCredit: amount.nullable(),
+	scenarioUncommittedCredit: amount.nullable(),
+	scenarioRemainingGap: amount.nullable(),
+	nextAction: text$1
+}).strict();
+var sellerDashboardReportSchema = object({
+	schemaVersion: literal(1),
+	generatedAt: timestamp$1,
+	plan: object({
+		currency: literal("USD"),
+		unit: literal("USD"),
+		fiscalYear: number().int().min(2e3).max(2200),
+		sourceUnitsVerified: boolean(),
+		metricMapping: array(object({
+			metric: name$1,
+			bucket: name$1,
+			hintSupported: boolean(),
+			state: text$1,
+			scenarioAllowed: boolean()
+		}).strict()).max(100),
+		unmappedProductionCandidates: count$1
+	}).strict(),
+	period: object({
+		label: name$1,
+		start: date$1,
+		end: date$1,
+		today: date$1
+	}).strict(),
+	sources: object({
+		earnings: object({
+			status: _enum(["live", "stale"]),
+			generatedAt: timestamp$1,
+			refreshedAt: timestamp$1.nullable(),
+			months: array(name$1).max(12),
+			ageDays: number().int().nullable()
+		}).strict(),
+		pipeline: object({
+			status: quality,
+			asOf: timestamp$1.nullable(),
+			errors: array(text$1).max(1e3)
+		}).strict(),
+		quota: object({
+			name: name$1,
+			rows: count$1,
+			accounts: count$1.max(200)
+		}).strict()
+	}).strict(),
+	warnings: array(text$1).max(1e3),
+	official: object({
+		weightedAttainment: amount,
+		closedMonthAttainment: amount.nullable(),
+		closedThrough: name$1.nullable(),
+		buckets: array(bucketSchema).min(1).max(100),
+		metrics: array(metricSchema).min(1).max(100)
+	}).strict(),
+	accounts: array(accountSchema).min(1).max(200),
+	opportunities: array(opportunitySchema$1).max(5e4),
+	milestones: array(milestoneSchema$1).max(5e4),
+	coverage: array(coverageSchema).max(100),
+	actions: array(object({
+		account: name$1,
+		tpid,
+		metric: name$1,
+		priority: _enum([
+			"High",
+			"Medium",
+			"Low"
+		]),
+		issue: text$1,
+		action: text$1,
+		owner: text$1
+	}).strict()).max(2e4),
+	methodology: array(text$1).max(100)
+}).strict().superRefine((report, context) => {
+	const reject = (message) => context.addIssue({
+		code: "custom",
+		message
+	});
+	const unique = (values, label) => {
+		if (new Set(values).size !== values.length) reject(`Duplicate ${label}.`);
+	};
+	const close = (left, right) => Math.abs(left - right) <= .01;
+	const { buckets, metrics } = report.official;
+	unique(buckets.map((row) => row.name), "bucket");
+	unique(metrics.map((row) => row.name), "metric");
+	unique(report.accounts.map((row) => row.tpid), "account");
+	unique(report.opportunities.map((row) => row.id), "opportunity");
+	unique(report.milestones.map((row) => row.id), "milestone");
+	unique(report.coverage.map((row) => row.metric), "coverage metric");
+	if (Math.abs(buckets.reduce((sum, row) => sum + row.weight, 0) - 1) > 1e-6) reject("Official bucket weights must sum to one.");
+	if (report.period.start > report.period.end) reject("Invalid official reporting interval.");
+	if (report.period.today < report.period.start || Date.parse(report.period.today) > Date.parse(report.period.end) + 26784e5) reject("As-of date is outside the supported official reporting interval.");
+	if (report.period.start < `${report.plan.fiscalYear - 1}-07-01` || report.period.end > `${report.plan.fiscalYear}-06-30`) reject("Reporting interval is outside the fiscal year.");
+	for (const row of [...buckets, ...metrics]) if (!close(row.gap, Math.max(row.calcQuota - row.calcActual, 0))) reject("Posted gap does not reconcile to signed calculated amounts.");
+	const metricMap = new Map(metrics.map((row) => [row.name, row]));
+	const bucketNames = new Set(buckets.map((row) => row.name));
+	if (metrics.some((row) => !bucketNames.has(row.bucket))) reject("Unknown metric bucket.");
+	if (report.plan.metricMapping.length !== metrics.length || report.plan.metricMapping.some((row) => metricMap.get(row.metric)?.bucket !== row.bucket)) reject("Plan metric mapping does not reconcile.");
+	unique(report.plan.metricMapping.map((row) => row.metric), "plan mapping");
+	const accountMap = new Map(report.accounts.map((row) => [row.tpid, row]));
+	const opportunityMap = new Map(report.opportunities.map((row) => [row.id, row]));
+	if (report.sources.quota.accounts !== report.accounts.length) reject("Quota account count does not reconcile.");
+	for (const account of report.accounts) {
+		unique(account.metrics.map((row) => row.metric), "account metric");
+		const accountMetricNames = new Set(account.metrics.map((row) => row.metric));
+		if (metrics.some((metric) => !accountMetricNames.has(metric.name))) reject("Account metrics must include the complete official metric set.");
+		for (const row of account.metrics) {
+			if (metricMap.get(row.metric)?.bucket !== row.bucket) reject("Unknown account metric mapping.");
+			if (row.actual === null) {
+				if (row.gap !== null || row.variance !== null) reject("Missing actuals cannot establish an account gap.");
+			} else if (row.gap === null || row.variance === null || !close(row.gap, Math.max(row.quota - row.actual, 0)) || !close(row.variance, row.actual - row.quota)) reject("Account amounts do not reconcile.");
+		}
+		if (account.pipeline.status !== "complete" && (account.pipeline.noPipeline || account.pipeline.noInQuarterPipeline)) reject("Incomplete retrieval cannot establish absent pipeline.");
+		if (report.sources.pipeline.status === "unavailable" && account.pipeline.status !== "unavailable") reject("Unavailable global retrieval cannot establish complete account data.");
+	}
+	for (const row of [...report.opportunities, ...report.milestones]) {
+		if (accountMap.get(row.tpid)?.name !== row.account) reject("Pipeline is outside the quota roster.");
+		const value = "date" in row ? row.date : row.closeDate;
+		const expectedTiming = value === null ? "undated" : value < report.period.today ? "overdue" : value > report.period.end ? "future" : "in-quarter";
+		if (row.timing !== expectedTiming) reject("Pipeline timing does not match source dates.");
+	}
+	for (const row of report.milestones) {
+		const parent = opportunityMap.get(row.opportunityId);
+		if (!parent || parent.tpid !== row.tpid) reject("Milestone parent attribution is invalid.");
+		if (row.metricCandidates.some((metric) => !metricMap.has(metric))) reject("Unknown candidate metric.");
+		if (parent?.state === "Lost" && row.active === true) reject("A lost parent cannot supply active consumption.");
+		if (row.active === null && accountMap.get(row.tpid)?.pipeline.status === "complete") reject("Unknown milestone activity requires incomplete source quality.");
+	}
+	for (const row of report.coverage) {
+		const metric = metricMap.get(row.metric);
+		if (!metric || metric.bucket !== row.bucket || !close(row.gap, metric.gap)) reject("Coverage does not reconcile to the official metric.");
+	}
+	for (const row of report.actions) if (!accountMap.has(row.tpid) || !metricMap.has(row.metric)) reject("Action is outside the reporting scope.");
+});
+var supplementSourceSchema = object({
+	name: name$1,
+	status: quality,
+	asOf: timestamp$1,
+	start: date$1,
+	end: date$1,
+	detail: text$1
+}).strict().refine((source) => source.start <= source.end, "Invalid supplemental source interval.");
+var sellerDashboardSupplementSchema = object({
+	schemaVersion: literal(1),
+	consumption: object({
+		source: supplementSourceSchema,
+		accounts: array(object({
+			tpid,
+			actual: nonnegative$1,
+			previousActual: nonnegative$1.nullable(),
+			averageDaily: nonnegative$1,
+			projected: nonnegative$1.nullable(),
+			daysPosted: count$1,
+			pillars: array(object({
+				name: name$1,
+				actual: nonnegative$1
+			}).strict()).max(100)
+		}).strict()).max(200),
+		services: array(object({
+			id: identifier$2,
+			tpid,
+			name: name$1,
+			pillar: name$1,
+			previousDaily: nonnegative$1,
+			currentDaily: nonnegative$1,
+			isNew: boolean()
+		}).strict()).max(5e4),
+		subscriptions: array(object({
+			id: identifier$2,
+			tpid,
+			name: name$1,
+			created: date$1,
+			averageDaily: nonnegative$1
+		}).strict()).max(5e4),
+		sqlReclassification: array(object({
+			id: identifier$2,
+			tpid,
+			workload: name$1,
+			monthlyOpportunity: nonnegative$1,
+			evidence: text$1
+		}).strict()).max(5e4)
+	}).strict().nullable(),
+	conversion: object({
+		source: supplementSourceSchema,
+		accounts: array(object({
+			tpid,
+			territory: text$1,
+			startingMonthly: nonnegative$1,
+			convertedMonthly: nonnegative$1,
+			inQuarterMonthly: nonnegative$1,
+			shiftedOutMonthly: nonnegative$1,
+			startingCount: count$1,
+			convertedCount: count$1
+		}).strict()).max(200)
+	}).strict().nullable()
+}).strict().superRefine((supplement, context) => {
+	const reject = (message) => context.addIssue({
+		code: "custom",
+		message
+	});
+	const consumption = supplement.consumption;
+	if (consumption) {
+		if (new Set(consumption.accounts.map((row) => row.tpid)).size !== consumption.accounts.length) reject("Duplicate consumption account.");
+		for (const row of consumption.accounts) {
+			if (row.daysPosted > 31 || row.daysPosted === 0 && row.actual !== 0) reject("Invalid posted consumption days.");
+			if (Math.abs(row.pillars.reduce((sum, pillar) => sum + pillar.actual, 0) - row.actual) > .01) reject("Pillar consumption does not reconcile to the account.");
+		}
+	}
+	const conversion = supplement.conversion;
+	if (conversion) {
+		if (new Set(conversion.accounts.map((row) => row.tpid)).size !== conversion.accounts.length) reject("Duplicate conversion account.");
+		for (const row of conversion.accounts) if (row.convertedCount > row.startingCount || row.convertedMonthly > row.startingMonthly || Math.abs(row.inQuarterMonthly + row.shiftedOutMonthly - row.convertedMonthly) > .01) reject("Conversion does not reconcile to the historical baseline.");
+	}
+});
+discriminatedUnion("kind", [object({
+	contractVersion: literal("1.0"),
+	kind: literal("snapshot"),
+	mode: _enum(["sample", "live"]),
+	state: _enum(["ready", "stale"]),
+	message: text$1,
+	report: sellerDashboardReportSchema,
+	supplement: sellerDashboardSupplementSchema.nullable()
+}).strict().superRefine((snapshot, context) => {
+	const tpids = new Set(snapshot.report.accounts.map((row) => row.tpid));
+	const consumption = snapshot.supplement?.consumption;
+	if ([
+		...consumption?.accounts ?? [],
+		...consumption?.services ?? [],
+		...consumption?.subscriptions ?? [],
+		...consumption?.sqlReclassification ?? [],
+		...snapshot.supplement?.conversion?.accounts ?? []
+	].some((row) => !tpids.has(row.tpid))) context.addIssue({
+		code: "custom",
+		message: "Supplemental data is outside the quota roster."
+	});
+	for (const source of [consumption, snapshot.supplement?.conversion]) if (source?.source.status === "complete" && source.accounts.length !== tpids.size) context.addIssue({
+		code: "custom",
+		message: "A complete supplemental source must cover the quota account roster."
+	});
+}), object({
+	contractVersion: literal("1.0"),
+	kind: literal("unavailable"),
+	mode: literal("live"),
+	code: _enum([
+		"not-configured",
+		"unsupported-platform",
+		"identity-mismatch",
+		"invalid-snapshot",
+		"runtime-failed",
+		"hosted-profile-denied"
+	]),
+	message: name$1
+}).strict()]);
+discriminatedUnion("operation", [object({
+	contractVersion: literal("1.0"),
+	operation: literal("get")
+}).strict(), object({
+	contractVersion: literal("1.0"),
+	operation: literal("refresh"),
+	confirmed: literal(true),
+	asOf: date$1.optional()
+}).strict()]);
+var identifier$1 = string().min(1).max(200);
+var name = string().min(1).max(500);
+var text = string().max(3e4);
+var nonnegative = number().finite().nonnegative();
+var count = number().int().nonnegative();
+var date = date$2();
+var timestamp = datetime({ offset: true });
+var month = string().regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/);
+var stagePipelineStages = [
+	"Listen & Consult",
+	"Inspire & Design",
+	"Empower & Achieve",
+	"Realize Value",
+	"Manage & Optimize"
+];
+var stagePipelineMilestoneStatuses = [
+	"On Track",
+	"At Risk",
+	"Blocked",
+	"Completed",
+	"Cancelled",
+	"Hygiene/Duplicate",
+	"Lost to Competitor"
+];
+var stagePipelineStageSchema = _enum(stagePipelineStages);
+var stagePipelineMilestoneStatusSchema = _enum(stagePipelineMilestoneStatuses);
+var stagePipelineScopeSchema = _enum(["azure", "microsoft-services"]);
+var stagePipelineThreatSchema = _enum([
+	"None",
+	"Low",
+	"Medium",
+	"High"
+]);
+var stagePipelineOpportunitySchema = object({
+	id: identifier$1,
+	number: name,
+	customer: name,
+	name,
+	notes: text,
+	contact: text,
+	scope: stagePipelineScopeSchema,
+	solutionArea: name,
+	inbound: boolean(),
+	stage: stagePipelineStageSchema,
+	status: _enum([
+		"In Progress",
+		"On Hold",
+		"Won",
+		"Lost"
+	]),
+	forecast: name,
+	closeDate: date,
+	daysInStage: count,
+	idleDays: count.nullable(),
+	consumedRecurring: nonnegative,
+	consumedNonRecurring: nonnegative,
+	maccCommit: nonnegative,
+	partner: text.nullable(),
+	competitor: object({
+		name: text.nullable(),
+		threat: stagePipelineThreatSchema
+	}).strict(),
+	solutionTagReview: boolean()
+}).strict();
+var stagePipelineMilestoneSchema = object({
+	id: identifier$1,
+	number: name,
+	opportunityId: identifier$1,
+	name,
+	workload: text,
+	estimatedMonthlyAcr: nonnegative,
+	commitment: _enum(["Committed", "Uncommitted"]),
+	status: stagePipelineMilestoneStatusSchema,
+	date: date.nullable(),
+	comment: text,
+	owner: text
+}).strict();
+var stagePipelineAcrSchema = object({
+	syncedAt: date,
+	lastActualMonth: month,
+	accounts: array(object({
+		customer: name,
+		months: array(object({
+			month,
+			actual: nonnegative,
+			baseline: nonnegative,
+			committed: nonnegative,
+			uncommitted: nonnegative,
+			stage1: nonnegative,
+			target: nonnegative
+		}).strict()).length(12)
+	}).strict()).max(500)
+}).strict();
+var stagePipelineSnapshotSchema = object({
+	contractVersion: literal("1.0"),
+	kind: literal("snapshot"),
+	mode: _enum(["sample", "live"]),
+	state: _enum(["fresh", "stale"]),
+	message: text,
+	generatedAt: timestamp,
+	owner: string().max(200),
+	asOf: date,
+	fiscalYear: number().int().min(2e3).max(2100),
+	opportunities: array(stagePipelineOpportunitySchema).max(5e3),
+	milestones: array(stagePipelineMilestoneSchema).max(25e3),
+	acr: stagePipelineAcrSchema
+}).strict().superRefine((value, context) => {
+	const ids = /* @__PURE__ */ new Set();
+	for (const [index, row] of value.opportunities.entries()) {
+		if (ids.has(row.id)) context.addIssue({
+			code: "custom",
+			path: [
+				"opportunities",
+				index,
+				"id"
+			],
+			message: "Opportunity ids must be unique."
+		});
+		ids.add(row.id);
+	}
+	const milestoneIds = /* @__PURE__ */ new Set();
+	for (const [index, row] of value.milestones.entries()) {
+		if (milestoneIds.has(row.id)) context.addIssue({
+			code: "custom",
+			path: [
+				"milestones",
+				index,
+				"id"
+			],
+			message: "Milestone ids must be unique."
+		});
+		milestoneIds.add(row.id);
+		if (!ids.has(row.opportunityId)) context.addIssue({
+			code: "custom",
+			path: [
+				"milestones",
+				index,
+				"opportunityId"
+			],
+			message: "Milestone must reference a listed opportunity."
+		});
+	}
+});
+var stagePipelineUnavailableSchema = object({
+	contractVersion: literal("1.0"),
+	kind: literal("unavailable"),
+	code: _enum([
+		"source-unavailable",
+		"unauthorized",
+		"invalid-snapshot"
+	]),
+	message: text
+}).strict();
+object({
+	contractVersion: literal("1.0"),
+	operation: literal("get")
+}).strict();
+union([stagePipelineSnapshotSchema, stagePipelineUnavailableSchema]);
+//#endregion
+//#region packages/common/contracts/record-creation.ts
+var clientKeySchema = string().trim().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
+var dateSchema = string().date();
+var textSchema = string().trim().min(1).max(200);
+var choiceRefSchema = object({
+	value: number().int(),
+	label: textSchema
+}).strict();
+var lookupRefSchema = object({
+	id: string().trim().min(1).max(200),
+	label: textSchema
+}).strict();
+var currencyRefSchema = lookupRefSchema.extend({ isoCode: string().length(3) });
+var recordCreationTargetSchema = _enum([
+	"sqlite",
+	"draft",
+	"live-msx"
+]);
+var milestoneCreateInputSchema = object({
+	clientMilestoneKey: clientKeySchema,
+	name: string().trim().min(1).max(100),
+	category: choiceRefSchema,
+	milestoneDate: dateSchema,
+	workload: lookupRefSchema,
+	owner: lookupRefSchema.optional(),
+	status: choiceRefSchema.optional(),
+	commitment: choiceRefSchema.optional(),
+	estimatedMonthlyUsage: number().finite().nonnegative().max(922337203685477).optional(),
+	comments: string().max(35e3).optional(),
+	riskDetails: string().trim().max(2e3).optional(),
+	customerBudgetApproved: choiceRefSchema.optional()
+}).strict().superRefine((item, context) => {
+	if ((item.status?.value === 861980001 || item.status?.value === 861980002) && !item.riskDetails) context.addIssue({
+		code: "custom",
+		path: ["riskDetails"],
+		message: "Risk/Blocker Details are required for At Risk or Blocked milestones."
+	});
+});
+var opportunityBundleSchema = object({
+	opportunity: object({
+		clientOpportunityKey: clientKeySchema,
+		name: string().trim().min(1).max(200),
+		intent: array(choiceRefSchema).min(1).max(2).refine((items) => new Set(items.map((item) => item.value)).size === items.length, "Opportunity Intent choices must not repeat."),
+		estimatedValue: number().finite().nonnegative().max(0xe8d4a51000),
+		priceList: lookupRefSchema.optional(),
+		currency: lookupRefSchema.optional(),
+		owner: lookupRefSchema.optional(),
+		estimatedCloseDate: dateSchema,
+		need: string().max(2e3).optional(),
+		solutionArea: choiceRefSchema.optional(),
+		technicalCapability: choiceRefSchema.optional()
+	}).strict(),
+	milestones: array(milestoneCreateInputSchema).max(50)
+}).strict();
+var recordCreationDraftSchema = discriminatedUnion("kind", [object({
+	kind: literal("opportunity-batch"),
+	account: lookupRefSchema,
+	opportunities: array(opportunityBundleSchema).min(1).max(50)
+}).strict(), object({
+	kind: literal("existing-opportunity-milestone-batch"),
+	account: lookupRefSchema,
+	opportunity: lookupRefSchema,
+	milestones: array(milestoneCreateInputSchema).min(1).max(50)
+}).strict()]).superRefine((draft, context) => {
+	const opportunityKeys = /* @__PURE__ */ new Set();
+	const milestoneKeys = /* @__PURE__ */ new Set();
+	const bundles = draft.kind === "opportunity-batch" ? draft.opportunities.map((bundle, index) => ({
+		key: bundle.opportunity.clientOpportunityKey,
+		milestones: bundle.milestones,
+		index
+	})) : [{
+		key: draft.opportunity.id,
+		milestones: draft.milestones,
+		index: 0
+	}];
+	for (const { key, milestones, index } of bundles) {
+		if (draft.kind === "opportunity-batch" && opportunityKeys.has(key)) context.addIssue({
+			code: "custom",
+			path: [
+				"opportunities",
+				index,
+				"opportunity",
+				"clientOpportunityKey"
+			],
+			message: "Opportunity keys must be unique."
+		});
+		opportunityKeys.add(key);
+		for (const [milestoneIndex, milestone] of milestones.entries()) {
+			if (milestoneKeys.has(milestone.clientMilestoneKey)) context.addIssue({
+				code: "custom",
+				path: draft.kind === "opportunity-batch" ? [
+					"opportunities",
+					index,
+					"milestones",
+					milestoneIndex
+				] : ["milestones", milestoneIndex],
+				message: "Milestone keys must be unique."
+			});
+			milestoneKeys.add(milestone.clientMilestoneKey);
+		}
+	}
+});
+var creationChoicesSchema = object({
+	intent: array(choiceRefSchema),
+	category: array(choiceRefSchema),
+	status: array(choiceRefSchema),
+	commitment: array(choiceRefSchema),
+	customerBudgetApproved: array(choiceRefSchema),
+	solutionArea: array(choiceRefSchema),
+	technicalCapability: array(choiceRefSchema)
+}).strict();
+object({
+	contractVersion: literal("1.2"),
+	target: _enum(["sqlite", "draft"]),
+	revision: string().min(1),
+	account: lookupRefSchema,
+	opportunities: array(lookupRefSchema.extend({ currency: currencyRefSchema.optional() })),
+	priceLists: array(lookupRefSchema),
+	currencies: array(currencyRefSchema),
+	workloads: array(lookupRefSchema),
+	owners: array(lookupRefSchema),
+	defaults: object({
+		owner: lookupRefSchema,
+		priceList: lookupRefSchema.optional(),
+		currency: currencyRefSchema.optional()
+	}).strict(),
+	choices: creationChoicesSchema,
+	maxMutations: number().int().positive().max(999)
+}).strict();
+object({
+	contractVersion: literal("1.2"),
+	accountId: string().trim().min(1).max(200)
+}).strict();
+object({
+	contractVersion: literal("1.2"),
+	target: recordCreationTargetSchema,
+	draft: recordCreationDraftSchema
+}).strict();
+var recordCreationPreviewSchema = object({
+	contractVersion: literal("1.2"),
+	batchId: string().min(1),
+	digest: string().regex(/^[a-f0-9]{64}$/),
+	target: _enum(["sqlite", "draft"]),
+	catalogRevision: string().min(1),
+	normalizedDraft: recordCreationDraftSchema,
+	mutationCount: number().int().positive(),
+	warnings: array(string().min(1)),
+	expiresAt: string().datetime()
+}).strict();
+object({
+	contractVersion: literal("1.2"),
+	preview: recordCreationPreviewSchema,
+	expectedDigest: string().regex(/^[a-f0-9]{64}$/),
+	confirmed: literal(true)
+}).strict();
+var recordCreationItemResultSchema = object({
+	clientKey: string().min(1),
+	kind: _enum([
+		"opportunity",
+		"milestone",
+		"deal-team"
+	]),
+	recordId: string().min(1).optional(),
+	parentRecordId: string().min(1).optional()
+}).strict();
+var recordCreationResultSchema = object({
+	contractVersion: literal("1.2"),
+	batchId: string().min(1),
+	target: _enum(["sqlite", "draft"]),
+	state: _enum([
+		"committed",
+		"drafted",
+		"rolled-back",
+		"reconciled"
+	]),
+	created: array(recordCreationItemResultSchema),
+	audit: object({
+		correlationId: string().min(1),
+		opportunityCount: number().int().nonnegative(),
+		milestoneCount: number().int().nonnegative(),
+		committedAt: string().datetime().optional()
+	}).strict(),
+	message: string().min(1)
+}).strict().superRefine((result, context) => {
+	if (result.target === "draft") {
+		if (result.state !== "drafted" || result.created.length > 0 || result.audit.committedAt) context.addIssue({
+			code: "custom",
+			path: ["state"],
+			message: "Drafts cannot claim committed records or a commit time."
+		});
+	} else if (result.state === "drafted") context.addIssue({
+		code: "custom",
+		path: ["state"],
+		message: "A SQLite result cannot be a draft."
+	});
+	if (result.state === "committed") {
+		const count = (kind) => result.created.filter((item) => item.kind === kind).length;
+		if (!result.audit.committedAt || count("opportunity") !== result.audit.opportunityCount || count("deal-team") !== result.audit.opportunityCount || count("milestone") !== result.audit.milestoneCount) context.addIssue({
+			code: "custom",
+			path: ["created"],
+			message: "A commit receipt must match its created-record counts and commit time."
+		});
+	}
+});
+object({
+	contractVersion: literal("1.2"),
+	result: recordCreationResultSchema,
+	files: array(object({
+		name: string().min(1),
+		content: string(),
+		mimeType: string().min(1)
+	}).strict()).min(1)
+}).strict();
+object({
+	code: _enum([
+		"validation-failed",
+		"parent-unavailable",
+		"reference-unavailable",
+		"catalog-changed",
+		"stale-preview",
+		"batch-too-large",
+		"target-disabled",
+		"already-committed",
+		"transaction-failed",
+		"ambiguous-outcome"
+	]),
+	message: string().min(1),
+	path: array(union([string(), number()])).optional()
+}).strict();
 var cachePolicySchema = object({
 	mutableFreshMs: number().int().positive().default(3e5),
 	referenceFreshMs: number().int().positive().default(18e5),
@@ -4430,6 +6034,388 @@ var mutationSyncResponseSchema = discriminatedUnion("kind", [
 	}).strict()
 ]);
 //#endregion
+//#region packages/common/contracts/index.ts
+var dataModeSchema = _enum(["sample", "live"]);
+var sourceStateSchema = _enum([
+	"sample",
+	"live",
+	"stale",
+	"partial",
+	"unauthorized",
+	"unavailable"
+]);
+var sourceHealthSchema = object({
+	source: _enum([
+		"msx",
+		"mcem",
+		"seismic",
+		"linkedin",
+		"dataverse-mcp",
+		"msx-mcp"
+	]),
+	state: sourceStateSchema,
+	detail: string().min(1),
+	checkedAt: string().datetime()
+});
+object({
+	mode: dataModeSchema,
+	auth: object({
+		state: _enum([
+			"ready",
+			"cli-missing",
+			"login-required",
+			"tenant-mismatch",
+			"consent-required",
+			"permission-missing"
+		]),
+		displayName: string().min(1).optional(),
+		userEmail: string().email().optional(),
+		tenantName: string().min(1).optional(),
+		detail: string().min(1)
+	})
+});
+var opportunitySchema = object({
+	id: string().min(1),
+	accountId: string().min(1),
+	name: string().min(1),
+	owner: string().min(1).optional(),
+	opportunityIntent: array(string().trim().min(1)).max(10).optional(),
+	recordedStage: number().int().min(1).max(5),
+	value: number().finite(),
+	currency: string().length(3),
+	closeDate: string().date(),
+	comments: string().optional()
+});
+var milestoneSchema = object({
+	id: string().min(1),
+	opportunityId: string().min(1),
+	name: string().min(1),
+	status: string().min(1),
+	targetDate: string().date().optional(),
+	estimatedMonthlyUsage: number().optional(),
+	owner: string().min(1).optional(),
+	commitment: string().min(1).optional(),
+	riskDetails: string().optional(),
+	comments: string().optional(),
+	/**
+	* Whether the signed-in user is on this milestone's team. Independent of
+	* opportunity Deal Team membership and of the milestone owner. Set per-user by
+	* the connector at read time; omitted means membership is unknown/not evaluated.
+	*/
+	onMilestoneTeam: boolean().optional()
+});
+var portfolioReadRequestSchema = object({
+	contractVersion: literal("1.0"),
+	includeHidden: boolean().optional()
+}).strict();
+var portfolioIndexSchema = object({
+	contractVersion: literal("1.0"),
+	accounts: array(accountSchema$1.strict()),
+	opportunities: array(opportunitySchema.strict())
+}).strict();
+portfolioReadRequestSchema.extend({
+	accountId: string().min(1).max(200).optional(),
+	opportunityId: string().min(1).max(200).optional()
+}).strict();
+portfolioIndexSchema.extend({
+	selectedAccountId: string().min(1).optional(),
+	selectedOpportunityId: string().min(1).optional(),
+	milestones: array(milestoneSchema.strict())
+}).strict();
+var milestoneStatusSchema = _enum([
+	"On Track",
+	"At Risk",
+	"Blocked",
+	"Completed",
+	"Cancelled",
+	"Lost to Competitor",
+	"Hygiene/Duplicate"
+]);
+var customerCommitmentSchema = _enum(["Uncommitted", "Committed"]);
+object({
+	status: milestoneStatusSchema.optional(),
+	riskDetails: string().max(3e4).optional(),
+	targetDate: string().date().optional(),
+	customerCommitment: customerCommitmentSchema.optional(),
+	comments: string().max(3e4).optional()
+}).refine((value) => Object.keys(value).length > 0, "At least one milestone field is required.");
+object({ comments: string().max(3e4) });
+object({
+	opportunityId: string().min(1),
+	milestoneId: string().min(1),
+	onMilestoneTeam: literal(true),
+	alreadyMember: boolean()
+}).strict();
+object({
+	opportunityId: string().min(1),
+	milestoneId: string().min(1),
+	onMilestoneTeam: literal(false),
+	alreadyAbsent: boolean()
+}).strict();
+/** Activity priority, mapped to the Dataverse task `prioritycode` (Low 0 / Normal 1 / High 2). */
+var milestoneActivityPrioritySchema = _enum([
+	"Low",
+	"Normal",
+	"High"
+]);
+/**
+* Task Category option set shown on the MSX "Quick Create: Task" form. Bundled so sample mode needs
+* no network; in live mode the field + option codes are environment-configured.
+*/
+var taskCategorySchema = _enum([
+	"Architecture Design Session",
+	"Assessment",
+	"Blocker Escalation",
+	"Briefing",
+	"Call Back Requested",
+	"Consumption Plan",
+	"Cross Segment",
+	"Cross Workload",
+	"Customer Engagement",
+	"Demo",
+	"External (Co-creation of Value)",
+	"Internal",
+	"L300+ Demo",
+	"Negotiate Pricing",
+	"New Partner Request",
+	"PoC/Pilot",
+	"Post Sales",
+	"Rapid Prototyping",
+	"RFP/RFI",
+	"Solution Whiteboarding",
+	"Tech Support",
+	"Technical Close/Win Plan",
+	"Technical Workshop",
+	"Workshop"
+]);
+object({
+	id: string().min(1),
+	milestoneId: string().min(1),
+	opportunityId: string().min(1),
+	subject: string().min(1),
+	activityType: string().min(1),
+	status: string().min(1),
+	priority: milestoneActivityPrioritySchema.optional(),
+	taskCategory: string().min(1).optional(),
+	due: string().date().optional(),
+	durationMinutes: number().int().positive().optional(),
+	description: string().optional(),
+	owner: string().min(1).optional(),
+	createdBy: string().min(1).optional(),
+	createdOn: string().datetime().optional()
+});
+object({
+	subject: string().trim().min(1).max(200),
+	taskCategory: taskCategorySchema.optional(),
+	description: string().max(3e4).optional(),
+	due: string().date().optional(),
+	priority: milestoneActivityPrioritySchema.default("Normal"),
+	durationMinutes: number().int().positive().max(1e5).optional()
+}).strict();
+/**
+* An opportunity surfaced by SE-domain discovery. It extends the base
+* opportunity with the domain it matched and whether the signed-in user is
+* already on its deal team, so a client can present a one-click join action.
+*/
+var discoverableOpportunitySchema = opportunitySchema.extend({
+	domain: seDomainSchema,
+	accountName: string().min(1).optional(),
+	solutionArea: string().min(1).optional(),
+	technicalCapability: string().min(1).optional(),
+	onDealTeam: boolean()
+});
+object({ contractVersion: literal("1.0") }).strict();
+object({
+	contractVersion: literal("1.0"),
+	generatedAt: string().datetime(),
+	accounts: array(accountSchema$1.strict()),
+	portfolioOpportunities: array(opportunitySchema.strict()),
+	opportunities: array(discoverableOpportunitySchema.strict()),
+	milestoneTeamOpportunityIds: array(string().min(1))
+}).strict();
+object({
+	contractVersion: literal("1.2"),
+	accountId: string().min(1),
+	opportunityId: string().min(1),
+	targetStage: number().int().min(1).max(5),
+	reason: string().trim().min(10).max(1e3).optional()
+}).strict();
+object({
+	opportunity: opportunitySchema,
+	previousStage: number().int().min(1).max(5),
+	targetStage: number().int().min(1).max(5),
+	disposition: _enum([
+		"advanced",
+		"override",
+		"recycled"
+	]),
+	auditNote: string().min(1)
+}).strict();
+var evidenceSchema = object({
+	id: string().min(1),
+	source: _enum([
+		"msx",
+		"mcem",
+		"dataverse-mcp",
+		"msx-mcp"
+	]),
+	recordId: string().min(1),
+	title: string().min(1),
+	url: string().url().optional(),
+	retrievedAt: string().datetime(),
+	modifiedAt: string().datetime().optional(),
+	accessContext: _enum(["sample", "delegated-user"]),
+	quality: _enum([
+		"authoritative",
+		"observed",
+		"stale",
+		"incomplete"
+	]),
+	excerpt: string().min(1)
+});
+var criterionSchema = object({
+	id: string().min(1),
+	label: string().min(1),
+	status: _enum([
+		"met",
+		"partial",
+		"missing"
+	]),
+	rationale: string().min(1),
+	evidenceIds: array(string().min(1))
+});
+var recommendationSchema = object({
+	id: string().min(1),
+	action: string().min(1),
+	ownerRole: string().min(1),
+	rationale: string().min(1),
+	evidenceIds: array(string().min(1)),
+	assumption: boolean(),
+	confidence: _enum([
+		"high",
+		"medium",
+		"low"
+	])
+}).superRefine((recommendation, context) => {
+	if (recommendation.evidenceIds.length === 0 && !recommendation.assumption) context.addIssue({
+		code: "custom",
+		path: ["evidenceIds"],
+		message: "A recommendation must cite evidence or be labeled as an assumption."
+	});
+});
+object({
+	contractVersion: literal("1.2"),
+	accountId: string().min(1),
+	opportunityId: string().min(1),
+	prompt: string().min(3).max(1e3)
+});
+var agentCapabilitySchema = _enum(workflowAgentCapabilityValues);
+object({
+	contractVersion: literal("1.2"),
+	capability: agentCapabilitySchema,
+	accountId: string().min(1),
+	opportunityId: string().min(1),
+	prompt: string().min(3).max(agentTaskPromptMaxLength)
+});
+var agentTaskResponseSchema = object({
+	contractVersion: literal("1.2"),
+	correlationId: string().uuid(),
+	capability: agentCapabilitySchema,
+	agentVersion: string().min(1),
+	generatedAt: string().datetime(),
+	mode: dataModeSchema,
+	state: _enum([
+		"complete",
+		"partial",
+		"unauthorized"
+	]),
+	content: string().min(1),
+	sourceHealth: array(sourceHealthSchema).min(1)
+});
+/**
+* Progressive agent response. `context` carries an instant deterministic draft grounded in the same
+* evidence as the model call; `delta` carries model text; `complete` always carries the full authoritative
+* response; `error` ends the stream without a response.
+*/
+var agentTaskStreamEventSchema = discriminatedUnion("type", [
+	object({
+		type: literal("context"),
+		streamVersion: literal("1.0"),
+		capability: agentCapabilitySchema,
+		instantDraft: string().min(1),
+		sourceHealth: array(sourceHealthSchema).min(1)
+	}).strict(),
+	object({
+		type: literal("delta"),
+		text: string().min(1)
+	}).strict(),
+	object({
+		type: literal("complete"),
+		response: agentTaskResponseSchema
+	}).strict(),
+	object({
+		type: literal("error"),
+		code: _enum([
+			"failed",
+			"timeout",
+			"cancelled"
+		]),
+		message: string().min(1).max(500)
+	}).strict()
+]);
+object({
+	contractVersion: literal("1.2"),
+	recipients: array(string().email()).min(1).max(20),
+	subject: string().trim().min(1).max(255),
+	responseTitle: string().trim().min(1).max(255),
+	responseMarkdown: string().min(1).max(2e5)
+}).strict();
+object({ state: literal("opened") }).strict();
+object({
+	contractVersion: literal("1.2"),
+	responseTitle: string().trim().min(1).max(255),
+	responseMarkdown: string().min(1).max(2e5),
+	generatedAt: string().datetime()
+}).strict();
+discriminatedUnion("state", [object({
+	state: literal("saved"),
+	filePath: string().min(1)
+}).strict(), object({ state: literal("cancelled") }).strict()]);
+object({
+	contractVersion: literal("1.2"),
+	correlationId: string().uuid(),
+	capability: literal("mcem-coach"),
+	agentVersion: string().min(1),
+	generatedAt: string().datetime(),
+	mode: dataModeSchema,
+	state: _enum([
+		"complete",
+		"partial",
+		"unauthorized"
+	]),
+	summary: string().min(1),
+	recordedStage: number().int().min(1).max(5),
+	evidenceBasedStage: number().int().min(1).max(5),
+	criteria: array(criterionSchema).min(1),
+	recommendations: array(recommendationSchema).min(1),
+	missingData: array(string().min(1)),
+	evidence: array(evidenceSchema).min(1),
+	sourceHealth: array(sourceHealthSchema).min(1)
+});
+object({
+	correlationId: string().uuid(),
+	agentVersion: string().min(1),
+	capability: literal("mcem-coach"),
+	category: _enum([
+		"useful",
+		"incorrect",
+		"missing-source",
+		"wrong-owner",
+		"other"
+	]),
+	comment: string().max(500).optional()
+});
+//#endregion
 //#region apps/desktop/electron/preload/index.ts
 electron.contextBridge.exposeInMainWorld("tlc", {
 	invokeMutationSync: async (request) => mutationSyncResponseSchema.parse(await electron.ipcRenderer.invoke("tlc:mutation-sync", request)),
@@ -4444,6 +6430,7 @@ electron.contextBridge.exposeInMainWorld("tlc", {
 		};
 	},
 	invokeSellerDashboard: (request) => electron.ipcRenderer.invoke("tlc:seller-dashboard", request),
+	invokeSeReporting: (request) => electron.ipcRenderer.invoke("tlc:se-reporting", request),
 	invokeVoice: (request) => electron.ipcRenderer.invoke("tlc:voice-input", request),
 	exitApplication: () => electron.ipcRenderer.invoke("tlc:exit-application"),
 	getDataStatus: () => electron.ipcRenderer.invoke("tlc:get-data-status"),
@@ -4478,6 +6465,32 @@ electron.contextBridge.exposeInMainWorld("tlc", {
 	runMcemCoach: (request) => electron.ipcRenderer.invoke("tlc:run-mcem-coach", request),
 	transitionOpportunityStage: (request) => electron.ipcRenderer.invoke("tlc:transition-opportunity-stage", request),
 	runAgentTask: (request) => electron.ipcRenderer.invoke("tlc:run-agent-task", request),
+	runAgentTaskStream: (request, onEvent) => {
+		const streamId = globalThis.crypto.randomUUID();
+		let terminalDelivered = false;
+		const listener = (_event, message) => {
+			if (message?.streamId !== streamId || terminalDelivered) return;
+			const event = message.event;
+			if (event && typeof event === "object" && "type" in event && (event.type === "complete" || event.type === "error")) terminalDelivered = true;
+			onEvent(event);
+		};
+		electron.ipcRenderer.on("tlc:agent-task-event", listener);
+		return {
+			cancel: () => {
+				electron.ipcRenderer.invoke("tlc:cancel-agent-task-stream", streamId);
+			},
+			done: electron.ipcRenderer.invoke("tlc:run-agent-task-stream", request, streamId).then((raw) => {
+				const terminal = agentTaskStreamEventSchema.parse(raw);
+				if (terminal.type !== "complete" && terminal.type !== "error") throw new Error("The agent response ended before it completed.");
+				if (!terminalDelivered) {
+					terminalDelivered = true;
+					onEvent(terminal);
+				}
+			}).finally(() => {
+				electron.ipcRenderer.removeListener("tlc:agent-task-event", listener);
+			})
+		};
+	},
 	openEmailCompose: (request) => electron.ipcRenderer.invoke("tlc:open-email-compose", request),
 	exportAgentResponse: (request) => electron.ipcRenderer.invoke("tlc:export-agent-response", request),
 	openEvidence: (url) => electron.ipcRenderer.invoke("tlc:open-evidence", url),

@@ -29,6 +29,23 @@ test('launches the secure MCEM operational workbench', async () => {
     })
     await window.reload()
     await expect(window.getByText('SAMPLE DATA')).toBeVisible()
+    const knowledge = await window.evaluate(async () => {
+      const bridge = globalThis.window.tlc
+      if (!bridge) throw new Error('The Desktop bridge is unavailable.')
+      return bridge.searchKnowledge({
+        contractVersion: '1.0', source: 'seismic-m365', query: 'Azure AI', filters: { fileTypes: ['pptx'] }
+      })
+    })
+    expect(knowledge).toMatchObject({
+      kind: 'results', mode: 'sample', sourceHealth: { state: 'sample' },
+      hits: [{ source: 'seismic-m365', fileType: 'pptx', untrusted: true }]
+    })
+    const mcp = await window.evaluate(async () => {
+      const bridge = globalThis.window.tlc
+      if (!bridge) throw new Error('The Desktop bridge is unavailable.')
+      return bridge.searchKnowledge({ contractVersion: '1.0', source: 'seismic-mcp', query: 'Azure AI' })
+    })
+    expect(mcp).toMatchObject({ kind: 'unavailable', code: 'mcp-not-configured' })
     const sourceNotice = window.locator('.sample-notice')
     const workspaceTopWithNotice = (await window.locator('.workspace').boundingBox())!.y
     await expect(sourceNotice).toBeVisible()
