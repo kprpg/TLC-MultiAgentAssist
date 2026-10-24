@@ -7,6 +7,8 @@ import { AgentResultView } from './result-view.js'
 import { ResponseActions } from './response-actions.js'
 import type { TeamsApiClient } from './data-client.js'
 import type { WorkingSelection } from './accounts.js'
+import type { AgentInvoke } from '../../../shared/use-agent-run.js'
+import type { CustomerEmailAction } from '../../../shared/customer-email.js'
 
 export function GuidanceWorkspace({ client, selection }: { client: TeamsApiClient; selection: WorkingSelection }) {
   const [capability, setCapability] = useState<c.AgentCapability>('account-pulse')
@@ -16,6 +18,18 @@ export function GuidanceWorkspace({ client, selection }: { client: TeamsApiClien
   const [busy, setBusy] = useState(false)
   const [phase, setPhase] = useState<AgentStreamProgress['phase'] | null>(null)
   const request = useRef<AbortController | null>(null)
+  const invoke: AgentInvoke = (capability, accountId, opportunityId, prompt, onProgress, signal) =>
+    client.runAgentTaskStream({ contractVersion: c.contractVersion, capability, accountId, opportunityId, prompt }, onProgress, signal)
+  const emailAction: CustomerEmailAction = {
+    kind: 'recipients',
+    compose: async (draft, recipients) => {
+      const input = c.emailComposeRequestSchema.parse({
+        contractVersion: c.contractVersion, recipients, subject: draft.subject, responseTitle: draft.subject, responseMarkdown: draft.markdown
+      })
+      await client.download('documents/email', { opportunityId: selection.opportunity.id, draft: input }, 'TLC-customer-email-draft.eml')
+      return 'downloaded'
+    }
+  }
   useEffect(() => () => request.current?.abort(), [])
   async function run() {
     request.current?.abort()
@@ -47,7 +61,9 @@ export function GuidanceWorkspace({ client, selection }: { client: TeamsApiClien
       : phase === 'draft' ? 'Showing the evidence-based draft from current MSX evidence while the AI response is prepared. No source records will be changed.'
       : 'Checking current MSX evidence, milestones and MCEM guidance before preparing the response. No source records will be changed.'}</p>}
     {error && <p role="alert" className="error-banner">{error}</p>}
-    {result && <AgentResultView result={result} actions={busy ? null : <ResponseActions client={client} opportunityId={selection.opportunity.id}
+    {result && <AgentResultView result={result} busy={busy} emailAction={emailAction}
+      followUp={{ capability: result.capability, accountId: selection.account.id, opportunityId: selection.opportunity.id, invoke }}
+      actions={busy ? null : <ResponseActions client={client} opportunityId={selection.opportunity.id}
       title={`TLC guidance - ${selection.opportunity.name}`} markdown={formatResponseMarkdown(result.content)} generatedAt={result.generatedAt} />} />}
   </div>
 }

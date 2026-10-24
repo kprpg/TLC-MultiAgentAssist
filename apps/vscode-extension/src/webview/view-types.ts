@@ -164,10 +164,11 @@ export interface WorkflowDefinitionView {
     name: string
     personaTargets: string[]
     category: string
+    sla: { targetMs: number; timeoutMs: number }
     ui: { cardStyle: string }
 }
 
-export interface WorkflowRunView { runId: string; workflowId: string; status: string }
+export interface WorkflowRunView { runId: string; workflowId: string; status: string; state?: string }
 
 export interface WorkflowResultCardView {
     style: string
@@ -192,8 +193,10 @@ export interface WorkflowQueueItemView {
 
 export interface WorkflowOutputView {
     workflowId: string
+    generatedAt: string
     card: WorkflowResultCardView
     queueItems: WorkflowQueueItemView[]
+    sourceHealth: Array<{ source: string; state: string; detail: string }>
 }
 
 export interface WorkflowRunResultView { run: WorkflowRunView; output?: WorkflowOutputView }

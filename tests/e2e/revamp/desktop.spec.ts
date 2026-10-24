@@ -8,7 +8,8 @@ import { expectCompleteSamplePortfolio } from './sample-portfolio.js'
 import { expectOpportunityAndMilestoneRemoval } from './membership-removal.js'
 import { expectOpportunitiesToFillCollapsedWorkspace } from './opportunities-layout.js'
 import { conversionOffer, followUpAgentResponse, initialAgentResponse } from './agent-response-fixtures.js'
-import { agentTaskRequestSchema, contractVersion } from '../../../packages/common/contracts/index.js'
+import { agentTaskRequestSchema, contractVersion, emailComposeRequestSchema } from '../../../packages/common/contracts/index.js'
+import { expectCopiedCustomerEmail, installCustomerEmailClipboard } from '../customer-email.js'
 
 test('Desktop agent follow-ups send the previous response through IPC and keep both replies readable', async () => {
     const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-agent-follow-up-'))
@@ -19,6 +20,12 @@ test('Desktop agent follow-ups send the previous response through IPC and keep b
     try {
         await app.evaluate(({ ipcMain }, { initial, followUp, version }) => {
             process.env.TLC_TEST_AGENT_REQUESTS = '[]'
+            delete process.env.TLC_TEST_CUSTOMER_EMAIL
+            ipcMain.removeHandler('tlc:open-email-compose')
+            ipcMain.handle('tlc:open-email-compose', (_event, request: unknown) => {
+                process.env.TLC_TEST_CUSTOMER_EMAIL = JSON.stringify(request)
+                return { state: 'opened' }
+            })
             ipcMain.removeHandler('tlc:run-agent-task-stream')
             ipcMain.handle('tlc:run-agent-task-stream', (event, request: { capability: string }, streamId: string) => {
                 const requests: unknown[] = JSON.parse(process.env.TLC_TEST_AGENT_REQUESTS ?? '[]')
@@ -38,6 +45,7 @@ test('Desktop agent follow-ups send the previous response through IPC and keep b
             })
         }, { initial: initialAgentResponse, followUp: followUpAgentResponse, version: contractVersion })
         const window = await app.firstWindow()
+        await installCustomerEmailClipboard(window)
         await window.setViewportSize({ width: 1600, height: 1000 })
         await window.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'Portfolio', exact: true }).click()
         await window.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
@@ -57,6 +65,19 @@ test('Desktop agent follow-ups send the previous response through IPC and keep b
         expect(sent[1]).toMatchObject({ capability: 'account-pulse', accountId: 'account-contoso', opportunityId: 'opp-grid-modernization' })
         expect(sent[1]!.prompt).toContain(initialAgentResponse)
         expect(sent[1]!.prompt).toContain(conversionOffer)
+        const actions = response.getByRole('region', { name: 'Customer email draft actions' })
+        await expectCopiedCustomerEmail(window, actions)
+        expect(await app.evaluate(() => process.env.TLC_TEST_CUSTOMER_EMAIL)).toBeUndefined()
+        await actions.getByRole('button', { name: 'E-mail', exact: true }).click()
+        await actions.getByLabel('Draft recipients', { exact: true }).fill('reviewer@example.com')
+        await actions.getByRole('button', { name: 'Prepare unsent draft', exact: true }).click()
+        await expect(actions.getByRole('status')).toContainText('Unsent email draft opened')
+        const email = emailComposeRequestSchema.parse(JSON.parse(await app.evaluate(() => process.env.TLC_TEST_CUSTOMER_EMAIL ?? 'null')))
+        expect(email.recipients).toEqual(['reviewer@example.com'])
+        expect(email.subject).toBe('Confirming the approval path')
+        expect(email.responseMarkdown).toContain('Please confirm the sponsor and approval sequence.')
+        expect(email.responseMarkdown).not.toContain('Assumptions and missing information')
+        expect(email.responseMarkdown).not.toContain('Feedback prompt')
     } finally {
         await app.close()
         await rm(userDataDirectory, { recursive: true, force: true })

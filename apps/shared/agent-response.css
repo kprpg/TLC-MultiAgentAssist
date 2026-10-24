@@ -90,3 +90,62 @@
 .agent-response-markdown {
     overflow-wrap: anywhere;
 }
+
+.customer-email-actions {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--cp-border, var(--vscode-panel-border, var(--colorNeutralStroke2, #d1d1d1)));
+}
+
+.customer-email-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.customer-email-actions button {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--cp-border-strong, var(--vscode-panel-border, var(--colorNeutralStroke1, #8a8a8a)));
+    border-radius: 4px;
+    color: var(--cp-text, var(--vscode-foreground, var(--colorNeutralForeground1, #242424)));
+    background: var(--cp-surface-soft, var(--vscode-editorWidget-background, var(--colorNeutralBackground1, #ffffff)));
+    font: inherit;
+    cursor: pointer;
+}
+
+.customer-email-actions button:hover:not(:disabled),
+.customer-email-actions button:focus-visible {
+    outline: 2px solid var(--cp-accent, var(--vscode-focusBorder, var(--colorStrokeFocus2, #0078d4)));
+    outline-offset: 2px;
+}
+
+.customer-email-actions button:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.customer-email-review-note {
+    color: var(--cp-text-muted, var(--vscode-descriptionForeground, var(--colorNeutralForeground3, #616161)));
+    font-size: 0.9em;
+}
+
+.customer-email-form,
+.customer-email-form label {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.customer-email-form input {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    padding: 0.5rem;
+    border: 1px solid var(--cp-border-strong, var(--vscode-input-border, var(--colorNeutralStroke1, #8a8a8a)));
+    color: var(--cp-text, var(--vscode-input-foreground, var(--colorNeutralForeground1, #242424)));
+    background: var(--cp-surface, var(--vscode-input-background, var(--colorNeutralBackground1, #ffffff)));
+    font: inherit;
+}
+
+.customer-email-form input:focus-visible {
+    outline: 2px solid var(--cp-accent, var(--vscode-focusBorder, var(--colorStrokeFocus2, #0078d4)));
+}

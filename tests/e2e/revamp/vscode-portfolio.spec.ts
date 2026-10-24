@@ -2,6 +2,9 @@ import { expect, test, type Page } from '@playwright/test'
 import { resolve } from 'node:path'
 import type { AccountView, OpportunityView } from '../../../apps/vscode-extension/src/webview/view-types.js'
 import { briefOffer, conversionOffer, followUpAgentResponse, initialAgentResponse } from './agent-response-fixtures.js'
+import { expectHorizontalPaneScroll, expectPaneResizing } from '../pane-resizing.js'
+import { expectTextContrast } from '../color-contrast.js'
+import { expectCopiedCustomerEmail, installCustomerEmailClipboard } from '../customer-email.js'
 
 interface BridgeRequest {
     kind: string
@@ -24,6 +27,8 @@ declare global {
             delayComments: boolean
             delayAgent: boolean
             failAgent: boolean
+            failEmail: boolean
+            cancelEmail: boolean
             delayedAgent: Array<{ id: string; event: unknown }>
             release(): void
             releaseAgent(): void
@@ -80,7 +85,7 @@ async function mountWebview(page: Page): Promise<void> {
         window.portfolioTest = {
             accounts, requests: [], delayed: [], delayCoach: false, failAccounts: false, rejectEvidence: false,
             rejectComments: false, delayComments: false,
-            delayAgent: false, failAgent: false, delayedAgent: [],
+            delayAgent: false, failAgent: false, failEmail: false, cancelEmail: false, delayedAgent: [],
             release() {
                 for (const response of this.delayed.splice(0)) reply(response.id, response.result)
             },
@@ -118,6 +123,11 @@ async function mountWebview(page: Page): Promise<void> {
                     if (message.kind !== 'request') return
                     const state = window.portfolioTest
                     state.requests.push(message)
+                    if (message.method === 'composeEmail') {
+                        if (state.failEmail) window.postMessage({ kind: 'response', id: message.id, ok: false, error: { message: 'The email application is unavailable.' } }, window.location.origin)
+                        else reply(message.id, { drafted: !state.cancelEmail })
+                        return
+                    }
                     if ((['listAccounts', 'getPortfolioIndex', 'getDiscoverySnapshot'].includes(message.method) && state.failAccounts) ||
                         (message.method === 'openEvidence' && state.rejectEvidence) ||
                         (message.method === 'updateOpportunity' && state.rejectComments)) {
@@ -232,8 +242,83 @@ async function mountWebview(page: Page): Promise<void> {
     await expect(page.locator('#portfolio-details-panel').getByRole('heading', { name: 'Alpha analysis', exact: true })).toBeVisible()
 }
 
+test('VS Code resizes Portfolio panes with dot grips and scrolls wide tables without changing scope', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await mountWebview(page)
+    const accountsPane = page.locator('#portfolio-accounts-panel')
+    const details = page.locator('#portfolio-details-panel')
+    const accountsHandle = page.getByRole('separator', { name: 'Resize Accounts panel', exact: true })
+    const detailsHandle = page.getByRole('separator', { name: 'Resize opportunity details panel', exact: true })
+    await expect(page.getByRole('separator')).toHaveCount(2)
+    await expectPaneResizing(page, accountsHandle, accountsPane)
+    await expectPaneResizing(page, detailsHandle, details)
+    await accountsHandle.press('Home')
+    await expectHorizontalPaneScroll(accountsPane.locator('.opportunity-table-wrap'))
+    await detailsHandle.press('Home')
+    await expectHorizontalPaneScroll(details.locator('.milestone-table-wrap'))
+    await expect(details.getByRole('heading', { name: 'Alpha analysis', exact: true })).toBeVisible()
+    await expect(page.getByRole('combobox', { name: 'Customer account', exact: true })).toHaveValue('alpha')
+
+    await page.getByRole('button', { name: 'Hide Accounts panel', exact: true }).click()
+    await expect(accountsHandle).toHaveCount(0)
+    await page.getByRole('button', { name: 'Show Accounts panel', exact: true }).click()
+    await expect(accountsHandle).toBeVisible()
+    await page.setViewportSize({ width: 420, height: 850 })
+    await expect(page.getByRole('separator')).toHaveCount(0)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
+
+test('VS Code cancels pane dragging cleanly and keeps unsent comments while resizing', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await mountWebview(page)
+    const row = page.locator('#portfolio-accounts-panel tr').filter({ hasText: 'Alpha analysis' }).first()
+    await row.getByRole('button', { name: 'Comments', exact: true }).click()
+    const draft = page.locator('#portfolio-accounts-panel textarea[data-draft-field="comments"]')
+    await draft.fill('Keep this unsent comment during resizing.')
+    const handle = page.getByRole('separator', { name: 'Resize Accounts panel', exact: true })
+    const box = (await handle.boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + 60)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2 + 30, box.y + 60, { steps: 3 })
+    await expect(handle).toHaveClass(/is-dragging/)
+    await handle.dispatchEvent('pointercancel', { pointerId: 1 })
+    await page.mouse.up()
+    await expect(page.locator('body')).not.toHaveClass(/resizing-pane/)
+    await expect(draft).toHaveValue('Keep this unsent comment during resizing.')
+    expect(await page.evaluate(() => window.portfolioTest.requests.some((request) => request.method === 'updateOpportunity'))).toBe(false)
+})
+
+const webviewThemes = [
+    { name: 'dark', colors: '--vscode-editor-background:#1e1e1e;--vscode-editorWidget-background:#252526;--vscode-foreground:#cccccc;--vscode-descriptionForeground:#969696;--vscode-textLink-foreground:#3794ff;--vscode-textLink-activeForeground:#75beff' },
+    { name: 'light', colors: '--vscode-editor-background:#ffffff;--vscode-editorWidget-background:#f3f3f3;--vscode-foreground:#333333;--vscode-descriptionForeground:#616161;--vscode-textLink-foreground:#006ab1;--vscode-textLink-activeForeground:#005a9e' }
+]
+
+for (const theme of webviewThemes) test(`VS Code guidance Cancel stays readable and functional in the ${theme.name} theme`, async ({ page }) => {
+    await mountWebview(page)
+    await page.addStyleTag({ content: `:root{${theme.colors};--vscode-focusBorder:#0078d4}` })
+    await page.getByRole('tab', { name: 'Guidance', exact: true }).click()
+    await page.evaluate(() => { window.portfolioTest.delayAgent = true })
+    await page.getByRole('button', { name: 'What should the account team focus on this week?' }).click()
+    const cancel = page.getByRole('button', { name: 'Cancel', exact: true })
+    await expect(cancel).toBeEnabled()
+    await expectTextContrast(cancel)
+    await cancel.hover()
+    await expectTextContrast(cancel)
+    await cancel.press('Tab')
+    await cancel.focus()
+    await expect(cancel).toBeFocused()
+    await expect(cancel).toHaveCSS('outline-style', 'solid')
+    await expectTextContrast(cancel)
+    await cancel.click()
+    await expect(cancel).toHaveCount(0)
+    await expect.poll(() => page.evaluate(() => window.portfolioTest.requests.filter((request) => request.kind === 'stream-cancel').length)).toBe(1)
+    await page.evaluate(() => window.portfolioTest.releaseAgent())
+    await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled()
+})
+
 test('VS Code agent follow-ups send scoped context and render the returned email as readable Markdown', async ({ page }) => {
     await mountWebview(page)
+    await installCustomerEmailClipboard(page)
     await page.getByRole('tab', { name: 'Guidance', exact: true }).click()
     await page.getByRole('button', { name: 'What should the account team focus on this week?' }).click()
     await expect(page.locator('.agent-response-markdown h2')).toHaveText(['Summary', 'Observed signals', 'Recommended actions', 'Sources', 'Feedback prompt'])
@@ -245,6 +330,7 @@ test('VS Code agent follow-ups send scoped context and render the returned email
     await send.press('Enter')
     await expect(send).toBeDisabled()
     await expect(page.getByRole('button', { name: `Send follow-up: ${briefOffer}` })).toBeDisabled()
+    await expect(page.getByRole('region', { name: 'Customer email draft actions' })).toHaveCount(0)
     const requests = await calls()
     expect(requests).toHaveLength(2)
     expect(requests[1]?.params).toMatchObject({ capability: 'account-pulse', accountId: 'alpha', opportunityId: 'alpha-one' })
@@ -256,7 +342,40 @@ test('VS Code agent follow-ups send scoped context and render the returned email
     await expect(response.getByRole('columnheader')).toHaveText(['Owner', 'Action', 'Evidence'])
     await expect(response.locator('strong').filter({ hasText: 'Subject:' })).toBeVisible()
     await expect(page.getByRole('button', { name: `Send follow-up: ${briefOffer}` })).toBeEnabled()
+    const actions = response.getByRole('region', { name: 'Customer email draft actions' })
+    await expectCopiedCustomerEmail(page, actions)
+    await actions.getByRole('button', { name: 'E-mail', exact: true }).click()
+    await expect(actions.getByRole('status')).toContainText('Unsent email draft opened')
+    const compose = await page.evaluate(() => window.portfolioTest.requests.find((request) => request.method === 'composeEmail'))
+    expect(compose?.params).toMatchObject({ subject: 'Confirming the approval path' })
+    expect(compose?.params).not.toHaveProperty('recipients')
+    expect(JSON.stringify(compose?.params)).toContain('Please confirm the sponsor and approval sequence.')
+    expect(JSON.stringify(compose?.params)).not.toContain('Assumptions and missing information')
+    expect(JSON.stringify(compose?.params)).not.toContain('Feedback prompt')
     await expect(page.locator('.agent-response-markdown').first().getByRole('heading', { name: 'Summary', exact: true })).toBeVisible()
+})
+
+for (const theme of webviewThemes) test(`VS Code customer email sharing reports failures and cancellation in the ${theme.name} theme without claiming a sent email`, async ({ page }) => {
+    await mountWebview(page)
+    await page.addStyleTag({ content: `:root{${theme.colors};--vscode-focusBorder:#0078d4}` })
+    await installCustomerEmailClipboard(page)
+    await page.getByRole('tab', { name: 'Guidance', exact: true }).click()
+    await page.getByRole('button', { name: 'What should the account team focus on this week?' }).click()
+    await page.getByRole('button', { name: `Send follow-up: ${conversionOffer}` }).click()
+    const actions = page.getByRole('article', { name: 'Agent follow-up response' }).getByRole('region', { name: 'Customer email draft actions' })
+    await page.evaluate(() => { window.customerEmailClipboard.fail = true })
+    await actions.getByRole('button', { name: 'Copy', exact: true }).click()
+    await expect(actions.getByRole('alert')).toHaveText('Clipboard permission denied.')
+    await expect(actions.getByRole('status')).toHaveCount(0)
+    await page.evaluate(() => { window.customerEmailClipboard.fail = false })
+    await expectCopiedCustomerEmail(page, actions)
+    await page.evaluate(() => { window.portfolioTest.failEmail = true })
+    await actions.getByRole('button', { name: 'E-mail', exact: true }).click()
+    await expect(actions.getByRole('alert')).toHaveText('The email application is unavailable.')
+    await expect(actions.getByRole('status')).toHaveCount(0)
+    await page.evaluate(() => { window.portfolioTest.failEmail = false; window.portfolioTest.cancelEmail = true })
+    await actions.getByRole('button', { name: 'E-mail', exact: true }).click()
+    await expect(actions.getByRole('status')).toHaveText('Email draft cancelled. Nothing was sent.')
 })
 
 test('VS Code agent follow-ups show errors, support retry and cancellation, and ignore late completion', async ({ page }) => {

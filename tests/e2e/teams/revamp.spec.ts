@@ -1,5 +1,34 @@
 import { expect, test } from '@playwright/test'
 import { chooseOpportunity, openUtility, post } from './helpers.js'
+import { expectHorizontalPaneScroll, expectPaneResizing } from '../pane-resizing.js'
+
+test('Teams resizes Portfolio panes, preserves hidden drafts and scrolls wide rows', async ({ page, request }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/')
+  await chooseOpportunity(page, request)
+  const accounts = page.locator('#portfolio-accounts-panel')
+  const details = page.locator('#portfolio-details-panel')
+  const accountsHandle = page.getByRole('separator', { name: 'Resize Accounts panel', exact: true })
+  const detailsHandle = page.getByRole('separator', { name: 'Resize opportunity details panel', exact: true })
+  await expect(page.getByRole('separator')).toHaveCount(2)
+  await expectPaneResizing(page, accountsHandle, page.locator('.portfolio-scope-disclosure'))
+  await expectPaneResizing(page, detailsHandle, details)
+  await accountsHandle.press('Home')
+  await expectHorizontalPaneScroll(accounts.getByRole('region', { name: 'Opportunity list' }))
+
+  await page.getByRole('tab', { name: 'Guidance', exact: true }).click()
+  const draft = page.getByLabel('Ask TLC', { exact: true })
+  await draft.fill('Keep this private draft while resizing and hiding panes.')
+  await detailsHandle.press('ArrowRight')
+  await page.getByRole('button', { name: 'Hide opportunity details panel', exact: true }).click()
+  await expect(details).toBeHidden()
+  await expect(detailsHandle).toHaveCount(0)
+  await page.getByRole('button', { name: 'Show opportunity details panel', exact: true }).click()
+  await expect(draft).toHaveValue('Keep this private draft while resizing and hiding panes.')
+  await page.setViewportSize({ width: 420, height: 850 })
+  await expect(page.getByRole('separator')).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
 
 test('opens the focused opportunity in MSX from the standalone Teams workbench', async ({ page, request }) => {
   await page.addInitScript(() => {

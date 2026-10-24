@@ -83,6 +83,7 @@ Host** window loaded directly from your working tree (not the installed `.vsix`)
 | Launch configuration | Startup environment |
 | --- | --- |
 | Run TLC Assist Extension | fixtures (sample) |
+| Run TLC Assist Extension (isolated) | Standard profile settings; other installed extensions disabled only in this debug window |
 | Run TLC Assist Extension (SQLite test store) | `TLC_MODE=sample`, `TLC_DATA_STORE=sqlite` |
 | Run TLC Assist Extension (SQLite + Foundry extraction) | adds `TLC_MEETING_EXTRACTOR=foundry`, `TLC_MEETING_MODEL=gpt-6.1-sol` |
 | Run TLC Assist Extension (Live MSX/Dataverse) | `TLC_MODE=live` |

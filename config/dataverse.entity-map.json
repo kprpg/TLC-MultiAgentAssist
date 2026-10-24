@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "environmentLabel": "microsoftsales",
-  "refreshedAt": "2026-09-12T00:00:00.000Z",
+  "refreshedAt": "2026-10-16T00:00:00.000Z",
   "entities": [
     {
       "canonical": "account",
@@ -50,7 +50,14 @@
         { "canonical": "id", "logicalName": "msp_engagementmilestoneid", "label": "Milestone ID", "dataType": "uniqueidentifier", "sensitivity": "internal", "includeInPrompt": true },
         { "canonical": "opportunityId", "logicalName": "_msp_opportunityid_value", "label": "Opportunity ID", "dataType": "lookup", "sensitivity": "internal", "includeInPrompt": true },
         { "canonical": "name", "logicalName": "msp_name", "label": "Milestone name", "dataType": "string", "sensitivity": "internal", "includeInPrompt": true },
-        { "canonical": "status", "logicalName": "msp_milestonestatusname", "label": "Status", "dataType": "string", "sensitivity": "internal", "includeInPrompt": true },
+        {
+          "canonical": "status", "logicalName": "msp_milestonestatus", "label": "Status", "dataType": "optionset",
+          "optionSet": {
+            "On Track": 861980000, "At Risk": 861980001, "Blocked": 861980002, "Completed": 861980003,
+            "Cancelled": 861980004, "Lost to Competitor": 861980005, "Hygiene/Duplicate": 861980006
+          },
+          "sensitivity": "internal", "includeInPrompt": true
+        },
         { "canonical": "targetDate", "logicalName": "msp_milestonedate", "label": "Target date", "dataType": "date", "sensitivity": "internal", "includeInPrompt": true }
       ]
     },

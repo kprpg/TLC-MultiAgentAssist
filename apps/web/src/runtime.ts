@@ -200,6 +200,8 @@ export async function createHostedWorkflowHostResolver(options: HostedRuntimeOpt
         await evictOldestWorkflowHost(hosts)
         const token = { value: authentication.accessToken }
         const msx = new LiveMsxConnector({ getAccessToken: async () => token.value }, fetch, undefined, undefined, msxWriteMetadataFromEnvironment(environment), portfolioPreferenceStore)
+        const performanceReporter = createPerformanceReporter(environment['TLC_PERFORMANCE'] === '1',
+            (message) => console.info(`[performance] ${message}`))
         const configured = createLivePlayWorkflowHost({
             registry,
             policy,
@@ -208,6 +210,7 @@ export async function createHostedWorkflowHostResolver(options: HostedRuntimeOpt
             resolveCurrentUserId: () => msx.getCurrentUserId(),
             resolveExcludedAccountIds: async () =>
                 (await portfolioPreferenceStore.read(await msx.getCurrentUserId())).hiddenAccountIds,
+            ...(performanceReporter ? { performanceReporter } : {}),
             onStepError: (info) => {
                 console.error(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? 'required' : 'optional'} step failed: ${info.message}`)
             }

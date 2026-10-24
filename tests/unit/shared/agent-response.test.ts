@@ -8,6 +8,38 @@ const content = `1. Summary\n\n**Budget:** Unconfirmed [O.C1].\n\n2. Recommended
 const followUp = { capability: 'account-pulse' as const, accountId: 'account', opportunityId: 'opportunity', invoke: vi.fn() }
 
 describe('shared AgentResponse', () => {
+    it('offers E-mail and Copy on a completed customer email without preparing or sending automatically', () => {
+        const compose = vi.fn()
+        const markup = renderToStaticMarkup(createElement(AgentResponse, {
+            content: '## Customer-ready draft\n\n**Subject:** Confirming next steps\n\nPlease confirm the approval sequence.',
+            emailAction: { kind: 'host', compose }, onOpenEvidence: vi.fn()
+        }))
+        expect(markup).toContain('aria-label="Customer email draft actions"')
+        expect(markup).toContain('>E-mail</button>')
+        expect(markup).toContain('>Copy</button>')
+        expect(markup).toContain('Nothing is sent automatically.')
+        expect(compose).not.toHaveBeenCalled()
+    })
+
+    it('places E-mail and Copy immediately after a quoted customer draft and before later review sections', () => {
+        const markup = renderToStaticMarkup(createElement(AgentResponse, {
+            content: '## Customer-ready draft requiring human review\n\n> Requires human review.\n>\n> **Subject:** Aligning next steps\n>\n> Hi [Customer Name],\n\n## Recommended tailoring before send\n\nConfirm timing.',
+            emailAction: { kind: 'host', compose: vi.fn() }, onOpenEvidence: vi.fn()
+        }))
+        const actions = markup.indexOf('Customer email draft actions')
+        expect(markup.indexOf('Hi [Customer Name],')).toBeLessThan(actions)
+        expect(actions).toBeLessThan(markup.indexOf('Recommended tailoring before send'))
+        expect(markup).toContain('Replace the bracketed placeholders')
+    })
+
+    it('does not allow sharing a partially streamed customer email', () => {
+        const markup = renderToStaticMarkup(createElement(AgentResponse, {
+            content: '## Customer-ready draft\n\nSubject: Confirming next steps\n\nIncomplete text.',
+            busy: true, emailAction: { kind: 'host', compose: vi.fn() }, onOpenEvidence: vi.fn()
+        }))
+        expect(markup).not.toContain('Customer email draft actions')
+    })
+
     it('renders sections, bold labels, and an accessible sendable offer without sending automatically', () => {
         const markup = renderToStaticMarkup(createElement(AgentResponse, { content, followUp, onOpenEvidence: vi.fn() }))
         expect(markup).toContain('<h2>Summary</h2>')

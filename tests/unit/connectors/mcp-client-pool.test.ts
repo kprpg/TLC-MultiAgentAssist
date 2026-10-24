@@ -45,6 +45,29 @@ function deferred<T>() {
 }
 
 describe('McpClientPool', () => {
+    it('reports cold initialization once without logging tokens or tool arguments', async () => {
+        const performanceReporter = vi.fn()
+        const pool = new McpClientPool({
+            registry: registry(), accessTokenProvider: async () => 'private-token', performanceReporter,
+            clientFactory: () => ({
+                initialize: async () => undefined,
+                listTools: async () => ({ tools: [] }),
+                callTool: async () => ({ content: [] }),
+                dispose: async () => undefined
+            })
+        })
+        try {
+            await pool.callTool('dataverse', 'read_query', { querytext: 'private-query-text' })
+            await pool.callTool('dataverse', 'read_query', { querytext: 'private-query-text' })
+            expect(performanceReporter).toHaveBeenCalledExactlyOnceWith({
+                operation: 'mcp.initialize.dataverse', durationMs: expect.any(Number), outcome: 'success'
+            })
+            expect(JSON.stringify(performanceReporter.mock.calls)).not.toMatch(/private-token|private-query-text/)
+        } finally {
+            await pool.dispose()
+        }
+    })
+
     it('shares one physical client across logical server aliases', async () => {
         const fakeClient = {
             initialize: vi.fn(async () => undefined),

@@ -3778,6 +3778,9 @@ var ZodURL = /*@__PURE__*/ $constructor("ZodURL", (inst, def) => {
 	$ZodURL.init(inst, def);
 	ZodStringFormat.init(inst, def);
 });
+function url(params) {
+	return /* @__PURE__ */ _url(ZodURL, params);
+}
 var ZodEmoji = /*@__PURE__*/ $constructor("ZodEmoji", (inst, def) => {
 	$ZodEmoji.init(inst, def);
 	ZodStringFormat.init(inst, def);
@@ -4317,6 +4320,102 @@ function refine(fn, _params = {}) {
 function superRefine(fn, params) {
 	return /* @__PURE__ */ _superRefine(fn, params);
 }
+var knowledgeSourceIdSchema = _enum([
+	"mcem",
+	"seismic-m365",
+	"seismic-mcp"
+]);
+var knowledgeFileTypeSchema = _enum([
+	"ppt",
+	"pptx",
+	"pdf",
+	"doc",
+	"docx",
+	"xls",
+	"xlsx",
+	"html"
+]);
+var knowledgeSearchFiltersSchema = object({ fileTypes: array(knowledgeFileTypeSchema).min(1).max(8).optional() }).strict();
+var knowledgeSearchRequestSchema = object({
+	contractVersion: literal("1.0"),
+	query: string().trim().min(1).max(500),
+	source: knowledgeSourceIdSchema,
+	filters: knowledgeSearchFiltersSchema.optional(),
+	limit: number().int().min(1).max(50).optional(),
+	offset: number().int().min(0).max(1e4).optional()
+}).strict();
+var httpsEvidenceUrl = url().max(4096).refine((value) => {
+	const url = new URL(value);
+	return url.protocol === "https:" && !url.username && !url.password;
+}, "Knowledge evidence must use an HTTPS URL without credentials.");
+var knowledgeHitSchema = object({
+	id: string().min(1).max(500),
+	evidenceId: string().min(1).max(1e3),
+	source: knowledgeSourceIdSchema,
+	title: string().trim().min(1).max(1e3),
+	url: httpsEvidenceUrl,
+	snippet: string().max(4e3).optional(),
+	fileType: knowledgeFileTypeSchema.optional(),
+	lastModifiedAt: datetime({ offset: true }).optional(),
+	connectionId: string().min(1).max(32).optional(),
+	untrusted: literal(true)
+}).strict();
+var knowledgeFailureCodeSchema = _enum([
+	"source-not-configured",
+	"mcp-not-configured",
+	"graph-not-configured",
+	"graph-auth-not-configured",
+	"graph-sign-in-required",
+	"graph-permission-denied",
+	"graph-throttled",
+	"graph-request-failed",
+	"graph-transport-failed",
+	"graph-response-invalid",
+	"graph-response-too-large"
+]);
+var sourceHealth = object({
+	state: _enum([
+		"sample",
+		"live",
+		"partial",
+		"unauthorized",
+		"unavailable"
+	]),
+	detail: string().min(1).max(1e3),
+	checkedAt: datetime()
+}).strict();
+var common = {
+	contractVersion: literal("1.0"),
+	source: knowledgeSourceIdSchema,
+	mode: _enum(["sample", "live"]),
+	sourceHealth
+};
+var knowledgeSearchResponseSchema = discriminatedUnion("kind", [object({
+	...common,
+	kind: literal("results"),
+	hits: array(knowledgeHitSchema).max(50),
+	hasMore: boolean(),
+	nextOffset: number().int().min(1).max(1e4).optional(),
+	warnings: array(_enum(["invalid-source-items", "unverified-file-types"])).max(2)
+}).strict().superRefine((value, context) => {
+	if (value.hasMore !== (value.nextOffset !== void 0)) context.addIssue({
+		code: "custom",
+		message: "A continuation offset is required exactly when more results are available."
+	});
+	if (value.sourceHealth.state !== value.mode && value.sourceHealth.state !== "partial") context.addIssue({
+		code: "custom",
+		message: "Results require an available source."
+	});
+	if (value.hits.some((hit) => hit.source !== value.source)) context.addIssue({
+		code: "custom",
+		message: "Knowledge hits must come from the requested source."
+	});
+}), object({
+	...common,
+	kind: literal("unavailable"),
+	code: knowledgeFailureCodeSchema,
+	message: string().min(1).max(1e3)
+}).strict().refine((value) => ["unauthorized", "unavailable"].includes(value.sourceHealth.state), "Unavailable results must report an unavailable or unauthorized source.")]);
 //#endregion
 //#region packages/common/contracts/agent-task-limits.ts
 var agentTaskPromptMaxLength = 64e3;
@@ -6418,6 +6517,7 @@ object({
 //#endregion
 //#region apps/desktop/electron/preload/index.ts
 electron.contextBridge.exposeInMainWorld("tlc", {
+	searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(await electron.ipcRenderer.invoke("tlc:search-knowledge", knowledgeSearchRequestSchema.parse(request))),
 	invokeMutationSync: async (request) => mutationSyncResponseSchema.parse(await electron.ipcRenderer.invoke("tlc:mutation-sync", request)),
 	cacheControl: async (request) => cacheControlResponseSchema.parse(await electron.ipcRenderer.invoke("tlc:cache-control", request)),
 	onCacheChanged: (listener) => {

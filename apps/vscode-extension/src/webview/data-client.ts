@@ -20,6 +20,7 @@ import { discoverySnapshotSchema, discoverySnapshotVersion, portfolioIndexSchema
 import * as syncContracts from '../../../../packages/common/contracts/index.js'
 import { SessionPortfolio } from '../../../shared/session-portfolio.js'
 import { MutationSyncClient } from '../../../shared/mutation-sync.js'
+import { pollWorkflow } from '../../../shared/workflow-polling.js'
 import type {
     AccountView,
     AccountCandidateView,
@@ -51,11 +52,6 @@ import type {
     WorkflowRunResultView,
     WorkflowRunView
 } from './view-types.js'
-
-const POLL_INTERVAL_MS = 300
-const POLL_TIMEOUT_MS = 15_000
-
-const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 const transport = {
     searchKnowledge: async (input: KnowledgeSearchRequest) => knowledgeSearchResponseSchema.parse(
@@ -169,21 +165,22 @@ const transport = {
         return { handoff, response }
     },
 
-    async runWorkflowToCompletion(workflowId: string, asOf: string): Promise<WorkflowRunResultView> {
+    async runWorkflowToCompletion(
+        workflowId: string,
+        asOf: string,
+        timeoutMs: number,
+        onUpdate?: (view: WorkflowRunResultView) => void
+    ): Promise<WorkflowRunResultView> {
         const run = await request<WorkflowRunView>('startWorkflow', {
             workflowId,
             scope: { kind: 'portfolio' },
             input: { asOf }
         })
-        const deadline = Date.now() + POLL_TIMEOUT_MS
-        let view = await request<WorkflowRunResultView>('getWorkflowRun', { runId: run.runId })
-        while (view.run.status !== 'completed' && view.run.status !== 'failed' && view.run.status !== 'cancelled') {
-            if (Date.now() > deadline) throw new Error('The play timed out before completing.')
-            await delay(POLL_INTERVAL_MS)
-            view = await request<WorkflowRunResultView>('getWorkflowRun', { runId: run.runId })
-        }
-
-        return view
+        return pollWorkflow(
+            () => request<WorkflowRunResultView>('getWorkflowRun', { runId: run.runId }),
+            timeoutMs,
+            onUpdate
+        )
     }
 }
 

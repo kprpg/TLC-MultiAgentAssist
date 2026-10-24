@@ -13,7 +13,7 @@ import dataverseEntityMapJson from '../../../config/dataverse.entity-map.json' w
 import foundryEnvironmentJson from '../../../config/foundry.environment.json' with { type: 'json' }
 import { LiveMsxConnector, LiveMeetingCaptureConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
 import { RecordCreationService } from '../../../packages/orchestrator/record-creation/service.js'
-import { JsonFilePortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
+import { JsonFilePortfolioPreferenceStore, MemoryPortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
 import { createFoundryOpenAIClient } from '../../../packages/connectors/foundry/index.js'
 import { createFoundryMeetingExtractor } from '../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
 import type { MeetingExtractorFn } from '../../../packages/connectors/local-store/index.js'
@@ -84,9 +84,10 @@ export function createLiveDataProvider(
     const metadata = msxWriteMetadataFromEnvironment(process.env)
     const performanceReporter = createPerformanceReporter(process.env['TLC_PERFORMANCE'] === '1',
         (message) => console.info(`[performance] ${message}`))
-    const msx = preferenceFilePath
-        ? new LiveMsxConnector({ getAccessToken: sourceToken }, fetch, undefined, performanceReporter, metadata, new JsonFilePortfolioPreferenceStore(preferenceFilePath))
-        : new LiveMsxConnector({ getAccessToken: sourceToken }, fetch, undefined, performanceReporter, metadata)
+    const portfolioPreferenceStore = preferenceFilePath
+        ? new JsonFilePortfolioPreferenceStore(preferenceFilePath)
+        : new MemoryPortfolioPreferenceStore()
+    const msx = new LiveMsxConnector({ getAccessToken: sourceToken }, fetch, undefined, performanceReporter, metadata, portfolioPreferenceStore)
     const taskAgents = (useFoundryAgents ? buildFoundryTaskAgents(foundryCredential, performanceReporter) : undefined) ?? buildLiveTaskAgents()
     const orchestrator = new ThinSliceOrchestrator(msx, new ExtensionMcemGuidanceConnector(), taskAgents, performanceReporter, new RecordCreationService(msx, msx),
         createKnowledgeSearch({ mode: 'live', ...(getGraphKnowledgeToken ? { getGraphToken: getGraphKnowledgeToken } : {}) }))
@@ -99,9 +100,9 @@ export function createLiveDataProvider(
         entityMap,
         getAccessToken: () => sourceToken(),
         resolveCurrentUserId: () => msx.getCurrentUserId(),
-        resolveExcludedAccountIds: async () => (await msx.listAccounts({ includeHidden: true }))
-            .filter((candidate) => candidate.visibility === 'hidden')
-            .map((candidate) => candidate.id),
+        resolveExcludedAccountIds: async () =>
+            (await portfolioPreferenceStore.read(await msx.getCurrentUserId())).hiddenAccountIds,
+        ...(performanceReporter ? { performanceReporter } : {}),
         ...(onStepError ? { onStepError } : {})
     })
     const reportingHost = createSeReportingHost({

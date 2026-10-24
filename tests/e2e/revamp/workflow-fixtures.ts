@@ -47,7 +47,7 @@ function definition(id: string, name: string, personaTargets: string[], connecto
         connectorPlan: connectors.map((connector) => ({ connector, operation: 'read_query', required: connector === 'dataverse-mcp' })),
         inputSchemaRef: `workflow-input-${id.toLowerCase()}.v1`,
         outputSchemaRef: `workflow-output-${id.toLowerCase()}.v1`,
-        sla: { targetMs: 4_000, timeoutMs: 12_000 },
+        sla: { targetMs: 4_000, timeoutMs: 60_000 },
         auth: { requiresDelegatedUser: true, allowedWrite: false },
         ui: { cardStyle: 'record-table', resultPriority: 'high', showInQuickLaunch: true }
     }

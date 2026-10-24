@@ -90,8 +90,16 @@ apps/teams/.env.cli.example          Safe existing-user CLI configuration, not t
 apps/shared/                         Browser-safe prompt/Markdown and existing UI reuse
 apps/shared/transcript-file.ts       Shared UTF-8 VTT/text reader for Desktop/Web, VS Code and Teams
                                      Shared Portfolio controls, sorting and Next Best Actions
+apps/shared/pane-resize-handle.tsx   Accessible shared three-dot width divider for all four surfaces
+apps/shared/resizable-split.tsx      Responsive two-region Portfolio sizing without unmounting hidden drafts
+apps/shared/pane-resizing.css        Blue hover/drag divider lines and native horizontal pane scrollbars
+apps/shared/customer-email.ts        Browser-safe customer-email extraction excluding later internal sections
+apps/shared/customer-email-actions.tsx
+                                     Copy and human-reviewed unsent draft actions shared by all four surfaces
 apps/shared/session-portfolio.ts     Memory-only, mode/session-scoped Portfolio/Discovery snapshots
                                      Shared lazy detail caching, local filtering and confirmed-write updates
+apps/shared/workflow-polling.ts      Workflow-definition deadline plus bounded transport grace across UI transports
+apps/shared/workflow-progress.tsx    Shared incomplete/partial/terminal Play result announcements
 apps/shared/session-cache.ts         Bounded reactive datasets, active-interest freshness and safe read retries
 apps/shared/presentation-owner.ts    Host-owned cache composition and confirmed canonical patches
 apps/shared/presentation-hooks.ts    Visible-interest subscriptions and original editor-field capture

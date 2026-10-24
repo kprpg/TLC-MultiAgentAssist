@@ -35,6 +35,6 @@ export function WorkbenchPane({ collapsed, mobileActive, stageBoardActive, onTog
                 >{collapsed ? <ChevronDoubleRight20Regular /> : <ChevronDoubleLeft20Regular />}</button>
             </div>
         </div>
-        <div id="guidance-pane-content" className="workbench-pane-content">{children}</div>
+        <div id="guidance-pane-content" className="workbench-pane-content pane-scroll">{children}</div>
     </section>
 }

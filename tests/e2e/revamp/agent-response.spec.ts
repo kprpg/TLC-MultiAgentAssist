@@ -1,5 +1,6 @@
 import { createServer, type Server } from 'node:http'
 import { resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
 import { expect, test, type Page } from '@playwright/test'
 import { buildWebApiHandler, type WebRuntime } from '../../../apps/web/src/app.js'
 import { createSampleAuthentication } from '../../../apps/web/src/authentication.js'
@@ -8,6 +9,7 @@ import { FixtureMsxConnector } from '../../../packages/connectors/msx/index.js'
 import { FixtureMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
 import { ThinSliceOrchestrator, type AgentStreamHandlers, type AgentTaskContext } from '../../../packages/orchestrator/index.js'
 import { briefOffer, conversionOffer, followUpAgentResponse, initialAgentResponse } from './agent-response-fixtures.js'
+import { expectCopiedCustomerEmail, expectUnsentCustomerEmail, installCustomerEmailClipboard } from '../customer-email.js'
 
 let server: Server | undefined
 test.afterEach(async () => {
@@ -74,6 +76,7 @@ async function mountGuidance(page: Page) {
 
 test('Web agent follow-ups send the preceding answer and display both responses with headings, bold labels, and tables', async ({ page }) => {
     const host = await mountGuidance(page)
+    await installCustomerEmailClipboard(page)
     await expect(page.locator('.agent-response-markdown h2')).toHaveText(['Summary', 'Observed signals', 'Recommended actions', 'Sources', 'Feedback prompt'])
     await expect(page.locator('.agent-response-markdown li strong')).toHaveText(['Evidence:', 'Confidence:', 'Owner role:', 'Priority:', 'Rationale:'])
     await expect(page.locator('.agent-response-markdown li strong').first()).toHaveCSS('font-weight', '650')
@@ -89,6 +92,7 @@ test('Web agent follow-ups send the preceding answer and display both responses 
     expect(followUp.prompt).toContain(conversionOffer)
     await expect(send).toBeDisabled()
     await expect(page.getByRole('button', { name: `Send follow-up: ${briefOffer}` })).toBeDisabled()
+    await expect(page.getByRole('region', { name: 'Customer email draft actions' })).toHaveCount(0)
     host.complete()
 
     const response = page.getByRole('article', { name: 'Agent follow-up response' })
@@ -97,11 +101,48 @@ test('Web agent follow-ups send the preceding answer and display both responses 
     await expect(response.locator('strong').filter({ hasText: 'Subject:' })).toBeVisible()
     await expect(page.locator('.agent-response-markdown').first().getByRole('heading', { name: 'Summary', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: `Send follow-up: ${briefOffer}` })).toBeEnabled()
+    const actions = response.getByRole('region', { name: 'Customer email draft actions' })
+    await expectCopiedCustomerEmail(page, actions)
+    await actions.getByRole('button', { name: 'E-mail', exact: true }).click()
+    await actions.getByLabel('Draft recipients', { exact: true }).fill('reviewer@example.com')
+    await expect(actions.getByLabel('Draft subject', { exact: true })).toHaveValue('Confirming the approval path')
+    const [download] = await Promise.all([
+        page.waitForEvent('download'), actions.getByRole('button', { name: 'Prepare unsent draft', exact: true }).click()
+    ])
+    const path = await download.path()
+    if (!path) throw new Error('The customer email draft was not downloaded.')
+    expectUnsentCustomerEmail(await readFile(path, 'utf8'))
+    await expect(actions.getByRole('status')).toContainText('Unsent email draft downloaded')
     await page.getByRole('button', { name: `Send follow-up: ${briefOffer}` }).click()
     await expect.poll(() => host.calls.length).toBe(3)
     expect(host.calls[2]!.request.prompt).toContain(followUpAgentResponse)
     host.complete()
     await expect(page.getByRole('button', { name: 'Cancel follow-up' })).toHaveCount(0)
+    await expect(page.getByRole('region', { name: 'Customer email draft actions' })).toHaveCount(2)
+})
+
+test('Web customer drafts validate recipients and report download failures without sending anything', async ({ page }) => {
+    const host = await mountGuidance(page)
+    await installCustomerEmailClipboard(page)
+    await page.getByRole('button', { name: `Send follow-up: ${conversionOffer}` }).click()
+    await expect.poll(() => host.calls.length).toBe(2)
+    host.complete()
+    const actions = page.getByRole('article', { name: 'Agent follow-up response' }).getByRole('region', { name: 'Customer email draft actions' })
+    await actions.getByRole('button', { name: 'E-mail', exact: true }).click()
+    await actions.getByLabel('Draft recipients', { exact: true }).fill('not-an-email')
+    await actions.getByRole('button', { name: 'Prepare unsent draft', exact: true }).click()
+    await expect(actions.getByRole('alert')).toContainText('valid recipient addresses')
+    await actions.getByLabel('Draft subject', { exact: true }).fill('Reviewed approval sequence')
+    await actions.getByRole('button', { name: 'Copy', exact: true }).click()
+    expect(await page.evaluate(() => window.customerEmailClipboard.texts.at(-1))).toMatch(/^Subject: Reviewed approval sequence\n/)
+    await page.route('**/api/open-email-compose', (route) => route.fulfill({
+        status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Draft download is unavailable.' })
+    }))
+    await actions.getByLabel('Draft recipients', { exact: true }).fill('reviewer@example.com')
+    await actions.getByRole('button', { name: 'Prepare unsent draft', exact: true }).click()
+    await expect(actions.getByRole('alert')).toHaveText('Draft download is unavailable.')
+    await expect(actions.getByRole('status')).toHaveCount(0)
+    await expect(actions.getByRole('button', { name: 'Prepare unsent draft', exact: true })).toBeEnabled()
 })
 
 test('Web agent follow-ups send user-written feedback with the original response for context', async ({ page }) => {

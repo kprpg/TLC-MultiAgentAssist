@@ -30,6 +30,7 @@ export type WorkflowConnectorExecutionContext = {
     scope: ScopeRef
     input: unknown
     signal: AbortSignal
+    onProgress?: (result: WorkflowConnectorResult) => void
 }
 
 export interface WorkflowConnectorExecutor {
@@ -208,6 +209,7 @@ export class WorkflowRuntime {
             for (const step of definition.connectorPlan) {
                 const callStarted = this.now()
                 const stepAbort = linkedAbortController(controller.signal)
+                let latestProgress: WorkflowConnectorResult | undefined
                 try {
                     const connectorResult = await withTimeout(
                         this.executor.execute(step, {
@@ -216,7 +218,22 @@ export class WorkflowRuntime {
                             correlationId: run.telemetry.correlationId,
                             scope: run.scope,
                             input,
-                            signal: stepAbort.controller.signal
+                            signal: stepAbort.controller.signal,
+                            onProgress: (progress) => {
+                                const current = this.history.get(runId)
+                                if (!this.resultAssembler || !current || current.status !== 'running' || stepAbort.controller.signal.aborted) return
+                                const progressiveResult: WorkflowExecutionResult = {
+                                    ...result, steps: [...result.steps, executionStep(step, progress)]
+                                }
+                                progressiveResult.output = this.resultAssembler.assemble({
+                                    definition, scope: current.scope, input, steps: progressiveResult.steps, generatedAt: iso(this.now())
+                                })
+                                this.results.set(resultRef, structuredClone(progressiveResult))
+                                current.telemetry.firstResultMs ??= Math.max(0, this.now() - startedMs)
+                                run = workflowRunSchema.parse({ ...current, resultRef })
+                                this.history.set(run)
+                                latestProgress = progress
+                            }
                         }),
                         Math.max(0, definition.sla.timeoutMs - (this.now() - startedMs)),
                         stepAbort.controller
@@ -236,13 +253,7 @@ export class WorkflowRuntime {
                     if (run.telemetry.firstResultMs === undefined && connectorResult.state !== 'unauthorized') {
                         run.telemetry.firstResultMs = Math.max(0, this.now() - startedMs)
                     }
-                    result.steps.push({
-                        connector: step.connector,
-                        operation: step.operation,
-                        data: connectorResult.data,
-                        ...(connectorResult.lineage ? { lineage: connectorResult.lineage } : {}),
-                        ...(connectorResult.sourceHealth ? { sourceHealth: connectorResult.sourceHealth } : {})
-                    })
+                    result.steps.push(executionStep(step, connectorResult))
                     if (connectorResult.state === 'unauthorized') {
                         outcome = step.required ? 'unauthorized' : 'partial'
                         this.onStepError?.({
@@ -287,12 +298,25 @@ export class WorkflowRuntime {
                         operation: step.operation,
                         status: unauthorized ? 'unauthorized' : 'failed',
                         durationMs: Math.max(0, this.now() - callStarted),
-                        recordCount: 0,
-                        truncated: false
+                        recordCount: latestProgress?.rowCount ?? 0,
+                        truncated: latestProgress !== undefined
                     })
                     this.history.set(run)
                     if (step.required) {
                         if (unauthorized) {
+                            this.results.delete(resultRef)
+                            delete run.resultRef
+                            this.history.set(run)
+                            if (latestProgress) {
+                                result.steps.push(executionStep(step, {
+                                    state: 'unauthorized', data: [], rowCount: 0, truncated: false,
+                                    ...(latestProgress.lineage ? { lineage: latestProgress.lineage } : {}),
+                                    sourceHealth: {
+                                        source: step.connector, state: 'unauthorized',
+                                        detail: `${step.connector} delegated authorization is unavailable.`, checkedAt: iso(this.now())
+                                    }
+                                }))
+                            }
                             outcome = 'unauthorized'
                             break
                         }
@@ -316,6 +340,14 @@ export class WorkflowRuntime {
                     outcome = 'partial'
                 } finally {
                     stepAbort.dispose()
+                }
+            }
+
+            function executionStep(step: ConnectorStep, result: WorkflowConnectorResult): WorkflowExecutionResult['steps'][number] {
+                return {
+                    connector: step.connector, operation: step.operation, data: result.data,
+                    ...(result.lineage ? { lineage: result.lineage } : {}),
+                    ...(result.sourceHealth ? { sourceHealth: result.sourceHealth } : {})
                 }
             }
 

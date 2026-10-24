@@ -267,6 +267,7 @@ const configuredWorkflowHost = dataMode === 'sample' ? undefined : createLivePla
   registry: mcpRegistry,
   policy: mcpPolicy,
   entityMap: dataverseEntityMap,
+  ...(reportPerformance ? { performanceReporter: reportPerformance } : {}),
   getAccessToken: async (server: McpServer) => {
     const token = await credentials.msx.getToken(server.authentication.scopes)
     if (!token) throw new Error('A delegated MCP access token is unavailable.')
@@ -277,10 +278,8 @@ const configuredWorkflowHost = dataMode === 'sample' ? undefined : createLivePla
     return liveMsxConnector.getCurrentUserId()
   },
   resolveExcludedAccountIds: async () => {
-    if (!liveMsxConnector) return []
-    return (await liveMsxConnector.listAccounts({ includeHidden: true }))
-      .filter((account) => account.visibility === 'hidden')
-      .map((account) => account.id)
+    if (!liveMsxConnector) throw new Error('Live Plays require the live MSX connection.')
+    return (await portfolioPreferenceStore.read(await liveMsxConnector.getCurrentUserId())).hiddenAccountIds
   },
   onStepError: (info) => {
     console.error(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? 'required' : 'optional'} step failed: ${info.message}`)

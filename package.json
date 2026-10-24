@@ -18,6 +18,8 @@
     "typecheck": "tsc --build --pretty false",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:regression:plays": "vitest run --maxWorkers=2 tests/unit/orchestrator/workflow tests/unit/orchestrator/live-play-host.test.ts tests/unit/orchestrator/sample-workflow-host.test.ts tests/unit/connectors/dataverse tests/unit/connectors/mcp-client-pool.test.ts tests/unit/shared/workflow tests/unit/hosts/workflow-transport-parity.test.ts tests/unit/vscode-extension/live-play-composition.test.ts tests/unit/vscode-extension/sample-provider.test.ts tests/unit/desktop/workflow-host-startup.test.ts tests/contract/dataverse-plays.test.ts tests/integration/plays-performance.test.ts",
+    "test:smoke:plays": "npm run desktop:build && npm run ext:build && playwright test --config playwright.revamp.config.ts web.spec.ts plays-progress.spec.ts --grep \"workflow|first[- ]page\" --reporter=line",
     "build": "npm run typecheck",
     "desktop:icon": "node scripts/generate-desktop-icon.mjs",
     "desktop:build": "npm run desktop:icon && npm run voice:model && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.main.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.preload.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.revamp.config.ts",

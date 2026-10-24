@@ -813,7 +813,7 @@ var voiceResponseSchema = z.discriminatedUnion("kind", [z.object({
 	kind: z.literal("availability"),
 	availability: voiceAvailabilitySchema
 }).strict(), voiceSessionSchema]);
-var text$3 = z.string().max(3e4);
+var text$4 = z.string().max(3e4);
 var name$1 = z.string().min(1).max(500);
 var identifier$3 = z.string().min(1).max(200);
 var tpid = z.string().regex(/^[1-9][0-9]{0,19}$/);
@@ -887,58 +887,58 @@ var accountSchema = z.object({
 		noPipeline: z.boolean(),
 		noInQuarterPipeline: z.boolean()
 	}).strict(),
-	nextAction: text$3
+	nextAction: text$4
 }).strict();
 var opportunitySchema$1 = z.object({
 	id: identifier$3,
-	number: text$3,
+	number: text$4,
 	tpid,
 	account: name$1,
 	name: name$1,
-	owner: text$3,
-	stage: text$3,
-	solutionArea: text$3,
-	salesPlay: text$3,
-	intent: text$3,
+	owner: text$4,
+	stage: text$4,
+	solutionArea: text$4,
+	salesPlay: text$4,
+	intent: text$4,
 	estimatedValue: amount$1.nullable(),
-	currency: text$3,
+	currency: text$4,
 	monthlyRunRate: amount$1.nullable(),
 	closeDate: date$3.nullable(),
-	state: text$3,
-	forecastComments: text$3,
+	state: text$4,
+	forecastComments: text$4,
 	timing,
-	relevance: text$3,
+	relevance: text$4,
 	modifiedAt: timestamp$1.optional(),
 	estimatedBilledRevenue: amount$1.nullable().optional(),
 	estimatedSqlRevenue: amount$1.nullable().optional()
 }).strict();
 var milestoneSchema$1 = z.object({
 	id: identifier$3,
-	number: text$3,
+	number: text$4,
 	opportunityId: identifier$3,
 	opportunityName: name$1,
 	tpid,
 	account: name$1,
 	name: name$1,
-	owner: text$3,
-	category: text$3,
-	status: text$3,
-	commitment: text$3,
+	owner: text$4,
+	category: text$4,
+	status: text$4,
+	commitment: text$4,
 	monthly: amount$1.nullable(),
 	date: date$3.nullable(),
-	workload: text$3,
-	forecastComments: text$3,
-	currency: text$3,
+	workload: text$4,
+	forecastComments: text$4,
+	currency: text$4,
 	active: z.boolean().nullable(),
 	timing,
 	metricCandidates: z.array(name$1).max(100),
-	mappingBasis: text$3,
-	classification: text$3,
+	mappingBasis: text$4,
+	classification: text$4,
 	scenarioCredit: amount$1.nullable(),
 	modifiedAt: timestamp$1.optional(),
 	commitmentChangedAt: timestamp$1.optional(),
-	region: text$3.optional(),
-	riskDetails: text$3.optional()
+	region: text$4.optional(),
+	riskDetails: text$4.optional()
 }).strict();
 var coverageSchema = z.object({
 	metric: name$1,
@@ -948,14 +948,14 @@ var coverageSchema = z.object({
 	committedMonthly: amount$1,
 	uncommittedMonthly: amount$1,
 	verifiedPeriodCredit: z.null(),
-	state: text$3,
+	state: text$4,
 	mappingSupported: z.boolean(),
 	mappingReviewRequired: z.boolean(),
 	scenarioAllowed: z.boolean(),
 	scenarioCommittedCredit: amount$1.nullable(),
 	scenarioUncommittedCredit: amount$1.nullable(),
 	scenarioRemainingGap: amount$1.nullable(),
-	nextAction: text$3
+	nextAction: text$4
 }).strict();
 var sellerDashboardReportSchema = z.object({
 	schemaVersion: z.literal(1),
@@ -969,7 +969,7 @@ var sellerDashboardReportSchema = z.object({
 			metric: name$1,
 			bucket: name$1,
 			hintSupported: z.boolean(),
-			state: text$3,
+			state: text$4,
 			scenarioAllowed: z.boolean()
 		}).strict()).max(100),
 		unmappedProductionCandidates: count$2
@@ -991,7 +991,7 @@ var sellerDashboardReportSchema = z.object({
 		pipeline: z.object({
 			status: quality,
 			asOf: timestamp$1.nullable(),
-			errors: z.array(text$3).max(1e3)
+			errors: z.array(text$4).max(1e3)
 		}).strict(),
 		quota: z.object({
 			name: name$1,
@@ -999,7 +999,7 @@ var sellerDashboardReportSchema = z.object({
 			accounts: count$2.max(200)
 		}).strict()
 	}).strict(),
-	warnings: z.array(text$3).max(1e3),
+	warnings: z.array(text$4).max(1e3),
 	official: z.object({
 		weightedAttainment: amount$1,
 		closedMonthAttainment: amount$1.nullable(),
@@ -1020,11 +1020,11 @@ var sellerDashboardReportSchema = z.object({
 			"Medium",
 			"Low"
 		]),
-		issue: text$3,
-		action: text$3,
-		owner: text$3
+		issue: text$4,
+		action: text$4,
+		owner: text$4
 	}).strict()).max(2e4),
-	methodology: z.array(text$3).max(100)
+	methodology: z.array(text$4).max(100)
 }).strict().superRefine((report, context) => {
 	const reject = (message) => context.addIssue({
 		code: "custom",
@@ -1092,7 +1092,7 @@ var supplementSourceSchema = z.object({
 	asOf: timestamp$1,
 	start: date$3,
 	end: date$3,
-	detail: text$3
+	detail: text$4
 }).strict().refine((source) => source.start <= source.end, "Invalid supplemental source interval.");
 var sellerDashboardSupplementSchema = z.object({
 	schemaVersion: z.literal(1),
@@ -1131,14 +1131,14 @@ var sellerDashboardSupplementSchema = z.object({
 			tpid,
 			workload: name$1,
 			monthlyOpportunity: nonnegative$1,
-			evidence: text$3
+			evidence: text$4
 		}).strict()).max(5e4)
 	}).strict().nullable(),
 	conversion: z.object({
 		source: supplementSourceSchema,
 		accounts: z.array(z.object({
 			tpid,
-			territory: text$3,
+			territory: text$4,
 			startingMonthly: nonnegative$1,
 			convertedMonthly: nonnegative$1,
 			inQuarterMonthly: nonnegative$1,
@@ -1171,7 +1171,7 @@ var sellerDashboardSnapshotSchema = z.object({
 	kind: z.literal("snapshot"),
 	mode: z.enum(["sample", "live"]),
 	state: z.enum(["ready", "stale"]),
-	message: text$3,
+	message: text$4,
 	report: sellerDashboardReportSchema,
 	supplement: sellerDashboardSupplementSchema.nullable()
 }).strict().superRefine((snapshot, context) => {
@@ -1218,7 +1218,7 @@ var sellerDashboardRequestSchema = z.discriminatedUnion("operation", [z.object({
 }).strict()]);
 var identifier$2 = z.string().min(1).max(200);
 var name = z.string().min(1).max(500);
-var text$2 = z.string().max(3e4);
+var text$3 = z.string().max(3e4);
 var nonnegative = z.number().finite().nonnegative();
 var count$1 = z.number().int().nonnegative();
 var date$2 = z.iso.date();
@@ -1254,8 +1254,8 @@ var stagePipelineOpportunitySchema = z.object({
 	number: name,
 	customer: name,
 	name,
-	notes: text$2,
-	contact: text$2,
+	notes: text$3,
+	contact: text$3,
 	scope: stagePipelineScopeSchema,
 	solutionArea: name,
 	inbound: z.boolean(),
@@ -1273,9 +1273,9 @@ var stagePipelineOpportunitySchema = z.object({
 	consumedRecurring: nonnegative,
 	consumedNonRecurring: nonnegative,
 	maccCommit: nonnegative,
-	partner: text$2.nullable(),
+	partner: text$3.nullable(),
 	competitor: z.object({
-		name: text$2.nullable(),
+		name: text$3.nullable(),
 		threat: stagePipelineThreatSchema
 	}).strict(),
 	solutionTagReview: z.boolean()
@@ -1285,13 +1285,13 @@ var stagePipelineMilestoneSchema = z.object({
 	number: name,
 	opportunityId: identifier$2,
 	name,
-	workload: text$2,
+	workload: text$3,
 	estimatedMonthlyAcr: nonnegative,
 	commitment: z.enum(["Committed", "Uncommitted"]),
 	status: stagePipelineMilestoneStatusSchema,
 	date: date$2.nullable(),
-	comment: text$2,
-	owner: text$2
+	comment: text$3,
+	owner: text$3
 }).strict();
 var acrMonthSchema = z.object({
 	month,
@@ -1315,7 +1315,7 @@ var stagePipelineSnapshotSchema = z.object({
 	kind: z.literal("snapshot"),
 	mode: z.enum(["sample", "live"]),
 	state: z.enum(["fresh", "stale"]),
-	message: text$2,
+	message: text$3,
 	generatedAt: timestamp,
 	owner: z.string().max(200),
 	asOf: date$2,
@@ -1368,7 +1368,7 @@ var stagePipelineUnavailableSchema = z.object({
 		"unauthorized",
 		"invalid-snapshot"
 	]),
-	message: text$2
+	message: text$3
 }).strict();
 z.object({
 	contractVersion: z.literal("1.0"),
@@ -1759,6 +1759,102 @@ var mutationSyncResponseSchema = z.discriminatedUnion("kind", [
 		receipts: z.array(mutationReceiptSchema).max(100)
 	}).strict()
 ]);
+var knowledgeSourceIdSchema = z.enum([
+	"mcem",
+	"seismic-m365",
+	"seismic-mcp"
+]);
+var knowledgeFileTypeSchema = z.enum([
+	"ppt",
+	"pptx",
+	"pdf",
+	"doc",
+	"docx",
+	"xls",
+	"xlsx",
+	"html"
+]);
+var knowledgeSearchFiltersSchema = z.object({ fileTypes: z.array(knowledgeFileTypeSchema).min(1).max(8).optional() }).strict();
+var knowledgeSearchRequestSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	query: z.string().trim().min(1).max(500),
+	source: knowledgeSourceIdSchema,
+	filters: knowledgeSearchFiltersSchema.optional(),
+	limit: z.number().int().min(1).max(50).optional(),
+	offset: z.number().int().min(0).max(1e4).optional()
+}).strict();
+var httpsEvidenceUrl = z.url().max(4096).refine((value) => {
+	const url = new URL(value);
+	return url.protocol === "https:" && !url.username && !url.password;
+}, "Knowledge evidence must use an HTTPS URL without credentials.");
+var knowledgeHitSchema = z.object({
+	id: z.string().min(1).max(500),
+	evidenceId: z.string().min(1).max(1e3),
+	source: knowledgeSourceIdSchema,
+	title: z.string().trim().min(1).max(1e3),
+	url: httpsEvidenceUrl,
+	snippet: z.string().max(4e3).optional(),
+	fileType: knowledgeFileTypeSchema.optional(),
+	lastModifiedAt: z.iso.datetime({ offset: true }).optional(),
+	connectionId: z.string().min(1).max(32).optional(),
+	untrusted: z.literal(true)
+}).strict();
+var knowledgeFailureCodeSchema = z.enum([
+	"source-not-configured",
+	"mcp-not-configured",
+	"graph-not-configured",
+	"graph-auth-not-configured",
+	"graph-sign-in-required",
+	"graph-permission-denied",
+	"graph-throttled",
+	"graph-request-failed",
+	"graph-transport-failed",
+	"graph-response-invalid",
+	"graph-response-too-large"
+]);
+var sourceHealth = z.object({
+	state: z.enum([
+		"sample",
+		"live",
+		"partial",
+		"unauthorized",
+		"unavailable"
+	]),
+	detail: z.string().min(1).max(1e3),
+	checkedAt: z.iso.datetime()
+}).strict();
+var common = {
+	contractVersion: z.literal("1.0"),
+	source: knowledgeSourceIdSchema,
+	mode: z.enum(["sample", "live"]),
+	sourceHealth
+};
+var knowledgeSearchResponseSchema = z.discriminatedUnion("kind", [z.object({
+	...common,
+	kind: z.literal("results"),
+	hits: z.array(knowledgeHitSchema).max(50),
+	hasMore: z.boolean(),
+	nextOffset: z.number().int().min(1).max(1e4).optional(),
+	warnings: z.array(z.enum(["invalid-source-items", "unverified-file-types"])).max(2)
+}).strict().superRefine((value, context) => {
+	if (value.hasMore !== (value.nextOffset !== void 0)) context.addIssue({
+		code: "custom",
+		message: "A continuation offset is required exactly when more results are available."
+	});
+	if (value.sourceHealth.state !== value.mode && value.sourceHealth.state !== "partial") context.addIssue({
+		code: "custom",
+		message: "Results require an available source."
+	});
+	if (value.hits.some((hit) => hit.source !== value.source)) context.addIssue({
+		code: "custom",
+		message: "Knowledge hits must come from the requested source."
+	});
+}), z.object({
+	...common,
+	kind: z.literal("unavailable"),
+	code: knowledgeFailureCodeSchema,
+	message: z.string().min(1).max(1e3)
+}).strict().refine((value) => ["unauthorized", "unavailable"].includes(value.sourceHealth.state), "Unavailable results must report an unavailable or unauthorized source.")]);
 //#endregion
 //#region packages/common/contracts/index.ts
 var dataModeSchema = z.enum(["sample", "live"]);
@@ -3487,6 +3583,18 @@ var milestoneMembershipSchema = z.object({
 	opportunityId: z.string().min(1)
 }).strict();
 z.record(z.string().min(1), z.array(milestoneMembershipSchema));
+//#endregion
+//#region packages/connectors/common/knowledge.ts
+var KnowledgeSourceError = class extends Error {
+	code;
+	state;
+	constructor(code, message, state = "unavailable") {
+		super(message);
+		this.code = code;
+		this.state = state;
+		this.name = "KnowledgeSourceError";
+	}
+};
 //#endregion
 //#region packages/connectors/msx/live.ts
 var defaultBaseUrl = "https://microsoftsales.crm.dynamics.com/api/data/v9.2/";
@@ -11016,6 +11124,27 @@ function assemble({ context, milestones, evidence, now = /* @__PURE__ */ new Dat
 		}
 	};
 }
+/**
+* Model-facing serialization of an agent task. Raw free-text comments are replaced by the bounded,
+* dated evidence pack so the same facts are not sent twice and no field can exceed the prompt budget.
+*/
+function serializeAgentContext(context) {
+	const { comments: opportunityComments, ...opportunity } = context.opportunityContext.opportunity;
+	return JSON.stringify({
+		request: context.request,
+		opportunityContext: {
+			...context.opportunityContext,
+			opportunity,
+			milestones: context.opportunityContext.milestones?.map(({ comments, riskDetails, ...milestone }) => {
+				return milestone;
+			})
+		},
+		guidance: context.guidance,
+		...context.nextStageGuidance ? { nextStageGuidance: context.nextStageGuidance } : {},
+		localEvaluation: context.localEvaluation,
+		...context.evidence ? { evidence: context.evidence } : {}
+	});
+}
 /** Reflects evidence-read gaps on the MSX source label without adding a duplicate source entry. */
 function agentSourceHealth(context) {
 	const { sourceHealth } = context.opportunityContext;
@@ -11399,6 +11528,395 @@ var RecordCreationService = class {
 	}
 };
 //#endregion
+//#region packages/common/configuration/knowledge-sources.ts
+var seismicGraphScopes = ["https://graph.microsoft.com/ExternalItem.Read.All"];
+var seismicGraphDefaultScope = "https://graph.microsoft.com/.default";
+var propertyName = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,127}$/);
+var seismicGraphConfigurationSchema = z.object({
+	connectionId: z.string().regex(/^[A-Za-z0-9]{3,32}$/),
+	titleProperty: propertyName.default("title"),
+	urlProperty: propertyName.default("url"),
+	fileTypeProperty: propertyName.optional(),
+	modifiedProperty: propertyName.optional()
+}).strict();
+function seismicGraphConfigurationFromEnvironment(environment) {
+	const connectionId = environment["TLC_SEISMIC_GRAPH_CONNECTION_ID"]?.trim();
+	if (!connectionId) return void 0;
+	const optional = (key) => environment[key]?.trim() || void 0;
+	const titleProperty = optional("TLC_SEISMIC_GRAPH_TITLE_PROPERTY");
+	const urlProperty = optional("TLC_SEISMIC_GRAPH_URL_PROPERTY");
+	const fileTypeProperty = optional("TLC_SEISMIC_GRAPH_FILE_TYPE_PROPERTY");
+	const modifiedProperty = optional("TLC_SEISMIC_GRAPH_MODIFIED_PROPERTY");
+	return seismicGraphConfigurationSchema.parse({
+		connectionId,
+		...titleProperty ? { titleProperty } : {},
+		...urlProperty ? { urlProperty } : {},
+		...fileTypeProperty ? { fileTypeProperty } : {},
+		...modifiedProperty ? { modifiedProperty } : {}
+	});
+}
+//#endregion
+//#region packages/common/fixtures/knowledge.ts
+var sampleKnowledgeCheckedAt = "2026-10-01T00:00:00.000Z";
+var hits = knowledgeHitSchema.array().parse([
+	{
+		id: "sample-azure-ai-pitch",
+		evidenceId: "knowledge:seismic-m365:sample:azure-ai-pitch",
+		source: "seismic-m365",
+		title: "Azure AI solution pitch (sample)",
+		url: "https://seismic.example.test/content/azure-ai-pitch.pptx",
+		fileType: "pptx",
+		snippet: "Synthetic presentation covering Azure AI business outcomes and solution discovery.",
+		connectionId: "sampleSeismic",
+		untrusted: true
+	},
+	{
+		id: "sample-azure-ai-guide",
+		evidenceId: "knowledge:seismic-m365:sample:azure-ai-guide",
+		source: "seismic-m365",
+		title: "Azure AI architecture guide (sample)",
+		url: "https://seismic.example.test/content/azure-ai-guide.pdf",
+		fileType: "pdf",
+		snippet: "Synthetic architecture guidance for Azure AI workloads.",
+		connectionId: "sampleSeismic",
+		untrusted: true
+	},
+	{
+		id: "sample-fabric-overview",
+		evidenceId: "knowledge:seismic-m365:sample:fabric-overview",
+		source: "seismic-m365",
+		title: "Microsoft Fabric overview (sample)",
+		url: "https://seismic.example.test/content/fabric-overview.pptx",
+		fileType: "pptx",
+		snippet: "Synthetic presentation covering analytics, OneLake, and Microsoft Fabric.",
+		connectionId: "sampleSeismic",
+		untrusted: true
+	}
+]);
+function searchSampleKnowledge(input) {
+	const request = knowledgeSearchRequestSchema.parse(input);
+	if (request.source !== "seismic-m365") throw new Error("The sample Seismic index cannot search another source.");
+	const terms = request.query.toLowerCase().split(/\s+/);
+	const matching = hits.filter((hit) => terms.every((term) => `${hit.title} ${hit.snippet}`.toLowerCase().includes(term)) && (!request.filters?.fileTypes || hit.fileType && request.filters.fileTypes.includes(hit.fileType)));
+	const offset = request.offset ?? 0;
+	const page = matching.slice(offset, offset + (request.limit ?? 10));
+	const next = offset + page.length;
+	return {
+		hits: structuredClone(page),
+		hasMore: next < matching.length,
+		...next < matching.length ? { nextOffset: next } : {},
+		warnings: []
+	};
+}
+function sampleKnowledgeSearchResponse(input) {
+	const request = knowledgeSearchRequestSchema.parse(input);
+	const base = {
+		contractVersion: "1.0",
+		source: request.source,
+		mode: "sample"
+	};
+	if (request.source !== "seismic-m365") {
+		const message = request.source === "seismic-mcp" ? "Direct Seismic MCP is not implemented. Select seismic-m365 for Graph retrieval." : "MCEM knowledge search is reserved for a future provider. Existing MCEM guidance operations are unchanged.";
+		return knowledgeSearchResponseSchema.parse({
+			...base,
+			kind: "unavailable",
+			code: request.source === "seismic-mcp" ? "mcp-not-configured" : "source-not-configured",
+			message,
+			sourceHealth: {
+				state: "unavailable",
+				detail: message,
+				checkedAt: sampleKnowledgeCheckedAt
+			}
+		});
+	}
+	return knowledgeSearchResponseSchema.parse({
+		...base,
+		kind: "results",
+		...searchSampleKnowledge(request),
+		sourceHealth: {
+			state: "sample",
+			detail: "Synthetic bundled knowledge results; no Microsoft 365 or Seismic request was made.",
+			checkedAt: sampleKnowledgeCheckedAt
+		}
+	});
+}
+//#endregion
+//#region packages/connectors/common/http-response.ts
+var ResponseSizeError = class extends Error {
+	constructor() {
+		super("The response exceeded its byte budget.");
+		this.name = "ResponseSizeError";
+	}
+};
+async function readBoundedText(response, maximumBytes) {
+	if (!response.body) return "";
+	const reader = response.body.getReader();
+	const chunks = [];
+	let bytes = 0;
+	while (true) {
+		const chunk = await reader.read();
+		if (chunk.done) break;
+		bytes += chunk.value.byteLength;
+		if (bytes > maximumBytes) {
+			await reader.cancel();
+			throw new ResponseSizeError();
+		}
+		chunks.push(chunk.value);
+	}
+	return Buffer.concat(chunks).toString("utf8");
+}
+//#endregion
+//#region packages/connectors/seismic/graph.ts
+var graphSearchUrl = "https://graph.microsoft.com/v1.0/search/query";
+var searchResponse = z.object({ value: z.array(z.object({
+	error: z.unknown().optional(),
+	hitsContainers: z.array(z.object({
+		hits: z.array(z.unknown()).max(50).optional(),
+		moreResultsAvailable: z.boolean(),
+		total: z.number().int().nonnegative()
+	})).length(1)
+})).length(1) });
+var searchHit = z.object({
+	hitId: z.string().min(1).max(500),
+	summary: z.string().optional(),
+	contentSource: z.string().optional(),
+	resource: z.object({
+		"@odata.type": z.literal("#microsoft.graph.externalConnectors.externalItem").optional(),
+		id: z.string().min(1).max(500).optional(),
+		properties: z.record(z.string(), z.unknown())
+	})
+});
+var mimeTypes = {
+	"application/vnd.ms-powerpoint": "ppt",
+	"application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+	"application/pdf": "pdf",
+	"application/msword": "doc",
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+	"application/vnd.ms-excel": "xls",
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+	"text/html": "html"
+};
+var text$2 = (value) => value.replace(/<[^>]*>/g, "").trim();
+function fileType(value, url) {
+	if (typeof value === "string") {
+		const normalized = value.toLowerCase().trim().replace(/^\./, "");
+		const parsed = knowledgeFileTypeSchema.safeParse(mimeTypes[normalized] ?? normalized);
+		if (parsed.success) return parsed.data;
+	}
+	const extension = new URL(url).pathname.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+	const parsed = knowledgeFileTypeSchema.safeParse(extension);
+	return parsed.success ? parsed.data : void 0;
+}
+var SeismicM365Provider = class {
+	getAccessToken;
+	fetcher;
+	id = "seismic-m365";
+	mode = "live";
+	configuration;
+	constructor(configuration, getAccessToken, fetcher = fetch) {
+		this.getAccessToken = getAccessToken;
+		this.fetcher = fetcher;
+		this.configuration = seismicGraphConfigurationSchema.parse(configuration);
+	}
+	async search(input) {
+		const request = knowledgeSearchRequestSchema.parse(input);
+		if (request.source !== this.id) throw new Error("The Seismic Graph provider cannot search another knowledge source.");
+		let token;
+		try {
+			token = await this.getAccessToken();
+		} catch {
+			throw new KnowledgeSourceError("graph-sign-in-required", "A delegated Microsoft Graph session is required for Seismic search.", "unauthorized");
+		}
+		if (!token.trim()) throw new KnowledgeSourceError("graph-sign-in-required", "A delegated Microsoft Graph token was not returned.", "unauthorized");
+		const config = this.configuration;
+		const contentSource = `/external/connections/${config.connectionId}`;
+		const fields = [...new Set([
+			config.titleProperty,
+			config.urlProperty,
+			config.fileTypeProperty,
+			config.modifiedProperty
+		].filter((field) => field !== void 0))];
+		let response;
+		try {
+			response = await this.fetcher(graphSearchUrl, {
+				method: "POST",
+				redirect: "error",
+				signal: AbortSignal.timeout(3e4),
+				headers: {
+					authorization: `Bearer ${token}`,
+					accept: "application/json",
+					"content-type": "application/json"
+				},
+				body: JSON.stringify({ requests: [{
+					entityTypes: ["externalItem"],
+					contentSources: [contentSource],
+					query: { queryString: request.query },
+					from: request.offset ?? 0,
+					size: request.limit ?? 10,
+					fields
+				}] })
+			});
+		} catch {
+			throw new KnowledgeSourceError("graph-transport-failed", "The Seismic Graph search request could not be completed.");
+		}
+		if (!response.ok) {
+			if (response.status === 401) throw new KnowledgeSourceError("graph-sign-in-required", "Microsoft Graph rejected the delegated session. Sign in again.", "unauthorized");
+			if (response.status === 403) throw new KnowledgeSourceError("graph-permission-denied", "Microsoft Graph denied Seismic search. Verify ExternalItem.Read.All consent and connector access.", "unauthorized");
+			if (response.status === 429) throw new KnowledgeSourceError("graph-throttled", "Microsoft Graph throttled Seismic search. Retry later.");
+			throw new KnowledgeSourceError("graph-request-failed", `Microsoft Graph Seismic search returned HTTP ${response.status}.`);
+		}
+		let raw;
+		try {
+			raw = JSON.parse(await readBoundedText(response, 1e6));
+		} catch (error) {
+			if (error instanceof ResponseSizeError) throw new KnowledgeSourceError("graph-response-too-large", "The Seismic search response exceeded its byte budget.");
+			if (error instanceof SyntaxError) throw new KnowledgeSourceError("graph-response-invalid", "Microsoft Graph returned an invalid search response.");
+			throw new KnowledgeSourceError("graph-transport-failed", "The Seismic Graph search response could not be read.");
+		}
+		const parsed = searchResponse.safeParse(raw);
+		const result = parsed.success ? parsed.data.value[0] : void 0;
+		const page = result?.hitsContainers[0];
+		const rawHits = page?.hits ?? [];
+		if (!page || result?.error || rawHits.length > (request.limit ?? 10) || !rawHits.length && (page.moreResultsAvailable || (request.offset ?? 0) < page.total)) throw new KnowledgeSourceError("graph-response-invalid", "Microsoft Graph returned an incomplete or invalid Seismic search page.");
+		const hits = [];
+		const warnings = /* @__PURE__ */ new Set();
+		const seen = /* @__PURE__ */ new Set();
+		for (const rawHit of rawHits) {
+			const candidate = searchHit.safeParse(rawHit);
+			if (!candidate.success || candidate.data.contentSource && candidate.data.contentSource !== contentSource) {
+				warnings.add("invalid-source-items");
+				continue;
+			}
+			const { resource, hitId, summary } = candidate.data;
+			const title = resource.properties[config.titleProperty];
+			const url = resource.properties[config.urlProperty];
+			const modified = config.modifiedProperty ? resource.properties[config.modifiedProperty] : void 0;
+			const hit = knowledgeHitSchema.safeParse({
+				id: resource.id ?? hitId,
+				evidenceId: `knowledge:seismic-m365:${config.connectionId}:${resource.id ?? hitId}`,
+				source: this.id,
+				title: typeof title === "string" ? text$2(title) : title,
+				url,
+				...summary ? { snippet: text$2(summary).slice(0, 4e3) } : {},
+				...modified === void 0 ? {} : { lastModifiedAt: modified },
+				connectionId: config.connectionId,
+				untrusted: true
+			});
+			if (!hit.success) {
+				warnings.add("invalid-source-items");
+				continue;
+			}
+			const extension = fileType(config.fileTypeProperty ? resource.properties[config.fileTypeProperty] : void 0, hit.data.url);
+			if (request.filters?.fileTypes) {
+				if (!extension) warnings.add("unverified-file-types");
+				if (!extension || !request.filters.fileTypes.includes(extension)) continue;
+			}
+			if (!seen.has(hit.data.id)) {
+				hits.push({
+					...hit.data,
+					...extension ? { fileType: extension } : {}
+				});
+				seen.add(hit.data.id);
+			}
+		}
+		const nextOffset = (request.offset ?? 0) + rawHits.length;
+		if (page.moreResultsAvailable && nextOffset > 1e4) throw new KnowledgeSourceError("graph-response-invalid", "Narrow the Seismic query; its continuation exceeds the supported search window.");
+		return {
+			hits,
+			hasMore: page.moreResultsAvailable,
+			...page.moreResultsAvailable ? { nextOffset } : {},
+			warnings: [...warnings]
+		};
+	}
+};
+//#endregion
+//#region packages/connectors/seismic/mcp.ts
+var SeismicMCPProvider = class {
+	mode;
+	id = "seismic-mcp";
+	constructor(mode = "live") {
+		this.mode = mode;
+	}
+	async search(input) {
+		if (knowledgeSearchRequestSchema.parse(input).source !== this.id) throw new Error("The Seismic MCP provider cannot search another knowledge source.");
+		throw new KnowledgeSourceError("mcp-not-configured", "Direct Seismic MCP is not implemented. It requires an approved Seismic MCP app, delegated Seismic OAuth, and read-only tool approvals. Select seismic-m365 for Graph retrieval.");
+	}
+};
+//#endregion
+//#region packages/orchestrator/knowledge-search.ts
+var KnowledgeSearchService = class {
+	mode;
+	now;
+	sources = /* @__PURE__ */ new Map();
+	constructor(sources = [], mode = "live", now = () => /* @__PURE__ */ new Date()) {
+		this.mode = mode;
+		this.now = now;
+		for (const source of sources) {
+			if (this.sources.has(source.id)) throw new Error("A knowledge source may only be registered once.");
+			if (source.mode !== mode) throw new Error("Sample and live knowledge providers cannot share a search service.");
+			this.sources.set(source.id, source);
+		}
+	}
+	async searchKnowledge(input) {
+		const request = knowledgeSearchRequestSchema.parse(input);
+		const base = {
+			contractVersion: "1.0",
+			source: request.source,
+			mode: this.mode
+		};
+		const checkedAt = this.mode === "sample" ? sampleKnowledgeCheckedAt : this.now().toISOString();
+		try {
+			const source = this.sources.get(request.source);
+			if (!source) throw new KnowledgeSourceError("source-not-configured", "The requested knowledge source is not configured. Existing MCEM guidance operations are unchanged.");
+			const page = await source.search(request);
+			const result = knowledgeSearchResponseSchema.parse({
+				...base,
+				kind: "results",
+				...page,
+				sourceHealth: {
+					state: page.warnings.length ? "partial" : this.mode,
+					detail: this.mode === "sample" ? "Synthetic bundled knowledge results; no Microsoft 365 or Seismic request was made." : page.warnings.length ? "Some Seismic index items lacked valid evidence or filter metadata; this page is partial." : "Retrieved from the configured Seismic Microsoft Graph connection under the delegated user.",
+					checkedAt
+				}
+			});
+			if (result.kind === "results" && (result.hits.length > (request.limit ?? 10) || result.nextOffset !== void 0 && result.nextOffset <= (request.offset ?? 0))) throw new Error("The knowledge provider returned an invalid result window.");
+			return result;
+		} catch (error) {
+			if (!(error instanceof KnowledgeSourceError)) throw error;
+			return knowledgeSearchResponseSchema.parse({
+				...base,
+				kind: "unavailable",
+				code: error.code,
+				message: error.message,
+				sourceHealth: {
+					state: error.state,
+					detail: error.message,
+					checkedAt
+				}
+			});
+		}
+	}
+};
+function createKnowledgeSearch(options) {
+	if (options.mode === "sample") return { searchKnowledge: async (request) => sampleKnowledgeSearchResponse(request) };
+	return new KnowledgeSearchService([{
+		id: "seismic-m365",
+		mode: options.mode,
+		search: async (request) => {
+			let configuration;
+			try {
+				configuration = seismicGraphConfigurationFromEnvironment(options.environment ?? process.env);
+			} catch (error) {
+				if (!(error instanceof z.ZodError)) throw error;
+				throw new KnowledgeSourceError("graph-not-configured", "The Seismic Graph connection or property mapping is invalid. Check TLC_SEISMIC_GRAPH_* configuration.");
+			}
+			if (!configuration) throw new KnowledgeSourceError("graph-not-configured", "Set TLC_SEISMIC_GRAPH_CONNECTION_ID to the existing Seismic Microsoft 365 connector connection ID.");
+			if (!options.getGraphToken) throw new KnowledgeSourceError("graph-auth-not-configured", "A separate delegated Microsoft Graph token provider is not configured. MSX and Seismic OAuth tokens cannot be used for Graph search.", "unauthorized");
+			return new SeismicM365Provider(configuration, options.getGraphToken, options.fetcher).search(request);
+		}
+	}, new SeismicMCPProvider(options.mode)], options.mode, options.now);
+}
+//#endregion
 //#region packages/orchestrator/policies/mcp-tool-authorization.ts
 var McpToolAuthorizationError = class extends Error {
 	code;
@@ -11435,8 +11953,13 @@ function prewarmAgentDependencies(options) {
 }
 //#endregion
 //#region packages/orchestrator/progress/run-history.ts
+function isFinished(run) {
+	return run.status === "completed" || run.status === "failed" || run.status === "cancelled";
+}
 var WorkflowRunHistory = class {
 	runs = /* @__PURE__ */ new Map();
+	/** Ids of finished runs in the order they finished; the front is evicted first. */
+	finished = [];
 	capacity;
 	onEvicted;
 	constructor(options = {}) {
@@ -11446,21 +11969,25 @@ var WorkflowRunHistory = class {
 	}
 	set(run) {
 		const validated = workflowRunSchema.parse(run);
-		if (!this.runs.has(validated.runId) && this.runs.size >= this.capacity) {
-			const oldestRunId = this.runs.keys().next().value;
-			if (oldestRunId) {
-				const evicted = this.runs.get(oldestRunId);
-				this.runs.delete(oldestRunId);
-				if (evicted) this.onEvicted?.(structuredClone(evicted));
-			}
-		}
+		const previous = this.runs.get(validated.runId);
 		this.runs.set(validated.runId, structuredClone(validated));
+		if (isFinished(validated) && !(previous && isFinished(previous))) this.finished.push(validated.runId);
+		while (this.finished.length > this.capacity) {
+			const evictedRunId = this.finished.shift();
+			const evicted = this.runs.get(evictedRunId);
+			this.runs.delete(evictedRunId);
+			if (evicted) this.onEvicted?.(structuredClone(evicted));
+		}
+	}
+	/** Number of queued or running runs, which retention never removes. */
+	activeCount() {
+		return this.runs.size - this.finished.length;
 	}
 	get(runId) {
 		const run = this.runs.get(runId);
 		return run ? structuredClone(run) : void 0;
 	}
-	list(scope, limit = this.capacity) {
+	list(scope, limit = Number.MAX_SAFE_INTEGER) {
 		if (!Number.isInteger(limit) || limit < 1) throw new Error("Workflow run history limit must be a positive integer.");
 		return [...this.runs.values()].filter((run) => scope === void 0 || sameScope(run.scope, scope)).reverse().slice(0, limit).map((run) => structuredClone(run));
 	}
@@ -11642,9 +12169,19 @@ var initialWorkflowOutputSchema = z.object({
 	lineage: z.array(mcpEvidenceLineageSchema).min(1),
 	sourceHealth: z.array(sourceHealthSchema).min(1)
 }).strict();
+/**
+* Output of a workflow registered through the extension seam. Its shape is owned and validated host-side
+* by the registration's approved schema; the wire carries it as bounded data beside the stable initial-cohort `output`.
+*/
+var registeredWorkflowOutputSchema = z.object({
+	workflowId: z.string().regex(/^WF-[0-9]{3}$/),
+	outputSchemaRef: z.string().min(1).max(200),
+	data: z.record(z.string(), z.unknown())
+}).strict();
 var workflowRunViewSchema = z.object({
 	run: workflowRunSchema,
-	output: initialWorkflowOutputSchema.optional()
+	output: initialWorkflowOutputSchema.optional(),
+	extensionOutput: registeredWorkflowOutputSchema.optional()
 }).strict();
 //#endregion
 //#region packages/orchestrator/workflows/cohort.ts
@@ -11794,7 +12331,7 @@ function createDefinition(id, name, personaTargets, category, cardStyle, connect
 		outputSchemaRef: `workflow-output-${id.toLowerCase()}.v1`,
 		sla: {
 			targetMs: 4e3,
-			timeoutMs: 12e3
+			timeoutMs: 6e4
 		},
 		auth: {
 			requiresDelegatedUser: true,
@@ -11813,26 +12350,37 @@ var InitialWorkflowConnectorExecutor = class {
 	dataverse;
 	msx;
 	resolveDelegatedScope;
-	constructor(dataverse, msx, resolveDelegatedScope) {
+	performanceReporter;
+	constructor(dataverse, msx, resolveDelegatedScope, performanceReporter) {
 		this.dataverse = dataverse;
 		this.msx = msx;
 		this.resolveDelegatedScope = resolveDelegatedScope;
+		this.performanceReporter = performanceReporter;
 	}
 	async execute(step, context) {
 		const workflowId = requireInitialWorkflowId(context.workflowId);
 		const input = parseInitialWorkflowInput(workflowId, context.input);
 		if (step.connector === "dataverse-mcp") {
+			const onProgress = context.onProgress;
 			const queryContext = {
 				correlationId: context.correlationId,
 				capability: "account-pulse",
 				scope: context.scope,
-				delegatedScope: await this.resolveDelegatedScope(context.scope),
-				signal: context.signal
+				delegatedScope: await measurePerformance("plays.scope", this.performanceReporter, async () => this.resolveDelegatedScope(context.scope)),
+				signal: context.signal,
+				...onProgress ? { onProgress: (progress) => onProgress({
+					state: progress.state,
+					data: progress.records,
+					rowCount: progress.recordCount,
+					truncated: progress.truncated,
+					lineage: progress.lineage,
+					sourceHealth: progress.sourceHealth
+				}) } : {}
 			};
 			const result = await this.dataverse.query(buildInitialWorkflowQuery(workflowId, input), queryContext);
 			return {
 				state: result.state,
-				data: await this.attachOpportunityAccounts(workflowId, result.records, queryContext),
+				data: result.records,
 				rowCount: result.recordCount,
 				truncated: result.truncated,
 				lineage: result.lineage,
@@ -11846,54 +12394,11 @@ var InitialWorkflowConnectorExecutor = class {
 		};
 		return fromMsxResult(step.operation === "get_forecast_snapshot" ? await this.msx.getForecastSnapshot({}, msxContext) : await this.msx.listPipeline({}, msxContext));
 	}
-	async attachOpportunityAccounts(workflowId, records, queryContext) {
-		if (opportunityScopedWorkflows.has(workflowId) || workflowId === "WF-009") return records;
-		const opportunityIds = [...new Set(records.flatMap((record) => text$1(record.opportunityId) && !text$1(record.accountId) ? [text$1(record.opportunityId)] : []))];
-		if (opportunityIds.length === 0) return records;
-		const accounts = /* @__PURE__ */ new Map();
-		try {
-			for (let start = 0; start < opportunityIds.length; start += opportunityLookupBatchSize) {
-				const batch = opportunityIds.slice(start, start + opportunityLookupBatchSize);
-				const lookup = await this.dataverse.query({
-					entity: "opportunity",
-					select: [
-						"id",
-						"accountId",
-						"name"
-					],
-					filter: [{
-						field: "id",
-						operator: "in",
-						value: batch
-					}],
-					orderBy: [],
-					top: batch.length,
-					expand: []
-				}, queryContext);
-				for (const row of lookup.records) {
-					const id = text$1(row.id);
-					const accountId = text$1(row.accountId);
-					if (id && accountId) accounts.set(id, {
-						accountId,
-						...text$1(row.name) ? { name: text$1(row.name) } : {}
-					});
-				}
-			}
-		} catch (error) {
-			if (queryContext.signal?.aborted || error instanceof Error && error.name === "AbortError") throw error;
-		}
-		return records.map((record) => {
-			const match = accounts.get(text$1(record.opportunityId) ?? "");
-			if (!match || text$1(record.accountId)) return record;
-			return {
-				...record,
-				accountId: match.accountId,
-				...match.name && !text$1(record.opportunityName) ? { opportunityName: match.name } : {}
-			};
-		});
-	}
 };
-var opportunityLookupBatchSize = 50;
+var opportunityProjection = [{
+	relationship: "opportunity",
+	select: ["accountId", "name"]
+}];
 var InitialWorkflowResultAssembler = class {
 	assemble(context) {
 		const workflowId = requireInitialWorkflowId(context.definition.id);
@@ -11992,7 +12497,7 @@ function buildInitialWorkflowQuery(workflowId, input) {
 				direction: "asc"
 			}],
 			top: 500,
-			expand: []
+			expand: opportunityProjection
 		};
 		case "WF-009": return {
 			entity: "opportunity",
@@ -12038,7 +12543,7 @@ function buildInitialWorkflowQuery(workflowId, input) {
 				direction: "asc"
 			}],
 			top: 500,
-			expand: []
+			expand: opportunityProjection
 		};
 		case "WF-012": return milestoneQuery(input.asOf, []);
 		case "WF-004":
@@ -12099,7 +12604,7 @@ function milestoneQuery(asOf, extraFilters) {
 			direction: "asc"
 		}],
 		top: 500,
-		expand: []
+		expand: opportunityProjection
 	};
 }
 function buildCard(workflowId, title, records, queueItems, evidenceIds) {
@@ -12355,6 +12860,23 @@ var dealTeamOpportunityColumn = {
 	msp_engagementmilestone: "msp_opportunityid",
 	activitypointer: "regardingobjectid"
 };
+function resolveOpportunityProjection(entityMap, query) {
+	if (query.expand.length === 0) return [];
+	const entity = entityMap.entities.find((candidate) => candidate.canonical === query.entity);
+	const expansion = query.expand[0];
+	if (query.expand.length !== 1 || expansion?.relationship !== "opportunity" || !entity || !["msp_engagementmilestone", "activitypointer"].includes(entity.logicalName)) throw new DataverseQueryGuardError("relationship_denied", "Only milestone/activity parent opportunity projection is allowlisted.");
+	const opportunity = entityMap.entities.find((candidate) => candidate.canonical === "opportunity" && candidate.logicalName === "opportunity");
+	if (!opportunity) throw new DataverseQueryGuardError("relationship_denied", "The parent opportunity is not allowlisted.");
+	return expansion.select.map((field) => {
+		if (field !== "accountId" && field !== "name") throw new DataverseQueryGuardError("field_denied", "The parent opportunity field is not allowlisted for projection.");
+		const attribute = opportunity.attributes.find((candidate) => candidate.canonical === field);
+		if (!attribute || attribute.sensitivity === "restricted") throw new DataverseQueryGuardError("field_denied", "The parent opportunity field is not allowlisted.");
+		return {
+			canonical: field === "name" ? "opportunityName" : "accountId",
+			column: toSqlColumn(attribute.logicalName)
+		};
+	});
+}
 var DataverseQueryGuardError = class extends Error {
 	code;
 	constructor(code, message) {
@@ -12393,6 +12915,21 @@ function sqlValue(operator, value) {
 	if (operator === "startswith") return sqlScalar(`${value}%`);
 	return sqlScalar(value);
 }
+function choiceFilterValue(attribute, filter) {
+	const choices = attribute.optionSet;
+	if (!choices) return filter.value;
+	if (![
+		"eq",
+		"ne",
+		"in"
+	].includes(filter.operator)) throw new DataverseQueryGuardError("field_denied", "Choice filters support only equality and membership operations.");
+	const resolve = (value) => {
+		const code = typeof value === "string" && Object.hasOwn(choices, value) ? choices[value] : value;
+		if (typeof code !== "number" || !Object.values(choices).includes(code)) throw new DataverseQueryGuardError("field_denied", "The choice filter value is not in the configured option set.");
+		return code;
+	};
+	return Array.isArray(filter.value) ? filter.value.map(resolve) : resolve(filter.value);
+}
 function renderSqlScopePredicate(template, scope) {
 	const replacements = {
 		delegatedUserAccountIds: scope.delegatedUserAccountIds,
@@ -12421,34 +12958,40 @@ function renderDataverseSql(entityMapInput, queryInput, delegatedScope, maximumR
 	if (!Number.isInteger(maximumRows) || maximumRows < 1) throw new Error("Dataverse maximum row count must be a positive integer.");
 	const entity = entityMap.entities.find((candidate) => candidate.canonical === query.entity);
 	if (!entity) throw new DataverseQueryGuardError("entity_denied", "Dataverse entity is not allowlisted.");
-	if (query.expand.length > 0) throw new DataverseQueryGuardError("relationship_denied", "Dataverse relationship expansion is not allowlisted by the semantic map.");
+	const projection = resolveOpportunityProjection(entityMap, query);
 	const attributes = new Map(entity.attributes.map((attribute) => [attribute.canonical, attribute]));
-	const column = (canonical) => {
+	const attribute = (canonical) => {
 		const attribute = attributes.get(canonical);
 		if (!attribute) throw new DataverseQueryGuardError("field_denied", "Dataverse field is not allowlisted.");
-		return toSqlColumn(attribute.logicalName);
+		return attribute;
 	};
+	const column = (canonical) => toSqlColumn(attribute(canonical).logicalName);
 	const top = Math.min(query.top, maximumRows);
 	const dealTeamColumn = dealTeamOpportunityColumn[toSqlColumn(entity.logicalName)];
 	const useJoinScope = options.enforceScope !== false && Boolean(delegatedScope.currentUserId) && Boolean(dealTeamColumn);
-	const qualify = (sqlColumn) => useJoinScope ? `m.${sqlColumn}` : sqlColumn;
-	const selectColumns = query.select.map((canonical) => qualify(column(canonical)));
-	const whereClauses = query.filter.map((filter) => `${qualify(column(filter.field))} ${sqlOperator(filter.operator)} ${sqlValue(filter.operator, filter.value)}`);
+	const excludedAccountIds = options.enforceScope === false ? [] : [...new Set(delegatedScope.excludedAccountIds ?? [])];
+	if (excludedAccountIds.some((accountId) => !isSafeIdentifier(accountId))) throw new DataverseQueryGuardError("scope_required", "An excluded TLC account id is invalid.");
+	const excludeAccounts = Boolean(dealTeamColumn) && excludedAccountIds.length > 0;
+	const useAlias = useJoinScope || projection.length > 0 || excludeAccounts && entity.logicalName !== "opportunity";
+	const qualify = (sqlColumn) => useAlias ? `m.${sqlColumn}` : sqlColumn;
+	const selectColumns = [...query.select.map((canonical) => qualify(column(canonical))), ...projection.map((field) => `scopeop.${field.column} AS ${field.canonical}`)];
+	const whereClauses = query.filter.map((filter) => `${qualify(column(filter.field))} ${sqlOperator(filter.operator)} ${sqlValue(filter.operator, choiceFilterValue(attribute(filter.field), filter))}`);
 	if (useJoinScope) {
 		const userId = delegatedScope.currentUserId;
 		if (!isSafeIdentifier(userId)) throw new DataverseQueryGuardError("scope_required", "The delegated user id is missing or invalid.");
 		whereClauses.unshift(`dt.msp_dealteamuserid = '${userId}'`, "dt.statecode = 0");
-		const excludedAccountIds = [...new Set(delegatedScope.excludedAccountIds ?? [])];
-		if (excludedAccountIds.some((accountId) => !isSafeIdentifier(accountId))) throw new DataverseQueryGuardError("scope_required", "An excluded TLC account id is invalid.");
-		if (excludedAccountIds.length > 0) {
-			const ids = excludedAccountIds.map((accountId) => `'${accountId}'`).join(", ");
-			whereClauses.push(`${toSqlColumn(entity.logicalName) === "opportunity" ? "m" : "scopeop"}.parentaccountid NOT IN (${ids})`);
-		}
 	} else if (options.enforceScope !== false && entity.userScopePredicate !== void 0) whereClauses.push(renderSqlScopePredicate(entity.userScopePredicate, delegatedScope));
+	if (excludeAccounts) {
+		const ids = excludedAccountIds.map((accountId) => `'${accountId}'`).join(", ");
+		const accountColumn = entity.logicalName === "opportunity" ? qualify("parentaccountid") : "scopeop.parentaccountid";
+		whereClauses.push(`${accountColumn} NOT IN (${ids})`);
+	}
 	const orderBy = query.orderBy.map((order) => `${qualify(column(order.field))} ${order.direction.toUpperCase()}`);
 	let sql = `SELECT TOP ${top} ${selectColumns.join(", ")} FROM ${toSqlColumn(entity.logicalName)}`;
-	if (useJoinScope) sql += ` m JOIN msp_dealteam dt ON m.${dealTeamColumn} = dt.msp_parentopportunityid`;
-	if (useJoinScope && (delegatedScope.excludedAccountIds?.length ?? 0) > 0 && toSqlColumn(entity.logicalName) !== "opportunity") sql += ` JOIN opportunity scopeop ON m.${dealTeamColumn} = scopeop.opportunityid`;
+	if (useAlias) sql += " m";
+	if (useJoinScope) sql += ` JOIN msp_dealteam dt ON m.${dealTeamColumn} = dt.msp_parentopportunityid`;
+	const excludesParent = excludeAccounts && entity.logicalName !== "opportunity";
+	if (projection.length > 0 || excludesParent) sql += ` ${excludesParent ? "JOIN" : "LEFT JOIN"} opportunity scopeop ON m.${dealTeamColumn} = scopeop.opportunityid`;
 	if (whereClauses.length > 0) sql += ` WHERE ${whereClauses.join(" AND ")}`;
 	if (orderBy.length > 0) sql += ` ORDER BY ${orderBy.join(", ")}`;
 	return sql;
@@ -12477,16 +13020,18 @@ var DataverseMcpReadAdapter = class {
 			toolCallId: this.createToolCallId()
 		};
 		const target = Math.max(1, Math.min(query.top, this.maximumRows));
+		const collected = [];
 		try {
+			context.signal?.throwIfAborted();
 			if (target <= READ_QUERY_PER_CALL_LIMIT) {
-				const page = await this.fetchPage(query, context, target);
+				const page = await measurePerformance("plays.dataverse.page", this.options.performanceReporter, () => this.fetchPage(query, context, target));
 				const truncated = page.recordCount > page.records.length;
 				return this.assembleResult(page.records, page.recordCount, truncated, checkedAt, lineage);
 			}
-			const collected = [];
 			let lastId;
 			let exhausted = false;
 			while (collected.length < target && !exhausted) {
+				context.signal?.throwIfAborted();
 				const pageSize = Math.min(READ_QUERY_PER_CALL_LIMIT, target - collected.length);
 				const pageQuery = {
 					...query,
@@ -12501,19 +13046,31 @@ var DataverseMcpReadAdapter = class {
 					}],
 					top: pageSize
 				};
-				const page = await this.fetchPage(pageQuery, context, pageSize);
+				const page = await measurePerformance("plays.dataverse.page", this.options.performanceReporter, () => this.fetchPage(pageQuery, context, pageSize));
 				collected.push(...page.records);
 				const lastRecordId = page.records.at(-1)?.["id"];
 				if (page.records.length < pageSize || typeof lastRecordId !== "string") exhausted = true;
 				else lastId = lastRecordId;
+				if (context.onProgress) {
+					const progress = this.assembleResult(sortRecords([...collected], query.orderBy), collected.length, true, checkedAt, lineage);
+					progress.sourceHealth.detail = `Dataverse MCP loaded ${collected.length} rows; the query is still running and coverage is incomplete.`;
+					context.onProgress(progress);
+					context.signal?.throwIfAborted();
+				}
 			}
 			const ordered = sortRecords(collected, query.orderBy).slice(0, target);
 			return this.assembleResult(ordered, collected.length, !exhausted, checkedAt, lineage);
 		} catch (error) {
 			const code = errorCode(error);
-			if (code === "aborted" || error instanceof Error && error.name === "AbortError") throw error;
+			if (context.signal?.aborted || code === "aborted" || error instanceof Error && error.name === "AbortError") throw error;
 			if (isUnauthorizedCode(code)) return failureResult("unauthorized", "unauthorized", `Dataverse MCP delegated authorization is unavailable (${code}).`, checkedAt, lineage);
 			if (error instanceof DataverseMcpAdapterError) throw error;
+			if (!code || !availabilityErrorCodes.has(code)) throw error;
+			if (collected.length > 0) {
+				const partial = this.assembleResult(sortRecords(collected, query.orderBy), collected.length, true, checkedAt, lineage);
+				partial.sourceHealth.detail = "Dataverse MCP stopped before all pages could be read; the displayed results are incomplete.";
+				return partial;
+			}
 			return failureResult("partial", "unavailable", "Dataverse MCP data is temporarily unavailable.", checkedAt, lineage);
 		}
 	}
@@ -12528,6 +13085,7 @@ var DataverseMcpReadAdapter = class {
 			arguments: { querytext },
 			...context.signal ? { signal: context.signal } : {}
 		});
+		context.signal?.throwIfAborted();
 		if (result.kind !== "untrusted-mcp-data") throw new DataverseMcpAdapterError("malformed_response", "Dataverse MCP result was not marked as untrusted data.");
 		assertNotMcpError(result.data);
 		return {
@@ -12552,6 +13110,14 @@ var DataverseMcpReadAdapter = class {
 	}
 };
 var READ_QUERY_PER_CALL_LIMIT = 20;
+var availabilityErrorCodes = /* @__PURE__ */ new Set([
+	"transport",
+	"timeout",
+	"rate_limited",
+	"circuit_open",
+	"disposed",
+	"response_too_large"
+]);
 function sortRecords(records, orderBy) {
 	if (orderBy.length === 0) return records;
 	return [...records].sort((left, right) => {
@@ -12608,7 +13174,16 @@ function mapRowsToCanonical(entityMap, query, rows) {
 		if (!attribute) throw new DataverseMcpAdapterError("malformed_response", "Dataverse field mapping disappeared after translation.");
 		return attribute;
 	});
-	return rows.map((row) => Object.fromEntries(selected.map((attribute) => [attribute.canonical, row[toSqlColumn(attribute.logicalName)] ?? row[attribute.logicalName] ?? null])));
+	const projection = resolveOpportunityProjection(entityMap, query);
+	return rows.map((row) => Object.fromEntries([...selected.map((attribute) => [attribute.canonical, canonicalAttributeValue(attribute, row[toSqlColumn(attribute.logicalName)] ?? row[attribute.logicalName] ?? null)]), ...projection.map((field) => [field.canonical, row[field.canonical] ?? row[field.canonical.toLowerCase()] ?? null])]));
+}
+function canonicalAttributeValue(attribute, value) {
+	if (!attribute.optionSet || value === null) return value;
+	const code = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+	const label = Object.entries(attribute.optionSet).find(([, candidate]) => candidate === code)?.[0];
+	if (label) return label;
+	if (typeof value === "string" && Object.hasOwn(attribute.optionSet, value)) return value;
+	throw new DataverseMcpAdapterError("malformed_response", `Dataverse returned an unmapped choice value for ${attribute.canonical}.`);
 }
 function failureResult(state, sourceState, detail, checkedAt, lineage) {
 	return {
@@ -12842,9 +13417,11 @@ var McpClientPool = class {
 	entries = /* @__PURE__ */ new Map();
 	createClient;
 	now;
+	performanceReporter;
 	disposed = false;
 	constructor(options) {
 		this.now = options.now ?? Date.now;
+		this.performanceReporter = options.performanceReporter;
 		this.createClient = options.clientFactory ?? ((server) => new McpHttpClient({
 			serverUrl: server.serverUrl,
 			accessTokenProvider: () => options.accessTokenProvider(server),
@@ -12953,7 +13530,7 @@ var McpClientPool = class {
 		if (entry.client) return entry.client;
 		if (!entry.initialization) {
 			const client = this.createClient(entry.config);
-			entry.initialization = client.initialize(signal).then(() => {
+			entry.initialization = measurePerformance(`mcp.initialize.${entry.config.id}`, this.performanceReporter, () => client.initialize(signal)).then(() => {
 				if (this.disposed) throw new McpPoolError("disposed", "MCP client pool has been disposed.");
 				entry.client = client;
 				entry.health = "healthy";
@@ -13238,6 +13815,7 @@ var WorkflowRuntime = class {
 	completions = /* @__PURE__ */ new Map();
 	now;
 	createId;
+	maxActiveRuns;
 	resultAssembler;
 	onStepError;
 	constructor(registry, executor, options = {}) {
@@ -13245,6 +13823,8 @@ var WorkflowRuntime = class {
 		this.executor = executor;
 		this.now = options.now ?? Date.now;
 		this.createId = options.createId ?? randomUUID;
+		this.maxActiveRuns = options.maxActiveRuns ?? 100;
+		if (!Number.isInteger(this.maxActiveRuns) || this.maxActiveRuns < 1) throw new Error("Workflow active-run limit must be a positive integer.");
 		this.resultAssembler = options.resultAssembler;
 		this.onStepError = options.onStepError;
 		this.history = new WorkflowRunHistory({
@@ -13261,6 +13841,7 @@ var WorkflowRuntime = class {
 		const scope = scopeRefSchema.parse(request.scope);
 		if (definition.scope !== scope.kind) throw new WorkflowRuntimeError("scope_mismatch", `Workflow ${definition.id} requires ${definition.scope} scope.`);
 		if (definition.executionMode === "agentic") throw new WorkflowRuntimeError("unsupported_execution_mode", "This runtime does not execute agentic workflows.");
+		if (this.history.activeCount() >= this.maxActiveRuns) throw new WorkflowRuntimeError("capacity_exceeded", "Too many workflow runs are active. Wait for a run to finish or cancel one, then try again.");
 		const runId = this.createId();
 		const correlationId = request.correlationId ?? this.createId();
 		const run = workflowRunSchema.parse({
@@ -13282,6 +13863,10 @@ var WorkflowRuntime = class {
 			this.execute(runId, definition, request.input);
 		});
 		return run;
+	}
+	/** Number of queued or running runs; retention never removes them. */
+	activeRunCount() {
+		return this.history.activeCount();
 	}
 	get(runId) {
 		return this.history.get(runId);
@@ -13329,6 +13914,7 @@ var WorkflowRuntime = class {
 			for (const step of definition.connectorPlan) {
 				const callStarted = this.now();
 				const stepAbort = linkedAbortController(controller.signal);
+				let latestProgress;
 				try {
 					const connectorResult = await withTimeout(this.executor.execute(step, {
 						runId,
@@ -13336,7 +13922,30 @@ var WorkflowRuntime = class {
 						correlationId: run.telemetry.correlationId,
 						scope: run.scope,
 						input,
-						signal: stepAbort.controller.signal
+						signal: stepAbort.controller.signal,
+						onProgress: (progress) => {
+							const current = this.history.get(runId);
+							if (!this.resultAssembler || !current || current.status !== "running" || stepAbort.controller.signal.aborted) return;
+							const progressiveResult = {
+								...result,
+								steps: [...result.steps, executionStep(step, progress)]
+							};
+							progressiveResult.output = this.resultAssembler.assemble({
+								definition,
+								scope: current.scope,
+								input,
+								steps: progressiveResult.steps,
+								generatedAt: iso(this.now())
+							});
+							this.results.set(resultRef, structuredClone(progressiveResult));
+							current.telemetry.firstResultMs ??= Math.max(0, this.now() - startedMs);
+							run = workflowRunSchema.parse({
+								...current,
+								resultRef
+							});
+							this.history.set(run);
+							latestProgress = progress;
+						}
 					}), Math.max(0, definition.sla.timeoutMs - (this.now() - startedMs)), stepAbort.controller);
 					const current = this.history.get(runId);
 					if (!current || current.status !== "running" || controller.signal.aborted) return;
@@ -13351,13 +13960,7 @@ var WorkflowRuntime = class {
 						truncated: connectorResult.truncated
 					});
 					if (run.telemetry.firstResultMs === void 0 && connectorResult.state !== "unauthorized") run.telemetry.firstResultMs = Math.max(0, this.now() - startedMs);
-					result.steps.push({
-						connector: step.connector,
-						operation: step.operation,
-						data: connectorResult.data,
-						...connectorResult.lineage ? { lineage: connectorResult.lineage } : {},
-						...connectorResult.sourceHealth ? { sourceHealth: connectorResult.sourceHealth } : {}
-					});
+					result.steps.push(executionStep(step, connectorResult));
 					if (connectorResult.state === "unauthorized") {
 						outcome = step.required ? "unauthorized" : "partial";
 						this.onStepError?.({
@@ -13403,12 +14006,28 @@ var WorkflowRuntime = class {
 						operation: step.operation,
 						status: unauthorized ? "unauthorized" : "failed",
 						durationMs: Math.max(0, this.now() - callStarted),
-						recordCount: 0,
-						truncated: false
+						recordCount: latestProgress?.rowCount ?? 0,
+						truncated: latestProgress !== void 0
 					});
 					this.history.set(run);
 					if (step.required) {
 						if (unauthorized) {
+							this.results.delete(resultRef);
+							delete run.resultRef;
+							this.history.set(run);
+							if (latestProgress) result.steps.push(executionStep(step, {
+								state: "unauthorized",
+								data: [],
+								rowCount: 0,
+								truncated: false,
+								...latestProgress.lineage ? { lineage: latestProgress.lineage } : {},
+								sourceHealth: {
+									source: step.connector,
+									state: "unauthorized",
+									detail: `${step.connector} delegated authorization is unavailable.`,
+									checkedAt: iso(this.now())
+								}
+							}));
 							outcome = "unauthorized";
 							break;
 						}
@@ -13431,6 +14050,15 @@ var WorkflowRuntime = class {
 				} finally {
 					stepAbort.dispose();
 				}
+			}
+			function executionStep(step, result) {
+				return {
+					connector: step.connector,
+					operation: step.operation,
+					data: result.data,
+					...result.lineage ? { lineage: result.lineage } : {},
+					...result.sourceHealth ? { sourceHealth: result.sourceHealth } : {}
+				};
 			}
 			const current = this.history.get(runId);
 			if (!current || current.status !== "running" || controller.signal.aborted) return;
@@ -13587,9 +14215,14 @@ var workflowHostOperationSchema = z.enum([
 var SharedWorkflowHost = class {
 	registry;
 	runtime;
-	constructor(registry, runtime) {
+	outputs;
+	constructor(registry, runtime, outputs = /* @__PURE__ */ new Map()) {
 		this.registry = registry;
 		this.runtime = runtime;
+		this.outputs = outputs;
+	}
+	activeRunCount() {
+		return this.runtime.activeRunCount();
 	}
 	listDefinitions(rawRequest) {
 		const request = listWorkflowDefinitionsRequestSchema.parse(rawRequest);
@@ -13609,9 +14242,14 @@ var SharedWorkflowHost = class {
 		const run = this.runtime.get(request.runId);
 		if (!run) throw new WorkflowRuntimeError("run_not_found", `Workflow run ${request.runId} is not available.`);
 		const result = run.resultRef ? this.runtime.getResult(run.resultRef) : void 0;
+		const registered = this.outputs.get(run.workflowId);
 		return workflowRunViewSchema.parse({
 			run,
-			...result?.output === void 0 ? {} : { output: initialWorkflowOutputSchema.parse(result.output) }
+			...result?.output === void 0 ? {} : registered ? { extensionOutput: {
+				workflowId: run.workflowId,
+				outputSchemaRef: registered.outputSchemaRef,
+				data: registered.schema.parse(result.output)
+			} } : { output: initialWorkflowOutputSchema.parse(result.output) }
 		});
 	}
 	cancel(rawRequest) {
@@ -13719,29 +14357,65 @@ var WorkflowRegistryError = class extends Error {
 	}
 };
 //#endregion
+//#region packages/orchestrator/workflows/registration.ts
+function composeWorkflows(base, registrations = []) {
+	const taken = new Set(base.definitions.map(({ id }) => id));
+	const registered = /* @__PURE__ */ new Map();
+	for (const registration of registrations) {
+		const definition = workflowDefinitionSchema.parse(registration.definition);
+		if (taken.has(definition.id)) throw new WorkflowRegistryError("invalid_registration", `Workflow ${definition.id} is already registered.`);
+		if (definition.executionMode === "agentic") throw new WorkflowRegistryError("invalid_registration", `Workflow ${definition.id} cannot use agentic execution; only deterministic and composite plans are supported.`);
+		if (definition.auth.allowedWrite) throw new WorkflowRegistryError("invalid_registration", `Workflow ${definition.id} must be read-only; writes use the reviewed mutation path.`);
+		taken.add(definition.id);
+		registered.set(definition.id, {
+			...registration,
+			definition
+		});
+	}
+	return {
+		definitions: [...base.definitions, ...[...registered.values()].map(({ definition }) => definition)],
+		executor: { execute: (step, context) => (registered.get(context.workflowId)?.executor ?? base.executor).execute(step, context) },
+		assembler: { assemble: (context) => {
+			const registration = registered.get(context.definition.id);
+			if (!registration) return base.assembler.assemble(context);
+			return registration.outputSchema.parse(registration.assembler.assemble(context));
+		} },
+		outputs: new Map([...registered].map(([id, { definition, outputSchema }]) => [id, {
+			outputSchemaRef: definition.outputSchemaRef,
+			schema: outputSchema
+		}]))
+	};
+}
+//#endregion
 //#region packages/orchestrator/workflows/configured-host.ts
 function createConfiguredWorkflowHost(options) {
 	const pool = new McpClientPool({
 		registry: options.registry,
-		accessTokenProvider: (server) => options.getAccessToken(server)
+		accessTokenProvider: (server) => options.getAccessToken(server),
+		...options.performanceReporter ? { performanceReporter: options.performanceReporter } : {}
 	});
 	const broker = new McpToolBroker({
 		registry: options.registry,
 		policy: options.policy,
 		invokeTool: (serverId, tool, args, signal) => pool.callTool(serverId, tool, args, signal)
 	});
-	const executor = new InitialWorkflowConnectorExecutor(new DataverseMcpReadAdapter({
-		entityMap: options.entityMap,
-		broker,
-		...options.enforceDelegatedScope === void 0 ? {} : { enforceDelegatedScope: options.enforceDelegatedScope },
-		...options.maximumRows === void 0 ? {} : { maximumRows: options.maximumRows }
-	}), new MsxMcpReadAdapter(broker), options.resolveDelegatedScope);
-	const workflowRegistry = new WorkflowRegistry(initialWorkflowDefinitions);
+	const composition = composeWorkflows({
+		definitions: initialWorkflowDefinitions,
+		executor: new InitialWorkflowConnectorExecutor(new DataverseMcpReadAdapter({
+			entityMap: options.entityMap,
+			broker,
+			...options.performanceReporter ? { performanceReporter: options.performanceReporter } : {},
+			...options.enforceDelegatedScope === void 0 ? {} : { enforceDelegatedScope: options.enforceDelegatedScope },
+			...options.maximumRows === void 0 ? {} : { maximumRows: options.maximumRows }
+		}), new MsxMcpReadAdapter(broker), options.resolveDelegatedScope, options.performanceReporter),
+		assembler: new InitialWorkflowResultAssembler()
+	}, options.registrations);
+	const workflowRegistry = new WorkflowRegistry(composition.definitions);
 	return {
-		host: new SharedWorkflowHost(workflowRegistry, new WorkflowRuntime(workflowRegistry, executor, {
-			resultAssembler: new InitialWorkflowResultAssembler(),
+		host: new SharedWorkflowHost(workflowRegistry, new WorkflowRuntime(workflowRegistry, composition.executor, {
+			resultAssembler: composition.assembler,
 			...options.onStepError ? { onStepError: options.onStepError } : {}
-		})),
+		}), composition.outputs),
 		dispose: () => pool.dispose()
 	};
 }
@@ -13985,13 +14659,18 @@ var ThinSliceOrchestrator = class {
 	taskAgents;
 	performanceReporter;
 	recordCreation;
+	knowledge;
 	mutationListeners = /* @__PURE__ */ new Set();
-	constructor(msx, mcem, taskAgents = {}, performanceReporter, recordCreation) {
+	constructor(msx, mcem, taskAgents = {}, performanceReporter, recordCreation, knowledge = new KnowledgeSearchService()) {
 		this.msx = msx;
 		this.mcem = mcem;
 		this.taskAgents = taskAgents;
 		this.performanceReporter = performanceReporter;
 		this.recordCreation = recordCreation;
+		this.knowledge = knowledge;
+	}
+	searchKnowledge(request) {
+		return this.knowledge.searchKnowledge(request);
 	}
 	withReadContext(operation, signal) {
 		signal?.throwIfAborted();
@@ -14361,6 +15040,27 @@ function errorMessage(error) {
 }
 //#endregion
 //#region packages/orchestrator/task-agents.ts
+function createFoundryTaskAgents(environment, credential, client = createFoundryOpenAIClient(environment.foundry.projectEndpoint, credential), performanceReporter) {
+	const bindings = environment.foundry.agents;
+	const agents = {
+		"account-pulse": bindings.accountPulse,
+		"mcem-coach": bindings.mcemCoach,
+		"pursuit-executive": bindings.pursuitExecutive,
+		"risk-solution-play": bindings.riskSolutionPlay
+	};
+	return Object.fromEntries(workflowAgentCapabilityValues.map((capability) => [capability, {
+		version: "active",
+		agent: new FoundryPromptAgent({
+			projectEndpoint: environment.foundry.projectEndpoint,
+			agentName: agents[capability].name,
+			requestTimeoutMs: environment.foundry.requestTimeoutMs,
+			credential,
+			openAIClient: client,
+			serializeContext: serializeAgentContext,
+			...foundryAgentTuning(environment, performanceReporter)
+		})
+	}]));
+}
 /** Optional latency controls shared by every host that builds Foundry prompt agents. */
 function foundryAgentTuning(environment, performanceReporter) {
 	return {
@@ -14368,6 +15068,16 @@ function foundryAgentTuning(environment, performanceReporter) {
 		maxOutputTokens: environment.foundry.maxOutputTokens,
 		performanceReporter
 	};
+}
+//#endregion
+//#region apps/desktop/electron/main/task-agents.ts
+/**
+* Desktop keeps its own sample guidance; live mode uses the shared Foundry factory so the model
+* input is serialized identically to every other host.
+*/
+function createDesktopTaskAgents(options) {
+	if (!options.environment || !options.credential) return options.sample();
+	return createFoundryTaskAgents(options.environment, options.credential, options.client, options.performanceReporter);
 }
 //#endregion
 //#region apps/desktop/electron/main/azure-cli-token-provider.ts
@@ -16966,6 +17676,7 @@ function seReportRelativePath(report, extension) {
 	return segments.join("/");
 }
 function renderSeReportHtml(raw, options = {}) {
+	const styleNonce = options.styleNonce && /^[A-Za-z0-9+/_-]{16,128}={0,2}$/.test(options.styleNonce) ? options.styleNonce : "";
 	const report = seReportSchema.parse(raw);
 	const references = (ids) => `<ul>${ids.map((id) => {
 		const reference = report.source_references.find((row) => row.id === id);
@@ -17024,7 +17735,7 @@ function renderSeReportHtml(raw, options = {}) {
 	]), "Cross Collaboration", "No Cross Collaboration activity this period.");
 	const asks = report.asks_for_manager.length ? report.asks_for_manager.map((row) => `<article class="note"><p class="verbatim">${escape(row.ask)}</p>${detail("Why it matters", row.why_it_matters)}${detail("Customer", row.customer)}${detail("Urgency", row.urgency)}${row.source_refs.length ? references(row.source_refs) : ""}</article>`).join("") : "<p class=\"muted\">No asks provided by the reporter.</p>";
 	const filters = options.includeFilters === false ? "" : `<fieldset class="report-status-filter"><legend>Customer update status</legend>${report.dashboard.customer_update_filters.map((value) => `<label><input type="radio" name="customer-status" value="${escape(value)}"${value === "All" ? " checked" : ""}>${escape(value.replaceAll("_", " "))}</label>`).join("")}</fieldset>`;
-	return `<!doctype html><html lang="en"${options.dark ? " class=\"dark\"" : ""}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'"><title>${escape(report.executive_summary.headline)}</title><style>
+	return `<!doctype html><html lang="en"${options.dark ? " class=\"dark\"" : ""}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${styleNonce ? `'nonce-${styleNonce}'` : "'unsafe-inline'"}; script-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'"><title>${escape(report.executive_summary.headline)}</title><style${styleNonce ? ` nonce="${styleNonce}"` : ""}>
     :root{color-scheme:light;--bg:#f4f6f9;--surface:#fff;--fg:#202b3c;--muted:#596579;--line:#d6dce5;--accent:#165ac0}
     :root.dark{color-scheme:dark;--bg:#151c28;--surface:#202b3b;--fg:#edf2fa;--muted:#bcc7d8;--line:#42516a;--accent:#93c5fd}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.55 "Segoe UI",Arial,sans-serif}main{max-width:1480px;margin:auto;padding:24px}h1{font-size:28px;margin:4px 0}h2{font-size:20px;margin:0 0 14px}h3{font-size:16px;margin:0 0 6px}h4,p{margin:6px 0}section{margin:20px 0;padding:20px;background:var(--surface);border:1px solid var(--line);border-radius:12px}.muted,small{color:var(--muted)}.banner{padding:10px;border:1px solid var(--line);border-radius:8px}.kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;padding:0;border:0;background:none}.kpi{padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.kpi span,.kpi strong,.kpi small{display:block}.kpi strong{font-size:30px;line-height:1.4}.chip,.status{display:inline-block;border:1px solid var(--line);border-radius:20px;padding:2px 9px;font-size:12px}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}caption{text-align:left;color:var(--muted);padding:0 0 12px}th,td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:12px;color:var(--muted)}th:last-child,td:last-child{text-align:right;white-space:nowrap}.customer,.note{padding:14px 0;border-bottom:1px solid var(--line)}.customer{border-left:4px solid var(--line);padding:16px;margin:12px 0}.customer header{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.customer h3{margin-right:auto}.status-running_hot{border-left-color:#db3750}.status-with_blocker{border-left-color:#ce7a13}.status-advisory{border-left-color:#218653}.status-watchlist{border-left-color:#7b8798}.signals{display:grid;grid-template-columns:1fr 1fr;gap:20px}.signals h4{color:var(--accent)}details{margin-top:12px}summary{cursor:pointer;padding:10px 0;font-weight:600}summary:focus-visible{outline:2px solid var(--accent)}.secondary-view{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:0 20px}.secondary-view>summary{padding:16px 0}.secondary-view section{border:0;border-top:1px solid var(--line);border-radius:0;padding:18px 0}.verbatim{white-space:pre-wrap}.customer[hidden]{display:none}
@@ -17051,31 +17762,6 @@ function renderSeReportHtml(raw, options = {}) {
     ${notes("Next Month Priorities", report.next_month_priorities, references)}${notes("Leadership decisions", report.leadership_decisions, references)}
     ${notes("Scrum rollup bullets", report.scrum_rollup_bullets, references)}${notes("Follow-up required", report.follow_up_required, references)}
     </details></main></body></html>`;
-}
-//#endregion
-//#region packages/connectors/common/http-response.ts
-var ResponseSizeError = class extends Error {
-	constructor() {
-		super("The response exceeded its byte budget.");
-		this.name = "ResponseSizeError";
-	}
-};
-async function readBoundedText(response, maximumBytes) {
-	if (!response.body) return "";
-	const reader = response.body.getReader();
-	const chunks = [];
-	let bytes = 0;
-	while (true) {
-		const chunk = await reader.read();
-		if (chunk.done) break;
-		bytes += chunk.value.byteLength;
-		if (bytes > maximumBytes) {
-			await reader.cancel();
-			throw new ResponseSizeError();
-		}
-		chunks.push(chunk.value);
-	}
-	return Buffer.concat(chunks).toString("utf8");
 }
 //#endregion
 //#region packages/connectors/se-reporting/types.ts
@@ -20894,6 +21580,12 @@ function createMutationSession(options) {
 	};
 }
 //#endregion
+//#region apps/desktop/electron/main/knowledge-ipc.ts
+var knowledgeSearchIpcChannel = "tlc:search-knowledge";
+function createKnowledgeSearchIpcHandler(host) {
+	return async (input) => knowledgeSearchResponseSchema.parse(await host.searchKnowledge(knowledgeSearchRequestSchema.parse(input)));
+}
+//#endregion
 //#region apps/desktop/electron/main/index.ts
 var currentDirectory = dirname(fileURLToPath(import.meta.url));
 var desktopRoot = resolve(currentDirectory, "../..");
@@ -20982,34 +21674,28 @@ var meetingExtractor = runtimeEnvironment && foundryOpenAIClient && (process.env
 	model: process.env["TLC_MEETING_MODEL"]?.trim() || "gpt-6.1-sol",
 	requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs
 }) : void 0;
-var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object.fromEntries([
-	"account-pulse",
-	"mcem-coach",
-	"pursuit-executive",
-	"risk-solution-play"
-].map((capability) => {
-	if (!runtimeEnvironment) return [capability, {
+var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, createDesktopTaskAgents({
+	environment: runtimeEnvironment,
+	credential: credentials.foundry,
+	client: foundryOpenAIClient,
+	performanceReporter: reportPerformance,
+	sample: () => Object.fromEntries([
+		"account-pulse",
+		"mcem-coach",
+		"pursuit-executive",
+		"risk-solution-play"
+	].map((capability) => [capability, {
 		version: "sample-v2",
 		agent: { invoke: async (context) => buildSampleAgentResponse(capability, context) }
-	}];
-	const binding = {
-		"account-pulse": runtimeEnvironment.foundry.agents.accountPulse,
-		"mcem-coach": runtimeEnvironment.foundry.agents.mcemCoach,
-		"pursuit-executive": runtimeEnvironment.foundry.agents.pursuitExecutive,
-		"risk-solution-play": runtimeEnvironment.foundry.agents.riskSolutionPlay
-	}[capability];
-	return [capability, {
-		version: "active",
-		agent: new FoundryPromptAgent({
-			projectEndpoint: runtimeEnvironment.foundry.projectEndpoint,
-			agentName: binding.name,
-			requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
-			credential: credentials.foundry,
-			openAIClient: foundryOpenAIClient,
-			...foundryAgentTuning(runtimeEnvironment, reportPerformance)
-		})
-	}];
-})), reportPerformance, recordCreation);
+	}]))
+}), reportPerformance, recordCreation, createKnowledgeSearch({
+	mode: dataMode,
+	getGraphToken: async () => {
+		const token = await credentials.msx.getToken(authentication?.mode === "interactive-browser" ? [...seismicGraphScopes] : seismicGraphDefaultScope);
+		if (!token) throw new Error("A delegated Microsoft Graph token was not returned.");
+		return token.token;
+	}
+}));
 var presentation = createPresentationOwner(orchestrator);
 var clearSourceSession = () => presentation.session.clear();
 var backgroundEnabled = process.env["TLC_BACKGROUND_SYNC"] === "1";
@@ -21082,6 +21768,7 @@ var configuredWorkflowHost = dataMode === "sample" ? void 0 : createLivePlayWork
 	registry: mcpRegistry,
 	policy: mcpPolicy,
 	entityMap: dataverseEntityMap,
+	...reportPerformance ? { performanceReporter: reportPerformance } : {},
 	getAccessToken: async (server) => {
 		const token = await credentials.msx.getToken(server.authentication.scopes);
 		if (!token) throw new Error("A delegated MCP access token is unavailable.");
@@ -21092,8 +21779,8 @@ var configuredWorkflowHost = dataMode === "sample" ? void 0 : createLivePlayWork
 		return liveMsxConnector.getCurrentUserId();
 	},
 	resolveExcludedAccountIds: async () => {
-		if (!liveMsxConnector) return [];
-		return (await liveMsxConnector.listAccounts({ includeHidden: true })).filter((account) => account.visibility === "hidden").map((account) => account.id);
+		if (!liveMsxConnector) throw new Error("Live Plays require the live MSX connection.");
+		return (await portfolioPreferenceStore.read(await liveMsxConnector.getCurrentUserId())).hiddenAccountIds;
 	},
 	onStepError: (info) => {
 		console.error(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? "required" : "optional"} step failed: ${info.message}`);
@@ -21165,6 +21852,11 @@ function registerIpc() {
 	});
 	const invokeSellerDashboard = createSellerDashboardIpcHandler(sellerDashboardHost);
 	const invokeSeReporting = createSeReportingIpcHandler(seReportingHost);
+	const searchKnowledge = createKnowledgeSearchIpcHandler(orchestrator);
+	ipcMain.handle(knowledgeSearchIpcChannel, (event, request) => {
+		assertTrustedSender(event);
+		return searchKnowledge(request);
+	});
 	ipcMain.handle(seReportingIpcChannel, (event, request) => {
 		assertTrustedSender(event);
 		return invokeSeReporting(request);
