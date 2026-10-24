@@ -257,6 +257,7 @@ try {
         '--name', $WebAppName,
         '--settings',
         "TLC_FOUNDRY_ENV_BASE64=$foundryEnvironmentSetting",
+        'TLC_HOSTING_MODEL=single-instance',
         'WEBSITE_RUN_FROM_PACKAGE=1',
         '--output', 'none'
     )

@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import { buildWebApiHandler, type WebRuntime } from './app.js'
-import { assertLoopbackHost, createAzureCliAuthentication, createSampleAuthentication } from './authentication.js'
+import { assertLoopbackHost, createAzureCliAuthentication, createAzureCliGraphKnowledgeTokenProvider, createSampleAuthentication } from './authentication.js'
 import { buildStaticHandler, setSecurityHeaders } from './hosting.js'
 import { listenWebServer } from './listener.js'
 import { createHostedRuntimeFactory, createHostedWorkflowHostResolver, createWebSellerDashboardHost, createWebSeReportingResolver } from './runtime.js'
@@ -18,7 +18,10 @@ import { RecordCreationService } from '../../../packages/orchestrator/record-cre
 import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import { localMutationState } from '../../../packages/connectors/common/mutation-state.js'
 import { createMutationSession } from '../../../packages/orchestrator/mutations/composition.js'
+import { createKnowledgeSearch } from '../../../packages/orchestrator/knowledge-search.js'
+import { resolveHostingModel } from '../../../packages/common/configuration/hosting-model.js'
 
+resolveHostingModel(process.env)
 const port = parsePort(process.env['PORT'])
 const mode = resolveWebHostMode(process.env)
 const host = process.env['HOST']?.trim() || (mode === 'easy-auth' ? '0.0.0.0' : '127.0.0.1')
@@ -42,7 +45,8 @@ const sampleRuntime = sampleMsx
                 sampleMsx,
                 creationWriter ?? new SampleRecordCreationCatalog(sampleMsx),
                 creationWriter ? { writer: creationWriter } : {}
-            )
+            ),
+            createKnowledgeSearch({ mode: 'sample' })
         ),
         localStoreMsx
             ? {
@@ -74,7 +78,7 @@ const sampleRuntime = sampleMsx
     : undefined
 const createRuntime = sampleRuntime
     ? () => sampleRuntime
-    : await createHostedRuntimeFactory()
+    : await createHostedRuntimeFactory(mode === 'azure-cli' ? { getGraphKnowledgeToken: createAzureCliGraphKnowledgeTokenProvider() } : {})
 const sampleMutationPath = resolve(process.env['TLC_MUTATION_STATE_PATH'] || '.tlc/web-sample-mutations.sqlite')
 const sampleMutationState = sampleRuntime && (process.env['TLC_BACKGROUND_SYNC'] === '1' || existsSync(sampleMutationPath))
     ? await localMutationState(sampleMutationPath) : undefined

@@ -67,6 +67,8 @@ import { buildLiveDataProvider, buildLiveTaskAgents } from './live-provider-core
 import { buildFoundryMeetingExtractor } from './live-provider.js'
 import type { SessionPortfolio } from '../../shared/session-portfolio.js'
 import type { MutationSyncRequest, MutationSyncResponse } from '../../../packages/common/contracts/cache-sync.js'
+import type { KnowledgeSearchRequest, KnowledgeSearchResponse } from '../../../packages/common/contracts/knowledge.js'
+import { createKnowledgeSearch } from '../../../packages/orchestrator/knowledge-search.js'
 import {
     buildSampleAgentResponse,
     buildSampleEvaluation,
@@ -101,6 +103,7 @@ export interface MeetingTranscriptSource {
  * decision of sample vs live; the router never learns which mode is active.
  */
 export interface ExtensionDataProvider {
+    searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
     readonly sourceCore?: ThinSliceOrchestrator
     readonly getSourceToken?: () => Promise<string>
     readonly cacheSession?: SessionPortfolio
@@ -174,7 +177,7 @@ export function createLocalStoreDataProvider(options: { foundryCredential?: Toke
     const connector = new LocalStoreMsxConnector(store)
     const writer = connector.createRecordCreationWriter()
     const creation = new RecordCreationService(connector, writer, { writer })
-    const orchestrator = new ThinSliceOrchestrator(connector, new ExtensionMcemGuidanceConnector(), buildLiveTaskAgents(), undefined, creation)
+    const orchestrator = new ThinSliceOrchestrator(connector, new ExtensionMcemGuidanceConnector(), buildLiveTaskAgents(), undefined, creation, createKnowledgeSearch({ mode: 'sample' }))
     const host: WorkflowHost = createSampleWorkflowHost(async () => {
         const { accounts, opportunities } = await connector.getPortfolioIndex()
         return {
@@ -192,6 +195,7 @@ export function createLocalStoreDataProvider(options: { foundryCredential?: Toke
  * milestone, and agent data on top.
  */
 export function createSampleDataProvider(): ExtensionDataProvider {
+    const knowledge = createKnowledgeSearch({ mode: 'sample' })
     const sampleMsx = {
         listAccounts: async (options?: AccountListOptions) => listSampleAccounts(options),
         listOpportunities: async (accountId: string) => listSampleOpportunities(accountId)
@@ -207,6 +211,7 @@ export function createSampleDataProvider(): ExtensionDataProvider {
     })
     return {
         mode: 'sample',
+        searchKnowledge: (request) => knowledge.searchKnowledge(request),
         sellerDashboard: createSellerDashboardHost({ mode: 'sample', resolveUserEmail: async () => undefined }),
         seReporting: createSampleSeReportingHost(),
         getCurrentUserEmail: async () => undefined,

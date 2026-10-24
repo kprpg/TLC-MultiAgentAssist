@@ -510,6 +510,7 @@ describe('hosted web API', () => {
 
 function runtime(): WebRuntime {
     return {
+        searchKnowledge: vi.fn(),
         getPortfolioIndex: vi.fn(),
         getPortfolioWorkspace: vi.fn(),
         getDiscoverySnapshot: vi.fn(),

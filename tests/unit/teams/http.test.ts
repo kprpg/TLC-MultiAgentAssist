@@ -10,6 +10,8 @@ import JSZip from 'jszip'
 import { GraphMeetingError } from '../../../packages/orchestrator/collaboration/meeting-acquisition.js'
 import { manualMeetingTranscriptVersion, meetingChangeSetProposalSchema } from '../../../packages/common/contracts/meeting.js'
 import { acquisitionSchema } from '../../../packages/common/contracts/collaboration.js'
+import { workflowContractVersion } from '../../../packages/common/contracts/workflows.js'
+import { WorkflowRuntimeError } from '../../../packages/orchestrator/workflows/runtime.js'
 import { z } from 'zod'
 
 const cleanups: Array<() => Promise<void> | void> = []
@@ -166,6 +168,19 @@ describe('Teams same-origin verified operation boundary', () => {
     const unknown = await post('/api/teams/operations/__proto__', {})
     expect(unknown.status).toBe(404)
     expect(await unknown.text()).not.toContain('node_modules')
+  })
+  it('returns an explicit retryable outcome when the workflow runtime is at its active-run limit', async () => {
+    const { post, services } = await start()
+    const definition = services.workflows.listDefinitions({ contractVersion: workflowContractVersion, scope: 'portfolio' })[0]!
+    vi.spyOn(services.workflows, 'start').mockImplementation(() => {
+      throw new WorkflowRuntimeError('capacity_exceeded', 'Too many workflow runs are active.')
+    })
+    const response = await post('/api/teams/operations/workflows.start', {
+      contractVersion: workflowContractVersion, workflowId: definition.id, scope: { kind: 'portfolio' }
+    })
+    expect(response.status).toBe(429)
+    expect(response.headers.get('retry-after')).toBe('5')
+    expect(await response.json()).toMatchObject({ error: 'workflow_capacity_exceeded' })
   })
   it('never falls through to sample for a missing or invalid live token', async () => {
     const store = new SqliteDocumentStore()

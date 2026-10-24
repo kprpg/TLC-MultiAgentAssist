@@ -18,6 +18,7 @@ import {
 } from '../../../packages/common/index.js'
 import { discoverySnapshotSchema, portfolioIndexSchema, portfolioWorkspaceSchema } from '../../../packages/common/contracts/index.js'
 import { cacheControlResponseSchema, mutationSyncResponseSchema } from '../../../packages/common/contracts/cache-sync.js'
+import { knowledgeSearchResponseSchema } from '../../../packages/common/contracts/knowledge.js'
 
 function extractId(raw: unknown): string {
     if (raw && typeof raw === 'object' && 'id' in raw) {
@@ -94,6 +95,9 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
     const { id, method } = parsed.data
     try {
         switch (method) {
+            case 'searchKnowledge':
+                return successResponse(id, knowledgeSearchResponseSchema.parse(
+                    await provider.searchKnowledge(parseBridgeParams('searchKnowledge', parsed.data.params))))
             case 'cacheControl': {
                 const input = parseBridgeParams('cacheControl', parsed.data.params)
                 if (!provider.cacheSession) throw new Error('The presentation cache owner is unavailable.')

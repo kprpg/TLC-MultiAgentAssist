@@ -17,6 +17,16 @@ const run = (runId: string, workflowId: string): WorkflowRun => ({
     contractVersion: '1.0', runId, workflowId, status: 'queued', scope: { kind: 'portfolio' },
     connectorCalls: [], telemetry: { correlationId: runId, cacheHit: false }
 })
+const running = (runId: string, workflowId: string): WorkflowRun => ({
+    ...run(runId, workflowId), status: 'running', startedAt: '2026-09-12T10:00:00.000Z'
+})
+const cancelled = (runId: string, workflowId: string): WorkflowRun => ({
+    ...running(runId, workflowId), status: 'cancelled', completedAt: '2026-09-12T10:00:01.000Z'
+})
+const ids = {
+    one: '11111111-1111-4111-8111-111111111111', two: '22222222-2222-4222-8222-222222222222',
+    three: '33333333-3333-4333-8333-333333333333', four: '44444444-4444-4444-8444-444444444444'
+}
 
 describe('workflow registry', () => {
     it('strictly validates definitions and rejects duplicate ids', () => {
@@ -45,35 +55,50 @@ describe('workflow registry', () => {
 })
 
 describe('workflow run history', () => {
-    it('evicts the oldest run at capacity and returns newest first', () => {
+    it('never evicts queued or running runs, however many newer runs are admitted', () => {
+        const onEvicted = vi.fn()
+        const history = new WorkflowRunHistory({ capacity: 1, onEvicted })
+        history.set(running(ids.one, 'WF-001'))
+        history.set(run(ids.two, 'WF-002'))
+        history.set(run(ids.three, 'WF-003'))
+
+        expect(history.list().map(({ runId }) => runId)).toEqual([ids.three, ids.two, ids.one])
+        expect(history.activeCount()).toBe(3)
+        expect(onEvicted).not.toHaveBeenCalled()
+    })
+
+    it('retains at most the configured number of finished runs, evicting the earliest finished first', () => {
         const onEvicted = vi.fn()
         const history = new WorkflowRunHistory({ capacity: 2, onEvicted })
-        const first = run('11111111-1111-4111-8111-111111111111', 'WF-001')
-        const second = run('22222222-2222-4222-8222-222222222222', 'WF-002')
-        const third = run('33333333-3333-4333-8333-333333333333', 'WF-003')
+        history.set(running(ids.one, 'WF-001'))
+        history.set(running(ids.two, 'WF-002'))
+        history.set(running(ids.three, 'WF-003'))
+        history.set(cancelled(ids.two, 'WF-002'))
+        history.set(cancelled(ids.three, 'WF-003'))
+        expect(onEvicted).not.toHaveBeenCalled()
 
-        history.set(first)
-        history.set(second)
-        history.set(third)
+        // The longest-running run finishes last: it must be retained, not evicted as "oldest".
+        history.set(cancelled(ids.one, 'WF-001'))
 
-        expect(history.get(first.runId)).toBeUndefined()
-        expect(history.list().map(({ runId }) => runId)).toEqual([third.runId, second.runId])
-        expect(onEvicted).toHaveBeenCalledWith(first)
+        expect(onEvicted).toHaveBeenCalledOnce()
+        expect(onEvicted).toHaveBeenCalledWith(cancelled(ids.two, 'WF-002'))
+        expect(history.get(ids.one)?.status).toBe('cancelled')
+        expect(history.get(ids.three)?.status).toBe('cancelled')
+        expect(history.get(ids.two)).toBeUndefined()
+        expect(history.activeCount()).toBe(0)
     })
 
     it('updates an existing run without changing creation order and isolates stored values', () => {
         const history = new WorkflowRunHistory({ capacity: 2 })
-        const first = run('11111111-1111-4111-8111-111111111111', 'WF-001')
-        const second = run('22222222-2222-4222-8222-222222222222', 'WF-002')
+        const first = run(ids.one, 'WF-001')
+        const second = run(ids.two, 'WF-002')
         history.set(first)
         history.set(second)
         first.workflowId = 'WF-999'
 
         expect(history.get(first.runId)?.workflowId).toBe('WF-001')
-        history.set({ ...history.get(first.runId)!, status: 'running', startedAt: '2026-09-12T10:00:00.000Z' })
-        const third = run('33333333-3333-4333-8333-333333333333', 'WF-003')
-        history.set(third)
-        expect(history.get(first.runId)).toBeUndefined()
+        history.set(running(ids.one, 'WF-001'))
+        expect(history.list().map(({ runId }) => runId)).toEqual([ids.two, ids.one])
     })
 
     it('filters by exact scope and validates capacity and limit', () => {

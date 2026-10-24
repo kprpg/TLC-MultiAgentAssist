@@ -84,7 +84,7 @@ import {
 } from '../../../packages/common/index.js'
 import { createOutlookDraftMessage } from '../../../packages/documents/outlook-compose.js'
 import { createResponseDocumentBuffer } from '../../../packages/documents/response-document.js'
-import { invokeWorkflowHost, type WorkflowHost, type WorkflowHostOperation } from '../../../packages/orchestrator/workflows/index.js'
+import { invokeWorkflowHost, WorkflowRuntimeError, type WorkflowHost, type WorkflowHostOperation } from '../../../packages/orchestrator/workflows/index.js'
 import { createBrowserOnlyVoiceHost, type SharedVoiceInputHost } from '../../../packages/orchestrator/voice-input.js'
 import type { SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
@@ -94,11 +94,13 @@ import { mutationSyncRequestSchema, mutationSyncResponseSchema, type MutationSyn
 import { MutationDispatchPreventedError } from '../../../packages/orchestrator/mutations/host.js'
 import { MutationJournalError } from '../../../packages/orchestrator/mutations/journal.js'
 import { sourceHttpFailure } from '../../../packages/common/source-failure.js'
+import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest, type KnowledgeSearchResponse } from '../../../packages/common/contracts/knowledge.js'
 
 const accountIdSchema = z.string().min(1).max(200)
 const maximumBodyBytes = 1_048_576
 
 export interface WebRuntime {
+    searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
     mutationSync?(request: MutationSyncRequest): Promise<MutationSyncResponse>
     withReadContext?<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T>
     getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
@@ -271,6 +273,11 @@ export function buildWebApiHandler(options: WebApiOptions) {
 
             const runtime = await options.createRuntime(authentication)
 
+            if (request.method === 'POST' && url.pathname === '/api/knowledge/search') {
+                const input = knowledgeSearchRequestSchema.parse(await readJsonBody(request))
+                sendJson(response, 200, knowledgeSearchResponseSchema.parse(await runtime.searchKnowledge(input)))
+                return true
+            }
             if (request.method === 'POST' && url.pathname === '/api/mutation-sync') {
                 const input = mutationSyncRequestSchema.parse(await readJsonBody(request))
                 if (!runtime.mutationSync) {
@@ -533,14 +540,19 @@ export function buildWebApiHandler(options: WebApiOptions) {
                     ? 400
                     : error instanceof RecordCreationError
                         ? error.code === 'target-disabled' ? 403 : error.code === 'parent-unavailable' ? 404 : 409
-                        : 500
+                        : error instanceof WorkflowRuntimeError && error.code === 'capacity_exceeded'
+                            ? 429
+                            : error instanceof WorkflowRuntimeError && error.code === 'run_not_found'
+                                ? 404
+                                : 500
             options.onError?.(error, correlationId)
+            if (statusCode === 429) response.setHeader('retry-after', '5')
             const message = statusCode === 500
                 ? 'The server could not complete the request.'
                 : error instanceof Error ? error.message : 'The request is invalid.'
             sendJson(response, statusCode, {
                 error: message,
-                ...(error instanceof RecordCreationError ? { code: error.code } : {}),
+                ...(error instanceof RecordCreationError || error instanceof WorkflowRuntimeError ? { code: error.code } : {}),
                 correlationId
             })
             return true

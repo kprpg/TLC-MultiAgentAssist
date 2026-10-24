@@ -23,6 +23,7 @@ import type { SeReportingResource } from '../connectors/se-reporting/types.js'
 import type { MeetingAcquisitionRequest } from './collaboration/meeting-acquisition.js'
 import type { PerformanceReporter } from '../common/telemetry/performance.js'
 import { bindSourceToken } from './mutations/core-adapter.js'
+import { createKnowledgeSearch, type KnowledgeSearch } from './knowledge-search.js'
 
 type MeetingConnector = Pick<LiveMeetingCaptureConnector, 'proposeMeetingChangeSet' | 'applyMeetingChangeSet'>
 export interface ApplicationServices {
@@ -43,10 +44,10 @@ export interface ApplicationServices {
   dispose(): Promise<void>
 }
 
-function assemble(msx: MsxConnector, guidance: McemGuidanceConnector, agents: TaskAgentRegistry, recordCreation: RecordCreationService, meetings: MeetingConnector, workflows: WorkflowHost, sellerDashboard: SellerDashboardHost, seReporting: SeReportingHost, source: Pick<ApplicationServices, 'acquireTranscripts' | 'resolveMeeting' | 'listTranscriptSources'>, dispose: () => Promise<void>, refreshSource = () => {}, performanceReporter?: PerformanceReporter): ApplicationServices {
+function assemble(msx: MsxConnector, guidance: McemGuidanceConnector, agents: TaskAgentRegistry, recordCreation: RecordCreationService, meetings: MeetingConnector, workflows: WorkflowHost, sellerDashboard: SellerDashboardHost, seReporting: SeReportingHost, knowledge: KnowledgeSearch, source: Pick<ApplicationServices, 'acquireTranscripts' | 'resolveMeeting' | 'listTranscriptSources'>, dispose: () => Promise<void>, refreshSource = () => {}, performanceReporter?: PerformanceReporter): ApplicationServices {
   return {
     ...(performanceReporter ? { performanceReporter } : {}),
-    orchestrator: new ThinSliceOrchestrator(msx, guidance, agents, performanceReporter, recordCreation),
+    orchestrator: new ThinSliceOrchestrator(msx, guidance, agents, performanceReporter, recordCreation, knowledge),
     meetings, workflows, sellerDashboard, seReporting, dispose, workflowScopes: new Map(), ...source,
     refreshSource,
     withReadContext: (operation) => msx.withReadContext ? msx.withReadContext(operation) : operation(),
@@ -70,7 +71,8 @@ export async function createSampleApplicationServices(options: { dataPath?: stri
   return assemble(
     msx, new LocalPdfMcemGuidanceConnector(resolve(options.workingDirectory ?? process.cwd(), 'docs/knowledge/MCEM Overview.pdf')),
     createSampleTaskAgents(), new RecordCreationService(msx, writer, { writer }), msx, workflows,
-    createSellerDashboardHost({ mode: 'sample', resolveUserEmail: async () => undefined }), createSampleSeReportingHost(), {
+    createSellerDashboardHost({ mode: 'sample', resolveUserEmail: async () => undefined }), createSampleSeReportingHost(),
+    createKnowledgeSearch({ mode: 'sample' }), {
       listTranscriptSources: (opportunityId) => msx.listMeetingTranscripts(opportunityId),
       resolveMeeting: async () => { throw new Error('Sample mode uses the bundled transcript picker, not a live meeting URL.') },
       acquireTranscripts: async (request) => {
@@ -138,6 +140,9 @@ export async function createLiveApplicationServices(options: {
       ...(options.getReportingToken ? { getToken: options.getReportingToken } : {}),
       ...(options.foundryCredential ? { foundryCredential: options.foundryCredential } : {}),
       ...(options.reportingFetcher ? { fetcher: options.reportingFetcher } : {})
+    }), createKnowledgeSearch({
+      mode: 'live', environment: options.environment, getGraphToken: () => options.getToken('graph'),
+      ...(options.fetchImplementation ? { fetcher: options.fetchImplementation } : {})
     }), {
       acquireTranscripts: (request) => graph.acquire(request),
       resolveMeeting: (url) => graph.resolveMeeting(url),

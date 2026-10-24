@@ -27,6 +27,27 @@ The structure supports these boundaries:
 - [Backlog screenshot assets](./media/product-backlog/) contains redacted,
   ID-labelled references linked from each entry. Sensitive originals stay outside Git.
 
+### Knowledge connector foundation
+
+The read-only knowledge operation is implemented in these focused modules:
+
+```text
+packages/common/contracts/knowledge.ts        Independent v1.0 query/evidence/result contracts
+packages/common/configuration/knowledge-sources.ts
+                                             Seismic connection and retrievable-property mappings
+packages/common/fixtures/knowledge.ts         Canonical offline content/PPT search fixtures
+packages/connectors/common/knowledge.ts       KnowledgeSource interface and typed source errors
+packages/connectors/seismic/graph.ts          Scoped delegated Microsoft Graph external-item search
+packages/connectors/seismic/mcp.ts            Explicitly unavailable direct-MCP placeholder
+packages/orchestrator/knowledge-search.ts     Shared provider composition and source dispatch
+apps/desktop/electron/main/knowledge-ipc.ts   Validated Desktop knowledge operation adapter
+docs/Knowledge-Search-Connectors.md            Phased rollout, authentication and future UI contract
+```
+
+Desktop, Web, VS Code, and the shared operation catalog expose the same operation.
+No content-search UI or MCEM portal connector is added. See the
+[knowledge connector guide](./Knowledge-Search-Connectors.md).
+
 ### Teams implementation additions
 
 The original proposal below is retained as historical context. The Teams development
@@ -105,6 +126,19 @@ packages/orchestrator/agent-evidence.ts
                                      Bounded evidence pack (comment history, notes, activities, milestone detail) and model-input serialization
 packages/connectors/msx/evidence.ts  Pure helpers for MSX comment-history parsing and rich-text cleanup
 packages/orchestrator/prewarm.ts      Best-effort Foundry token and MCEM guidance pre-warm
+packages/orchestrator/workflows/registration.ts
+                                     Approved workflow registration seam (schema-validated extension output)
+packages/orchestrator/evaluation/golden-scenarios.ts
+                                     Metadata-only golden-scenario evaluator (not-evaluated is never a pass)
+packages/common/configuration/hosting-model.ts
+                                     Declared single-instance hosting model and startup guard
+apps/desktop/electron/main/task-agents.ts
+                                     Desktop task-agent composition over the shared factory
+apps/desktop/renderer-revamp/src/preview/
+                                     Static-preview-only implementations, imported only by data-client.ts
+scripts/check-import-boundaries.mjs   Import-boundary gate (baseline: scripts/import-boundary-baseline.json)
+docs/architecture/Hosting-Model.md, Operational-Evidence.md
+                                     Hosting constraints and executed vs planned evidence
 apps/shared/agent-stream.ts           Browser-safe agent stream accumulator and NDJSON reader (all UIs)
                                      Desktop IPC acknowledges the validated terminal event before removing its listener
 apps/shared/use-agent-run.ts          Shared React hook: instant draft, streamed text, final response, cancel

@@ -31,11 +31,23 @@ export const initialWorkflowOutputSchema = z.object({
   sourceHealth: z.array(sourceHealthSchema).min(1)
 }).strict()
 
+/**
+ * Output of a workflow registered through the extension seam. Its shape is owned and validated host-side
+ * by the registration's approved schema; the wire carries it as bounded data beside the stable initial-cohort `output`.
+ */
+export const registeredWorkflowOutputSchema = z.object({
+  workflowId: z.string().regex(/^WF-[0-9]{3}$/),
+  outputSchemaRef: z.string().min(1).max(200),
+  data: z.record(z.string(), z.unknown())
+}).strict()
+
 export const workflowRunViewSchema = z.object({
   run: workflowRunSchema,
-  output: initialWorkflowOutputSchema.optional()
+  output: initialWorkflowOutputSchema.optional(),
+  extensionOutput: registeredWorkflowOutputSchema.optional()
 }).strict()
 
 export type WorkflowQueueItem = z.infer<typeof workflowQueueItemSchema>
 export type InitialWorkflowOutput = z.infer<typeof initialWorkflowOutputSchema>
+export type RegisteredWorkflowOutput = z.infer<typeof registeredWorkflowOutputSchema>
 export type WorkflowRunView = z.infer<typeof workflowRunViewSchema>

@@ -16,13 +16,13 @@ import { createLocalStoreMsxConnector } from '../../../../packages/connectors/lo
 import { SampleRecordCreationCatalog } from '../../../../packages/connectors/local-store/sample-record-creation-catalog.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
-import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../../packages/connectors/foundry/index.js'
+import { createFoundryOpenAIClient } from '../../../../packages/connectors/foundry/index.js'
 import { createFoundryMeetingExtractor } from '../../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
 import { parseTranscriptContent } from '../../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import { ThinSliceOrchestrator, prewarmAgentDependencies, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
-import { foundryAgentTuning } from '../../../../packages/orchestrator/task-agents.js'
 import { RecordCreationService } from '../../../../packages/orchestrator/record-creation/service.js'
 import { createLivePlayWorkflowHost, createSampleWorkflowHost } from '../../../../packages/orchestrator/workflows/index.js'
+import { createDesktopTaskAgents } from './task-agents.js'
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
 import { prepareFoundryEnvironmentFile } from './packaged-configuration.js'
 import { createRuntimeCredentials } from './runtime-credentials.js'
@@ -47,6 +47,9 @@ import { localMutationState, protectedMutationKey, type MutationState } from '..
 import { createMutationSession, type MutationSession } from '../../../../packages/orchestrator/mutations/composition.js'
 import { bindSourceToken } from '../../../../packages/orchestrator/mutations/core-adapter.js'
 import { cacheControlRequestSchema, cacheControlResponseSchema } from '../../../../packages/common/contracts/cache-sync.js'
+import { createKnowledgeSearch } from '../../../../packages/orchestrator/knowledge-search.js'
+import { seismicGraphDefaultScope, seismicGraphScopes } from '../../../../packages/common/configuration/knowledge-sources.js'
+import { createKnowledgeSearchIpcHandler, knowledgeSearchIpcChannel } from './knowledge-ipc.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -175,39 +178,32 @@ const meetingExtractor = runtimeEnvironment && foundryOpenAIClient && (process.e
     requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs
   })
   : undefined
-const taskAgents: TaskAgentRegistry = Object.fromEntries(
-  (['account-pulse', 'mcem-coach', 'pursuit-executive', 'risk-solution-play'] as const).map((capability) => {
-    if (!runtimeEnvironment) {
-      return [capability, {
-        version: 'sample-v2',
-        agent: { invoke: async (context: AgentTaskContext) => buildSampleAgentResponse(capability, context) }
-      }]
-    }
-    const binding = {
-      'account-pulse': runtimeEnvironment.foundry.agents.accountPulse,
-      'mcem-coach': runtimeEnvironment.foundry.agents.mcemCoach,
-      'pursuit-executive': runtimeEnvironment.foundry.agents.pursuitExecutive,
-      'risk-solution-play': runtimeEnvironment.foundry.agents.riskSolutionPlay
-    }[capability]
-    return [capability, {
-      version: 'active',
-      agent: new FoundryPromptAgent<AgentTaskContext>({
-        projectEndpoint: runtimeEnvironment.foundry.projectEndpoint,
-        agentName: binding.name,
-        requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
-        credential: credentials.foundry,
-        openAIClient: foundryOpenAIClient,
-        ...foundryAgentTuning(runtimeEnvironment, reportPerformance)
-      })
-    }]
-  })
-) as TaskAgentRegistry
+const taskAgents: TaskAgentRegistry = createDesktopTaskAgents({
+  environment: runtimeEnvironment,
+  credential: credentials.foundry,
+  client: foundryOpenAIClient,
+  performanceReporter: reportPerformance,
+  sample: () => Object.fromEntries(
+    (['account-pulse', 'mcem-coach', 'pursuit-executive', 'risk-solution-play'] as const).map((capability) => [capability, {
+      version: 'sample-v2',
+      agent: { invoke: async (context: AgentTaskContext) => buildSampleAgentResponse(capability, context) }
+    }])
+  ) as TaskAgentRegistry
+})
 const orchestrator = new ThinSliceOrchestrator(
   msxConnector,
   mcemConnector,
   taskAgents,
   reportPerformance,
-  recordCreation
+  recordCreation,
+  createKnowledgeSearch({
+    mode: dataMode,
+    getGraphToken: async () => {
+      const token = await credentials.msx.getToken(authentication?.mode === 'interactive-browser' ? [...seismicGraphScopes] : seismicGraphDefaultScope)
+      if (!token) throw new Error('A delegated Microsoft Graph token was not returned.')
+      return token.token
+    }
+  })
 )
 const presentation = createPresentationOwner(orchestrator)
 const clearSourceSession = () => presentation.session.clear()
@@ -353,6 +349,11 @@ function registerIpc(): void {
   })
   const invokeSellerDashboard = createSellerDashboardIpcHandler(sellerDashboardHost)
   const invokeSeReporting = createSeReportingIpcHandler(seReportingHost)
+  const searchKnowledge = createKnowledgeSearchIpcHandler(orchestrator)
+  ipcMain.handle(knowledgeSearchIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return searchKnowledge(request)
+  })
   ipcMain.handle(seReportingIpcChannel, (event, request: unknown) => {
     assertTrustedSender(event)
     return invokeSeReporting(request)

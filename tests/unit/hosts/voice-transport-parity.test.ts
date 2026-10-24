@@ -30,6 +30,7 @@ function harness() {
 
 function runtime(): WebRuntime {
     return {
+        searchKnowledge: vi.fn(),
         getPortfolioIndex: vi.fn(), getPortfolioWorkspace: vi.fn(), getDiscoverySnapshot: vi.fn(),
         listAccounts: vi.fn(), searchAccounts: vi.fn(), addAccount: vi.fn(), setAccountVisibility: vi.fn(),
         listOpportunities: vi.fn(), getRecordCreationCatalog: vi.fn(), previewRecordCreation: vi.fn(),

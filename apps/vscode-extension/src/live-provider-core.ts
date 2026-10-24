@@ -57,6 +57,7 @@ export function buildLiveDataProvider(
         sourceCore: orchestrator,
         ...(getSourceToken ? { getSourceToken } : {}),
         mode,
+        searchKnowledge: (request) => orchestrator.searchKnowledge(request),
         sellerDashboard: createSellerDashboardHost({ mode, resolveUserEmail: async () => account }),
         seReporting: reportingHost ?? createSeReportingHost({ mode, identity: async () => ({ key: account, email: account }) }),
         getCurrentUserEmail: async () => account,

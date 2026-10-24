@@ -12,6 +12,7 @@ import { McpToolBroker } from '../routing/mcp-tool-broker.js'
 import { InitialWorkflowConnectorExecutor, InitialWorkflowResultAssembler } from './cohort-executor.js'
 import { initialWorkflowDefinitions } from './cohort.js'
 import { SharedWorkflowHost } from './host.js'
+import { composeWorkflows, type WorkflowRegistration } from './registration.js'
 import { WorkflowRegistry } from './registry.js'
 import { WorkflowRuntime, type WorkflowStepErrorInfo } from './runtime.js'
 
@@ -26,6 +27,8 @@ export type ConfiguredWorkflowHostOptions = {
     // Caps the Dataverse read_query TOP (the OOB Dataverse MCP tool rejects requests above 20 rows).
     maximumRows?: number
     onStepError?: (info: WorkflowStepErrorInfo) => void
+    /** Approved additional workflows; each brings its own handler and output schema. */
+    registrations?: readonly WorkflowRegistration[]
 }
 
 export type ConfiguredWorkflowHost = {
@@ -53,13 +56,16 @@ export function createConfiguredWorkflowHost(options: ConfiguredWorkflowHostOpti
         new MsxMcpReadAdapter(broker),
         options.resolveDelegatedScope
     )
-    const workflowRegistry = new WorkflowRegistry(initialWorkflowDefinitions)
-    const runtime = new WorkflowRuntime(workflowRegistry, executor, {
-        resultAssembler: new InitialWorkflowResultAssembler(),
+    const composition = composeWorkflows({
+        definitions: initialWorkflowDefinitions, executor, assembler: new InitialWorkflowResultAssembler()
+    }, options.registrations)
+    const workflowRegistry = new WorkflowRegistry(composition.definitions)
+    const runtime = new WorkflowRuntime(workflowRegistry, composition.executor, {
+        resultAssembler: composition.assembler,
         ...(options.onStepError ? { onStepError: options.onStepError } : {})
     })
     return {
-        host: new SharedWorkflowHost(workflowRegistry, runtime),
+        host: new SharedWorkflowHost(workflowRegistry, runtime, composition.outputs),
         dispose: () => pool.dispose()
     }
 }

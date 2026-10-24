@@ -6,6 +6,7 @@ import { seReportingRequestSchema } from '../../../packages/common/contracts/se-
 import { discoverySnapshotRequestSchema, portfolioReadRequestSchema, portfolioWorkspaceRequestSchema, agentTaskStreamEventSchema } from '../../../packages/common/contracts/index.js'
 import { cacheControlRequestSchema, mutationSyncRequestSchema } from '../../../packages/common/contracts/cache-sync.js'
 import { agentTaskPromptMaxLength } from '../../../packages/common/contracts/agent-task-limits.js'
+import { knowledgeSearchRequestSchema } from '../../../packages/common/contracts/knowledge.js'
 
 /**
  * Strict, discriminated message envelopes for the webview <-> extension-host bridge.
@@ -21,6 +22,7 @@ export const agentCapabilitySchema = z.enum([
 ])
 
 export const bridgeMethodSchema = z.enum([
+    'searchKnowledge',
     'cacheControl',
     'mutationSync',
     'sellerDashboard',
@@ -73,6 +75,7 @@ export type BridgeMethod = z.infer<typeof bridgeMethodSchema>
 const scopeKindSchema = z.enum(['portfolio', 'account', 'opportunity'])
 
 export const bridgeParamSchemas = {
+    searchKnowledge: knowledgeSearchRequestSchema,
     cacheControl: cacheControlRequestSchema,
     mutationSync: mutationSyncRequestSchema,
     sellerDashboard: sellerDashboardRequestSchema,

@@ -75,7 +75,10 @@ export type WorkflowStepErrorInfo = {
 }
 
 export type WorkflowRuntimeOptions = {
+    /** Finished runs retained for polling and results. Active runs are not counted or evicted. */
     historyCapacity?: number
+    /** Maximum queued plus running runs; further starts fail with `capacity_exceeded`. Default 100. */
+    maxActiveRuns?: number
     now?: () => number
     createId?: () => string
     resultAssembler?: WorkflowResultAssembler
@@ -94,6 +97,7 @@ export class WorkflowRuntime {
     private readonly completions = new Map<string, Completion>()
     private readonly now: () => number
     private readonly createId: () => string
+    private readonly maxActiveRuns: number
     private readonly resultAssembler: WorkflowResultAssembler | undefined
     private readonly onStepError: ((info: WorkflowStepErrorInfo) => void) | undefined
 
@@ -104,6 +108,10 @@ export class WorkflowRuntime {
     ) {
         this.now = options.now ?? Date.now
         this.createId = options.createId ?? randomUUID
+        this.maxActiveRuns = options.maxActiveRuns ?? 100
+        if (!Number.isInteger(this.maxActiveRuns) || this.maxActiveRuns < 1) {
+            throw new Error('Workflow active-run limit must be a positive integer.')
+        }
         this.resultAssembler = options.resultAssembler
         this.onStepError = options.onStepError
         this.history = new WorkflowRunHistory({
@@ -125,7 +133,9 @@ export class WorkflowRuntime {
         if (definition.executionMode === 'agentic') {
             throw new WorkflowRuntimeError('unsupported_execution_mode', 'This runtime does not execute agentic workflows.')
         }
-
+        if (this.history.activeCount() >= this.maxActiveRuns) {
+            throw new WorkflowRuntimeError('capacity_exceeded', 'Too many workflow runs are active. Wait for a run to finish or cancel one, then try again.')
+        }
         const runId = this.createId()
         const correlationId = request.correlationId ?? this.createId()
         const run = workflowRunSchema.parse({
@@ -142,6 +152,11 @@ export class WorkflowRuntime {
         this.completions.set(runId, deferredCompletion())
         queueMicrotask(() => { void this.execute(runId, definition, request.input) })
         return run
+    }
+
+    /** Number of queued or running runs; retention never removes them. */
+    activeRunCount(): number {
+        return this.history.activeCount()
     }
 
     get(runId: string): WorkflowRun | undefined {
@@ -352,7 +367,7 @@ export class WorkflowRuntime {
 }
 
 export class WorkflowRuntimeError extends Error {
-    constructor(readonly code: 'scope_mismatch' | 'unsupported_execution_mode' | 'run_not_found' | 'invalid_transition' | 'result_not_available' | 'queue_item_not_found' | 'opportunity_scope_required' | 'invalid_evidence', message: string) {
+    constructor(readonly code: 'scope_mismatch' | 'unsupported_execution_mode' | 'capacity_exceeded' | 'run_not_found' | 'invalid_transition' | 'result_not_available' | 'queue_item_not_found' | 'opportunity_scope_required' | 'invalid_evidence', message: string) {
         super(message)
         this.name = 'WorkflowRuntimeError'
     }

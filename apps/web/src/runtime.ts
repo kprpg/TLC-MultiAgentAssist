@@ -12,7 +12,7 @@ import { createFoundryMeetingExtractor } from '../../../packages/agents/meeting-
 import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import { ThinSliceOrchestrator, prewarmAgentDependencies } from '../../../packages/orchestrator/index.js'
 import { createFoundryTaskAgents } from '../../../packages/orchestrator/task-agents.js'
-import { createLivePlayWorkflowHost, type WorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
+import { createLivePlayWorkflowHost, WorkflowRuntimeError, type WorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import { createSellerDashboardHost, type SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 import { createSeReportingHost, seReportingScopes } from '../../../packages/orchestrator/se-reporting/composition.js'
 import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
@@ -20,6 +20,7 @@ import type { AuthenticatedRequest, WebRuntime } from './app.js'
 import { hostedMutationState } from '../../../packages/connectors/common/mutation-state.js'
 import { createMutationSession } from '../../../packages/orchestrator/mutations/composition.js'
 import { MutationRuntime } from '../../../packages/orchestrator/mutations/host.js'
+import { createKnowledgeSearch } from '../../../packages/orchestrator/knowledge-search.js'
 
 export function createWebSellerDashboardHost(mode: 'sample' | 'live'): SellerDashboardHost {
     return createSellerDashboardHost({
@@ -77,6 +78,7 @@ export function createWebSeReportingResolver(mode: 'sample' | 'azure-cli' | 'eas
 export interface HostedRuntimeOptions {
     environment?: NodeJS.ProcessEnv
     workingDirectory?: string
+    getGraphKnowledgeToken?(authentication: AuthenticatedRequest): Promise<string>
 }
 
 export async function createHostedRuntimeFactory(options: HostedRuntimeOptions = {}) {
@@ -120,10 +122,15 @@ export async function createHostedRuntimeFactory(options: HostedRuntimeOptions =
         })
         : undefined
 
-    const factory = ({ accessToken }: AuthenticatedRequest): WebRuntime => {
+    const factory = (authentication: AuthenticatedRequest): WebRuntime => {
+        const { accessToken } = authentication
         const msx = new LiveMsxConnector({ getAccessToken: async () => accessToken }, fetch, undefined, performanceReporter, msxWriteMetadataFromEnvironment(environment), portfolioPreferenceStore)
         const meetingConnector = new LiveMeetingCaptureConnector(msx)
-        const core = new ThinSliceOrchestrator(msx, guidance, taskAgents, performanceReporter, new RecordCreationService(msx, msx))
+        const core = new ThinSliceOrchestrator(msx, guidance, taskAgents, performanceReporter, new RecordCreationService(msx, msx),
+            createKnowledgeSearch({
+                mode: 'live', environment,
+                ...(options.getGraphKnowledgeToken ? { getGraphToken: () => options.getGraphKnowledgeToken!(authentication) } : {})
+            }))
         const mutations = createMutationSession({
             core, mode: 'live', source: `web:${foundryEnvironment.environment}:https://microsoftsales.crm.dynamics.com`,
             state: mutationState, enabled: environment['TLC_BACKGROUND_SYNC'] === '1', readCacheOwner: 'client',
@@ -178,6 +185,7 @@ export async function createHostedWorkflowHostResolver(options: HostedRuntimeOpt
         dispose(): Promise<void>
         token: { value: string }
         lastUsed: number
+        activeRunCount(): number
     }>()
 
     return async (authentication: AuthenticatedRequest): Promise<WorkflowHost> => {
@@ -204,18 +212,25 @@ export async function createHostedWorkflowHostResolver(options: HostedRuntimeOpt
                 console.error(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? 'required' : 'optional'} step failed: ${info.message}`)
             }
         })
-        hosts.set(principalKey, { host: configured.host, dispose: configured.dispose, token, lastUsed: Date.now() })
+        hosts.set(principalKey, {
+            host: configured.host, dispose: configured.dispose, token, lastUsed: Date.now(),
+            activeRunCount: () => configured.host.activeRunCount()
+        })
         return configured.host
     }
 }
 
-export async function evictOldestWorkflowHost<T extends { lastUsed: number; dispose(): Promise<void> }>(
+export async function evictOldestWorkflowHost<T extends { lastUsed: number; dispose(): Promise<void>; activeRunCount?(): number }>(
     hosts: Map<string, T>,
     maximumSize = 100
 ): Promise<void> {
     if (hosts.size < maximumSize) return
-    const oldest = [...hosts.entries()].sort((left, right) => left[1].lastUsed - right[1].lastUsed)[0]
-    if (!oldest) return
+    // A host with active runs owns their state; disposing it would strand them.
+    const idle = [...hosts.entries()].filter(([, host]) => (host.activeRunCount?.() ?? 0) === 0)
+    const oldest = idle.sort((left, right) => left[1].lastUsed - right[1].lastUsed)[0]
+    if (!oldest) {
+        throw new WorkflowRuntimeError('capacity_exceeded', 'Every cached workflow session has active runs. Wait for a run to finish, then try again.')
+    }
     hosts.delete(oldest[0])
     await oldest[1].dispose()
 }

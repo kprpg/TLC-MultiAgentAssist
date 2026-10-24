@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "check:structure": "node scripts/check-structure.mjs",
+    "check:boundaries": "node scripts/check-import-boundaries.mjs",
     "preflight": "node scripts/preflight.mjs",
     "typecheck": "tsc --build --pretty false",
     "lint": "eslint .",
@@ -60,7 +61,7 @@
     "test:smoke:revamp": "npm run desktop:build && npm --workspace tlc-assist-vscode run build && playwright test tests/e2e/revamp --config playwright.revamp.config.ts --reporter=line",
     "test:smoke:live": "npm run desktop:build && cross-env TLC_RUN_LIVE_SMOKE=1 playwright test tests/e2e/desktop/live.spec.ts --reporter=line",
     "validate:major": "npm run typecheck && npm test && npm run test:smoke:desktop",
-    "phase0:check": "npm run check:structure && npm run preflight && npm run lint && npm run typecheck && npm run test"
+    "phase0:check": "npm run check:structure && npm run check:boundaries && npm run preflight && npm run lint && npm run typecheck && npm run test"
   },
   "engines": {
     "node": ">=22.12.0",

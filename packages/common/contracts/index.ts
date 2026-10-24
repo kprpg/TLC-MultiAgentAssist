@@ -16,6 +16,7 @@ export * from './seller-dashboard.js'
 export * from './stage-pipeline-review.js'
 export * from './record-creation.js'
 export * from './cache-sync.js'
+export * from './knowledge.js'
 
 export const dataModeSchema = z.enum(['sample', 'live'])
 export const sourceStateSchema = z.enum([
