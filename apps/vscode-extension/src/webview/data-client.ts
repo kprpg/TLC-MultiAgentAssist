@@ -3,6 +3,7 @@ import { AgentStreamError, createAgentStreamAccumulator, type AgentStreamProgres
 import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest } from '../../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema, type SellerDashboardRequest } from '../../../../packages/common/contracts/seller-dashboard.js'
 import { seReportingRequestSchema, seReportingResponseSchema, type SeReportingRequest } from '../../../../packages/common/contracts/se-reporting.js'
+import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest } from '../../../../packages/common/contracts/knowledge.js'
 import {
     recordCreationCatalogSchema,
     recordCreationPreviewSchema,
@@ -57,6 +58,8 @@ const POLL_TIMEOUT_MS = 15_000
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 const transport = {
+    searchKnowledge: async (input: KnowledgeSearchRequest) => knowledgeSearchResponseSchema.parse(
+        await request('searchKnowledge', knowledgeSearchRequestSchema.parse(input))),
     invokeSeReporting: async (input: SeReportingRequest) => seReportingResponseSchema.parse(
         await request('seReporting', seReportingRequestSchema.parse(input))
     ),

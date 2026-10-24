@@ -27,6 +27,7 @@ import { AGENT_CAPABILITIES, buildLiveDataProvider, buildLiveTaskAgents } from '
 import { bindSourceToken } from '../../../packages/orchestrator/mutations/core-adapter.js'
 import { createSeReportingHost } from '../../../packages/orchestrator/se-reporting/composition.js'
 import type { SeReportingResource } from '../../../packages/common/contracts/se-reporting.js'
+import { createKnowledgeSearch } from '../../../packages/orchestrator/knowledge-search.js'
 
 export function configuredFoundryTenantId(): string | undefined {
     const parsed = foundryEnvironmentSchema.safeParse(foundryEnvironmentJson)
@@ -91,7 +92,8 @@ export function createLiveDataProvider(
     useFoundryAgents = true,
     preferenceFilePath?: string,
     foundryCredential?: TokenCredential,
-    getReportingToken?: (resource: SeReportingResource) => Promise<string>
+    getReportingToken?: (resource: SeReportingResource) => Promise<string>,
+    getGraphKnowledgeToken?: () => Promise<string>
 ): ExtensionDataProvider {
     const sourceToken = bindSourceToken(getToken, 'https://microsoftsales.crm.dynamics.com')
     const registry = mcpServerRegistrySchema.parse(mcpServersJson)
@@ -104,7 +106,8 @@ export function createLiveDataProvider(
         ? new LiveMsxConnector({ getAccessToken: sourceToken }, fetch, undefined, performanceReporter, metadata, new JsonFilePortfolioPreferenceStore(preferenceFilePath))
         : new LiveMsxConnector({ getAccessToken: sourceToken }, fetch, undefined, performanceReporter, metadata)
     const taskAgents = (useFoundryAgents ? buildFoundryTaskAgents(foundryCredential, performanceReporter) : undefined) ?? buildLiveTaskAgents()
-    const orchestrator = new ThinSliceOrchestrator(msx, new ExtensionMcemGuidanceConnector(), taskAgents, performanceReporter, new RecordCreationService(msx, msx))
+    const orchestrator = new ThinSliceOrchestrator(msx, new ExtensionMcemGuidanceConnector(), taskAgents, performanceReporter, new RecordCreationService(msx, msx),
+        createKnowledgeSearch({ mode: 'live', ...(getGraphKnowledgeToken ? { getGraphToken: getGraphKnowledgeToken } : {}) }))
     const meetingConnector = new LiveMeetingCaptureConnector(msx)
     const meetingExtractor = buildFoundryMeetingExtractor(process.env, foundryCredential)
 

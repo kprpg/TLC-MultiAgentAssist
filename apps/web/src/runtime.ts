@@ -20,6 +20,7 @@ import type { AuthenticatedRequest, WebRuntime } from './app.js'
 import { hostedMutationState } from '../../../packages/connectors/common/mutation-state.js'
 import { createMutationSession } from '../../../packages/orchestrator/mutations/composition.js'
 import { MutationRuntime } from '../../../packages/orchestrator/mutations/host.js'
+import { createKnowledgeSearch } from '../../../packages/orchestrator/knowledge-search.js'
 
 export function createWebSellerDashboardHost(mode: 'sample' | 'live'): SellerDashboardHost {
     return createSellerDashboardHost({
@@ -58,6 +59,7 @@ export function createWebSeReportingResolver(mode: 'sample' | 'azure-cli' | 'eas
 export interface HostedRuntimeOptions {
     environment?: NodeJS.ProcessEnv
     workingDirectory?: string
+    getGraphKnowledgeToken?(authentication: AuthenticatedRequest): Promise<string>
 }
 
 export async function createHostedRuntimeFactory(options: HostedRuntimeOptions = {}) {
@@ -101,10 +103,15 @@ export async function createHostedRuntimeFactory(options: HostedRuntimeOptions =
         })
         : undefined
 
-    const factory = ({ accessToken }: AuthenticatedRequest): WebRuntime => {
+    const factory = (authentication: AuthenticatedRequest): WebRuntime => {
+        const { accessToken } = authentication
         const msx = new LiveMsxConnector({ getAccessToken: async () => accessToken }, fetch, undefined, performanceReporter, msxWriteMetadataFromEnvironment(environment), portfolioPreferenceStore)
         const meetingConnector = new LiveMeetingCaptureConnector(msx)
-        const core = new ThinSliceOrchestrator(msx, guidance, taskAgents, performanceReporter, new RecordCreationService(msx, msx))
+        const core = new ThinSliceOrchestrator(msx, guidance, taskAgents, performanceReporter, new RecordCreationService(msx, msx),
+            createKnowledgeSearch({
+                mode: 'live', environment,
+                ...(options.getGraphKnowledgeToken ? { getGraphToken: () => options.getGraphKnowledgeToken!(authentication) } : {})
+            }))
         const mutations = createMutationSession({
             core, mode: 'live', source: `web:${foundryEnvironment.environment}:https://microsoftsales.crm.dynamics.com`,
             state: mutationState, enabled: environment['TLC_BACKGROUND_SYNC'] === '1', readCacheOwner: 'client',

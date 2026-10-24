@@ -27,6 +27,27 @@ The structure supports these boundaries:
 - [Backlog screenshot assets](./media/product-backlog/) contains redacted,
   ID-labelled references linked from each entry. Sensitive originals stay outside Git.
 
+### Knowledge connector foundation
+
+The read-only knowledge operation is implemented in these focused modules:
+
+```text
+packages/common/contracts/knowledge.ts        Independent v1.0 query/evidence/result contracts
+packages/common/configuration/knowledge-sources.ts
+                                             Seismic connection and retrievable-property mappings
+packages/common/fixtures/knowledge.ts         Canonical offline content/PPT search fixtures
+packages/connectors/common/knowledge.ts       KnowledgeSource interface and typed source errors
+packages/connectors/seismic/graph.ts          Scoped delegated Microsoft Graph external-item search
+packages/connectors/seismic/mcp.ts            Explicitly unavailable direct-MCP placeholder
+packages/orchestrator/knowledge-search.ts     Shared provider composition and source dispatch
+apps/desktop/electron/main/knowledge-ipc.ts   Validated Desktop knowledge operation adapter
+docs/Knowledge-Search-Connectors.md            Phased rollout, authentication and future UI contract
+```
+
+Desktop, Web, VS Code, and the shared operation catalog expose the same operation.
+No content-search UI or MCEM portal connector is added. See the
+[knowledge connector guide](./Knowledge-Search-Connectors.md).
+
 ### Teams implementation additions
 
 The original proposal below is retained as historical context. The Teams development

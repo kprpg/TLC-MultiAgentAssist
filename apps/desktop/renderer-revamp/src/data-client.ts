@@ -102,8 +102,11 @@ import { SessionPortfolio } from '../../../shared/session-portfolio.js'
 import { createAgentStreamAccumulator, readNdjson, type AgentStreamProgress } from '../../../shared/agent-stream.js'
 import { MutationSyncClient, type MutationInvoker } from '../../../shared/mutation-sync.js'
 import * as syncContracts from '../../../../packages/common/contracts/index.js'
+import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest, type KnowledgeSearchResponse } from '../../../../packages/common/contracts/knowledge.js'
+import { sampleKnowledgeSearchResponse } from '../../../../packages/common/fixtures/knowledge.js'
 
 export interface RevampDataClient {
+    searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
     cacheSession?: SessionPortfolio
     mutationSession?: MutationSyncClient
     invokeMutationSync?: MutationInvoker
@@ -243,6 +246,9 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
             syncContracts.mutationSyncResponseSchema.parse(await apiRequest(fetcher, '/api/mutation-sync', { method: 'POST', body: JSON.stringify(request) })) } : {}),
         mode,
         getDataMode: async () => mode === 'web-live' ? 'live' : 'sample',
+        searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(await apiRequest(fetcher, '/api/knowledge/search', {
+            method: 'POST', body: JSON.stringify(knowledgeSearchRequestSchema.parse(request))
+        })),
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(await apiRequest(fetcher, '/api/seller-dashboard', {
             method: 'POST', body: JSON.stringify(sellerDashboardRequestSchema.parse(request))
         })),
@@ -383,6 +389,7 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
 }
 
 interface DesktopBridge {
+    searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
     invokeMutationSync?: MutationInvoker
     onCacheChanged?(listener: (state: syncContracts.CacheReadState) => void): () => void
     cacheControl?(request: syncContracts.CacheControlRequest): Promise<syncContracts.CacheControlResponse>
@@ -602,6 +609,7 @@ function webClient(): RevampDataClient {
     return {
         mode: 'web-sample',
         getDataMode: async () => 'sample',
+        searchKnowledge: async (request) => sampleKnowledgeSearchResponse(request),
         invokeSellerDashboard: async (request) => {
             sellerDashboardRequestSchema.parse(request)
             return createSampleSellerDashboard()
@@ -836,6 +844,8 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         } : {}),
         mode: 'desktop',
         getDataMode: async () => (await bridge.getDataStatus()).mode,
+        searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(
+            await bridge.searchKnowledge(knowledgeSearchRequestSchema.parse(request))),
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(
             await bridge.invokeSellerDashboard(sellerDashboardRequestSchema.parse(request))
         ),

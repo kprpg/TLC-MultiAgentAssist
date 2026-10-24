@@ -94,11 +94,13 @@ import { mutationSyncRequestSchema, mutationSyncResponseSchema, type MutationSyn
 import { MutationDispatchPreventedError } from '../../../packages/orchestrator/mutations/host.js'
 import { MutationJournalError } from '../../../packages/orchestrator/mutations/journal.js'
 import { sourceHttpFailure } from '../../../packages/common/source-failure.js'
+import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest, type KnowledgeSearchResponse } from '../../../packages/common/contracts/knowledge.js'
 
 const accountIdSchema = z.string().min(1).max(200)
 const maximumBodyBytes = 1_048_576
 
 export interface WebRuntime {
+    searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
     mutationSync?(request: MutationSyncRequest): Promise<MutationSyncResponse>
     withReadContext?<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T>
     getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
@@ -271,6 +273,11 @@ export function buildWebApiHandler(options: WebApiOptions) {
 
             const runtime = await options.createRuntime(authentication)
 
+            if (request.method === 'POST' && url.pathname === '/api/knowledge/search') {
+                const input = knowledgeSearchRequestSchema.parse(await readJsonBody(request))
+                sendJson(response, 200, knowledgeSearchResponseSchema.parse(await runtime.searchKnowledge(input)))
+                return true
+            }
             if (request.method === 'POST' && url.pathname === '/api/mutation-sync') {
                 const input = mutationSyncRequestSchema.parse(await readJsonBody(request))
                 if (!runtime.mutationSync) {

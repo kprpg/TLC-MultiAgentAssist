@@ -73,6 +73,8 @@ import type {
   StageGuidance
 } from '../connectors/common/index.js'
 import { RecordCreationService, RecordCreationError } from './record-creation/service.js'
+import { KnowledgeSearchService, type KnowledgeSearch } from './knowledge-search.js'
+import type { KnowledgeSearchRequest, KnowledgeSearchResponse } from '../common/contracts/knowledge.js'
 
 export interface McemAgentContext {
   request: McemRequest
@@ -119,8 +121,13 @@ export class ThinSliceOrchestrator {
     private readonly mcem: McemGuidanceConnector,
     private readonly taskAgents: TaskAgentRegistry = {},
     private readonly performanceReporter?: PerformanceReporter,
-    private readonly recordCreation?: RecordCreationService
+    private readonly recordCreation?: RecordCreationService,
+    private readonly knowledge: KnowledgeSearch = new KnowledgeSearchService()
   ) { }
+
+  searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse> {
+    return this.knowledge.searchKnowledge(request)
+  }
 
   withReadContext<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
     signal?.throwIfAborted()

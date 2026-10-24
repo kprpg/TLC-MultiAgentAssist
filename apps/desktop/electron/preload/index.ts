@@ -4,6 +4,7 @@ import type { WorkflowHostOperation } from '../../../../packages/orchestrator/wo
 import type { VoiceRequest, VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 import type { SellerDashboardRequest, SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
 import type { SeReportingRequest, SeReportingResponse } from '../../../../packages/common/contracts/se-reporting.js'
+import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest, type KnowledgeSearchResponse } from '../../../../packages/common/contracts/knowledge.js'
 import type { DiscoverySnapshot, DiscoverySnapshotRequest, PortfolioReadRequest, PortfolioIndex, PortfolioWorkspaceRequest, PortfolioWorkspace } from '../../../../packages/common/contracts/index.js'
 import { agentTaskStreamEventSchema } from '../../../../packages/common/contracts/index.js'
 import {
@@ -12,6 +13,7 @@ import {
 } from '../../../../packages/common/contracts/cache-sync.js'
 
 export interface TlcDesktopApi {
+  searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
   invokeMutationSync(request: MutationSyncRequest): Promise<MutationSyncResponse>
   cacheControl(request: CacheControlRequest): Promise<CacheControlResponse>
   onCacheChanged(listener: (state: CacheReadState) => void): () => void
@@ -60,6 +62,8 @@ export interface TlcDesktopApi {
 }
 
 const api: TlcDesktopApi = {
+  searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(
+    await ipcRenderer.invoke('tlc:search-knowledge', knowledgeSearchRequestSchema.parse(request))),
   invokeMutationSync: async (request) => mutationSyncResponseSchema.parse(await ipcRenderer.invoke('tlc:mutation-sync', request)),
   cacheControl: async (request) => cacheControlResponseSchema.parse(await ipcRenderer.invoke('tlc:cache-control', request)),
   onCacheChanged: (listener) => {

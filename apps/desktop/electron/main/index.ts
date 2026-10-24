@@ -47,6 +47,9 @@ import { localMutationState, protectedMutationKey, type MutationState } from '..
 import { createMutationSession, type MutationSession } from '../../../../packages/orchestrator/mutations/composition.js'
 import { bindSourceToken } from '../../../../packages/orchestrator/mutations/core-adapter.js'
 import { cacheControlRequestSchema, cacheControlResponseSchema } from '../../../../packages/common/contracts/cache-sync.js'
+import { createKnowledgeSearch } from '../../../../packages/orchestrator/knowledge-search.js'
+import { seismicGraphDefaultScope, seismicGraphScopes } from '../../../../packages/common/configuration/knowledge-sources.js'
+import { createKnowledgeSearchIpcHandler, knowledgeSearchIpcChannel } from './knowledge-ipc.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -207,7 +210,15 @@ const orchestrator = new ThinSliceOrchestrator(
   mcemConnector,
   taskAgents,
   reportPerformance,
-  recordCreation
+  recordCreation,
+  createKnowledgeSearch({
+    mode: dataMode,
+    getGraphToken: async () => {
+      const token = await credentials.msx.getToken(authentication?.mode === 'interactive-browser' ? [...seismicGraphScopes] : seismicGraphDefaultScope)
+      if (!token) throw new Error('A delegated Microsoft Graph token was not returned.')
+      return token.token
+    }
+  })
 )
 const presentation = createPresentationOwner(orchestrator)
 const clearSourceSession = () => presentation.session.clear()
@@ -353,6 +364,11 @@ function registerIpc(): void {
   })
   const invokeSellerDashboard = createSellerDashboardIpcHandler(sellerDashboardHost)
   const invokeSeReporting = createSeReportingIpcHandler(seReportingHost)
+  const searchKnowledge = createKnowledgeSearchIpcHandler(orchestrator)
+  ipcMain.handle(knowledgeSearchIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return searchKnowledge(request)
+  })
   ipcMain.handle(seReportingIpcChannel, (event, request: unknown) => {
     assertTrustedSender(event)
     return invokeSeReporting(request)

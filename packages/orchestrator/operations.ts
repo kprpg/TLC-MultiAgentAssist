@@ -59,6 +59,7 @@ export function createApplicationOperations(services: ApplicationServices) {
   const workflows = services.workflows
   const operations: Record<string, ApplicationOperation> = {
     ...createCoreMutationOperations(core, (input) => services.meetings.applyMeetingChangeSet(input)),
+    searchKnowledge: operation(c.knowledgeSearchRequestSchema, c.knowledgeSearchResponseSchema, (input) => core.searchKnowledge(input)),
     sellerDashboard: operation(sellerDashboardRequestSchema, sellerDashboardResponseSchema, (input) => services.sellerDashboard.invoke(input)),
     seReporting: operation(seReportingRequestSchema.refine((input) => !['run', 'publish'].includes(input.operation)), seReportingResponseSchema, (input) => services.seReporting.invoke(input)),
     seReportingRun: operation(seReportingRequestSchema.refine((input) => input.operation === 'run'), seReportingResponseSchema, (input) => services.seReporting.invoke(input), 'read', true),
