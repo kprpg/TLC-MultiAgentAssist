@@ -13,6 +13,7 @@ import {
 import { initialWorkflowOutputSchema } from './cohort.js'
 import { WorkflowRegistry } from './registry.js'
 import { WorkflowRuntime, WorkflowRuntimeError } from './runtime.js'
+import type { RegisteredWorkflowOutputs } from './registration.js'
 import { workflowRunViewSchema, type WorkflowRunView } from './view-contracts.js'
 
 export { workflowRunViewSchema } from './view-contracts.js'
@@ -66,13 +67,20 @@ export interface WorkflowHost {
     cancel(request: unknown): WorkflowRun
     listRuns(request: unknown): WorkflowRun[]
     prepareGuidance(request: unknown): WorkflowGuidanceHandoff
+    /** Queued or running runs; hosts that cache workflow hosts must not dispose one while this is above zero. */
+    activeRunCount?(): number
 }
 
 export class SharedWorkflowHost implements WorkflowHost {
     constructor(
         private readonly registry: WorkflowRegistry,
-        private readonly runtime: WorkflowRuntime
+        private readonly runtime: WorkflowRuntime,
+        private readonly outputs: RegisteredWorkflowOutputs = new Map()
     ) { }
+
+    activeRunCount(): number {
+        return this.runtime.activeRunCount()
+    }
 
     listDefinitions(rawRequest: unknown): WorkflowDefinition[] {
         const request = listWorkflowDefinitionsRequestSchema.parse(rawRequest)
@@ -94,9 +102,14 @@ export class SharedWorkflowHost implements WorkflowHost {
         const run = this.runtime.get(request.runId)
         if (!run) throw new WorkflowRuntimeError('run_not_found', `Workflow run ${request.runId} is not available.`)
         const result = run.resultRef ? this.runtime.getResult(run.resultRef) : undefined
+        const registered = this.outputs.get(run.workflowId)
         return workflowRunViewSchema.parse({
             run,
-            ...(result?.output === undefined ? {} : { output: initialWorkflowOutputSchema.parse(result.output) })
+            ...(result?.output === undefined ? {}
+                : registered ? { extensionOutput: {
+                    workflowId: run.workflowId, outputSchemaRef: registered.outputSchemaRef, data: registered.schema.parse(result.output)
+                } }
+                    : { output: initialWorkflowOutputSchema.parse(result.output) })
         })
     }
 

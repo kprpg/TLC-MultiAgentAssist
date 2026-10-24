@@ -33,8 +33,10 @@ import { teamsClientBuildSchema, teamsLaunchIdentitySchema, teamsLaunchVersion }
 import { teamsDataModeSchema } from '../../../packages/common/contracts/teams-data-mode.js'
 import { createTeamsPerformanceReporter } from './performance.js'
 import { createTeamsDataModeRouter } from './data-mode-router.js'
+import { resolveHostingModel } from '../../../packages/common/configuration/hosting-model.js'
 
 export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.env) {
+  resolveHostingModel(environment)
   const configuration = loadTeamsConfiguration(environment)
   const hosted = configuration.mode === 'live' && !isLocalConfiguration(configuration) ? configuration : undefined
   const tlsConfiguration = loadTeamsTlsConfiguration(environment, configuration.origin)

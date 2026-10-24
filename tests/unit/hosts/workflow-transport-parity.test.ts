@@ -129,6 +129,31 @@ describe('workflow trusted-host parity', () => {
         expect(await post(baseUrl, 'cancel', cancelRequest)).toEqual(ipc[workflowIpcChannels.cancel]!(cancelRequest))
     })
 
+    it('reports workflow overload as an explicit retryable outcome without losing the admitted run', async () => {
+        const registry = new WorkflowRegistry([definition])
+        const execute = vi.fn<WorkflowConnectorExecutor['execute']>(() => new Promise(() => undefined))
+        let counter = 0
+        const runtime = new WorkflowRuntime(registry, { execute }, {
+            maxActiveRuns: 1, createId: () => `${String(++counter).padStart(8, '0')}-0000-4000-8000-000000000000`
+        })
+        const host = new SharedWorkflowHost(registry, runtime)
+        const ipc = createWorkflowIpcHandlers(host)
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => runtimeStub(), resolveWorkflowHost: () => host }))
+        const startRequest = { contractVersion, workflowId: 'WF-001', scope: { kind: 'portfolio' as const } }
+
+        const admitted = await post(baseUrl, 'start', startRequest) as { runId: string }
+        const rejected = await fetch(`${baseUrl}/api/workflows/start`, {
+            method: 'POST', headers: authenticationHeaders, body: JSON.stringify(startRequest)
+        })
+        expect(rejected.status).toBe(429)
+        expect(rejected.headers.get('retry-after')).toBe('5')
+        expect(await rejected.json()).toMatchObject({ error: expect.stringContaining('Too many workflow runs are active'), code: 'capacity_exceeded' })
+        expect(() => ipc[workflowIpcChannels.start]!(startRequest)).toThrowError(expect.objectContaining({ code: 'capacity_exceeded' }))
+
+        expect(await post(baseUrl, 'get', { contractVersion, runId: admitted.runId })).toMatchObject({ run: { runId: admitted.runId } })
+        expect(runtime.list()).toHaveLength(1)
+    })
+
     async function post(baseUrl: string, operation: string, body: unknown): Promise<unknown> {
         const response = await fetch(`${baseUrl}/api/workflows/${operation}`, {
             method: 'POST', headers: authenticationHeaders, body: JSON.stringify(body)

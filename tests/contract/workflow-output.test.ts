@@ -22,4 +22,15 @@ describe('browser-safe workflow output authority', () => {
       { ...output, card: { kind: 'made-up', title: 'Bad' } }
     ]) expect(initialWorkflowOutputSchema.safeParse(invalid).success).toBe(false)
   })
+  it('adds the registered-workflow output as a strict optional field without changing existing views', () => {
+    const run = { contractVersion: '1.0', runId: '11111111-1111-4111-8111-111111111111', workflowId: 'WF-001', status: 'queued', scope: { kind: 'portfolio' }, connectorCalls: [], telemetry: { correlationId: '22222222-2222-4222-8222-222222222222', cacheHit: false } }
+    expect(workflowRunViewSchema.parse({ run })).toEqual({ run })
+    expect(workflowRunViewSchema.parse({ run, output })).toMatchObject({ output })
+    const extensionOutput = { workflowId: 'WF-101', outputSchemaRef: 'wf-101.output.v1', data: { any: 'approved shape' } }
+    expect(workflowRunViewSchema.parse({ run, extensionOutput }).extensionOutput).toEqual(extensionOutput)
+    for (const invalid of [
+      { ...extensionOutput, workflowId: 'renewal' }, { ...extensionOutput, outputSchemaRef: '' },
+      { ...extensionOutput, data: 'not-an-object' }, { ...extensionOutput, extra: true }
+    ]) expect(workflowRunViewSchema.safeParse({ run, extensionOutput: invalid }).success).toBe(false)
+  })
 })

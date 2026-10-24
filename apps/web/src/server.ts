@@ -19,7 +19,9 @@ import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-
 import { localMutationState } from '../../../packages/connectors/common/mutation-state.js'
 import { createMutationSession } from '../../../packages/orchestrator/mutations/composition.js'
 import { createKnowledgeSearch } from '../../../packages/orchestrator/knowledge-search.js'
+import { resolveHostingModel } from '../../../packages/common/configuration/hosting-model.js'
 
+resolveHostingModel(process.env)
 const port = parsePort(process.env['PORT'])
 const mode = resolveWebHostMode(process.env)
 const host = process.env['HOST']?.trim() || (mode === 'easy-auth' ? '0.0.0.0' : '127.0.0.1')

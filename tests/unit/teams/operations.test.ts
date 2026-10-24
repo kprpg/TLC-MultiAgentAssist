@@ -3,6 +3,7 @@ import { createSampleApplicationServices } from '../../../packages/orchestrator/
 import { createApplicationOperations } from '../../../packages/orchestrator/operations.js'
 import { contractVersion } from '../../../packages/common/contracts/version.js'
 import { workflowContractVersion, workflowRunSchema } from '../../../packages/common/contracts/workflows.js'
+import { WorkflowRuntimeError } from '../../../packages/orchestrator/workflows/runtime.js'
 
 const services: Array<Awaited<ReturnType<typeof createSampleApplicationServices>>> = []
 afterEach(async () => { for (const service of services.splice(0)) await service.dispose() })
@@ -83,5 +84,35 @@ describe('shared Teams operations and sample composition', () => {
     await expect(operations.invoke('workflows.get', request)).resolves.toMatchObject({ run: { status: 'completed' } })
     for (const account of await service.orchestrator.listAccounts()) await service.orchestrator.setAccountVisibility(account.id, 'hidden')
     await expect(operations.invoke('workflows.get', request)).rejects.toThrow(/scope|access/i)
+  })
+  it('keeps the source scope of every retained run, however many other runs were started', async () => {
+    const { service } = await fixture()
+    const retained = new Set<string>()
+    let counter = 0
+    const runView = (runId: string) => ({ run: { contractVersion: '1.0', runId, workflowId: 'WF-001', status: 'queued', scope: { kind: 'portfolio' }, connectorCalls: [], telemetry: { correlationId: runId, cacheHit: false } } })
+    const workflows = {
+      ...service.workflows,
+      start: () => {
+        const runId = `${String(++counter).padStart(8, '0')}-0000-4000-8000-000000000000`
+        retained.add(runId)
+        return runView(runId).run
+      },
+      get: (request: { runId: string }) => {
+        if (!retained.has(request.runId)) throw new WorkflowRuntimeError('run_not_found', 'not retained')
+        return runView(request.runId)
+      }
+    } as unknown as typeof service.workflows
+    const operations = createApplicationOperations({ ...service, workflows })
+    const startRequest = { contractVersion: workflowContractVersion, workflowId: 'WF-001', scope: { kind: 'portfolio' } }
+
+    const first = workflowRunSchema.parse(await operations.invoke('workflows.start', startRequest))
+    for (let index = 0; index < 150; index++) {
+      const run = workflowRunSchema.parse(await operations.invoke('workflows.start', startRequest))
+      retained.delete(run.runId)
+    }
+
+    await expect(operations.invoke('workflows.get', { contractVersion: workflowContractVersion, runId: first.runId }))
+      .resolves.toMatchObject({ run: { runId: first.runId } })
+    expect(service.workflowScopes.size).toBeLessThanOrEqual(100)
   })
 })

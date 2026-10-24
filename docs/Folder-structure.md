@@ -126,6 +126,19 @@ packages/orchestrator/agent-evidence.ts
                                      Bounded evidence pack (comment history, notes, activities, milestone detail) and model-input serialization
 packages/connectors/msx/evidence.ts  Pure helpers for MSX comment-history parsing and rich-text cleanup
 packages/orchestrator/prewarm.ts      Best-effort Foundry token and MCEM guidance pre-warm
+packages/orchestrator/workflows/registration.ts
+                                     Approved workflow registration seam (schema-validated extension output)
+packages/orchestrator/evaluation/golden-scenarios.ts
+                                     Metadata-only golden-scenario evaluator (not-evaluated is never a pass)
+packages/common/configuration/hosting-model.ts
+                                     Declared single-instance hosting model and startup guard
+apps/desktop/electron/main/task-agents.ts
+                                     Desktop task-agent composition over the shared factory
+apps/desktop/renderer-revamp/src/preview/
+                                     Static-preview-only implementations, imported only by data-client.ts
+scripts/check-import-boundaries.mjs   Import-boundary gate (baseline: scripts/import-boundary-baseline.json)
+docs/architecture/Hosting-Model.md, Operational-Evidence.md
+                                     Hosting constraints and executed vs planned evidence
 apps/shared/agent-stream.ts           Browser-safe agent stream accumulator and NDJSON reader (all UIs)
                                      Desktop IPC acknowledges the validated terminal event before removing its listener
 apps/shared/use-agent-run.ts          Shared React hook: instant draft, streamed text, final response, cancel

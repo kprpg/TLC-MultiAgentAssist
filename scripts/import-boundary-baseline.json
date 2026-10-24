@@ -1,0 +1,20 @@
+[
+  {
+    "rule": "connector-to-agent-runtime",
+    "file": "packages/connectors/graph/meetings.ts",
+    "target": "packages/agents/meeting-signal-extractor/src/transcript-parse.js",
+    "reason": "Meeting adapters share transcript parsing with the extraction agent. Extract the parser to a neutral module only when a second consumer needs it (Architecture-Review 5.6)."
+  },
+  {
+    "rule": "connector-to-agent-runtime",
+    "file": "packages/connectors/local-store/index.ts",
+    "target": "packages/agents/meeting-signal-extractor/src/index.js",
+    "reason": "The local-store meeting adapter runs the deterministic extractor; same tracked extraction as above (Architecture-Review 5.6)."
+  },
+  {
+    "rule": "connector-to-agent-runtime",
+    "file": "packages/connectors/msx/live-meeting.ts",
+    "target": "packages/agents/meeting-signal-extractor/src/index.js",
+    "reason": "The live meeting adapter runs the deterministic extractor; same tracked extraction as above (Architecture-Review 5.6)."
+  }
+]

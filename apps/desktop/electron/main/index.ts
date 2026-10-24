@@ -16,13 +16,13 @@ import { createLocalStoreMsxConnector } from '../../../../packages/connectors/lo
 import { SampleRecordCreationCatalog } from '../../../../packages/connectors/local-store/sample-record-creation-catalog.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
-import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../../packages/connectors/foundry/index.js'
+import { createFoundryOpenAIClient } from '../../../../packages/connectors/foundry/index.js'
 import { createFoundryMeetingExtractor } from '../../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
 import { parseTranscriptContent } from '../../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import { ThinSliceOrchestrator, prewarmAgentDependencies, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
-import { foundryAgentTuning } from '../../../../packages/orchestrator/task-agents.js'
 import { RecordCreationService } from '../../../../packages/orchestrator/record-creation/service.js'
 import { createLivePlayWorkflowHost, createSampleWorkflowHost } from '../../../../packages/orchestrator/workflows/index.js'
+import { createDesktopTaskAgents } from './task-agents.js'
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
 import { prepareFoundryEnvironmentFile } from './packaged-configuration.js'
 import { createRuntimeCredentials } from './runtime-credentials.js'
@@ -178,33 +178,18 @@ const meetingExtractor = runtimeEnvironment && foundryOpenAIClient && (process.e
     requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs
   })
   : undefined
-const taskAgents: TaskAgentRegistry = Object.fromEntries(
-  (['account-pulse', 'mcem-coach', 'pursuit-executive', 'risk-solution-play'] as const).map((capability) => {
-    if (!runtimeEnvironment) {
-      return [capability, {
-        version: 'sample-v2',
-        agent: { invoke: async (context: AgentTaskContext) => buildSampleAgentResponse(capability, context) }
-      }]
-    }
-    const binding = {
-      'account-pulse': runtimeEnvironment.foundry.agents.accountPulse,
-      'mcem-coach': runtimeEnvironment.foundry.agents.mcemCoach,
-      'pursuit-executive': runtimeEnvironment.foundry.agents.pursuitExecutive,
-      'risk-solution-play': runtimeEnvironment.foundry.agents.riskSolutionPlay
-    }[capability]
-    return [capability, {
-      version: 'active',
-      agent: new FoundryPromptAgent<AgentTaskContext>({
-        projectEndpoint: runtimeEnvironment.foundry.projectEndpoint,
-        agentName: binding.name,
-        requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
-        credential: credentials.foundry,
-        openAIClient: foundryOpenAIClient,
-        ...foundryAgentTuning(runtimeEnvironment, reportPerformance)
-      })
-    }]
-  })
-) as TaskAgentRegistry
+const taskAgents: TaskAgentRegistry = createDesktopTaskAgents({
+  environment: runtimeEnvironment,
+  credential: credentials.foundry,
+  client: foundryOpenAIClient,
+  performanceReporter: reportPerformance,
+  sample: () => Object.fromEntries(
+    (['account-pulse', 'mcem-coach', 'pursuit-executive', 'risk-solution-play'] as const).map((capability) => [capability, {
+      version: 'sample-v2',
+      agent: { invoke: async (context: AgentTaskContext) => buildSampleAgentResponse(capability, context) }
+    }])
+  ) as TaskAgentRegistry
+})
 const orchestrator = new ThinSliceOrchestrator(
   msxConnector,
   mcemConnector,

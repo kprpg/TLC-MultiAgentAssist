@@ -84,7 +84,7 @@ import {
 } from '../../../packages/common/index.js'
 import { createOutlookDraftMessage } from '../../../packages/documents/outlook-compose.js'
 import { createResponseDocumentBuffer } from '../../../packages/documents/response-document.js'
-import { invokeWorkflowHost, type WorkflowHost, type WorkflowHostOperation } from '../../../packages/orchestrator/workflows/index.js'
+import { invokeWorkflowHost, WorkflowRuntimeError, type WorkflowHost, type WorkflowHostOperation } from '../../../packages/orchestrator/workflows/index.js'
 import { createBrowserOnlyVoiceHost, type SharedVoiceInputHost } from '../../../packages/orchestrator/voice-input.js'
 import type { SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
@@ -540,14 +540,19 @@ export function buildWebApiHandler(options: WebApiOptions) {
                     ? 400
                     : error instanceof RecordCreationError
                         ? error.code === 'target-disabled' ? 403 : error.code === 'parent-unavailable' ? 404 : 409
-                        : 500
+                        : error instanceof WorkflowRuntimeError && error.code === 'capacity_exceeded'
+                            ? 429
+                            : error instanceof WorkflowRuntimeError && error.code === 'run_not_found'
+                                ? 404
+                                : 500
             options.onError?.(error, correlationId)
+            if (statusCode === 429) response.setHeader('retry-after', '5')
             const message = statusCode === 500
                 ? 'The server could not complete the request.'
                 : error instanceof Error ? error.message : 'The request is invalid.'
             sendJson(response, statusCode, {
                 error: message,
-                ...(error instanceof RecordCreationError ? { code: error.code } : {}),
+                ...(error instanceof RecordCreationError || error instanceof WorkflowRuntimeError ? { code: error.code } : {}),
                 correlationId
             })
             return true
