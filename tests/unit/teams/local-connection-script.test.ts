@@ -1,9 +1,9 @@
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
+import { temporaryRoot } from './test-temp-root.js'
 
 const execute = promisify(execFile)
 const script = resolve(import.meta.dirname, '../../../scripts/teams-local-connection.ps1')
@@ -11,7 +11,7 @@ const folders: string[] = []
 afterEach(async () => { for (const folder of folders.splice(0)) await rm(folder, { recursive: true, force: true }) })
 
 async function fixture(scenario = 'matching') {
-  const folder = await mkdtemp(join(tmpdir(), 'tlc-owner-script-'))
+  const folder = await mkdtemp(join(temporaryRoot, 'tlc-owner-script-'))
   folders.push(folder)
   const work = join(folder, 'work')
   const runId = '1'.repeat(32)

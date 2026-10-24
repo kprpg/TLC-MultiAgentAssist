@@ -2,7 +2,6 @@ import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { get, request as httpsRequest } from 'node:https'
 import { createServer } from 'node:net'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -12,6 +11,7 @@ import { invokeProtectedOwnerCommand, prepareOwnerDirectory } from '../../../app
 import { localConnectionVersion } from '../../../packages/common/contracts/local-connection.js'
 import { actionPreviewSchema } from '../../../packages/common/contracts/collaboration.js'
 import { z } from 'zod'
+import { temporaryRoot } from './test-temp-root.js'
 
 const nativeClient = vi.hoisted(() => ({
   interactive: vi.fn(async () => { throw new Error('A TLS/bootstrap test must not trigger source sign-in.') }),
@@ -47,7 +47,7 @@ let directory: string
 let certificatePath: string
 let keyPath: string
 beforeAll(async () => {
-  directory = await mkdtemp(join(tmpdir(), 'tlc-teams-test-tls-'))
+  directory = await mkdtemp(join(temporaryRoot, 'tlc-teams-test-tls-'))
   certificatePath = join(directory, 'localhost.pem')
   keyPath = join(directory, 'localhost-key.pem')
   await execute('pwsh', ['-NoProfile', '-Command', `
@@ -70,7 +70,7 @@ beforeAll(async () => {
 afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }) })
 
 describe('explicit local HTTPS hosting', () => {
-  it.each(['local-interactive', 'local-azure-cli'] as const)('boots %s live hosting without bot/Foundry credentials or any MSX sign-in/read/write', async (authentication) => {
+  it.runIf(process.platform === 'win32').each(['local-interactive', 'local-azure-cli'] as const)('boots %s live hosting without bot/Foundry credentials or any MSX sign-in/read/write', async (authentication) => {
     const reservation = createServer()
     await new Promise<void>((ready) => reservation.listen(0, '127.0.0.1', ready))
     const reserved = reservation.address()
@@ -137,7 +137,7 @@ describe('explicit local HTTPS hosting', () => {
     } finally { await application.close() }
     expect(application.server.listening).toBe(false)
   }, 50_000)
-  it('keeps real Sample writes in their own SQLite files across a Live runtime restart without source access', async () => {
+  it.runIf(process.platform === 'win32')('keeps real Sample writes in their own SQLite files across a Live runtime restart without source access', async () => {
     const reservation = createServer()
     await new Promise<void>((ready) => reservation.listen(0, '127.0.0.1', ready))
     const reserved = reservation.address()
