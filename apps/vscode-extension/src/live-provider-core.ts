@@ -16,6 +16,7 @@ import type { WorkflowHost } from '../../../packages/orchestrator/workflows/inde
 import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import type { MeetingExtractorFn } from '../../../packages/connectors/local-store/index.js'
 import type { ExtensionDataProvider, MeetingTranscriptSource } from './data-provider.js'
+import type { WorkingSessionService } from '../../../packages/orchestrator/working-session/index.js'
 import { createSellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 import { createStagePipelineReviewHost, createUnavailableStagePipelineReviewHost, type StagePipelineReviewHost } from '../../../packages/orchestrator/stage-pipeline-review.js'
 import { createSeReportingHost } from '../../../packages/orchestrator/se-reporting/composition.js'
@@ -44,11 +45,13 @@ export interface LiveDataProviderParts {
     meetingConnector?: MeetingCaptureConnector
     /** Optional Foundry model-backed extractor; falls back to the deterministic one when absent. */
     meetingExtractor?: MeetingExtractorFn
+    /** Prepares the working-session folder (decks, Learn pages, templates) for the selected opportunity and milestone. */
+    workingSession?: WorkingSessionService
 }
 
 /** Assembles the provider surface from injected parts so MCEM/agent/Play wiring is unit-testable. */
 export function buildLiveDataProvider(
-    { orchestrator, host, account, dispose, meetingConnector, meetingExtractor, getSourceToken, reportingHost, stagePipelineHost }: LiveDataProviderParts,
+    { orchestrator, host, account, dispose, meetingConnector, meetingExtractor, getSourceToken, reportingHost, stagePipelineHost, workingSession }: LiveDataProviderParts,
     mode: ExtensionDataProvider['mode'] = 'live'
 ): ExtensionDataProvider {
     const requireMeeting = (): MeetingCaptureConnector => {
@@ -57,6 +60,7 @@ export function buildLiveDataProvider(
     }
     return {
         sourceCore: orchestrator,
+        ...(workingSession ? { workingSession } : {}),
         ...(getSourceToken ? { getSourceToken } : {}),
         mode,
         searchKnowledge: (request) => orchestrator.searchKnowledge(request),

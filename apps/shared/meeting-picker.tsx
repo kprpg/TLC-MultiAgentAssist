@@ -29,7 +29,7 @@ export function sortMeetingsNewestFirst<T extends MeetingPickerItem>(items: read
 /** Removes transport prefixes such as Electron's "Error invoking remote method '...': Error:" from a failure. */
 export function meetingListFailure(error: unknown): string {
     const raw = error instanceof Error ? error.message : String(error)
-    const message = raw.replace(/^Error invoking remote method '[^']*':\s*/, '').replace(/^(?:[A-Za-z]+Error):\s*/, '').trim()
+    const message = raw.replace(/^Error invoking remote method '[^']*':\s*/, '').replace(/^(?:[A-Za-z]*Error):\s*/, '').trim()
     return message || 'The Teams meeting list could not be loaded. Use Paste / upload.'
 }
 

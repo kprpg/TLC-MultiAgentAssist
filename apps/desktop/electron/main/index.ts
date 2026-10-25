@@ -55,6 +55,13 @@ import { meetingGraphDefaultScope, meetingScopesFor } from '../../../../packages
 import { assertCliTokenCanReadMeetings, meetingSignInFailure } from '../../../../packages/connectors/common/meeting-source.js'
 import { GraphMeetingConnector } from '../../../../packages/connectors/graph/meetings.js'
 import { createKnowledgeSearchIpcHandler, knowledgeSearchIpcChannel } from './knowledge-ipc.js'
+import {
+  createWorkingSessionIpcHandlers, workingSessionOpenIpcChannel, workingSessionPrepareIpcChannel, workingSessionTopicIpcChannel
+} from './working-session-ipc.js'
+import {
+  createBicepCliCompiler, createWorkingSessionService, deckConfigurationFromEnvironment, folderOutput, foundryStructuredModel, workingSessionModelName
+} from '../../../../packages/orchestrator/working-session/index.js'
+import { renderMarkdownDocument } from '../../../../packages/documents/markdown-document.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -227,6 +234,18 @@ const orchestrator = new ThinSliceOrchestrator(
     }
   })
 )
+const workingSessionModelId = workingSessionModelName(process.env)
+const documentsFolder = () => process.env['TLC_DOCUMENTS_FOLDER']?.trim() || app.getPath('documents')
+const workingSession = createWorkingSessionService({
+  mode: dataMode,
+  openOutput: async (folderName) => folderOutput(documentsFolder(), folderName),
+  renderDocx: (title, markdown) => renderMarkdownDocument(title, markdown),
+  knowledgeSearch: orchestrator,
+  ...deckConfigurationFromEnvironment(process.env),
+  ...(process.env['TLC_GITHUB_TOKEN']?.trim() ? { githubToken: process.env['TLC_GITHUB_TOKEN'].trim() } : {}),
+  ...(dataMode === 'live' ? { compiler: createBicepCliCompiler() } : {}),
+  ...(dataMode === 'live' && foundryOpenAIClient && workingSessionModelId ? { model: foundryStructuredModel(foundryOpenAIClient, workingSessionModelId) } : {})
+})
 const presentation = createPresentationOwner(orchestrator)
 const clearSourceSession = () => presentation.session.clear()
 const backgroundEnabled = process.env['TLC_BACKGROUND_SYNC'] === '1'
@@ -371,6 +390,21 @@ function registerIpc(): void {
   const invokeSellerDashboard = createSellerDashboardIpcHandler(sellerDashboardHost)
   const invokeSeReporting = createSeReportingIpcHandler(seReportingHost)
   const searchKnowledge = createKnowledgeSearchIpcHandler(orchestrator)
+  const workingSessionHandlers = createWorkingSessionIpcHandlers(workingSession, {
+    documentsFolder, openPath: (path) => shell.openPath(path)
+  })
+  ipcMain.handle(workingSessionTopicIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return workingSessionHandlers.topic(request)
+  })
+  ipcMain.handle(workingSessionPrepareIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return workingSessionHandlers.prepare(request)
+  })
+  ipcMain.handle(workingSessionOpenIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return workingSessionHandlers.open(request)
+  })
   ipcMain.handle(knowledgeSearchIpcChannel, (event, request: unknown) => {
     assertTrustedSender(event)
     return searchKnowledge(request)

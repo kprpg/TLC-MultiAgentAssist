@@ -105,8 +105,14 @@ import { MutationSyncClient, type MutationInvoker } from '../../../shared/mutati
 import * as syncContracts from '../../../../packages/common/contracts/index.js'
 import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest, type KnowledgeSearchResponse } from '../../../../packages/common/contracts/knowledge.js'
 import { sampleKnowledgeSearchResponse } from '../../../../packages/common/fixtures/knowledge.js'
+import {
+  workingSessionPrepareRequestSchema, workingSessionResultSchema, workingSessionTopicRequestSchema, workingSessionTopicResponseSchema,
+  type WorkingSessionPrepareRequest, type WorkingSessionResult, type WorkingSessionTopicRequest, type WorkingSessionTopicResponse
+} from '../../../../packages/common/contracts/working-session.js'
+import type { WorkingSessionClient } from '../../../shared/working-session/types.js'
+import { fetchAndSave } from '../../../shared/working-session/download.js'
 
-export interface RevampDataClient {
+export interface RevampDataClient extends WorkingSessionClient {
     searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
     cacheSession?: SessionPortfolio
     mutationSession?: MutationSyncClient
@@ -120,6 +126,7 @@ export interface RevampDataClient {
     invokeSeReporting(request: SeReportingRequest): Promise<SeReportingResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     readonly mode: 'desktop' | 'web-live' | 'web-sample'
+    readonly canExitApplication?: boolean
     exitApplication(): Promise<void>
     getCurrentUserEmail(): Promise<string | undefined>
     listAccounts(options?: AccountListOptions): Promise<Account[]>
@@ -247,10 +254,19 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
         ...(background ? { invokeMutationSync: async (request: syncContracts.MutationSyncRequest) =>
             syncContracts.mutationSyncResponseSchema.parse(await apiRequest(fetcher, '/api/mutation-sync', { method: 'POST', body: JSON.stringify(request) })) } : {}),
         mode,
+        canExitApplication: typeof document !== 'undefined'
+            && document.querySelector<HTMLMetaElement>('meta[name="tlc-local-exit"]')?.content === '1',
         getDataMode: async () => mode === 'web-live' ? 'live' : 'sample',
         searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(await apiRequest(fetcher, '/api/knowledge/search', {
             method: 'POST', body: JSON.stringify(knowledgeSearchRequestSchema.parse(request))
         })),
+        deriveWorkingSessionTopic: async (request) => workingSessionTopicResponseSchema.parse(await apiRequest(fetcher, '/api/working-session/topic', {
+            method: 'POST', body: JSON.stringify(workingSessionTopicRequestSchema.parse(request))
+        })),
+        prepareWorkingSession: async (request) => workingSessionResultSchema.parse(await apiRequest(fetcher, '/api/working-session/prepare', {
+            method: 'POST', body: JSON.stringify(workingSessionPrepareRequestSchema.parse(request))
+        })),
+        downloadWorkingSession: (downloadId, fileName) => fetchAndSave(fetcher, `/api/working-session/download/${encodeURIComponent(downloadId)}`, fileName),
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(await apiRequest(fetcher, '/api/seller-dashboard', {
             method: 'POST', body: JSON.stringify(sellerDashboardRequestSchema.parse(request))
         })),
@@ -395,6 +411,9 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
 
 interface DesktopBridge {
     searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
+    deriveWorkingSessionTopic(request: WorkingSessionTopicRequest): Promise<WorkingSessionTopicResponse>
+    prepareWorkingSession(request: WorkingSessionPrepareRequest): Promise<WorkingSessionResult>
+    openWorkingSessionFolder(folderPath: string): Promise<void>
     invokeMutationSync?: MutationInvoker
     onCacheChanged?(listener: (state: syncContracts.CacheReadState) => void): () => void
     cacheControl?(request: syncContracts.CacheControlRequest): Promise<syncContracts.CacheControlResponse>
@@ -553,6 +572,8 @@ function webClient(): RevampDataClient {
         mode: 'web-sample',
         getDataMode: async () => 'sample',
         searchKnowledge: async (request) => sampleKnowledgeSearchResponse(request),
+        deriveWorkingSessionTopic: async () => unavailable(),
+        prepareWorkingSession: async () => unavailable(),
         invokeSellerDashboard: async (request) => {
             sellerDashboardRequestSchema.parse(request)
             return createSampleSellerDashboard()
@@ -793,6 +814,11 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         getDataMode: async () => (await bridge.getDataStatus()).mode,
         searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(
             await bridge.searchKnowledge(knowledgeSearchRequestSchema.parse(request))),
+        deriveWorkingSessionTopic: async (request) => workingSessionTopicResponseSchema.parse(
+            await bridge.deriveWorkingSessionTopic(workingSessionTopicRequestSchema.parse(request))),
+        prepareWorkingSession: async (request) => workingSessionResultSchema.parse(
+            await bridge.prepareWorkingSession(workingSessionPrepareRequestSchema.parse(request))),
+        openWorkingSessionFolder: (folderPath) => bridge.openWorkingSessionFolder(folderPath),
         invokeStagePipelineReview: async (request) => stagePipelineResponseSchema.parse(
             await bridge.invokeStagePipelineReview(stagePipelineRequestSchema.parse(request))
         ),

@@ -33,13 +33,20 @@ async function prepareWebAppServiceRelease() {
     )
 
     const npm = resolveNpmInvocation()
-    await run(npm.command, [...npm.argsPrefix, ...createProductionInstallArgs(packageRoot)])
+    const installEnvironment = createProductionInstallEnvironment()
+    await run(npm.command, [...npm.argsPrefix, ...createProductionInstallArgs(packageRoot)], installEnvironment)
     const canvasPackage = JSON.parse(await readFile(join(packageRoot, 'node_modules', '@napi-rs', 'canvas', 'package.json'), 'utf8'))
     await run(npm.command, [
       ...npm.argsPrefix,
       ...createLinuxCanvasInstallArgs(packageRoot, canvasPackage.optionalDependencies)
-    ])
+    ], installEnvironment)
     await run(process.execPath, [join(repositoryRoot, 'scripts', 'smoke-web-release.mjs'), packageRoot])
+    if (process.env.TLC_WEB_RELEASE_BROWSER_SMOKE === '1') {
+      await run(process.execPath, [
+        join(repositoryRoot, 'node_modules', '@playwright', 'test', 'cli.js'),
+        'test', '--config', 'playwright.revamp.config.ts', 'web-release.spec.ts', '--reporter=line'
+      ], { ...process.env, TLC_WEB_RELEASE_ROOT: packageRoot })
+    }
     console.info(`Creating App Service package at ${artifactPath}...`)
     await createAppServiceZip(packageRoot, artifactPath)
     console.info(`App Service package created at ${artifactPath}`)
@@ -59,6 +66,12 @@ export function createProductionInstallArgs(packageRoot) {
   ]
 }
 
+export function createProductionInstallEnvironment(environment = process.env) {
+  // npm run exports this policy as a CLI flag, which npm 11 rejects for project installs.
+  // The isolated installs still explicitly prohibit every lifecycle script with --ignore-scripts.
+  return Object.fromEntries(Object.entries(environment).filter(([key]) => !/^npm_config_allow[-_]scripts$/i.test(key)))
+}
+
 export function createLinuxCanvasInstallArgs(packageRoot, optionalDependencies) {
   const packageName = '@napi-rs/canvas-linux-x64-gnu'
   const version = optionalDependencies?.[packageName]
@@ -76,9 +89,9 @@ export function createLinuxCanvasInstallArgs(packageRoot, optionalDependencies) 
   ]
 }
 
-function run(command, args) {
+function run(command, args, env = process.env) {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, { cwd: repositoryRoot, stdio: 'inherit' })
+    const child = spawn(command, args, { cwd: repositoryRoot, stdio: 'inherit', env })
     child.once('error', reject)
     child.once('exit', (code, signal) => {
       if (code === 0) {

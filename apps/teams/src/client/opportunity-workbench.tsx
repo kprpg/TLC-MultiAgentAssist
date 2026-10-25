@@ -13,6 +13,7 @@ import { useResponsiveDisclosure } from './use-responsive-disclosure.js'
 import { TeamsMcemStageBoard } from './mcem-stage-board.js'
 import { ResizableSplit } from '../../../shared/resizable-split.js'
 import { GuidanceWorkbenchPane } from '../../../shared/guidance-pane.js'
+import { WorkingSessionLauncher } from '../../../shared/working-session/working-session-launcher.js'
 
 export type DetailTab = 'overview' | 'guidance' | 'stages'
 const tabs: Array<{ id: DetailTab; label: string }> = [{ id: 'overview', label: 'Overview' }, { id: 'guidance', label: 'Guidance' }, { id: 'stages', label: 'MCEM Stages' }]
@@ -76,7 +77,7 @@ export function OpportunityWorkbench({ client, selection, opportunities, milesto
       </nav>
       <div onChangeCapture={(event) => { if (event.target instanceof Element && event.target.closest('.field')) onDraftChange() }}>
         <section id="detail-overview" role="tabpanel" aria-labelledby="detail-tab-overview" hidden={tab !== 'overview'}>
-          <div className="section-heading"><h3>Milestones</h3><button type="button" onClick={onMeeting}>Meeting capture</button></div>
+          <div className="section-heading"><h3>Milestones</h3><span className="working-session-actions"><button type="button" onClick={onMeeting}>Meeting capture</button><WorkingSessionLauncher client={client} opportunity={selection.opportunity} milestones={milestones} /></span></div>
           <div className="toolbar"><label>Sort milestones<select value={sort} onChange={(event) => {
             const value = event.target.value
             if (value === 'targetDate' || value === 'status' || value === 'estimatedMonthlyUsage' || value === 'commitment') setSort(value)

@@ -36,6 +36,7 @@ import { createMutationSession } from '../../../packages/orchestrator/mutations/
 import { MutationDispatchPreventedError, MutationRuntime } from '../../../packages/orchestrator/mutations/host.js'
 import { MutationJournalError } from '../../../packages/orchestrator/mutations/journal.js'
 import { sourceHttpFailure } from '../../../packages/common/source-failure.js'
+import type { TeamsWorkingSessionHost } from './working-session.js'
 
 export interface TeamsHandlerOptions {
   backgroundSync?: boolean
@@ -52,6 +53,7 @@ export interface TeamsHandlerOptions {
   authenticate?(assertion: string): Promise<ExecutionPrincipal>
   localConnection?: { pairing: LocalPairingAuthority; status(): NativeConnectionStatus; refreshIdentity(): Promise<void> }
   launch?: TeamsLaunchMonitor
+  workingSession?: TeamsWorkingSessionHost
   onError?(event: { correlationId: string; code: string; method: string; category: string }): void
 }
 export class TeamsHttpError extends Error {
@@ -338,6 +340,20 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         json(200, await publications.readShared(principal, decodeURIComponent(url.pathname.slice('/api/teams/shared/'.length)), { stage: principal.mode === 'live' }))
         return true
       }
+      if (request.method === 'GET' && url.pathname.startsWith('/api/teams/working-session/download/')) {
+        if (!options.workingSession) throw new TeamsHttpError(404, 'working_session_not_configured')
+        const id = decodeURIComponent(url.pathname.slice('/api/teams/working-session/download/'.length))
+        if (!/^[0-9a-f-]{36}$/.test(id)) throw new TeamsHttpError(404, 'download_not_found')
+        const stored = options.workingSession.download(principal, id)
+        if (!stored) throw new TeamsHttpError(404, 'download_expired')
+        assertCurrentCaller()
+        response.statusCode = 200
+        response.setHeader('content-type', 'application/zip')
+        const archiveName = Array.from(stored.fileName, (character) => character.charCodeAt(0) < 32 || '\\/:*?"<>|'.includes(character) ? '-' : character).join('')
+        response.setHeader('content-disposition', `attachment; filename="TLC-working-session.zip"; filename*=UTF-8''${encodeURIComponent(archiveName)}`)
+        response.end(stored.bytes)
+        return true
+      }
       if (request.method !== 'POST') throw new TeamsHttpError(404, 'route_not_found')
       const body = await readBody(request)
       if (url.pathname === '/api/teams/mutation-sync') {
@@ -423,6 +439,21 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         } finally {
           clearInterval(heartbeat)
           response.end()
+        }
+      } else if (url.pathname === '/api/teams/working-session/topic' || url.pathname === '/api/teams/working-session/prepare') {
+        if (!options.workingSession) throw new TeamsHttpError(404, 'working_session_not_configured')
+        const reference = z.object({ opportunityId: z.string().min(1).max(200) }).passthrough().parse(body)
+        await services.orchestrator.getOpportunitySnapshot(reference.opportunityId)
+        const session = options.workingSession.service(principal, services)
+        if (url.pathname.endsWith('/prepare')) {
+          await new UserRequestBudget(options.store).consume(principal, 'agent', principal.mode === 'sample' ? 60 : 4)
+          const result = await withTeamsPerformanceContext(correlationId, () => session.prepare(body))
+          assertCurrentCaller()
+          json(200, result)
+        } else {
+          const result = await withTeamsPerformanceContext(correlationId, () => session.deriveTopic(body))
+          assertCurrentCaller()
+          json(200, result)
         }
       } else if (url.pathname.startsWith('/api/teams/operations/')) {
         const name = decodeURIComponent(url.pathname.slice('/api/teams/operations/'.length))

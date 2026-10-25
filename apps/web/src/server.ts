@@ -6,6 +6,7 @@ import { assertLoopbackHost, createAzureCliAuthentication, createAzureCliGraphKn
 import { buildStaticHandler, setSecurityHeaders } from './hosting.js'
 import { listenWebServer } from './listener.js'
 import { createHostedRuntimeFactory, createHostedWorkflowHostResolver, createWebSellerDashboardHost, createWebSeReportingResolver, createWebStagePipelineResolver } from './runtime.js'
+import { createWebWorkingSessionResolver } from './working-session.js'
 import { createSampleWorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import { FixtureMsxConnector } from '../../../packages/connectors/msx/index.js'
 import { createLocalStoreMsxConnector } from '../../../packages/connectors/local-store/index.js'
@@ -24,6 +25,8 @@ import { resolveHostingModel } from '../../../packages/common/configuration/host
 resolveHostingModel(process.env)
 const port = parsePort(process.env['PORT'])
 const mode = resolveWebHostMode(process.env)
+const azureHosted = Boolean(process.env['WEBSITE_SITE_NAME'])
+const localExitEnabled = mode !== 'easy-auth' && !azureHosted
 const host = process.env['HOST']?.trim() || (mode === 'easy-auth' ? '0.0.0.0' : '127.0.0.1')
 if (mode === 'azure-cli') assertLoopbackHost(host)
 const staticRoot = resolve(process.env['TLC_WEB_STATIC_ROOT']?.trim() || 'apps/desktop/dist/revamp')
@@ -83,7 +86,7 @@ const createRuntime = sampleRuntime
         getGraphMeetingToken: createAzureCliGraphMeetingTokenProvider()
     } : {})
 const sampleMutationPath = resolve(process.env['TLC_MUTATION_STATE_PATH'] || '.tlc/web-sample-mutations.sqlite')
-const sampleMutationState = sampleRuntime && (process.env['TLC_BACKGROUND_SYNC'] === '1' || existsSync(sampleMutationPath))
+const sampleMutationState = sampleRuntime && !azureHosted && (process.env['TLC_BACKGROUND_SYNC'] === '1' || existsSync(sampleMutationPath))
     ? await localMutationState(sampleMutationPath) : undefined
 const sampleMutations = sampleRuntime instanceof ThinSliceOrchestrator && sampleMutationState ? createMutationSession({
     core: sampleRuntime, mode: 'sample', source: 'web:sample', state: sampleMutationState,
@@ -103,15 +106,22 @@ const authenticate = mode === 'sample'
     ? createSampleAuthentication()
     : mode === 'azure-cli' ? createAzureCliAuthentication() : undefined
 const serveStatic = buildStaticHandler(staticRoot, mode === 'sample' ? 'sample' : 'live',
-    process.env['TLC_BACKGROUND_SYNC'] === '1' || sampleMutationState?.durable === true || Boolean(process.env['TLC_MUTATION_TABLE_URL']?.trim()))
+    (mode === 'sample'
+        ? !azureHosted && (process.env['TLC_BACKGROUND_SYNC'] === '1' || sampleMutationState?.durable === true)
+        : process.env['TLC_BACKGROUND_SYNC'] === '1' || Boolean(process.env['TLC_MUTATION_TABLE_URL']?.trim())),
+    localExitEnabled)
 const handleApi = buildWebApiHandler({
     createRuntime,
     resolveWorkflowHost,
     resolveSellerDashboardHost: () => createWebSellerDashboardHost(mode === 'sample' ? 'sample' : 'live'),
     resolveStagePipelineReviewHost: createWebStagePipelineResolver(mode),
     resolveSeReportingHost: createWebSeReportingResolver(mode, 'foundryCredential' in createRuntime ? createRuntime.foundryCredential : undefined),
+    resolveWorkingSessionHost: createWebWorkingSessionResolver({
+        mode: mode === 'sample' ? 'sample' : 'live', createRuntime,
+        ...('workingSessionModel' in createRuntime && createRuntime.workingSessionModel ? { model: createRuntime.workingSessionModel } : {})
+    }),
     ...(authenticate ? { authenticate } : {}),
-    ...(mode !== 'easy-auth' ? { shutdown: closeLocalServer } : {}),
+    ...(localExitEnabled ? { shutdown: closeLocalServer } : {}),
     onError: (error, correlationId) => {
         console.error(`[web-api] ${correlationId}`, error instanceof Error ? error.message : error)
     }

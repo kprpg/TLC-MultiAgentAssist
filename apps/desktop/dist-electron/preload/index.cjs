@@ -4416,6 +4416,106 @@ var knowledgeSearchResponseSchema = discriminatedUnion("kind", [object({
 	code: knowledgeFailureCodeSchema,
 	message: string().min(1).max(1e3)
 }).strict().refine((value) => ["unauthorized", "unavailable"].includes(value.sourceHealth.state), "Unavailable results must report an unavailable or unauthorized source.")]);
+var shortText = (max) => string().trim().min(1).max(max);
+var untrustedText = (max) => string().max(max);
+var workingSessionTopicRequestSchema = object({
+	contractVersion: literal("1.0"),
+	opportunityId: shortText(200),
+	opportunityName: shortText(300),
+	opportunityComments: untrustedText(4e3).optional(),
+	milestoneId: shortText(200).optional(),
+	milestoneName: shortText(300),
+	milestoneComments: untrustedText(4e3).optional()
+}).strict();
+var workingSessionTopicSchema = object({
+	topic: shortText(200),
+	domain: shortText(100),
+	azureServices: array(shortText(80)).max(8),
+	deckQueries: array(shortText(120)).min(1).max(5),
+	learnQueries: array(shortText(120)).min(1).max(5),
+	iacScenario: shortText(300),
+	confidence: _enum([
+		"low",
+		"medium",
+		"high"
+	]),
+	basis: _enum(["model", "rules"]),
+	evidence: array(shortText(200)).max(8)
+}).strict();
+var workingSessionTopicResponseSchema = object({
+	contractVersion: literal("1.0"),
+	mode: _enum(["sample", "live"]),
+	topic: workingSessionTopicSchema
+}).strict();
+var workingSessionDeliverablesSchema = object({
+	decks: boolean(),
+	learn: boolean(),
+	iac: boolean()
+}).strict().refine((value) => value.decks || value.learn || value.iac, "Choose at least one deliverable.");
+var workingSessionPrepareRequestSchema = object({
+	contractVersion: literal("1.0"),
+	opportunityId: shortText(200),
+	opportunityName: shortText(300),
+	milestoneName: shortText(300),
+	topic: workingSessionTopicSchema,
+	deliverables: workingSessionDeliverablesSchema
+}).strict();
+var relativeFilePath = string().min(1).max(260).refine((value) => !/^([a-zA-Z]:|[\\/])/.test(value) && !value.split(/[\\/]/).some((part) => part === ".." || part === "" || part === "."), "File paths must be relative and stay inside the working-session folder.");
+var httpsUrl = url().max(4096).refine((value) => {
+	const url = new URL(value);
+	return url.protocol === "https:" && !url.username && !url.password;
+}, "Source links must use HTTPS without credentials.");
+var workingSessionFileSchema = object({
+	path: relativeFilePath,
+	kind: _enum([
+		"deck",
+		"learn",
+		"iac",
+		"manifest"
+	]),
+	title: shortText(300),
+	sourceLabel: shortText(200),
+	sourceUrl: httpsUrl.optional(),
+	bytes: number().int().min(0)
+}).strict();
+var workingSessionGapCodeSchema = _enum([
+	"not-configured",
+	"needs-consent",
+	"not-available-here",
+	"nothing-found",
+	"unavailable",
+	"tool-missing",
+	"rejected"
+]);
+var workingSessionGapSchema = object({
+	deliverable: _enum([
+		"decks",
+		"learn",
+		"iac"
+	]),
+	source: shortText(120),
+	code: workingSessionGapCodeSchema,
+	message: shortText(600)
+}).strict();
+var workingSessionDeliverySchema = discriminatedUnion("kind", [object({
+	kind: literal("folder"),
+	folderPath: shortText(1e3)
+}).strict(), object({
+	kind: literal("download"),
+	downloadId: string().uuid(),
+	fileName: shortText(200),
+	expiresAt: string().datetime()
+}).strict()]);
+var workingSessionResultSchema = object({
+	contractVersion: literal("1.0"),
+	mode: _enum(["sample", "live"]),
+	folderName: shortText(200),
+	delivery: workingSessionDeliverySchema,
+	files: array(workingSessionFileSchema).max(200),
+	gaps: array(workingSessionGapSchema).max(50),
+	summary: shortText(1e3)
+}).strict();
+var workingSessionOpenFolderRequestSchema = object({ folderPath: shortText(1e3) }).strict();
 //#endregion
 //#region packages/common/contracts/agent-task-limits.ts
 var agentTaskPromptMaxLength = 64e3;
@@ -6595,6 +6695,11 @@ object({
 //#region apps/desktop/electron/preload/index.ts
 electron.contextBridge.exposeInMainWorld("tlc", {
 	searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(await electron.ipcRenderer.invoke("tlc:search-knowledge", knowledgeSearchRequestSchema.parse(request))),
+	deriveWorkingSessionTopic: async (request) => workingSessionTopicResponseSchema.parse(await electron.ipcRenderer.invoke("tlc:working-session-topic", workingSessionTopicRequestSchema.parse(request))),
+	prepareWorkingSession: async (request) => workingSessionResultSchema.parse(await electron.ipcRenderer.invoke("tlc:working-session-prepare", workingSessionPrepareRequestSchema.parse(request))),
+	openWorkingSessionFolder: async (folderPath) => {
+		await electron.ipcRenderer.invoke("tlc:working-session-open", workingSessionOpenFolderRequestSchema.parse({ folderPath }));
+	},
 	invokeMutationSync: async (request) => mutationSyncResponseSchema.parse(await electron.ipcRenderer.invoke("tlc:mutation-sync", request)),
 	cacheControl: async (request) => cacheControlResponseSchema.parse(await electron.ipcRenderer.invoke("tlc:cache-control", request)),
 	onCacheChanged: (listener) => {

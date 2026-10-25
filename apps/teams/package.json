@@ -17,6 +17,7 @@
     "@microsoft/teams.apps": "2.1.1",
     "express": "^5.1.0",
     "jose": "6.2.12",
+    "jszip": "^3.10.1",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1"
   },

@@ -173,6 +173,23 @@ npm run web:start:live
 
 Build an Azure App Service-ready package with `npm run web:release`, or push a `web-v*` tag to publish the ZIP to GitHub Releases. Full deployment details: [web setup and hosting runbook](docs/runbooks/web-app.md).
 
+For a **public sample-only demo with no visitor sign-in**, use the existing Linux
+App Service and its `sample` slot; no new infrastructure or external database is needed:
+
+```powershell
+npm run web:deploy:sample -- -PackageOnly # Build/test the ZIP without Azure sign-in
+npm run web:deploy:sample                # Publisher signs in to Azure; deploy/test sample slot only
+npm run web:deploy:sample -- -Action Verify # Finalize an existing upload; no build/upload/Azure changes
+npm run web:deploy:sample -- -Action Promote  # Separately confirmed public sample production swap
+npm run web:deploy:sample -- -Action Rollback # Restore the previous production access policy/content
+```
+
+The configured target is `tlc` in `myDemoRg`. In-memory SQLite supports the fuller
+sample demo; all visitors share sample state, which resets on restart/swap.
+Production's current login requirement is left intact until explicit promotion.
+See [anonymous sample deployment and rollback](docs/runbooks/web-app.md#anonymous-sample-deployment)
+before publishing or changing production.
+
 ## Seller Dashboard
 
 The separate **Seller Dashboard** pane is available on Desktop, Web, and the
