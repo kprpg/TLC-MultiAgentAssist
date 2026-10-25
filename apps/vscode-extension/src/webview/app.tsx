@@ -15,6 +15,9 @@ import { groupQueueByOpportunity, highPriorityCount, humanizeResultCard, priorit
 import { AppHeader } from './app-header.js'
 import { CommentsButton } from './comments-button.js'
 import { portfolioLayoutClassName } from './portfolio-layout.js'
+import { ResizableSplit } from '../../../shared/resizable-split.js'
+import { GuidanceWorkbenchPane } from '../../../shared/guidance-pane.js'
+import type { CustomerEmailAction } from '../../../shared/customer-email.js'
 import { formatMoney, milestoneTooltipContent, opportunityTooltipContent } from './portfolio-record-details.js'
 import { RecordTooltip } from './record-tooltip.js'
 import { sortMilestones, sortOpportunities, type MilestoneSort, type OpportunitySort, type SortDirection } from './sorting.js'
@@ -23,6 +26,7 @@ import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportun
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 import { readTranscriptFile } from '../../../shared/transcript-file.js'
 import { meetingProposalToMarkdown } from '../../../shared/meeting-proposal-markdown.js'
+import { MeetingPicker, useMeetingList } from '../../../shared/meeting-picker.js'
 import { DashboardWorkspace } from '../../../shared/dashboards/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
 import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
@@ -36,6 +40,7 @@ import { SourceSyncStatus } from '../../../shared/sync-status.js'
 import { usePresentationSession } from '../../../shared/presentation-hooks.js'
 import { useAgentRun, type AgentInvoke } from '../../../shared/use-agent-run.js'
 import { AgentResponse, type AgentFollowUpContext } from '../../../shared/agent-response.js'
+import { WorkflowProgress } from '../../../shared/workflow-progress.js'
 import type {
     AccountView,
     AgentCapability,
@@ -54,6 +59,7 @@ import type {
     SeDomainView,
     WorkflowDefinitionView,
     WorkflowOutputView,
+    WorkflowRunResultView,
     WorkflowResultCardView
 } from './view-types.js'
 
@@ -93,8 +99,13 @@ const workflowDescriptions: Readonly<Record<string, { summary: string; reads: st
 const invokeGuidanceAgent: AgentInvoke = (capability, accountId, opportunityId, prompt, onProgress, signal) =>
     dataClient.runAgentTaskStream(capability, accountId, opportunityId, prompt, onProgress, signal)
 
+const customerEmailAction: CustomerEmailAction = {
+    kind: 'host',
+    compose: async (draft) => (await dataClient.composeEmail(draft.subject, draft.subject, draft.markdown)).drafted ? 'opened' : 'cancelled'
+}
+
 function AgentMarkdown({ content, busy = false, followUp }: { content: string; busy?: boolean; followUp?: AgentFollowUpContext | undefined }): ReactElement {
-    return <AgentResponse content={content} busy={busy} followUp={followUp} onOpenEvidence={dataClient.openEvidence} />
+    return <AgentResponse content={content} busy={busy} followUp={followUp} emailAction={customerEmailAction} onOpenEvidence={dataClient.openEvidence} />
 }
 
 /** True when the card itself has renderable content; action/exception cards are shown via the Operational queue. */
@@ -193,12 +204,15 @@ function formatRunTime(timestamp: number): string {
     return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-interface CompletedRun {
+interface PlayRun {
     runId: string
     workflowId: string
     workflowName: string
     asOf: string
     ranAt: number
+    status: string
+    state?: string
+    sourceHealth: WorkflowOutputView['sourceHealth']
     card: WorkflowResultCardView
     queue: WorkflowOutputView['queueItems']
 }
@@ -208,7 +222,7 @@ type GuidanceEntry = { status: 'loading' | 'ready' | 'error'; title: string; evi
 function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: number } | undefined }): ReactElement {
     const [definitions, setDefinitions] = useState<Loadable<WorkflowDefinitionView[]>>({ status: 'idle' })
     const [runningIds, setRunningIds] = useState<ReadonlySet<string>>(new Set())
-    const [runs, setRuns] = useState<CompletedRun[]>([])
+    const [runs, setRuns] = useState<PlayRun[]>([])
     const [selectedRunId, setSelectedRunId] = useState<string | undefined>(undefined)
     const [selectedPlayId, setSelectedPlayId] = useState<string | undefined>(undefined)
     const [runError, setRunError] = useState<string | undefined>(undefined)
@@ -221,6 +235,7 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
     const fetchedOppAccounts = useRef<Set<string>>(new Set())
     const handledRunToken = useRef<number | undefined>(undefined)
     const runHeaderRef = useRef<HTMLElement>(null)
+    const selectedPlayRef = useRef<string | undefined>(undefined)
 
     useEffect(() => {
         setDefinitions({ status: 'loading' })
@@ -261,22 +276,34 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
 
     const runPlay = useCallback(async (workflowId: string) => {
         if (runningIds.has(workflowId)) return
+        selectedPlayRef.current = workflowId
         setSelectedPlayId(workflowId)
+        setSelectedRunId(undefined)
         setRunError(undefined)
         setRunningIds((previous) => new Set(previous).add(workflowId))
         const asOf = today()
         try {
-            const view = await dataClient.runWorkflowToCompletion(workflowId, asOf)
+            const definition = definitions.data?.find((candidate) => candidate.id === workflowId)
+            if (!definition) throw new Error('The play definition is unavailable. Reload Plays and try again.')
+            let lastRevision: string | undefined
+            const publish = (view: WorkflowRunResultView) => {
+                const output = view.output
+                if (!output) return
+                const revision = `${view.run.status}:${view.run.state ?? ''}:${output.generatedAt}:${output.queueItems.length}`
+                if (revision === lastRevision) return
+                lastRevision = revision
+                const snapshot: PlayRun = {
+                    runId: view.run.runId, workflowId, workflowName: definition.name, asOf, ranAt: Date.now(),
+                    status: view.run.status, ...(view.run.state ? { state: view.run.state } : {}),
+                    sourceHealth: output.sourceHealth, card: output.card, queue: output.queueItems
+                }
+                setRuns((previous) => [snapshot, ...previous.filter((run) => run.runId !== snapshot.runId)].slice(0, 12))
+                if (selectedPlayRef.current === workflowId) setSelectedRunId(view.run.runId)
+            }
+            const view = await dataClient.runWorkflowToCompletion(workflowId, asOf, definition.sla.timeoutMs, publish)
             if (view.run.status !== 'completed' || !view.output) {
                 setRunError(playFailureMessage(view.run.status))
             } else {
-                const workflowName = definitions.data?.find((definition) => definition.id === workflowId)?.name ?? workflowId
-                const completed: CompletedRun = {
-                    runId: view.run.runId, workflowId, workflowName, asOf, ranAt: Date.now(),
-                    card: view.output.card, queue: view.output.queueItems
-                }
-                setRuns((previous) => [completed, ...previous.filter((run) => run.runId !== completed.runId)].slice(0, 12))
-                setSelectedRunId(view.run.runId)
                 void ensureOpportunityNames(view.output.queueItems)
             }
         } catch (error) {
@@ -298,6 +325,7 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
     }, [])
 
     const selectPlay = useCallback((workflowId: string) => {
+        selectedPlayRef.current = workflowId
         setSelectedPlayId(workflowId)
         setRunError(undefined)
         setSelectedRunId(runs.find((run) => run.workflowId === workflowId)?.runId)
@@ -306,7 +334,10 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
     const selectRun = useCallback((runId: string) => {
         setSelectedRunId(runId)
         const run = runs.find((candidate) => candidate.runId === runId)
-        if (run) setSelectedPlayId(run.workflowId)
+        if (run) {
+            selectedPlayRef.current = run.workflowId
+            setSelectedPlayId(run.workflowId)
+        }
     }, [runs])
 
     const toggleGroup = useCallback((key: string) => {
@@ -379,7 +410,7 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                                 return (
                                     <li key={definition.id} className={`play-row${isSelected ? ' selected' : ''}`}>
                                         <button type="button" className="play-select" aria-pressed={isSelected} onClick={() => selectPlay(definition.id)}>
-                                            <span className={`play-status-dot${isRunning ? ' running' : lastRun ? ' done' : ''}`} aria-hidden="true" />
+                                            <span className={`play-status-dot${isRunning ? ' running' : lastRun?.status === 'completed' && lastRun.state === 'complete' ? ' done' : ''}`} aria-hidden="true" />
                                             <span className="play-name">{definition.name}</span>
                                             <span className="badge">{definition.id}</span>
                                         </button>
@@ -412,7 +443,9 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                                 <span aria-hidden="true">&middot;</span>
                                 <span>as-of {selectedRun.asOf}</span>
                                 <span aria-hidden="true">&middot;</span>
-                                <span className="run-status ok">Completed</span>
+                                <span className={`run-status${selectedRun.status === 'completed' && selectedRun.state === 'complete' ? ' ok' : ''}`}>
+                                    {selectedRun.status === 'completed' ? selectedRun.state === 'partial' ? 'Partial results' : selectedRun.state === 'unauthorized' ? 'Access unavailable' : 'Completed' : selectedRun.status}
+                                </span>
                                 <span aria-hidden="true">&middot;</span>
                                 <span>{formatRunTime(selectedRun.ranAt)}</span>
                             </div>
@@ -422,6 +455,7 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                                 <span className="run-metric"><strong>{groups.length}</strong> opportunities</span>
                             </div>
                         </header>
+                        <WorkflowProgress run={selectedRun} itemCount={selectedRun.queue.length} sourceHealth={selectedRun.sourceHealth} />
                         {runs.length > 1 && (
                             <div className="run-history" role="tablist" aria-label="Recent runs">
                                 {runs.map((run) => (
@@ -474,7 +508,7 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                                                                             <button
                                                                                 className="send-agent"
                                                                                 title={`Send this item to ${agentLabel(capability)}`}
-                                                                                disabled={entry?.status === 'loading'}
+                                                                                disabled={selectedRun.status !== 'completed' || entry?.status === 'loading'}
                                                                                 onClick={() => void sendToGuidance(selectedRun.runId, item.id, item.title, capability)}
                                                                             >
                                                                                 {entry?.status === 'loading' ? 'Sending...' : `Send to ${agentLabel(capability)}`}
@@ -517,7 +551,9 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                     </>
                 ) : (
                     <div className="results-empty">
-                        <p className="muted">{selectedPlayId ? 'Run this play to see results.' : 'Select a play and choose Run to see results.'}</p>
+                        {selectedPlayId && runningIds.has(selectedPlayId)
+                            ? <WorkflowProgress run={{ workflowId: selectedPlayId, status: 'running' }} />
+                            : <p className="muted">{selectedPlayId ? 'Run this play to see results.' : 'Select a play and choose Run to see results.'}</p>}
                         {selectedPlayId && (
                             <button className="primary" disabled={runningIds.has(selectedPlayId)} onClick={() => void runPlay(selectedPlayId)}>
                                 {runningIds.has(selectedPlayId) ? 'Running...' : runError ? 'Try again' : 'Run play'}
@@ -587,7 +623,7 @@ function GuidancePane({ accountId, opportunityId, opportunityName, onNote }: { a
             </div>
             {agentLoading && <p className="muted" role="status">
                 {agentPhase === 'streaming' ? `Receiving ${label} response...` : agentPhase === 'draft' ? 'Evidence-based draft shown; the AI response is in progress...' : `Running ${label}...`}
-                {' '}<button type="button" className="action-button" onClick={cancelAgent}>Cancel</button>
+                {' '}<button type="button" className="secondary" onClick={cancelAgent}>Cancel</button>
             </p>}
             {agentError && <p className="error">{agentError}</p>}
             {agentResult && (
@@ -597,7 +633,7 @@ function GuidancePane({ accountId, opportunityId, opportunityName, onNote }: { a
                         {!agentLoading && <ResponseActions title={`Guidance - ${opportunityName}`} markdown={agentResult.content} onNote={onNote} />}
                     </header>
                     <AgentResponse key={agentResult.correlationId} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'}
-                        followUp={{ capability, accountId, opportunityId, invoke: invokeGuidanceAgent }} onOpenEvidence={dataClient.openEvidence} />
+                        followUp={{ capability, accountId, opportunityId, invoke: invokeGuidanceAgent }} emailAction={customerEmailAction} onOpenEvidence={dataClient.openEvidence} />
                 </article>
             )}
             {!agentLoading && !agentResult && !agentError && <p className="muted">Choose a suggested prompt or ask a different question.</p>}
@@ -1110,7 +1146,6 @@ function MeetingCaptureLauncher({ opportunityId, opportunityName, milestones, on
     onNote: (message: string) => void
 }): ReactElement {
     const [open, setOpen] = useState(false)
-    const [transcripts, setTranscripts] = useState<MeetingTranscriptSummaryView[]>([])
     const [transcriptId, setTranscriptId] = useState('')
     const [tab, setTab] = useState<'pick' | 'paste'>('pick')
     const [pasteContent, setPasteContent] = useState('')
@@ -1120,12 +1155,13 @@ function MeetingCaptureLauncher({ opportunityId, opportunityName, milestones, on
 
     useEffect(() => {
         setOpen(false); setProposal(undefined); setPasteContent(''); setTranscriptId(''); setTab('pick')
-        dataClient.listMeetingTranscripts(opportunityId)
-            .then((list) => { setTranscripts(list); if (list[0]) setTranscriptId(list[0].id) })
-            .catch(() => setTranscripts([]))
     }, [opportunityId])
+    const meetings = useMeetingList<MeetingTranscriptSummaryView>(
+        () => dataClient.listMeetingTranscripts(opportunityId), open && tab === 'pick', opportunityId,
+        (list) => setTranscriptId((current) => list.some((item) => item.id === current) ? current : list[0]?.id ?? '')
+    )
 
-    const canExtract = tab === 'paste' ? pasteContent.trim().length > 10 : transcriptId.length > 0
+    const canExtract = tab === 'paste' ? pasteContent.trim().length > 10 : meetings.items.some((item) => item.id === transcriptId)
 
     const extract = useCallback(async () => {
         setBusy(true)
@@ -1150,13 +1186,7 @@ function MeetingCaptureLauncher({ opportunityId, opportunityName, milestones, on
                         <button className={tab === 'pick' ? 'tab active' : 'tab'} onClick={() => setTab('pick')}>Teams meeting</button>
                         <button className={tab === 'paste' ? 'tab active' : 'tab'} onClick={() => setTab('paste')}>Paste / upload</button>
                     </div>
-                    {tab === 'pick' && (transcripts.length > 0 ? (
-                        <label className="meeting-field">Meeting
-                            <select value={transcriptId} onChange={(event) => setTranscriptId(event.target.value)}>
-                                {transcripts.map((transcript) => <option key={transcript.id} value={transcript.id}>{transcript.subject} ({transcript.meetingType}, {transcript.segmentCount} lines)</option>)}
-                            </select>
-                        </label>
-                    ) : <p className="muted">No linked meeting transcripts. Use Paste / upload.</p>)}
+                    {tab === 'pick' && <MeetingPicker list={meetings} selectedId={transcriptId} onSelect={setTranscriptId} />}
                     {tab === 'paste' && (
                         <div className="meeting-paste">
                             <label className="meeting-field">Meeting type
@@ -1460,8 +1490,11 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
     if (accounts.status === 'error' && !accounts.data) return <p className="error">Could not load accounts: {accounts.error}</p>
 
     return (
-        <div className={portfolioLayoutClassName({ accountsExpanded, detailsExpanded, actionsExpanded })}>
-            {accountsExpanded && <section id="portfolio-accounts-panel" className="pane">
+        <ResizableSplit className={portfolioLayoutClassName({ accountsExpanded, detailsExpanded, actionsExpanded })}
+            label="Accounts panel" controls="portfolio-accounts-panel" defaultRatio={1 / 3}
+            minFirst={240} minSecond={detailsExpanded && actionsExpanded && selectedOpportunity ? 576 : 320}
+            firstVisible={accountsExpanded} secondVisible={detailsExpanded || (actionsExpanded && !!selectedOpportunity)}>
+            {accountsExpanded && <section id="portfolio-accounts-panel" className="pane pane-scroll">
                 <div className="account-management-header"><h3 className="section-heading">Accounts</h3><div>
                     <button type="button" disabled={accounts.status === 'loading'} onClick={() => {
                         dataClient.refreshSources()
@@ -1547,8 +1580,10 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
                     </table>
                 </div>
             </section>}
-            {(detailsExpanded || actionsExpanded) && <div className={`portfolio-workbench${detailsExpanded ? '' : ' details-collapsed'}${actionsExpanded ? '' : ' actions-collapsed'}`}>
-            {detailsExpanded && <section id="portfolio-details-panel" className="pane portfolio-details-pane">
+            {(detailsExpanded || actionsExpanded) && <ResizableSplit className={`portfolio-workbench${detailsExpanded ? '' : ' details-collapsed'}${actionsExpanded ? '' : ' actions-collapsed'}`}
+                label="opportunity details panel" controls="portfolio-details-panel" defaultRatio={2 / 3}
+                minFirst={320} minSecond={240} firstVisible={detailsExpanded} secondVisible={actionsExpanded && !!selectedOpportunity}>
+            {detailsExpanded && <GuidanceWorkbenchPane id="portfolio-details-panel" className="pane portfolio-details-pane pane-scroll">
                 {selectedOpportunity ? (
                     <div>
                         <h3><MsxOpportunityLink opportunity={selectedOpportunity} onOpen={dataClient.openEvidence} onError={setNote} /></h3>
@@ -1609,7 +1644,7 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
                         {note && <p className="muted">{note}</p>}
                     </div>
                 ) : <p className="muted">Select an opportunity.</p>}
-            </section>}
+            </GuidanceWorkbenchPane>}
             {actionsExpanded && selectedOpportunity && (
                 <NextBestActions
                     evaluation={mcem.status === 'ready' ? mcem.data : undefined}
@@ -1619,8 +1654,8 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
                     onOpenEvidence={(url) => void openEvidence(url)}
                 />
             )}
-            </div>}
-        </div>
+            </ResizableSplit>}
+        </ResizableSplit>
     )
 }
 
@@ -1951,7 +1986,7 @@ export function App(): ReactElement {
                 }} /> : tab === 'portfolio' ? (
                     <PortfolioPanel key={mode} sourceRevision={portfolioRevision} focus={focus} accountsExpanded={accountsExpanded} detailsExpanded={detailsExpanded} actionsExpanded={actionsExpanded} dataMode={mode} onPortfolioChanged={portfolioChanged} />
                 ) : tab === 'discover' ? <DiscoverPanel key={mode} sourceRevision={portfolioRevision} dataMode={mode} onPortfolioChanged={portfolioChanged} /> : tab === 'dashboard'
-                    ? <DashboardWorkspace invokeSellerDashboard={dataClient.invokeSellerDashboard} invokeSeReporting={dataClient.invokeSeReporting} sourceSession={dataClient.cacheSession} /> : <PlaysPanel runRequest={runRequest} />}
+                    ? <DashboardWorkspace invokeSellerDashboard={dataClient.invokeSellerDashboard} invokeStagePipelineReview={dataClient.invokeStagePipelineReview} stagePipelineWrites={dataClient} invokeSeReporting={dataClient.invokeSeReporting} sourceSession={dataClient.cacheSession} /> : <PlaysPanel runRequest={runRequest} />}
             </main>
         </div>
     )

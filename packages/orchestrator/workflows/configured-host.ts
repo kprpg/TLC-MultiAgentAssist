@@ -3,6 +3,7 @@ import type {
     McpServer,
     McpServerRegistry,
     McpToolPolicy,
+    PerformanceReporter,
     ScopeRef
 } from '../../common/index.js'
 import { DataverseMcpReadAdapter, type DataverseDelegatedScope } from '../../connectors/dataverse-mcp/index.js'
@@ -24,9 +25,10 @@ export type ConfiguredWorkflowHostOptions = {
     resolveDelegatedScope(scope: ScopeRef): DataverseDelegatedScope | Promise<DataverseDelegatedScope>
     // When false, Dataverse reads omit the explicit delegated-scope IN predicate (trust the delegated token).
     enforceDelegatedScope?: boolean
-    // Caps the Dataverse read_query TOP (the OOB Dataverse MCP tool rejects requests above 20 rows).
+    // Caps total rows collected across read_query pages; each tool call remains limited to 20.
     maximumRows?: number
     onStepError?: (info: WorkflowStepErrorInfo) => void
+    performanceReporter?: PerformanceReporter
     /** Approved additional workflows; each brings its own handler and output schema. */
     registrations?: readonly WorkflowRegistration[]
 }
@@ -39,7 +41,8 @@ export type ConfiguredWorkflowHost = {
 export function createConfiguredWorkflowHost(options: ConfiguredWorkflowHostOptions): ConfiguredWorkflowHost {
     const pool = new McpClientPool({
         registry: options.registry,
-        accessTokenProvider: (server) => options.getAccessToken(server)
+        accessTokenProvider: (server) => options.getAccessToken(server),
+        ...(options.performanceReporter ? { performanceReporter: options.performanceReporter } : {})
     })
     const broker = new McpToolBroker({
         registry: options.registry,
@@ -50,11 +53,13 @@ export function createConfiguredWorkflowHost(options: ConfiguredWorkflowHostOpti
         new DataverseMcpReadAdapter({
             entityMap: options.entityMap,
             broker,
+            ...(options.performanceReporter ? { performanceReporter: options.performanceReporter } : {}),
             ...(options.enforceDelegatedScope === undefined ? {} : { enforceDelegatedScope: options.enforceDelegatedScope }),
             ...(options.maximumRows === undefined ? {} : { maximumRows: options.maximumRows })
         }),
         new MsxMcpReadAdapter(broker),
-        options.resolveDelegatedScope
+        options.resolveDelegatedScope,
+        options.performanceReporter
     )
     const composition = composeWorkflows({
         definitions: initialWorkflowDefinitions, executor, assembler: new InitialWorkflowResultAssembler()

@@ -3,7 +3,9 @@ import type { TokenCredential } from '@azure/core-auth'
 import { resolve } from 'node:path'
 import { createPerformanceReporter, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy } from '../../../packages/common/index.js'
 import { loadFoundryEnvironmentFromEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
+import type { MeetingTokenPurpose } from '../../../packages/common/configuration/meeting-sources.js'
 import { LiveMeetingCaptureConnector, LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
+import { GraphMeetingConnector } from '../../../packages/connectors/graph/meetings.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
 import { RecordCreationService } from '../../../packages/orchestrator/record-creation/service.js'
@@ -15,6 +17,7 @@ import { createFoundryTaskAgents } from '../../../packages/orchestrator/task-age
 import { createLivePlayWorkflowHost, WorkflowRuntimeError, type WorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import { createSellerDashboardHost, type SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 import { createSeReportingHost, seReportingScopes } from '../../../packages/orchestrator/se-reporting/composition.js'
+import { createStagePipelineReviewHost, type StagePipelineReviewHost } from '../../../packages/orchestrator/stage-pipeline-review.js'
 import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
 import type { AuthenticatedRequest, WebRuntime } from './app.js'
 import { hostedMutationState } from '../../../packages/connectors/common/mutation-state.js'
@@ -30,8 +33,43 @@ export function createWebSellerDashboardHost(mode: 'sample' | 'live'): SellerDas
     })
 }
 
-export function createWebSeReportingResolver(mode: 'sample' | 'azure-cli' | 'easy-auth', foundryCredential?: TokenCredential, now: () => number = Date.now) {
-    const hosts = new Map<string, { host: SeReportingHost; lastUsed: number; active: number }>()
+export function createWebStagePipelineResolver(
+    mode: 'sample' | 'azure-cli' | 'easy-auth',
+    options: { environment?: NodeJS.ProcessEnv; fetchImplementation?: typeof fetch; now?: () => number; maxSessions?: number; idleMs?: number } = {}
+): (authentication: AuthenticatedRequest) => StagePipelineReviewHost {
+    if (mode === 'sample') {
+        const sample = createStagePipelineReviewHost({ mode: 'sample' })
+        return () => sample
+    }
+    const now = options.now ?? Date.now
+    const maxSessions = options.maxSessions ?? 50
+    const idleMs = options.idleMs ?? 3_600_000
+    const sessions = new Map<string, { host: StagePipelineReviewHost; token: { value: string }; lastUsed: number }>()
+    return (authentication) => {
+        const key = authentication.clientPrincipal
+        let entry = sessions.get(key)
+        if (!entry) {
+            if (sessions.size >= maxSessions) {
+                for (const [existingKey, existing] of sessions) if (now() - existing.lastUsed > idleMs) sessions.delete(existingKey)
+            }
+            if (sessions.size >= maxSessions) throw new Error('The dashboard session limit has been reached.')
+            const token = { value: authentication.accessToken }
+            const msx = new LiveMsxConnector({ getAccessToken: async () => token.value }, options.fetchImplementation ?? fetch, undefined, undefined, msxWriteMetadataFromEnvironment(options.environment ?? process.env))
+            entry = { host: createStagePipelineReviewHost({ mode: 'live', source: msx }), token, lastUsed: now() }
+            sessions.set(key, entry)
+        }
+        entry.token.value = authentication.accessToken
+        entry.lastUsed = now()
+        return entry.host
+    }
+}
+
+export function createWebSeReportingResolver(
+    mode: 'sample' | 'azure-cli' | 'easy-auth', foundryCredential?: TokenCredential, now: () => number = Date.now,
+    dependencies: { createHost?: typeof createSeReportingHost; fetchImplementation?: typeof fetch; environment?: NodeJS.ProcessEnv } = {}
+) {
+    const makeHost = dependencies.createHost ?? createSeReportingHost
+    const hosts = new Map<string, { host: SeReportingHost; lastUsed: number; active: number; token: { value: string } }>()
     const credential = mode === 'azure-cli' ? new AzureCliCredential({ processTimeoutInMs: 30_000 }) : undefined
     return (authentication: AuthenticatedRequest) => {
         const key = authentication.userEmail.toLowerCase()
@@ -43,8 +81,12 @@ export function createWebSeReportingResolver(mode: 'sample' | 'azure-cli' | 'eas
                 }
             }
             if (hosts.size >= 50) throw new Error('The reporting user-session limit has been reached.')
-            const created = createSeReportingHost({
+            // Delegated Dataverse reads use the caller's own MSX token (never a server identity); assignments stay on Power BI.
+            const token = { value: authentication.accessToken }
+            const msx = mode === 'sample' ? undefined : new LiveMsxConnector({ getAccessToken: async () => token.value }, dependencies.fetchImplementation ?? fetch, undefined, undefined, msxWriteMetadataFromEnvironment(dependencies.environment ?? process.env))
+            const created = makeHost({
                 mode: mode === 'sample' ? 'sample' : 'live',
+                ...(msx ? { dataverse: msx } : {}),
                 identity: async () => ({ key: `web:${key}`, email: authentication.userEmail }),
                 ...(credential ? {
                     getToken: async (resource: keyof typeof seReportingScopes) => {
@@ -55,11 +97,12 @@ export function createWebSeReportingResolver(mode: 'sample' | 'azure-cli' | 'eas
                 } : {}),
                 ...(foundryCredential ? { foundryCredential } : {})
             })
-            const createdEntry = { host: created, lastUsed: now(), active: 0 }
+            const createdEntry = { host: created, lastUsed: now(), active: 0, token }
             entry = createdEntry
             hosts.set(key, createdEntry)
         }
         const tracked = entry
+        if (authentication.accessToken) tracked.token.value = authentication.accessToken
         tracked.lastUsed = now()
         return {
             invoke: async (request: unknown) => {
@@ -79,6 +122,8 @@ export interface HostedRuntimeOptions {
     environment?: NodeJS.ProcessEnv
     workingDirectory?: string
     getGraphKnowledgeToken?(authentication: AuthenticatedRequest): Promise<string>
+    /** Delegated Graph token for Teams meeting lookup. Absent in hosted Easy Auth until a caller-bound provider exists. */
+    getGraphMeetingToken?(authentication: AuthenticatedRequest, purpose?: MeetingTokenPurpose): Promise<string>
 }
 
 export async function createHostedRuntimeFactory(options: HostedRuntimeOptions = {}) {
@@ -125,7 +170,8 @@ export async function createHostedRuntimeFactory(options: HostedRuntimeOptions =
     const factory = (authentication: AuthenticatedRequest): WebRuntime => {
         const { accessToken } = authentication
         const msx = new LiveMsxConnector({ getAccessToken: async () => accessToken }, fetch, undefined, performanceReporter, msxWriteMetadataFromEnvironment(environment), portfolioPreferenceStore)
-        const meetingConnector = new LiveMeetingCaptureConnector(msx)
+        const meetingConnector = new LiveMeetingCaptureConnector(msx, undefined, options.getGraphMeetingToken
+            ? new GraphMeetingConnector((purpose) => options.getGraphMeetingToken!(authentication, purpose)) : undefined)
         const core = new ThinSliceOrchestrator(msx, guidance, taskAgents, performanceReporter, new RecordCreationService(msx, msx),
             createKnowledgeSearch({
                 mode: 'live', environment,
@@ -200,6 +246,8 @@ export async function createHostedWorkflowHostResolver(options: HostedRuntimeOpt
         await evictOldestWorkflowHost(hosts)
         const token = { value: authentication.accessToken }
         const msx = new LiveMsxConnector({ getAccessToken: async () => token.value }, fetch, undefined, undefined, msxWriteMetadataFromEnvironment(environment), portfolioPreferenceStore)
+        const performanceReporter = createPerformanceReporter(environment['TLC_PERFORMANCE'] === '1',
+            (message) => console.info(`[performance] ${message}`))
         const configured = createLivePlayWorkflowHost({
             registry,
             policy,
@@ -208,6 +256,7 @@ export async function createHostedWorkflowHostResolver(options: HostedRuntimeOpt
             resolveCurrentUserId: () => msx.getCurrentUserId(),
             resolveExcludedAccountIds: async () =>
                 (await portfolioPreferenceStore.read(await msx.getCurrentUserId())).hiddenAccountIds,
+            ...(performanceReporter ? { performanceReporter } : {}),
             onStepError: (info) => {
                 console.error(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? 'required' : 'optional'} step failed: ${info.message}`)
             }

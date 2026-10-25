@@ -31,6 +31,10 @@ host.
   semibold text. VS Code continues to own the native tooltip font.
 - **Plays**: run named workflows (stale opportunity sweep, overdue milestone triage,
   governance exceptions, and more) and review typed result cards and operational queues.
+  Live results appear page by page and remain marked incomplete until the run finishes.
+  The initial cohort allows 60 seconds for execution and 15 seconds of UI completion
+  grace; capped or unavailable sources remain visibly partial. See the
+  [Play performance and regression guide](../../docs/performance/performance-optimization.md#plays-deadlines-query-cost-and-first-page-results).
 
 Visible active opportunities where the signed-in user is a current Deal Team member
 or belongs to a milestone team enter Portfolio, milestones, agents, and Plays.
@@ -59,6 +63,13 @@ npm run --workspace apps/vscode-extension build
 
 Then open the repository in VS Code and press `F5` to launch the Extension Development
 Host. Run **TLC: Open Assist** or select TLC in the Activity Bar.
+
+For a quieter Debug Console, select **Run TLC Assist Extension (isolated)** in Run and
+Debug before pressing `F5`. It disables other installed extensions only in that debug
+window; TLC and built-in Microsoft authentication remain available. It uses the same
+TLC settings and storage as the standard profile and does not affect your normal editor.
+The existing profiles still load installed extensions for integration testing. Remaining
+Node warnings are not suppressed.
 
 After changing extension-host or connector code, stop the running debug session
 (`Shift+F5`) and launch it again (`F5`). The pre-launch task rebuilds the host and webview;

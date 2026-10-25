@@ -621,7 +621,8 @@ var meetingTranscriptSummarySchema = z.object({
 	source: meetingSourceSchema,
 	opportunityId: z.string().min(1).optional(),
 	opportunityName: z.string().min(1).optional(),
-	segmentCount: z.number().int().nonnegative()
+	/** Absent for calendar candidates, whose transcript is only fetched after the user chooses Extract. */
+	segmentCount: z.number().int().nonnegative().optional()
 }).strict();
 var meetingTranscriptSegmentSchema = z.object({
 	segmentId: z.string().min(1),
@@ -813,7 +814,7 @@ var voiceResponseSchema = z.discriminatedUnion("kind", [z.object({
 	kind: z.literal("availability"),
 	availability: voiceAvailabilitySchema
 }).strict(), voiceSessionSchema]);
-var text$3 = z.string().max(3e4);
+var text$6 = z.string().max(3e4);
 var name$1 = z.string().min(1).max(500);
 var identifier$3 = z.string().min(1).max(200);
 var tpid = z.string().regex(/^[1-9][0-9]{0,19}$/);
@@ -887,58 +888,58 @@ var accountSchema = z.object({
 		noPipeline: z.boolean(),
 		noInQuarterPipeline: z.boolean()
 	}).strict(),
-	nextAction: text$3
+	nextAction: text$6
 }).strict();
 var opportunitySchema$1 = z.object({
 	id: identifier$3,
-	number: text$3,
+	number: text$6,
 	tpid,
 	account: name$1,
 	name: name$1,
-	owner: text$3,
-	stage: text$3,
-	solutionArea: text$3,
-	salesPlay: text$3,
-	intent: text$3,
+	owner: text$6,
+	stage: text$6,
+	solutionArea: text$6,
+	salesPlay: text$6,
+	intent: text$6,
 	estimatedValue: amount$1.nullable(),
-	currency: text$3,
+	currency: text$6,
 	monthlyRunRate: amount$1.nullable(),
 	closeDate: date$3.nullable(),
-	state: text$3,
-	forecastComments: text$3,
+	state: text$6,
+	forecastComments: text$6,
 	timing,
-	relevance: text$3,
+	relevance: text$6,
 	modifiedAt: timestamp$1.optional(),
 	estimatedBilledRevenue: amount$1.nullable().optional(),
 	estimatedSqlRevenue: amount$1.nullable().optional()
 }).strict();
 var milestoneSchema$1 = z.object({
 	id: identifier$3,
-	number: text$3,
+	number: text$6,
 	opportunityId: identifier$3,
 	opportunityName: name$1,
 	tpid,
 	account: name$1,
 	name: name$1,
-	owner: text$3,
-	category: text$3,
-	status: text$3,
-	commitment: text$3,
+	owner: text$6,
+	category: text$6,
+	status: text$6,
+	commitment: text$6,
 	monthly: amount$1.nullable(),
 	date: date$3.nullable(),
-	workload: text$3,
-	forecastComments: text$3,
-	currency: text$3,
+	workload: text$6,
+	forecastComments: text$6,
+	currency: text$6,
 	active: z.boolean().nullable(),
 	timing,
 	metricCandidates: z.array(name$1).max(100),
-	mappingBasis: text$3,
-	classification: text$3,
+	mappingBasis: text$6,
+	classification: text$6,
 	scenarioCredit: amount$1.nullable(),
 	modifiedAt: timestamp$1.optional(),
 	commitmentChangedAt: timestamp$1.optional(),
-	region: text$3.optional(),
-	riskDetails: text$3.optional()
+	region: text$6.optional(),
+	riskDetails: text$6.optional()
 }).strict();
 var coverageSchema = z.object({
 	metric: name$1,
@@ -948,14 +949,14 @@ var coverageSchema = z.object({
 	committedMonthly: amount$1,
 	uncommittedMonthly: amount$1,
 	verifiedPeriodCredit: z.null(),
-	state: text$3,
+	state: text$6,
 	mappingSupported: z.boolean(),
 	mappingReviewRequired: z.boolean(),
 	scenarioAllowed: z.boolean(),
 	scenarioCommittedCredit: amount$1.nullable(),
 	scenarioUncommittedCredit: amount$1.nullable(),
 	scenarioRemainingGap: amount$1.nullable(),
-	nextAction: text$3
+	nextAction: text$6
 }).strict();
 var sellerDashboardReportSchema = z.object({
 	schemaVersion: z.literal(1),
@@ -969,7 +970,7 @@ var sellerDashboardReportSchema = z.object({
 			metric: name$1,
 			bucket: name$1,
 			hintSupported: z.boolean(),
-			state: text$3,
+			state: text$6,
 			scenarioAllowed: z.boolean()
 		}).strict()).max(100),
 		unmappedProductionCandidates: count$2
@@ -991,7 +992,7 @@ var sellerDashboardReportSchema = z.object({
 		pipeline: z.object({
 			status: quality,
 			asOf: timestamp$1.nullable(),
-			errors: z.array(text$3).max(1e3)
+			errors: z.array(text$6).max(1e3)
 		}).strict(),
 		quota: z.object({
 			name: name$1,
@@ -999,7 +1000,7 @@ var sellerDashboardReportSchema = z.object({
 			accounts: count$2.max(200)
 		}).strict()
 	}).strict(),
-	warnings: z.array(text$3).max(1e3),
+	warnings: z.array(text$6).max(1e3),
 	official: z.object({
 		weightedAttainment: amount$1,
 		closedMonthAttainment: amount$1.nullable(),
@@ -1020,11 +1021,11 @@ var sellerDashboardReportSchema = z.object({
 			"Medium",
 			"Low"
 		]),
-		issue: text$3,
-		action: text$3,
-		owner: text$3
+		issue: text$6,
+		action: text$6,
+		owner: text$6
 	}).strict()).max(2e4),
-	methodology: z.array(text$3).max(100)
+	methodology: z.array(text$6).max(100)
 }).strict().superRefine((report, context) => {
 	const reject = (message) => context.addIssue({
 		code: "custom",
@@ -1092,7 +1093,7 @@ var supplementSourceSchema = z.object({
 	asOf: timestamp$1,
 	start: date$3,
 	end: date$3,
-	detail: text$3
+	detail: text$6
 }).strict().refine((source) => source.start <= source.end, "Invalid supplemental source interval.");
 var sellerDashboardSupplementSchema = z.object({
 	schemaVersion: z.literal(1),
@@ -1131,14 +1132,14 @@ var sellerDashboardSupplementSchema = z.object({
 			tpid,
 			workload: name$1,
 			monthlyOpportunity: nonnegative$1,
-			evidence: text$3
+			evidence: text$6
 		}).strict()).max(5e4)
 	}).strict().nullable(),
 	conversion: z.object({
 		source: supplementSourceSchema,
 		accounts: z.array(z.object({
 			tpid,
-			territory: text$3,
+			territory: text$6,
 			startingMonthly: nonnegative$1,
 			convertedMonthly: nonnegative$1,
 			inQuarterMonthly: nonnegative$1,
@@ -1171,7 +1172,7 @@ var sellerDashboardSnapshotSchema = z.object({
 	kind: z.literal("snapshot"),
 	mode: z.enum(["sample", "live"]),
 	state: z.enum(["ready", "stale"]),
-	message: text$3,
+	message: text$6,
 	report: sellerDashboardReportSchema,
 	supplement: sellerDashboardSupplementSchema.nullable()
 }).strict().superRefine((snapshot, context) => {
@@ -1218,7 +1219,7 @@ var sellerDashboardRequestSchema = z.discriminatedUnion("operation", [z.object({
 }).strict()]);
 var identifier$2 = z.string().min(1).max(200);
 var name = z.string().min(1).max(500);
-var text$2 = z.string().max(3e4);
+var text$5 = z.string().max(3e4);
 var nonnegative = z.number().finite().nonnegative();
 var count$1 = z.number().int().nonnegative();
 var date$2 = z.iso.date();
@@ -1249,13 +1250,34 @@ var stagePipelineThreatSchema = z.enum([
 	"Medium",
 	"High"
 ]);
+var stagePipelineViewScopeSchema = z.enum([
+	"mine",
+	"reports",
+	"both"
+]);
+var stagePipelineSourceNames = [
+	"opportunities",
+	"milestones",
+	"macc",
+	"acr",
+	"hierarchy"
+];
+var stagePipelineAcrSources = [
+	"sample",
+	"mint",
+	"semantic-model",
+	"derived-pipeline-only",
+	"unavailable"
+];
 var stagePipelineOpportunitySchema = z.object({
 	id: identifier$2,
 	number: name,
 	customer: name,
 	name,
-	notes: text$2,
-	contact: text$2,
+	owner: z.string().max(200),
+	editable: z.boolean(),
+	notes: text$5,
+	contact: text$5,
 	scope: stagePipelineScopeSchema,
 	solutionArea: name,
 	inbound: z.boolean(),
@@ -1273,9 +1295,9 @@ var stagePipelineOpportunitySchema = z.object({
 	consumedRecurring: nonnegative,
 	consumedNonRecurring: nonnegative,
 	maccCommit: nonnegative,
-	partner: text$2.nullable(),
+	partner: text$5.nullable(),
 	competitor: z.object({
-		name: text$2.nullable(),
+		name: text$5.nullable(),
 		threat: stagePipelineThreatSchema
 	}).strict(),
 	solutionTagReview: z.boolean()
@@ -1285,45 +1307,89 @@ var stagePipelineMilestoneSchema = z.object({
 	number: name,
 	opportunityId: identifier$2,
 	name,
-	workload: text$2,
+	workload: text$5,
 	estimatedMonthlyAcr: nonnegative,
 	commitment: z.enum(["Committed", "Uncommitted"]),
 	status: stagePipelineMilestoneStatusSchema,
 	date: date$2.nullable(),
-	comment: text$2,
-	owner: text$2
+	comment: text$5,
+	owner: text$5
 }).strict();
 var acrMonthSchema = z.object({
 	month,
-	actual: nonnegative,
-	baseline: nonnegative,
+	actual: nonnegative.nullable(),
+	baseline: nonnegative.nullable(),
 	committed: nonnegative,
 	uncommitted: nonnegative,
 	stage1: nonnegative,
-	target: nonnegative
+	target: nonnegative.nullable()
 }).strict();
 var stagePipelineAcrSchema = z.object({
-	syncedAt: date$2,
-	lastActualMonth: month,
+	source: z.enum(stagePipelineAcrSources),
+	syncedAt: date$2.nullable(),
+	lastActualMonth: month.nullable(),
 	accounts: z.array(z.object({
 		customer: name,
 		months: z.array(acrMonthSchema).length(12)
 	}).strict()).max(500)
+}).strict().superRefine((acr, context) => {
+	const connected = acr.source === "sample" || acr.source === "mint" || acr.source === "semantic-model";
+	const measured = acr.accounts.flatMap((account) => account.months).flatMap((row) => [
+		row.actual,
+		row.baseline,
+		row.target
+	]);
+	if (!(connected ? acr.syncedAt !== null && acr.lastActualMonth !== null && measured.every((value) => value !== null) : acr.syncedAt === null && acr.lastActualMonth === null && measured.every((value) => value === null))) context.addIssue({
+		code: "custom",
+		message: connected ? "A connected ACR source must provide actuals, baseline, target and sync dates." : "An unconnected ACR source must not report actuals, baseline, target or sync dates."
+	});
+});
+var stagePipelineSourceHealthSchema = z.object({
+	source: z.enum(stagePipelineSourceNames),
+	state: z.enum([
+		"complete",
+		"partial",
+		"unavailable"
+	]),
+	detail: text$5,
+	count: count$1.optional()
+}).strict();
+var stagePipelineReportSchema = z.object({
+	id: identifier$2,
+	displayName: name
 }).strict();
 var stagePipelineSnapshotSchema = z.object({
-	contractVersion: z.literal("1.0"),
+	contractVersion: z.literal("1.1"),
 	kind: z.literal("snapshot"),
 	mode: z.enum(["sample", "live"]),
 	state: z.enum(["fresh", "stale"]),
-	message: text$2,
+	message: text$5,
 	generatedAt: timestamp,
 	owner: z.string().max(200),
 	asOf: date$2,
 	fiscalYear: z.number().int().min(2e3).max(2100),
+	scope: stagePipelineViewScopeSchema,
+	reports: z.array(stagePipelineReportSchema).max(50),
+	sources: z.array(stagePipelineSourceHealthSchema).max(10),
 	opportunities: z.array(stagePipelineOpportunitySchema).max(5e3),
 	milestones: z.array(stagePipelineMilestoneSchema).max(25e3),
 	acr: stagePipelineAcrSchema
 }).strict().superRefine((value, context) => {
+	if (value.scope === "mine" && value.reports.length > 0) context.addIssue({
+		code: "custom",
+		path: ["reports"],
+		message: "The seller portfolio scope has no direct reports."
+	});
+	if (new Set(value.reports.map((row) => row.id)).size !== value.reports.length) context.addIssue({
+		code: "custom",
+		path: ["reports"],
+		message: "Report ids must be unique."
+	});
+	if (new Set(value.sources.map((row) => row.source)).size !== value.sources.length) context.addIssue({
+		code: "custom",
+		path: ["sources"],
+		message: "Each source may be reported once."
+	});
 	const ids = /* @__PURE__ */ new Set();
 	for (const [index, row] of value.opportunities.entries()) {
 		if (ids.has(row.id)) context.addIssue({
@@ -1361,20 +1427,30 @@ var stagePipelineSnapshotSchema = z.object({
 	}
 });
 var stagePipelineUnavailableSchema = z.object({
-	contractVersion: z.literal("1.0"),
+	contractVersion: z.literal("1.1"),
 	kind: z.literal("unavailable"),
 	code: z.enum([
 		"source-unavailable",
 		"unauthorized",
+		"forbidden",
+		"throttled",
 		"invalid-snapshot"
 	]),
-	message: text$2
+	message: text$5
 }).strict();
-z.object({
-	contractVersion: z.literal("1.0"),
-	operation: z.literal("get")
-}).strict();
-z.union([stagePipelineSnapshotSchema, stagePipelineUnavailableSchema]);
+var stagePipelineRequestSchema = z.object({
+	contractVersion: z.literal("1.1"),
+	operation: z.enum(["get", "refresh"]),
+	scope: stagePipelineViewScopeSchema.default("mine"),
+	reportIds: z.array(identifier$2).max(50).optional()
+}).strict().superRefine((value, context) => {
+	if (value.reportIds && value.scope === "mine") context.addIssue({
+		code: "custom",
+		path: ["reportIds"],
+		message: "Direct reports can only be selected for a reports scope."
+	});
+});
+var stagePipelineResponseSchema = z.union([stagePipelineSnapshotSchema, stagePipelineUnavailableSchema]);
 //#endregion
 //#region packages/common/contracts/record-creation.ts
 var clientKeySchema = z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
@@ -1759,6 +1835,102 @@ var mutationSyncResponseSchema = z.discriminatedUnion("kind", [
 		receipts: z.array(mutationReceiptSchema).max(100)
 	}).strict()
 ]);
+var knowledgeSourceIdSchema = z.enum([
+	"mcem",
+	"seismic-m365",
+	"seismic-mcp"
+]);
+var knowledgeFileTypeSchema = z.enum([
+	"ppt",
+	"pptx",
+	"pdf",
+	"doc",
+	"docx",
+	"xls",
+	"xlsx",
+	"html"
+]);
+var knowledgeSearchFiltersSchema = z.object({ fileTypes: z.array(knowledgeFileTypeSchema).min(1).max(8).optional() }).strict();
+var knowledgeSearchRequestSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	query: z.string().trim().min(1).max(500),
+	source: knowledgeSourceIdSchema,
+	filters: knowledgeSearchFiltersSchema.optional(),
+	limit: z.number().int().min(1).max(50).optional(),
+	offset: z.number().int().min(0).max(1e4).optional()
+}).strict();
+var httpsEvidenceUrl = z.url().max(4096).refine((value) => {
+	const url = new URL(value);
+	return url.protocol === "https:" && !url.username && !url.password;
+}, "Knowledge evidence must use an HTTPS URL without credentials.");
+var knowledgeHitSchema = z.object({
+	id: z.string().min(1).max(500),
+	evidenceId: z.string().min(1).max(1e3),
+	source: knowledgeSourceIdSchema,
+	title: z.string().trim().min(1).max(1e3),
+	url: httpsEvidenceUrl,
+	snippet: z.string().max(4e3).optional(),
+	fileType: knowledgeFileTypeSchema.optional(),
+	lastModifiedAt: z.iso.datetime({ offset: true }).optional(),
+	connectionId: z.string().min(1).max(32).optional(),
+	untrusted: z.literal(true)
+}).strict();
+var knowledgeFailureCodeSchema = z.enum([
+	"source-not-configured",
+	"mcp-not-configured",
+	"graph-not-configured",
+	"graph-auth-not-configured",
+	"graph-sign-in-required",
+	"graph-permission-denied",
+	"graph-throttled",
+	"graph-request-failed",
+	"graph-transport-failed",
+	"graph-response-invalid",
+	"graph-response-too-large"
+]);
+var sourceHealth = z.object({
+	state: z.enum([
+		"sample",
+		"live",
+		"partial",
+		"unauthorized",
+		"unavailable"
+	]),
+	detail: z.string().min(1).max(1e3),
+	checkedAt: z.iso.datetime()
+}).strict();
+var common = {
+	contractVersion: z.literal("1.0"),
+	source: knowledgeSourceIdSchema,
+	mode: z.enum(["sample", "live"]),
+	sourceHealth
+};
+var knowledgeSearchResponseSchema = z.discriminatedUnion("kind", [z.object({
+	...common,
+	kind: z.literal("results"),
+	hits: z.array(knowledgeHitSchema).max(50),
+	hasMore: z.boolean(),
+	nextOffset: z.number().int().min(1).max(1e4).optional(),
+	warnings: z.array(z.enum(["invalid-source-items", "unverified-file-types"])).max(2)
+}).strict().superRefine((value, context) => {
+	if (value.hasMore !== (value.nextOffset !== void 0)) context.addIssue({
+		code: "custom",
+		message: "A continuation offset is required exactly when more results are available."
+	});
+	if (value.sourceHealth.state !== value.mode && value.sourceHealth.state !== "partial") context.addIssue({
+		code: "custom",
+		message: "Results require an available source."
+	});
+	if (value.hits.some((hit) => hit.source !== value.source)) context.addIssue({
+		code: "custom",
+		message: "Knowledge hits must come from the requested source."
+	});
+}), z.object({
+	...common,
+	kind: z.literal("unavailable"),
+	code: knowledgeFailureCodeSchema,
+	message: z.string().min(1).max(1e3)
+}).strict().refine((value) => ["unauthorized", "unavailable"].includes(value.sourceHealth.state), "Unavailable results must report an unavailable or unauthorized source.")]);
 //#endregion
 //#region packages/common/contracts/index.ts
 var dataModeSchema = z.enum(["sample", "live"]);
@@ -3488,6 +3660,18 @@ var milestoneMembershipSchema = z.object({
 }).strict();
 z.record(z.string().min(1), z.array(milestoneMembershipSchema));
 //#endregion
+//#region packages/connectors/common/knowledge.ts
+var KnowledgeSourceError = class extends Error {
+	code;
+	state;
+	constructor(code, message, state = "unavailable") {
+		super(message);
+		this.code = code;
+		this.state = state;
+		this.name = "KnowledgeSourceError";
+	}
+};
+//#endregion
 //#region packages/connectors/msx/live.ts
 var defaultBaseUrl = "https://microsoftsales.crm.dynamics.com/api/data/v9.2/";
 /** Dataverse column holding MSX's forecast-comment history as a JSON array of `{ userId, modifiedOn, comment }`. */
@@ -3949,10 +4133,10 @@ var LiveMsxConnector = class {
 		});
 		return context.memberships;
 	}
-	async readMilestoneTeamMemberships() {
+	async readMilestoneTeamMemberships(userId) {
 		const templateId = await this.resolveMilestoneTeamTemplateId().catch(() => void 0);
 		if (!templateId) return [];
-		const userId = await this.getCurrentUserId();
+		userId ??= await this.getCurrentUserId();
 		return unique((await this.requestAll("teams", {
 			"$select": "_regardingobjectid_value",
 			"$filter": `teamtype eq 1 and _teamtemplateid_value eq ${templateId} and teammembership_association/any(member:member/systemuserid eq ${userId})`
@@ -4568,6 +4752,31 @@ var LiveMsxConnector = class {
 		});
 		return this.currentUserIdPromise;
 	}
+	/** Read-only, bounded Dataverse read for dashboard sources. Entity-set names are plain identifiers; every page stays on the trusted origin. */
+	async readRows(entitySet, parameters) {
+		if (!navigationPropertyPattern.test(entitySet)) throw new Error("The entity set name is invalid.");
+		return this.requestAll(entitySet, parameters);
+	}
+	/** Opportunity ids on the given user's active deal teams. */
+	async listDealTeamOpportunityIds(userId) {
+		if (!guidPattern.test(userId)) throw new Error("The user id must be a valid MSX GUID.");
+		return unique((await this.requestAll("msp_dealteams", {
+			"$select": "_msp_parentopportunityid_value",
+			"$filter": `statecode eq 0 and _msp_dealteamuserid_value eq ${userId}`
+		})).map((row) => row._msp_parentopportunityid_value).filter(isPresent));
+	}
+	/** Milestone ids on the given user's milestone-team (access team) memberships. */
+	async listMilestoneTeamMilestoneIds(userId) {
+		if (!guidPattern.test(userId)) throw new Error("The user id must be a valid MSX GUID.");
+		return unique((await this.readMilestoneTeamMemberships(userId)).map((membership) => membership.milestoneId));
+	}
+	/** Parent opportunity ids of the given user's milestone-team (access team) memberships. */
+	async listMilestoneTeamOpportunityIds(userId) {
+		if (!guidPattern.test(userId)) throw new Error("The user id must be a valid MSX GUID.");
+		const memberships = await this.readMilestoneTeamMemberships(userId);
+		if (memberships.length === 0) return [];
+		return unique((await this.requestByIds("msp_engagementmilestones", "msp_engagementmilestoneid", unique(memberships.map((membership) => membership.milestoneId)), "msp_engagementmilestoneid,_msp_opportunityid_value")).map((row) => row._msp_opportunityid_value).filter(isPresent));
+	}
 	async assertNativeIdentity(entraObjectId) {
 		const userId = await this.getCurrentUserId();
 		if (!guidPattern.test(entraObjectId) || !guidPattern.test(userId)) throw new Error("The native source identity mapping is invalid.");
@@ -4973,6 +5182,525 @@ function mapOpportunityObservations(opportunity, milestones) {
 	}
 	return observations;
 }
+//#endregion
+//#region packages/connectors/common/meeting-source.ts
+/** A user-safe failure from the Teams meeting source. The message never contains tokens or record identifiers. */
+var MeetingSourceError = class extends Error {
+	code;
+	constructor(code, message) {
+		super(message);
+		this.code = code;
+		this.name = "MeetingSourceError";
+	}
+};
+var pasteHint = "You can still use Paste / upload with a transcript you are authorized to provide.";
+var meetingSourceMessages = {
+	"not-configured": `Automatic Teams meeting lookup needs delegated Microsoft Graph access, which this connection does not provide. ${pasteHint}`,
+	"sign-in-required": `Microsoft Graph sign-in or consent is required to list your Teams meetings. Approve the Calendars, Online meetings and transcript permissions, then try again. ${pasteHint}`,
+	denied: `Microsoft Graph did not allow access to your calendar, this meeting or its transcript. The account may lack the delegated permissions, or you may not be the organizer or an authorized attendee. ${pasteHint}`,
+	"admin-blocked": `Your organization has blocked Graph transcript access, and this app cannot bypass that policy. ${pasteHint}`,
+	"not-found": `That meeting is no longer in your recent calendar, or its Teams identity could not be verified. Refresh the list and choose again. ${pasteHint}`,
+	unavailable: `Microsoft Graph meeting lookup is temporarily unavailable. Try again later. ${pasteHint}`,
+	"no-transcript": `No transcript is available for this meeting yet. Transcription may not have been turned on, may still be processing, or you may not be the organizer or an authorized attendee. Choose another meeting. ${pasteHint}`,
+	"too-large": `This meeting's transcript is larger than the supported review size. ${pasteHint}`,
+	"cli-sign-in": `This connection uses Azure CLI sign-in, which cannot read your calendar or meeting transcripts. Switch to interactive sign-in (authentication mode "interactive-browser") and approve the Calendars permission, or use Paste / upload. ${pasteHint}`,
+	"sign-in-failed": `The Microsoft sign-in needed to list your Teams meetings did not complete. ${pasteHint}`
+};
+/** Collapses a host sign-in failure (never a token) into one short, printable line for the user. */
+function meetingSignInFailure(reason) {
+	const text = (reason instanceof Error ? reason.message : String(reason)).replace(/[^\x20-\x7E]+/g, " ").trim().slice(0, 160);
+	const base = meetingSourceMessages["sign-in-failed"];
+	return new MeetingSourceError("sign-in-failed", text ? `${base} Reason: ${text}` : base);
+}
+function meetingSourceError(code, reference) {
+	const base = meetingSourceMessages[code];
+	return new MeetingSourceError(code, reference && /^[A-Za-z0-9_]{1,100}$/.test(reference) ? `${base} (reference ${reference})` : base);
+}
+/**
+* Azure CLI tokens do not carry calendar or meeting permissions. Reading the token's own `scp` claim lets the host say so
+* instead of making a Graph call that can only fail. Opaque or scope-less tokens are left for Graph to judge.
+*/
+function assertCliTokenCanReadMeetings(token, purpose) {
+	const payload = token.split(".")[1];
+	let scopes;
+	try {
+		const claims = JSON.parse(Buffer.from(payload ?? "", "base64url").toString("utf8"));
+		if (typeof claims.scp === "string") scopes = claims.scp.split(" ");
+	} catch {
+		return token;
+	}
+	if (!scopes) return token;
+	const required = purpose === "list" ? "Calendars." : "OnlineMeetingTranscript.";
+	if (!scopes.some((scope) => scope.startsWith(required))) throw meetingSourceError("cli-sign-in");
+	return token;
+}
+//#endregion
+//#region packages/common/configuration/meeting-sources.ts
+/** Delegated Microsoft Graph permissions for listing recent Teams meetings and reading their transcripts. */
+var meetingGraphScopes = [
+	"https://graph.microsoft.com/Calendars.Read",
+	"https://graph.microsoft.com/OnlineMeetings.Read",
+	"https://graph.microsoft.com/OnlineMeetingTranscript.Read.All"
+];
+/** Listing the dropdown needs only user-consentable permissions; transcript scopes are requested on Extract. */
+var meetingListScopes = ["https://graph.microsoft.com/User.Read", "https://graph.microsoft.com/Calendars.Read"];
+var meetingGraphDefaultScope = "https://graph.microsoft.com/.default";
+var meetingScopesFor = (purpose) => purpose === "list" ? meetingListScopes : meetingGraphScopes;
+//#endregion
+//#region packages/agents/meeting-signal-extractor/src/transcript-parse.ts
+/**
+* Transcript parsing for *actual* meeting recordings.
+*
+* Phase 1 testing uses a real recording's transcript (uploaded or pasted) against the
+* SQLite opportunity/milestone store. This converts WebVTT (what Microsoft Graph returns
+* for Teams meeting transcripts) or a simple `Speaker: text` paste into the canonical
+* `MeetingTranscript` the extractor consumes. Phase 2 (live Graph) reuses the same shape.
+*/
+function parseTimestampMs(stamp) {
+	const m = stamp.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?$/);
+	if (!m || m[2] === void 0 || m[3] === void 0) return void 0;
+	const hours = m[1] ? Number(m[1]) : 0;
+	const minutes = Number(m[2]);
+	const seconds = Number(m[3]);
+	const millis = m[4] ? Number(m[4].padEnd(3, "0")) : 0;
+	return ((hours * 60 + minutes) * 60 + seconds) * 1e3 + millis;
+}
+/** Strips WebVTT speaker voice tags: `<v Priya Nair>text</v>` -> `{ speaker, text }`. */
+function extractVoiceTag(line, attributionAllowed = true) {
+	if (!attributionAllowed) return { text: line.replace(/<\/?v(?:\s+[^>]*)?>/gi, "").trim() };
+	const voice = line.match(/^<v\s+([^>]+)>(.*)$/i);
+	if (voice && voice[1] !== void 0) return {
+		speaker: voice[1].trim(),
+		text: (voice[2] ?? "").replace(/<\/v>\s*$/i, "").trim()
+	};
+	const colon = line.match(/^([A-Z][\w .'-]{1,60}?):\s+(.*)$/);
+	if (colon && colon[1] !== void 0) return {
+		speaker: colon[1].trim(),
+		text: (colon[2] ?? "").trim()
+	};
+	return { text: line.trim() };
+}
+function parseVtt(raw, attributionAllowed) {
+	const lines = raw.replace(/\r/g, "").split("\n");
+	const segments = [];
+	let startMs;
+	let endMs;
+	let buffer = [];
+	const flush = () => {
+		if (buffer.length === 0) return;
+		const joined = buffer.join(" ").trim();
+		if (joined) {
+			const { speaker, text } = extractVoiceTag(joined, attributionAllowed);
+			if (text) segments.push({
+				text,
+				...startMs !== void 0 ? { startMs } : {},
+				...endMs !== void 0 ? { endMs } : {},
+				...speaker ? { speaker } : {}
+			});
+		}
+		buffer = [];
+		startMs = void 0;
+		endMs = void 0;
+	};
+	for (const line of lines) {
+		const trimmed = line.trim();
+		if (trimmed === "") {
+			flush();
+			continue;
+		}
+		if (/^WEBVTT/i.test(trimmed) || /^NOTE\b/i.test(trimmed)) continue;
+		const cue = trimmed.match(/^([\d:.]+)\s*-->\s*([\d:.]+)/);
+		if (cue && cue[1] !== void 0 && cue[2] !== void 0) {
+			flush();
+			startMs = parseTimestampMs(cue[1]);
+			endMs = parseTimestampMs(cue[2]);
+			continue;
+		}
+		if (buffer.length === 0 && startMs === void 0 && /^[\w-]+$/.test(trimmed) && !/\s/.test(trimmed)) continue;
+		buffer.push(trimmed);
+	}
+	flush();
+	return segments;
+}
+function parsePlainText(raw, attributionAllowed) {
+	return raw.replace(/\r/g, "").split("\n").map((line) => line.trim()).filter((line) => line.length > 0).map((line) => {
+		const { speaker, text } = extractVoiceTag(line, attributionAllowed);
+		return {
+			text,
+			...speaker ? { speaker } : {}
+		};
+	}).filter((seg) => seg.text.length > 0);
+}
+/** Parses a raw transcript (WebVTT or `Speaker: text`) into a validated `MeetingTranscript`. */
+function parseTranscriptContent(raw, options = {}) {
+	const looksLikeVtt = options.format === "vtt" || options.format !== "text" && (/^\uFEFF?WEBVTT/i.test(raw.trimStart()) || /-->/.test(raw));
+	const attributionAllowed = options.attribution !== "prohibited";
+	const segments = (looksLikeVtt ? parseVtt(raw, attributionAllowed) : parsePlainText(raw, attributionAllowed)).map((seg, index) => ({
+		segmentId: `seg-${index + 1}`,
+		...seg
+	}));
+	const transcript = {
+		id: options.id ?? `upload-${Date.now()}`,
+		meetingType: options.meetingType ?? "customer",
+		source: options.source ?? "upload",
+		segments,
+		...options.opportunityId ? { opportunityId: options.opportunityId } : {},
+		...options.title ? { title: options.title } : {}
+	};
+	return meetingTranscriptSchema.parse(transcript);
+}
+//#endregion
+//#region packages/connectors/common/http-response.ts
+var ResponseSizeError = class extends Error {
+	constructor() {
+		super("The response exceeded its byte budget.");
+		this.name = "ResponseSizeError";
+	}
+};
+async function readBoundedText(response, maximumBytes) {
+	if (!response.body) return "";
+	const reader = response.body.getReader();
+	const chunks = [];
+	let bytes = 0;
+	while (true) {
+		const chunk = await reader.read();
+		if (chunk.done) break;
+		bytes += chunk.value.byteLength;
+		if (bytes > maximumBytes) {
+			await reader.cancel();
+			throw new ResponseSizeError();
+		}
+		chunks.push(chunk.value);
+	}
+	return Buffer.concat(chunks).toString("utf8");
+}
+//#endregion
+//#region packages/connectors/graph/meetings.ts
+var GraphMeetingError = class extends Error {
+	state;
+	code;
+	constructor(state, code) {
+		super(`Meeting transcript acquisition is ${state} (${code}).`);
+		this.state = state;
+		this.code = code;
+		this.name = "GraphMeetingError";
+	}
+};
+/** Converts any Graph meeting failure into a message that is safe and actionable for every UI. */
+function toMeetingSourceError(error) {
+	if (error instanceof MeetingSourceError) return error;
+	if (error instanceof GraphMeetingError) {
+		if (error.code === "content_budget_exceeded" || error.code === "invalid_transcript_segments" || error.code === "transcript_count_exceeded") return meetingSourceError("too-large");
+		if (error.code === "invalid_meeting_handle" || error.code === "meeting_not_in_recent_calendar" || error.code === "meeting_unavailable" || error.code === "invalid_meeting_link") return meetingSourceError("not-found");
+		const code = error.code;
+		if (error.state === "admin-blocked") return meetingSourceError("admin-blocked", code);
+		if (error.state === "auth-required") return meetingSourceError("sign-in-required", code);
+		if (error.state === "denied") return meetingSourceError("denied", code);
+		if (error.state === "unsupported") return meetingSourceError("not-found", code);
+		return meetingSourceError("unavailable", code);
+	}
+	return meetingSourceError("unavailable");
+}
+var graphRoot$3 = "https://graph.microsoft.com/v1.0";
+var teamsHosts = ["teams.microsoft.com", "teams.cloud.microsoft"];
+var recentEvent = z.object({
+	id: z.string().min(1).max(1e3),
+	subject: z.string().nullable().optional(),
+	isCancelled: z.boolean().optional(),
+	isOnlineMeeting: z.boolean().optional(),
+	start: z.object({
+		dateTime: z.string(),
+		timeZone: z.string().optional()
+	}),
+	end: z.object({
+		dateTime: z.string(),
+		timeZone: z.string().optional()
+	}),
+	onlineMeeting: z.object({ joinUrl: z.string().nullable().optional() }).nullable().optional(),
+	attendees: z.array(z.object({
+		type: z.string().optional(),
+		emailAddress: z.object({ address: z.string().nullable().optional() }).nullable().optional()
+	})).optional()
+});
+var recentPage = z.object({ value: z.array(z.unknown()).max(200) });
+var selfProfile = z.object({
+	mail: z.string().nullable().optional(),
+	userPrincipalName: z.string().nullable().optional()
+});
+var handlePattern = /^gm_[A-Za-z0-9_-]{32}$/;
+function meetingHandle(eventId) {
+	return `gm_${createHash("sha256").update(eventId).digest("base64url").slice(0, 32)}`;
+}
+function utcInstant(value) {
+	if (value.timeZone && value.timeZone.toUpperCase() !== "UTC") return void 0;
+	const parsed = Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(value.dateTime) ? value.dateTime : `${value.dateTime}Z`);
+	return Number.isFinite(parsed) ? parsed : void 0;
+}
+function isTeamsJoinUrl(value) {
+	try {
+		const url = new URL(value);
+		return url.protocol === "https:" && teamsHosts.includes(url.hostname) && !url.username && !url.password;
+	} catch {
+		return false;
+	}
+}
+/** Combines a meeting's transcripts (restarted recordings produce several) into one reviewable transcript. */
+function mergeMeetingTranscripts(transcripts, handle) {
+	const [first] = transcripts;
+	if (!first) return void 0;
+	if (transcripts.length === 1) return first;
+	const id = `graph-${createHash("sha256").update(transcripts.map((item) => item.id).join("|")).digest("hex").slice(0, 24)}`;
+	const segments = transcripts.flatMap((transcript, index) => transcript.segments.map((segment) => ({
+		...segment,
+		segmentId: `t${index + 1}-${segment.segmentId}`
+	})));
+	if (segments.length > 2e3) throw new GraphMeetingError("paused", "invalid_transcript_segments");
+	return {
+		...first,
+		id: id || handle,
+		segments
+	};
+}
+var transcriptPage = z.object({
+	value: z.array(z.object({ id: z.string().min(1).max(500) })),
+	"@odata.nextLink": z.url().optional()
+});
+var GraphMeetingConnector = class {
+	getAccessToken;
+	fetcher;
+	maximumBytes;
+	constructor(getAccessToken, fetcher = fetch, options = {}) {
+		this.getAccessToken = getAccessToken;
+		this.fetcher = fetcher;
+		this.maximumBytes = options.maximumBytes ?? 512e3;
+		if (!Number.isSafeInteger(this.maximumBytes) || this.maximumBytes < 1) throw new Error("A positive transcript byte budget is required.");
+	}
+	async resolveMeeting(joinUrl) {
+		const url = new URL(joinUrl);
+		if (url.protocol !== "https:" || !["teams.microsoft.com", "teams.cloud.microsoft"].includes(url.hostname) || url.username || url.password) throw new GraphMeetingError("unsupported", "invalid_meeting_link");
+		const endpoint = new URL(`${graphRoot$3}/me/onlineMeetings`);
+		endpoint.searchParams.set("$filter", `JoinWebUrl eq '${joinUrl.replaceAll("'", "''")}'`);
+		const response = await this.request(endpoint);
+		const value = z.object({ value: z.array(z.object({ id: z.string().min(1) })).max(1) }).parse(JSON.parse(await this.read(response)));
+		if (!value.value[0]) throw new GraphMeetingError("denied", "meeting_unavailable");
+		return value.value[0].id;
+	}
+	/** Lists past, non-cancelled Teams meetings from the signed-in user's calendar, newest first. */
+	async listRecentMeetings(options = {}) {
+		const now = options.now ?? /* @__PURE__ */ new Date();
+		const days = options.days ?? 14;
+		const limit = options.limit ?? 25;
+		const endpoint = new URL(`${graphRoot$3}/me/calendarView`);
+		endpoint.searchParams.set("startDateTime", (/* @__PURE__ */ new Date(now.getTime() - days * 864e5)).toISOString());
+		endpoint.searchParams.set("endDateTime", now.toISOString());
+		endpoint.searchParams.set("$select", "id,subject,start,end,isOnlineMeeting,isCancelled,onlineMeeting,attendees");
+		endpoint.searchParams.set("$orderby", "start/dateTime desc");
+		endpoint.searchParams.set("$top", "50");
+		const response = await this.request(endpoint, "application/json", "list");
+		let page;
+		try {
+			page = recentPage.parse(JSON.parse(await this.read(response, 2e6)));
+		} catch (error) {
+			if (error instanceof GraphMeetingError) throw error;
+			throw new GraphMeetingError("paused", "invalid_calendar_response");
+		}
+		const candidates = [];
+		for (const raw of page.value) {
+			const parsed = recentEvent.safeParse(raw);
+			if (!parsed.success) continue;
+			const event = parsed.data;
+			const joinUrl = event.onlineMeeting?.joinUrl;
+			const startsAt = utcInstant(event.start);
+			const endsAt = utcInstant(event.end);
+			if (event.isCancelled || event.isOnlineMeeting === false || !joinUrl || !isTeamsJoinUrl(joinUrl) || startsAt === void 0 || endsAt === void 0 || endsAt > now.getTime()) continue;
+			candidates.push({
+				event,
+				startsAt,
+				joinUrl
+			});
+		}
+		candidates.sort((left, right) => right.startsAt - left.startsAt);
+		const selected = candidates.slice(0, limit);
+		const domain = selected.length ? await this.ownDomain() : void 0;
+		return selected.map(({ event, startsAt, joinUrl }) => ({
+			handle: meetingHandle(event.id),
+			subject: event.subject?.trim() || "(No subject)",
+			startsAt: new Date(startsAt).toISOString(),
+			meetingType: this.classify(event.attendees ?? [], domain),
+			joinUrl
+		}));
+	}
+	/** Verifies the handle against the user's current recent calendar before any Graph meeting lookup. */
+	async resolveRecentMeeting(handle, options = {}) {
+		if (!handlePattern.test(handle)) throw new GraphMeetingError("unsupported", "invalid_meeting_handle");
+		const found = (await this.listRecentMeetings(options)).find((meeting) => meeting.handle === handle);
+		if (!found) throw new GraphMeetingError("unsupported", "meeting_not_in_recent_calendar");
+		return {
+			...found,
+			meetingId: await this.resolveMeeting(found.joinUrl)
+		};
+	}
+	async acquireRecentMeeting(handle, opportunityId, options = {}) {
+		const meeting = await this.resolveRecentMeeting(handle, options);
+		return {
+			...await this.acquire({
+				meetingId: meeting.meetingId,
+				opportunityId,
+				meetingType: meeting.meetingType
+			}),
+			meetingType: meeting.meetingType
+		};
+	}
+	/** Acquires and merges every transcript for a chosen recent meeting; `undefined` when none exists yet. */
+	async acquireRecentTranscript(handle, opportunityId, options = {}) {
+		return mergeMeetingTranscripts((await this.acquireRecentMeeting(handle, opportunityId, options)).transcripts, handle);
+	}
+	ownDomainRequest;
+	ownDomain() {
+		this.ownDomainRequest ??= (async () => {
+			try {
+				const endpoint = new URL(`${graphRoot$3}/me`);
+				endpoint.searchParams.set("$select", "mail,userPrincipalName");
+				const profile = selfProfile.parse(JSON.parse(await this.read(await this.request(endpoint, "application/json", "list"))));
+				return (profile.mail ?? profile.userPrincipalName ?? "").split("@")[1]?.toLowerCase() || void 0;
+			} catch {
+				return;
+			}
+		})();
+		return this.ownDomainRequest;
+	}
+	/** `customer` when anyone outside the signed-in user's domain was invited; the reviewer can still correct the result. */
+	classify(attendees, domain) {
+		if (!domain) return "customer";
+		return attendees.some((attendee) => {
+			if (attendee.type === "resource") return false;
+			const attendeeDomain = attendee.emailAddress?.address?.split("@")[1]?.toLowerCase();
+			return attendeeDomain !== void 0 && attendeeDomain !== domain;
+		}) ? "customer" : "internal";
+	}
+	async acquire(input) {
+		if (!input.meetingId || input.meetingId.length > 500 || /[/:\\?#\r\n]/.test(input.meetingId)) throw new GraphMeetingError("unsupported", "invalid_meeting_id");
+		const meetingPath = `${graphRoot$3}/me/onlineMeetings/${encodeURIComponent(input.meetingId)}`;
+		let requests = 0;
+		const get = async (url, accept = "application/json") => {
+			if (++requests > 30) throw new GraphMeetingError("paused", "request_budget_exhausted");
+			const target = new URL(url);
+			if (target.origin !== "https://graph.microsoft.com" || !target.pathname.startsWith(new URL(meetingPath).pathname) || target.username || target.password || target.hash) throw new GraphMeetingError("unsupported", "invalid_graph_continuation");
+			return this.request(target, accept);
+		};
+		const meeting = z.object({
+			id: z.string().min(1),
+			subject: z.string().optional()
+		}).parse(JSON.parse(await this.read(await get(meetingPath))));
+		if (meeting.id !== input.meetingId) throw new GraphMeetingError("denied", "meeting_identity_mismatch");
+		const ids = [];
+		let next = `${meetingPath}/transcripts`;
+		const visited = /* @__PURE__ */ new Set();
+		while (next) {
+			if (visited.has(next)) throw new GraphMeetingError("paused", "repeated_page");
+			visited.add(next);
+			const page = transcriptPage.parse(JSON.parse(await this.read(await get(next))));
+			for (const row of page.value) if (!ids.includes(row.id)) ids.push(row.id);
+			if (ids.length > 20) throw new GraphMeetingError("paused", "transcript_count_exceeded");
+			next = page["@odata.nextLink"];
+		}
+		const transcripts = [];
+		const contentVersions = {};
+		let unattributed = false;
+		let totalBytes = 0;
+		for (const id of ids) {
+			const endpoint = `${meetingPath}/transcripts/${encodeURIComponent(id)}/content`;
+			let response;
+			let prohibited = false;
+			try {
+				response = await get(endpoint, "text/vtt");
+			} catch (error) {
+				if (!(error instanceof GraphMeetingError) || error.code !== "SpeakerAttributionNotAllowed") throw error;
+				response = await get(endpoint, "application/vnd.microsoft.graph.transcript+text");
+				prohibited = true;
+				unattributed = true;
+			}
+			const contentType = response.headers.get("content-type")?.split(";")[0]?.trim();
+			if (contentType && ![
+				"text/vtt",
+				"text/plain",
+				"application/vnd.microsoft.graph.transcript+text"
+			].includes(contentType)) throw new GraphMeetingError("unsupported", "unexpected_content_type");
+			if (contentType === "application/vnd.microsoft.graph.transcript+text") {
+				prohibited = true;
+				unattributed = true;
+			}
+			const content = await this.read(response);
+			totalBytes += Buffer.byteLength(content);
+			if (totalBytes > this.maximumBytes || content.length > 15e4) throw new GraphMeetingError("paused", "content_budget_exceeded");
+			const transcript = parseTranscriptContent(content, {
+				id,
+				source: "teams",
+				meetingType: input.meetingType,
+				opportunityId: input.opportunityId,
+				attribution: prohibited ? "prohibited" : "allowed",
+				...meeting.subject ? { title: meeting.subject } : {}
+			});
+			if (!transcript.segments.length || transcript.segments.length > 2e3) throw new GraphMeetingError("unsupported", "invalid_transcript_segments");
+			transcripts.push(transcript);
+			contentVersions[id] = createHash("sha256").update(content).digest("hex");
+		}
+		return {
+			state: transcripts.length ? "ready" : "waiting",
+			meetingId: input.meetingId,
+			transcripts,
+			attribution: transcripts.length ? unattributed ? "unattributed" : "attributed" : "unknown",
+			contentVersions
+		};
+	}
+	async request(url, accept = "application/json", purpose = "transcript") {
+		let token;
+		try {
+			token = await this.getAccessToken(purpose);
+		} catch (error) {
+			if (error instanceof MeetingSourceError) throw error;
+			if (error instanceof Error && error.name === "TeamsAuthorizationError") throw error;
+			throw new GraphMeetingError("auth-required", "delegated_session_unavailable");
+		}
+		if (!token) throw new GraphMeetingError("auth-required", "missing_delegated_token");
+		let response;
+		try {
+			response = await this.fetcher(url, {
+				method: "GET",
+				redirect: "error",
+				signal: AbortSignal.timeout(3e4),
+				headers: {
+					authorization: `Bearer ${token}`,
+					accept
+				}
+			});
+		} catch {
+			throw new GraphMeetingError("paused", "graph_transport");
+		}
+		if (response.ok) return response;
+		let code = `http_${response.status}`;
+		const text = await this.read(response);
+		try {
+			const error = z.object({ error: z.object({
+				code: z.string().optional(),
+				innerError: z.object({ code: z.string().optional() }).optional()
+			}) }).parse(JSON.parse(text));
+			const candidate = error.error.innerError?.code ?? error.error.code;
+			if (candidate && /^[A-Za-z0-9_]{1,100}$/.test(candidate)) code = candidate;
+		} catch {
+			throw new GraphMeetingError(response.status === 401 ? "auth-required" : response.status === 403 ? "denied" : "paused", code);
+		}
+		throw new GraphMeetingError(code === "GraphAccessToTranscriptsDisabled" ? "admin-blocked" : response.status === 401 ? "auth-required" : response.status === 403 ? "denied" : response.status === 404 ? "unsupported" : "paused", code);
+	}
+	async read(response, maximumBytes = this.maximumBytes) {
+		try {
+			return await readBoundedText(response, maximumBytes);
+		} catch (error) {
+			if (error instanceof ResponseSizeError) throw new GraphMeetingError("paused", "content_budget_exceeded");
+			throw error;
+		}
+	}
+};
 //#endregion
 //#region packages/agents/meeting-signal-extractor/src/index.ts
 /**
@@ -5557,15 +6285,44 @@ function datePrefix(when) {
 var LiveMeetingCaptureConnector = class {
 	msx;
 	now;
-	constructor(msx, now = () => /* @__PURE__ */ new Date()) {
+	meetings;
+	constructor(msx, now = () => /* @__PURE__ */ new Date(), meetings) {
 		this.msx = msx;
 		this.now = now;
+		this.meetings = meetings;
 	}
-	/** Graph-based transcript discovery is a later step; the live path uses paste/upload today. */
+	/** Recent Teams meetings from the signed-in user's calendar; transcripts are fetched only when one is chosen. */
 	async listMeetingTranscripts() {
-		return [];
+		const meetings = this.requireMeetings();
+		try {
+			return (await meetings.listRecentMeetings()).map((meeting) => meetingTranscriptSummarySchema.parse({
+				id: meeting.handle,
+				subject: meeting.subject,
+				occurredAt: meeting.startsAt,
+				meetingType: meeting.meetingType,
+				source: "teams"
+			}));
+		} catch (error) {
+			throw toMeetingSourceError(error);
+		}
 	}
+	/** Full transcripts are not previewed; a chosen meeting is acquired during Extract & Review. */
 	async getMeetingTranscript() {}
+	requireMeetings() {
+		if (!this.meetings) throw meetingSourceError("not-configured");
+		return this.meetings;
+	}
+	async loadMeetingTranscript(handle, opportunityId) {
+		const meetings = this.requireMeetings();
+		let transcript;
+		try {
+			transcript = await meetings.acquireRecentTranscript(handle, opportunityId);
+		} catch (error) {
+			throw toMeetingSourceError(error);
+		}
+		if (!transcript) throw meetingSourceError("no-transcript");
+		return transcript;
+	}
 	buildOpportunitySnapshot(name, id, value, comments) {
 		return {
 			id,
@@ -5598,8 +6355,8 @@ var LiveMeetingCaptureConnector = class {
 		};
 	}
 	async proposeMeetingChangeSet(request, extractor) {
-		if (!request.transcript) throw new Error("Live meeting capture needs a pasted or uploaded transcript (Graph acquisition is not wired yet).");
-		const transcript = meetingTranscriptSchema.parse(request.transcript);
+		if (!request.transcript && !request.transcriptId) throw new Error("Choose a Teams meeting, or paste or upload a transcript.");
+		const transcript = meetingTranscriptSchema.parse(request.transcript ?? await this.loadMeetingTranscript(request.transcriptId, request.opportunityId));
 		const context = await this.msx.getOpportunityContext(request.opportunityId);
 		const milestones = await this.msx.listMilestones(request.opportunityId);
 		const opportunity = this.buildOpportunitySnapshot(context.opportunity.name, context.opportunity.id, context.opportunity.value, context.opportunity.comments);
@@ -10515,109 +11272,6 @@ function createFoundryMeetingExtractor(options) {
 	};
 }
 //#endregion
-//#region packages/agents/meeting-signal-extractor/src/transcript-parse.ts
-/**
-* Transcript parsing for *actual* meeting recordings.
-*
-* Phase 1 testing uses a real recording's transcript (uploaded or pasted) against the
-* SQLite opportunity/milestone store. This converts WebVTT (what Microsoft Graph returns
-* for Teams meeting transcripts) or a simple `Speaker: text` paste into the canonical
-* `MeetingTranscript` the extractor consumes. Phase 2 (live Graph) reuses the same shape.
-*/
-function parseTimestampMs(stamp) {
-	const m = stamp.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?$/);
-	if (!m || m[2] === void 0 || m[3] === void 0) return void 0;
-	const hours = m[1] ? Number(m[1]) : 0;
-	const minutes = Number(m[2]);
-	const seconds = Number(m[3]);
-	const millis = m[4] ? Number(m[4].padEnd(3, "0")) : 0;
-	return ((hours * 60 + minutes) * 60 + seconds) * 1e3 + millis;
-}
-/** Strips WebVTT speaker voice tags: `<v Priya Nair>text</v>` -> `{ speaker, text }`. */
-function extractVoiceTag(line, attributionAllowed = true) {
-	if (!attributionAllowed) return { text: line.replace(/<\/?v(?:\s+[^>]*)?>/gi, "").trim() };
-	const voice = line.match(/^<v\s+([^>]+)>(.*)$/i);
-	if (voice && voice[1] !== void 0) return {
-		speaker: voice[1].trim(),
-		text: (voice[2] ?? "").replace(/<\/v>\s*$/i, "").trim()
-	};
-	const colon = line.match(/^([A-Z][\w .'-]{1,60}?):\s+(.*)$/);
-	if (colon && colon[1] !== void 0) return {
-		speaker: colon[1].trim(),
-		text: (colon[2] ?? "").trim()
-	};
-	return { text: line.trim() };
-}
-function parseVtt(raw, attributionAllowed) {
-	const lines = raw.replace(/\r/g, "").split("\n");
-	const segments = [];
-	let startMs;
-	let endMs;
-	let buffer = [];
-	const flush = () => {
-		if (buffer.length === 0) return;
-		const joined = buffer.join(" ").trim();
-		if (joined) {
-			const { speaker, text } = extractVoiceTag(joined, attributionAllowed);
-			if (text) segments.push({
-				text,
-				...startMs !== void 0 ? { startMs } : {},
-				...endMs !== void 0 ? { endMs } : {},
-				...speaker ? { speaker } : {}
-			});
-		}
-		buffer = [];
-		startMs = void 0;
-		endMs = void 0;
-	};
-	for (const line of lines) {
-		const trimmed = line.trim();
-		if (trimmed === "") {
-			flush();
-			continue;
-		}
-		if (/^WEBVTT/i.test(trimmed) || /^NOTE\b/i.test(trimmed)) continue;
-		const cue = trimmed.match(/^([\d:.]+)\s*-->\s*([\d:.]+)/);
-		if (cue && cue[1] !== void 0 && cue[2] !== void 0) {
-			flush();
-			startMs = parseTimestampMs(cue[1]);
-			endMs = parseTimestampMs(cue[2]);
-			continue;
-		}
-		if (buffer.length === 0 && startMs === void 0 && /^[\w-]+$/.test(trimmed) && !/\s/.test(trimmed)) continue;
-		buffer.push(trimmed);
-	}
-	flush();
-	return segments;
-}
-function parsePlainText(raw, attributionAllowed) {
-	return raw.replace(/\r/g, "").split("\n").map((line) => line.trim()).filter((line) => line.length > 0).map((line) => {
-		const { speaker, text } = extractVoiceTag(line, attributionAllowed);
-		return {
-			text,
-			...speaker ? { speaker } : {}
-		};
-	}).filter((seg) => seg.text.length > 0);
-}
-/** Parses a raw transcript (WebVTT or `Speaker: text`) into a validated `MeetingTranscript`. */
-function parseTranscriptContent(raw, options = {}) {
-	const looksLikeVtt = options.format === "vtt" || options.format !== "text" && (/^\uFEFF?WEBVTT/i.test(raw.trimStart()) || /-->/.test(raw));
-	const attributionAllowed = options.attribution !== "prohibited";
-	const segments = (looksLikeVtt ? parseVtt(raw, attributionAllowed) : parsePlainText(raw, attributionAllowed)).map((seg, index) => ({
-		segmentId: `seg-${index + 1}`,
-		...seg
-	}));
-	const transcript = {
-		id: options.id ?? `upload-${Date.now()}`,
-		meetingType: options.meetingType ?? "customer",
-		source: options.source ?? "upload",
-		segments,
-		...options.opportunityId ? { opportunityId: options.opportunityId } : {},
-		...options.title ? { title: options.title } : {}
-	};
-	return meetingTranscriptSchema.parse(transcript);
-}
-//#endregion
 //#region packages/agents/mcem-coach/src/milestone-signals.ts
 var RISK_STATUSES = /* @__PURE__ */ new Set(["at risk", "blocked"]);
 var UNCOMMITTED = "uncommitted";
@@ -11016,6 +11670,27 @@ function assemble({ context, milestones, evidence, now = /* @__PURE__ */ new Dat
 		}
 	};
 }
+/**
+* Model-facing serialization of an agent task. Raw free-text comments are replaced by the bounded,
+* dated evidence pack so the same facts are not sent twice and no field can exceed the prompt budget.
+*/
+function serializeAgentContext(context) {
+	const { comments: opportunityComments, ...opportunity } = context.opportunityContext.opportunity;
+	return JSON.stringify({
+		request: context.request,
+		opportunityContext: {
+			...context.opportunityContext,
+			opportunity,
+			milestones: context.opportunityContext.milestones?.map(({ comments, riskDetails, ...milestone }) => {
+				return milestone;
+			})
+		},
+		guidance: context.guidance,
+		...context.nextStageGuidance ? { nextStageGuidance: context.nextStageGuidance } : {},
+		localEvaluation: context.localEvaluation,
+		...context.evidence ? { evidence: context.evidence } : {}
+	});
+}
 /** Reflects evidence-read gaps on the MSX source label without adding a duplicate source entry. */
 function agentSourceHealth(context) {
 	const { sourceHealth } = context.opportunityContext;
@@ -11399,6 +12074,370 @@ var RecordCreationService = class {
 	}
 };
 //#endregion
+//#region packages/common/configuration/knowledge-sources.ts
+var seismicGraphScopes = ["https://graph.microsoft.com/ExternalItem.Read.All"];
+var seismicGraphDefaultScope = "https://graph.microsoft.com/.default";
+var propertyName = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,127}$/);
+var seismicGraphConfigurationSchema = z.object({
+	connectionId: z.string().regex(/^[A-Za-z0-9]{3,32}$/),
+	titleProperty: propertyName.default("title"),
+	urlProperty: propertyName.default("url"),
+	fileTypeProperty: propertyName.optional(),
+	modifiedProperty: propertyName.optional()
+}).strict();
+function seismicGraphConfigurationFromEnvironment(environment) {
+	const connectionId = environment["TLC_SEISMIC_GRAPH_CONNECTION_ID"]?.trim();
+	if (!connectionId) return void 0;
+	const optional = (key) => environment[key]?.trim() || void 0;
+	const titleProperty = optional("TLC_SEISMIC_GRAPH_TITLE_PROPERTY");
+	const urlProperty = optional("TLC_SEISMIC_GRAPH_URL_PROPERTY");
+	const fileTypeProperty = optional("TLC_SEISMIC_GRAPH_FILE_TYPE_PROPERTY");
+	const modifiedProperty = optional("TLC_SEISMIC_GRAPH_MODIFIED_PROPERTY");
+	return seismicGraphConfigurationSchema.parse({
+		connectionId,
+		...titleProperty ? { titleProperty } : {},
+		...urlProperty ? { urlProperty } : {},
+		...fileTypeProperty ? { fileTypeProperty } : {},
+		...modifiedProperty ? { modifiedProperty } : {}
+	});
+}
+//#endregion
+//#region packages/common/fixtures/knowledge.ts
+var sampleKnowledgeCheckedAt = "2026-10-01T00:00:00.000Z";
+var hits = knowledgeHitSchema.array().parse([
+	{
+		id: "sample-azure-ai-pitch",
+		evidenceId: "knowledge:seismic-m365:sample:azure-ai-pitch",
+		source: "seismic-m365",
+		title: "Azure AI solution pitch (sample)",
+		url: "https://seismic.example.test/content/azure-ai-pitch.pptx",
+		fileType: "pptx",
+		snippet: "Synthetic presentation covering Azure AI business outcomes and solution discovery.",
+		connectionId: "sampleSeismic",
+		untrusted: true
+	},
+	{
+		id: "sample-azure-ai-guide",
+		evidenceId: "knowledge:seismic-m365:sample:azure-ai-guide",
+		source: "seismic-m365",
+		title: "Azure AI architecture guide (sample)",
+		url: "https://seismic.example.test/content/azure-ai-guide.pdf",
+		fileType: "pdf",
+		snippet: "Synthetic architecture guidance for Azure AI workloads.",
+		connectionId: "sampleSeismic",
+		untrusted: true
+	},
+	{
+		id: "sample-fabric-overview",
+		evidenceId: "knowledge:seismic-m365:sample:fabric-overview",
+		source: "seismic-m365",
+		title: "Microsoft Fabric overview (sample)",
+		url: "https://seismic.example.test/content/fabric-overview.pptx",
+		fileType: "pptx",
+		snippet: "Synthetic presentation covering analytics, OneLake, and Microsoft Fabric.",
+		connectionId: "sampleSeismic",
+		untrusted: true
+	}
+]);
+function searchSampleKnowledge(input) {
+	const request = knowledgeSearchRequestSchema.parse(input);
+	if (request.source !== "seismic-m365") throw new Error("The sample Seismic index cannot search another source.");
+	const terms = request.query.toLowerCase().split(/\s+/);
+	const matching = hits.filter((hit) => terms.every((term) => `${hit.title} ${hit.snippet}`.toLowerCase().includes(term)) && (!request.filters?.fileTypes || hit.fileType && request.filters.fileTypes.includes(hit.fileType)));
+	const offset = request.offset ?? 0;
+	const page = matching.slice(offset, offset + (request.limit ?? 10));
+	const next = offset + page.length;
+	return {
+		hits: structuredClone(page),
+		hasMore: next < matching.length,
+		...next < matching.length ? { nextOffset: next } : {},
+		warnings: []
+	};
+}
+function sampleKnowledgeSearchResponse(input) {
+	const request = knowledgeSearchRequestSchema.parse(input);
+	const base = {
+		contractVersion: "1.0",
+		source: request.source,
+		mode: "sample"
+	};
+	if (request.source !== "seismic-m365") {
+		const message = request.source === "seismic-mcp" ? "Direct Seismic MCP is not implemented. Select seismic-m365 for Graph retrieval." : "MCEM knowledge search is reserved for a future provider. Existing MCEM guidance operations are unchanged.";
+		return knowledgeSearchResponseSchema.parse({
+			...base,
+			kind: "unavailable",
+			code: request.source === "seismic-mcp" ? "mcp-not-configured" : "source-not-configured",
+			message,
+			sourceHealth: {
+				state: "unavailable",
+				detail: message,
+				checkedAt: sampleKnowledgeCheckedAt
+			}
+		});
+	}
+	return knowledgeSearchResponseSchema.parse({
+		...base,
+		kind: "results",
+		...searchSampleKnowledge(request),
+		sourceHealth: {
+			state: "sample",
+			detail: "Synthetic bundled knowledge results; no Microsoft 365 or Seismic request was made.",
+			checkedAt: sampleKnowledgeCheckedAt
+		}
+	});
+}
+//#endregion
+//#region packages/connectors/seismic/graph.ts
+var graphSearchUrl = "https://graph.microsoft.com/v1.0/search/query";
+var searchResponse = z.object({ value: z.array(z.object({
+	error: z.unknown().optional(),
+	hitsContainers: z.array(z.object({
+		hits: z.array(z.unknown()).max(50).optional(),
+		moreResultsAvailable: z.boolean(),
+		total: z.number().int().nonnegative()
+	})).length(1)
+})).length(1) });
+var searchHit = z.object({
+	hitId: z.string().min(1).max(500),
+	summary: z.string().optional(),
+	contentSource: z.string().optional(),
+	resource: z.object({
+		"@odata.type": z.literal("#microsoft.graph.externalConnectors.externalItem").optional(),
+		id: z.string().min(1).max(500).optional(),
+		properties: z.record(z.string(), z.unknown())
+	})
+});
+var mimeTypes = {
+	"application/vnd.ms-powerpoint": "ppt",
+	"application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+	"application/pdf": "pdf",
+	"application/msword": "doc",
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+	"application/vnd.ms-excel": "xls",
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+	"text/html": "html"
+};
+var text$4 = (value) => value.replace(/<[^>]*>/g, "").trim();
+function fileType(value, url) {
+	if (typeof value === "string") {
+		const normalized = value.toLowerCase().trim().replace(/^\./, "");
+		const parsed = knowledgeFileTypeSchema.safeParse(mimeTypes[normalized] ?? normalized);
+		if (parsed.success) return parsed.data;
+	}
+	const extension = new URL(url).pathname.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+	const parsed = knowledgeFileTypeSchema.safeParse(extension);
+	return parsed.success ? parsed.data : void 0;
+}
+var SeismicM365Provider = class {
+	getAccessToken;
+	fetcher;
+	id = "seismic-m365";
+	mode = "live";
+	configuration;
+	constructor(configuration, getAccessToken, fetcher = fetch) {
+		this.getAccessToken = getAccessToken;
+		this.fetcher = fetcher;
+		this.configuration = seismicGraphConfigurationSchema.parse(configuration);
+	}
+	async search(input) {
+		const request = knowledgeSearchRequestSchema.parse(input);
+		if (request.source !== this.id) throw new Error("The Seismic Graph provider cannot search another knowledge source.");
+		let token;
+		try {
+			token = await this.getAccessToken();
+		} catch {
+			throw new KnowledgeSourceError("graph-sign-in-required", "A delegated Microsoft Graph session is required for Seismic search.", "unauthorized");
+		}
+		if (!token.trim()) throw new KnowledgeSourceError("graph-sign-in-required", "A delegated Microsoft Graph token was not returned.", "unauthorized");
+		const config = this.configuration;
+		const contentSource = `/external/connections/${config.connectionId}`;
+		const fields = [...new Set([
+			config.titleProperty,
+			config.urlProperty,
+			config.fileTypeProperty,
+			config.modifiedProperty
+		].filter((field) => field !== void 0))];
+		let response;
+		try {
+			response = await this.fetcher(graphSearchUrl, {
+				method: "POST",
+				redirect: "error",
+				signal: AbortSignal.timeout(3e4),
+				headers: {
+					authorization: `Bearer ${token}`,
+					accept: "application/json",
+					"content-type": "application/json"
+				},
+				body: JSON.stringify({ requests: [{
+					entityTypes: ["externalItem"],
+					contentSources: [contentSource],
+					query: { queryString: request.query },
+					from: request.offset ?? 0,
+					size: request.limit ?? 10,
+					fields
+				}] })
+			});
+		} catch {
+			throw new KnowledgeSourceError("graph-transport-failed", "The Seismic Graph search request could not be completed.");
+		}
+		if (!response.ok) {
+			if (response.status === 401) throw new KnowledgeSourceError("graph-sign-in-required", "Microsoft Graph rejected the delegated session. Sign in again.", "unauthorized");
+			if (response.status === 403) throw new KnowledgeSourceError("graph-permission-denied", "Microsoft Graph denied Seismic search. Verify ExternalItem.Read.All consent and connector access.", "unauthorized");
+			if (response.status === 429) throw new KnowledgeSourceError("graph-throttled", "Microsoft Graph throttled Seismic search. Retry later.");
+			throw new KnowledgeSourceError("graph-request-failed", `Microsoft Graph Seismic search returned HTTP ${response.status}.`);
+		}
+		let raw;
+		try {
+			raw = JSON.parse(await readBoundedText(response, 1e6));
+		} catch (error) {
+			if (error instanceof ResponseSizeError) throw new KnowledgeSourceError("graph-response-too-large", "The Seismic search response exceeded its byte budget.");
+			if (error instanceof SyntaxError) throw new KnowledgeSourceError("graph-response-invalid", "Microsoft Graph returned an invalid search response.");
+			throw new KnowledgeSourceError("graph-transport-failed", "The Seismic Graph search response could not be read.");
+		}
+		const parsed = searchResponse.safeParse(raw);
+		const result = parsed.success ? parsed.data.value[0] : void 0;
+		const page = result?.hitsContainers[0];
+		const rawHits = page?.hits ?? [];
+		if (!page || result?.error || rawHits.length > (request.limit ?? 10) || !rawHits.length && (page.moreResultsAvailable || (request.offset ?? 0) < page.total)) throw new KnowledgeSourceError("graph-response-invalid", "Microsoft Graph returned an incomplete or invalid Seismic search page.");
+		const hits = [];
+		const warnings = /* @__PURE__ */ new Set();
+		const seen = /* @__PURE__ */ new Set();
+		for (const rawHit of rawHits) {
+			const candidate = searchHit.safeParse(rawHit);
+			if (!candidate.success || candidate.data.contentSource && candidate.data.contentSource !== contentSource) {
+				warnings.add("invalid-source-items");
+				continue;
+			}
+			const { resource, hitId, summary } = candidate.data;
+			const title = resource.properties[config.titleProperty];
+			const url = resource.properties[config.urlProperty];
+			const modified = config.modifiedProperty ? resource.properties[config.modifiedProperty] : void 0;
+			const hit = knowledgeHitSchema.safeParse({
+				id: resource.id ?? hitId,
+				evidenceId: `knowledge:seismic-m365:${config.connectionId}:${resource.id ?? hitId}`,
+				source: this.id,
+				title: typeof title === "string" ? text$4(title) : title,
+				url,
+				...summary ? { snippet: text$4(summary).slice(0, 4e3) } : {},
+				...modified === void 0 ? {} : { lastModifiedAt: modified },
+				connectionId: config.connectionId,
+				untrusted: true
+			});
+			if (!hit.success) {
+				warnings.add("invalid-source-items");
+				continue;
+			}
+			const extension = fileType(config.fileTypeProperty ? resource.properties[config.fileTypeProperty] : void 0, hit.data.url);
+			if (request.filters?.fileTypes) {
+				if (!extension) warnings.add("unverified-file-types");
+				if (!extension || !request.filters.fileTypes.includes(extension)) continue;
+			}
+			if (!seen.has(hit.data.id)) {
+				hits.push({
+					...hit.data,
+					...extension ? { fileType: extension } : {}
+				});
+				seen.add(hit.data.id);
+			}
+		}
+		const nextOffset = (request.offset ?? 0) + rawHits.length;
+		if (page.moreResultsAvailable && nextOffset > 1e4) throw new KnowledgeSourceError("graph-response-invalid", "Narrow the Seismic query; its continuation exceeds the supported search window.");
+		return {
+			hits,
+			hasMore: page.moreResultsAvailable,
+			...page.moreResultsAvailable ? { nextOffset } : {},
+			warnings: [...warnings]
+		};
+	}
+};
+//#endregion
+//#region packages/connectors/seismic/mcp.ts
+var SeismicMCPProvider = class {
+	mode;
+	id = "seismic-mcp";
+	constructor(mode = "live") {
+		this.mode = mode;
+	}
+	async search(input) {
+		if (knowledgeSearchRequestSchema.parse(input).source !== this.id) throw new Error("The Seismic MCP provider cannot search another knowledge source.");
+		throw new KnowledgeSourceError("mcp-not-configured", "Direct Seismic MCP is not implemented. It requires an approved Seismic MCP app, delegated Seismic OAuth, and read-only tool approvals. Select seismic-m365 for Graph retrieval.");
+	}
+};
+//#endregion
+//#region packages/orchestrator/knowledge-search.ts
+var KnowledgeSearchService = class {
+	mode;
+	now;
+	sources = /* @__PURE__ */ new Map();
+	constructor(sources = [], mode = "live", now = () => /* @__PURE__ */ new Date()) {
+		this.mode = mode;
+		this.now = now;
+		for (const source of sources) {
+			if (this.sources.has(source.id)) throw new Error("A knowledge source may only be registered once.");
+			if (source.mode !== mode) throw new Error("Sample and live knowledge providers cannot share a search service.");
+			this.sources.set(source.id, source);
+		}
+	}
+	async searchKnowledge(input) {
+		const request = knowledgeSearchRequestSchema.parse(input);
+		const base = {
+			contractVersion: "1.0",
+			source: request.source,
+			mode: this.mode
+		};
+		const checkedAt = this.mode === "sample" ? sampleKnowledgeCheckedAt : this.now().toISOString();
+		try {
+			const source = this.sources.get(request.source);
+			if (!source) throw new KnowledgeSourceError("source-not-configured", "The requested knowledge source is not configured. Existing MCEM guidance operations are unchanged.");
+			const page = await source.search(request);
+			const result = knowledgeSearchResponseSchema.parse({
+				...base,
+				kind: "results",
+				...page,
+				sourceHealth: {
+					state: page.warnings.length ? "partial" : this.mode,
+					detail: this.mode === "sample" ? "Synthetic bundled knowledge results; no Microsoft 365 or Seismic request was made." : page.warnings.length ? "Some Seismic index items lacked valid evidence or filter metadata; this page is partial." : "Retrieved from the configured Seismic Microsoft Graph connection under the delegated user.",
+					checkedAt
+				}
+			});
+			if (result.kind === "results" && (result.hits.length > (request.limit ?? 10) || result.nextOffset !== void 0 && result.nextOffset <= (request.offset ?? 0))) throw new Error("The knowledge provider returned an invalid result window.");
+			return result;
+		} catch (error) {
+			if (!(error instanceof KnowledgeSourceError)) throw error;
+			return knowledgeSearchResponseSchema.parse({
+				...base,
+				kind: "unavailable",
+				code: error.code,
+				message: error.message,
+				sourceHealth: {
+					state: error.state,
+					detail: error.message,
+					checkedAt
+				}
+			});
+		}
+	}
+};
+function createKnowledgeSearch(options) {
+	if (options.mode === "sample") return { searchKnowledge: async (request) => sampleKnowledgeSearchResponse(request) };
+	return new KnowledgeSearchService([{
+		id: "seismic-m365",
+		mode: options.mode,
+		search: async (request) => {
+			let configuration;
+			try {
+				configuration = seismicGraphConfigurationFromEnvironment(options.environment ?? process.env);
+			} catch (error) {
+				if (!(error instanceof z.ZodError)) throw error;
+				throw new KnowledgeSourceError("graph-not-configured", "The Seismic Graph connection or property mapping is invalid. Check TLC_SEISMIC_GRAPH_* configuration.");
+			}
+			if (!configuration) throw new KnowledgeSourceError("graph-not-configured", "Set TLC_SEISMIC_GRAPH_CONNECTION_ID to the existing Seismic Microsoft 365 connector connection ID.");
+			if (!options.getGraphToken) throw new KnowledgeSourceError("graph-auth-not-configured", "A separate delegated Microsoft Graph token provider is not configured. MSX and Seismic OAuth tokens cannot be used for Graph search.", "unauthorized");
+			return new SeismicM365Provider(configuration, options.getGraphToken, options.fetcher).search(request);
+		}
+	}, new SeismicMCPProvider(options.mode)], options.mode, options.now);
+}
+//#endregion
 //#region packages/orchestrator/policies/mcp-tool-authorization.ts
 var McpToolAuthorizationError = class extends Error {
 	code;
@@ -11435,8 +12474,13 @@ function prewarmAgentDependencies(options) {
 }
 //#endregion
 //#region packages/orchestrator/progress/run-history.ts
+function isFinished(run) {
+	return run.status === "completed" || run.status === "failed" || run.status === "cancelled";
+}
 var WorkflowRunHistory = class {
 	runs = /* @__PURE__ */ new Map();
+	/** Ids of finished runs in the order they finished; the front is evicted first. */
+	finished = [];
 	capacity;
 	onEvicted;
 	constructor(options = {}) {
@@ -11446,21 +12490,25 @@ var WorkflowRunHistory = class {
 	}
 	set(run) {
 		const validated = workflowRunSchema.parse(run);
-		if (!this.runs.has(validated.runId) && this.runs.size >= this.capacity) {
-			const oldestRunId = this.runs.keys().next().value;
-			if (oldestRunId) {
-				const evicted = this.runs.get(oldestRunId);
-				this.runs.delete(oldestRunId);
-				if (evicted) this.onEvicted?.(structuredClone(evicted));
-			}
-		}
+		const previous = this.runs.get(validated.runId);
 		this.runs.set(validated.runId, structuredClone(validated));
+		if (isFinished(validated) && !(previous && isFinished(previous))) this.finished.push(validated.runId);
+		while (this.finished.length > this.capacity) {
+			const evictedRunId = this.finished.shift();
+			const evicted = this.runs.get(evictedRunId);
+			this.runs.delete(evictedRunId);
+			if (evicted) this.onEvicted?.(structuredClone(evicted));
+		}
+	}
+	/** Number of queued or running runs, which retention never removes. */
+	activeCount() {
+		return this.runs.size - this.finished.length;
 	}
 	get(runId) {
 		const run = this.runs.get(runId);
 		return run ? structuredClone(run) : void 0;
 	}
-	list(scope, limit = this.capacity) {
+	list(scope, limit = Number.MAX_SAFE_INTEGER) {
 		if (!Number.isInteger(limit) || limit < 1) throw new Error("Workflow run history limit must be a positive integer.");
 		return [...this.runs.values()].filter((run) => scope === void 0 || sameScope(run.scope, scope)).reverse().slice(0, limit).map((run) => structuredClone(run));
 	}
@@ -11642,9 +12690,19 @@ var initialWorkflowOutputSchema = z.object({
 	lineage: z.array(mcpEvidenceLineageSchema).min(1),
 	sourceHealth: z.array(sourceHealthSchema).min(1)
 }).strict();
+/**
+* Output of a workflow registered through the extension seam. Its shape is owned and validated host-side
+* by the registration's approved schema; the wire carries it as bounded data beside the stable initial-cohort `output`.
+*/
+var registeredWorkflowOutputSchema = z.object({
+	workflowId: z.string().regex(/^WF-[0-9]{3}$/),
+	outputSchemaRef: z.string().min(1).max(200),
+	data: z.record(z.string(), z.unknown())
+}).strict();
 var workflowRunViewSchema = z.object({
 	run: workflowRunSchema,
-	output: initialWorkflowOutputSchema.optional()
+	output: initialWorkflowOutputSchema.optional(),
+	extensionOutput: registeredWorkflowOutputSchema.optional()
 }).strict();
 //#endregion
 //#region packages/orchestrator/workflows/cohort.ts
@@ -11794,7 +12852,7 @@ function createDefinition(id, name, personaTargets, category, cardStyle, connect
 		outputSchemaRef: `workflow-output-${id.toLowerCase()}.v1`,
 		sla: {
 			targetMs: 4e3,
-			timeoutMs: 12e3
+			timeoutMs: 6e4
 		},
 		auth: {
 			requiresDelegatedUser: true,
@@ -11813,26 +12871,37 @@ var InitialWorkflowConnectorExecutor = class {
 	dataverse;
 	msx;
 	resolveDelegatedScope;
-	constructor(dataverse, msx, resolveDelegatedScope) {
+	performanceReporter;
+	constructor(dataverse, msx, resolveDelegatedScope, performanceReporter) {
 		this.dataverse = dataverse;
 		this.msx = msx;
 		this.resolveDelegatedScope = resolveDelegatedScope;
+		this.performanceReporter = performanceReporter;
 	}
 	async execute(step, context) {
 		const workflowId = requireInitialWorkflowId(context.workflowId);
 		const input = parseInitialWorkflowInput(workflowId, context.input);
 		if (step.connector === "dataverse-mcp") {
+			const onProgress = context.onProgress;
 			const queryContext = {
 				correlationId: context.correlationId,
 				capability: "account-pulse",
 				scope: context.scope,
-				delegatedScope: await this.resolveDelegatedScope(context.scope),
-				signal: context.signal
+				delegatedScope: await measurePerformance("plays.scope", this.performanceReporter, async () => this.resolveDelegatedScope(context.scope)),
+				signal: context.signal,
+				...onProgress ? { onProgress: (progress) => onProgress({
+					state: progress.state,
+					data: progress.records,
+					rowCount: progress.recordCount,
+					truncated: progress.truncated,
+					lineage: progress.lineage,
+					sourceHealth: progress.sourceHealth
+				}) } : {}
 			};
 			const result = await this.dataverse.query(buildInitialWorkflowQuery(workflowId, input), queryContext);
 			return {
 				state: result.state,
-				data: await this.attachOpportunityAccounts(workflowId, result.records, queryContext),
+				data: result.records,
 				rowCount: result.recordCount,
 				truncated: result.truncated,
 				lineage: result.lineage,
@@ -11846,54 +12915,11 @@ var InitialWorkflowConnectorExecutor = class {
 		};
 		return fromMsxResult(step.operation === "get_forecast_snapshot" ? await this.msx.getForecastSnapshot({}, msxContext) : await this.msx.listPipeline({}, msxContext));
 	}
-	async attachOpportunityAccounts(workflowId, records, queryContext) {
-		if (opportunityScopedWorkflows.has(workflowId) || workflowId === "WF-009") return records;
-		const opportunityIds = [...new Set(records.flatMap((record) => text$1(record.opportunityId) && !text$1(record.accountId) ? [text$1(record.opportunityId)] : []))];
-		if (opportunityIds.length === 0) return records;
-		const accounts = /* @__PURE__ */ new Map();
-		try {
-			for (let start = 0; start < opportunityIds.length; start += opportunityLookupBatchSize) {
-				const batch = opportunityIds.slice(start, start + opportunityLookupBatchSize);
-				const lookup = await this.dataverse.query({
-					entity: "opportunity",
-					select: [
-						"id",
-						"accountId",
-						"name"
-					],
-					filter: [{
-						field: "id",
-						operator: "in",
-						value: batch
-					}],
-					orderBy: [],
-					top: batch.length,
-					expand: []
-				}, queryContext);
-				for (const row of lookup.records) {
-					const id = text$1(row.id);
-					const accountId = text$1(row.accountId);
-					if (id && accountId) accounts.set(id, {
-						accountId,
-						...text$1(row.name) ? { name: text$1(row.name) } : {}
-					});
-				}
-			}
-		} catch (error) {
-			if (queryContext.signal?.aborted || error instanceof Error && error.name === "AbortError") throw error;
-		}
-		return records.map((record) => {
-			const match = accounts.get(text$1(record.opportunityId) ?? "");
-			if (!match || text$1(record.accountId)) return record;
-			return {
-				...record,
-				accountId: match.accountId,
-				...match.name && !text$1(record.opportunityName) ? { opportunityName: match.name } : {}
-			};
-		});
-	}
 };
-var opportunityLookupBatchSize = 50;
+var opportunityProjection = [{
+	relationship: "opportunity",
+	select: ["accountId", "name"]
+}];
 var InitialWorkflowResultAssembler = class {
 	assemble(context) {
 		const workflowId = requireInitialWorkflowId(context.definition.id);
@@ -11985,14 +13011,14 @@ function buildInitialWorkflowQuery(workflowId, input) {
 			}, {
 				field: "dueDate",
 				operator: "on-or-before",
-				value: addDays(input.asOf, input.meetingWindowDays ?? 14)
+				value: addDays$1(input.asOf, input.meetingWindowDays ?? 14)
 			}],
 			orderBy: [{
 				field: "dueDate",
 				direction: "asc"
 			}],
 			top: 500,
-			expand: []
+			expand: opportunityProjection
 		};
 		case "WF-009": return {
 			entity: "opportunity",
@@ -12038,7 +13064,7 @@ function buildInitialWorkflowQuery(workflowId, input) {
 				direction: "asc"
 			}],
 			top: 500,
-			expand: []
+			expand: opportunityProjection
 		};
 		case "WF-012": return milestoneQuery(input.asOf, []);
 		case "WF-004":
@@ -12099,7 +13125,7 @@ function milestoneQuery(asOf, extraFilters) {
 			direction: "asc"
 		}],
 		top: 500,
-		expand: []
+		expand: opportunityProjection
 	};
 }
 function buildCard(workflowId, title, records, queueItems, evidenceIds) {
@@ -12139,7 +13165,7 @@ function buildCard(workflowId, title, records, queueItems, evidenceIds) {
 	};
 	if (workflowId === "WF-008") {
 		const perAccount = /* @__PURE__ */ new Map();
-		for (const record of records) perAccount.set(text$1(record.accountId) ?? "Unassigned", (perAccount.get(text$1(record.accountId) ?? "Unassigned") ?? 0) + 1);
+		for (const record of records) perAccount.set(text$3(record.accountId) ?? "Unassigned", (perAccount.get(text$3(record.accountId) ?? "Unassigned") ?? 0) + 1);
 		const topCount = perAccount.size > 0 ? Math.max(...perAccount.values()) : 0;
 		return {
 			kind: "metric-strip",
@@ -12192,8 +13218,8 @@ function buildQueueItems(workflowId, records, input, evidenceIds) {
 		const threshold = input.maximumActiveItems ?? 20;
 		const owners = /* @__PURE__ */ new Map();
 		for (const record of records) {
-			const ownerId = text$1(record.ownerId) ?? "unassigned";
-			const ownerName = text$1(record.opportunityOwnerName) ?? (ownerId === "unassigned" ? "Unassigned owner" : "Owner name unavailable");
+			const ownerId = text$3(record.ownerId) ?? "unassigned";
+			const ownerName = text$3(record.opportunityOwnerName) ?? (ownerId === "unassigned" ? "Unassigned owner" : "Owner name unavailable");
 			const current = owners.get(ownerId);
 			owners.set(ownerId, {
 				count: (current?.count ?? 0) + 1,
@@ -12211,10 +13237,10 @@ function buildQueueItems(workflowId, records, input, evidenceIds) {
 		}));
 	}
 	return records.map((record, index) => {
-		const recordId = text$1(record.id) ?? `${index + 1}`;
+		const recordId = text$3(record.id) ?? `${index + 1}`;
 		const dueDate = date$1(record.targetDate) ?? date$1(record.dueDate) ?? date$1(record.closeDate);
-		const opportunityId = text$1(record.opportunityId) ?? (opportunityScopedWorkflows.has(workflowId) ? text$1(record.id) : void 0);
-		const opportunityName = text$1(record.opportunityName) ?? (opportunityScopedWorkflows.has(workflowId) ? text$1(record.name) : void 0);
+		const opportunityId = text$3(record.opportunityId) ?? (opportunityScopedWorkflows.has(workflowId) ? text$3(record.id) : void 0);
+		const opportunityName = text$3(record.opportunityName) ?? (opportunityScopedWorkflows.has(workflowId) ? text$3(record.name) : void 0);
 		const owner = queueOwnerName(workflowId, record);
 		return {
 			id: `${workflowId}:${recordId}`,
@@ -12222,8 +13248,8 @@ function buildQueueItems(workflowId, records, input, evidenceIds) {
 			priority: workflowId === "WF-003" && Number(record.recordedStage ?? 0) >= 4 || workflowId === "WF-005" && record.status === "Blocked" ? "P0" : "P1",
 			title: queueTitle(workflowId, record),
 			...owner ? { owner } : {},
-			...text$1(record.accountId) ? { accountId: text$1(record.accountId) } : {},
-			...text$1(record.accountName) ? { accountName: text$1(record.accountName) } : {},
+			...text$3(record.accountId) ? { accountId: text$3(record.accountId) } : {},
+			...text$3(record.accountName) ? { accountName: text$3(record.accountName) } : {},
 			...opportunityId ? { opportunityId } : {},
 			...opportunityName ? { opportunityName } : {},
 			...dueDate ? { dueDate } : {},
@@ -12240,10 +13266,10 @@ var opportunityScopedWorkflows = /* @__PURE__ */ new Set([
 	"WF-011"
 ]);
 function queueOwnerName(workflowId, record) {
-	return text$1(record.owner) ?? (opportunityScopedWorkflows.has(workflowId) ? text$1(record.opportunityOwnerName) : void 0) ?? (text$1(record.ownerId) ? "Owner name unavailable" : void 0);
+	return text$3(record.owner) ?? (opportunityScopedWorkflows.has(workflowId) ? text$3(record.opportunityOwnerName) : void 0) ?? (text$3(record.ownerId) ? "Owner name unavailable" : void 0);
 }
 function queueTitle(workflowId, record) {
-	const label = text$1(record.name) ?? text$1(record.subject) ?? "Untitled record";
+	const label = text$3(record.name) ?? text$3(record.subject) ?? "Untitled record";
 	return `${{
 		"WF-001": "Review stale opportunity",
 		"WF-002": "Triage overdue milestone",
@@ -12285,10 +13311,10 @@ var curatedOpportunityFields = [
 	"probability"
 ];
 function reconcileRecords(dataverseRecords, msxRecords) {
-	const base = deduplicate(dataverseRecords, (record) => text$1(record.id));
-	const enrichment = new Map(deduplicate(msxRecords, (record) => text$1(record.id)).map((record) => [text$1(record.id), record]));
+	const base = deduplicate(dataverseRecords, (record) => text$3(record.id));
+	const enrichment = new Map(deduplicate(msxRecords, (record) => text$3(record.id)).map((record) => [text$3(record.id), record]));
 	return base.map((record) => {
-		const matchId = text$1(record.opportunityId) ?? text$1(record.id);
+		const matchId = text$3(record.opportunityId) ?? text$3(record.id);
 		const curated = matchId ? enrichment.get(matchId) : void 0;
 		if (!curated) return record;
 		const merged = { ...record };
@@ -12296,10 +13322,10 @@ function reconcileRecords(dataverseRecords, msxRecords) {
 			const value = curated[field];
 			if (value !== void 0 && value !== null && value !== "") merged[field] = value;
 		}
-		if (text$1(curated.name)) merged.opportunityName = curated.name;
-		if (text$1(curated.owner)) merged.opportunityOwnerName = curated.owner;
-		if (!text$1(merged.accountId) && text$1(curated.accountId)) merged.accountId = curated.accountId;
-		if (!text$1(merged.accountName) && text$1(curated.accountName)) merged.accountName = curated.accountName;
+		if (text$3(curated.name)) merged.opportunityName = curated.name;
+		if (text$3(curated.owner)) merged.opportunityOwnerName = curated.owner;
+		if (!text$3(merged.accountId) && text$3(curated.accountId)) merged.accountId = curated.accountId;
+		if (!text$3(merged.accountName) && text$3(curated.accountName)) merged.accountName = curated.accountName;
 		return merged;
 	});
 }
@@ -12332,7 +13358,7 @@ function primitiveRow(record, columns) {
 		return [column, typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? value : null];
 	}));
 }
-function text$1(value) {
+function text$3(value) {
 	return typeof value === "string" && value.length > 0 ? value : void 0;
 }
 function date$1(value) {
@@ -12343,7 +13369,7 @@ function subtractDays(value, days) {
 	result.setUTCDate(result.getUTCDate() - days);
 	return result.toISOString().slice(0, 10);
 }
-function addDays(value, days) {
+function addDays$1(value, days) {
 	const result = /* @__PURE__ */ new Date(`${value}T00:00:00.000Z`);
 	result.setUTCDate(result.getUTCDate() + days);
 	return result.toISOString().slice(0, 10);
@@ -12355,6 +13381,23 @@ var dealTeamOpportunityColumn = {
 	msp_engagementmilestone: "msp_opportunityid",
 	activitypointer: "regardingobjectid"
 };
+function resolveOpportunityProjection(entityMap, query) {
+	if (query.expand.length === 0) return [];
+	const entity = entityMap.entities.find((candidate) => candidate.canonical === query.entity);
+	const expansion = query.expand[0];
+	if (query.expand.length !== 1 || expansion?.relationship !== "opportunity" || !entity || !["msp_engagementmilestone", "activitypointer"].includes(entity.logicalName)) throw new DataverseQueryGuardError("relationship_denied", "Only milestone/activity parent opportunity projection is allowlisted.");
+	const opportunity = entityMap.entities.find((candidate) => candidate.canonical === "opportunity" && candidate.logicalName === "opportunity");
+	if (!opportunity) throw new DataverseQueryGuardError("relationship_denied", "The parent opportunity is not allowlisted.");
+	return expansion.select.map((field) => {
+		if (field !== "accountId" && field !== "name") throw new DataverseQueryGuardError("field_denied", "The parent opportunity field is not allowlisted for projection.");
+		const attribute = opportunity.attributes.find((candidate) => candidate.canonical === field);
+		if (!attribute || attribute.sensitivity === "restricted") throw new DataverseQueryGuardError("field_denied", "The parent opportunity field is not allowlisted.");
+		return {
+			canonical: field === "name" ? "opportunityName" : "accountId",
+			column: toSqlColumn(attribute.logicalName)
+		};
+	});
+}
 var DataverseQueryGuardError = class extends Error {
 	code;
 	constructor(code, message) {
@@ -12393,6 +13436,21 @@ function sqlValue(operator, value) {
 	if (operator === "startswith") return sqlScalar(`${value}%`);
 	return sqlScalar(value);
 }
+function choiceFilterValue(attribute, filter) {
+	const choices = attribute.optionSet;
+	if (!choices) return filter.value;
+	if (![
+		"eq",
+		"ne",
+		"in"
+	].includes(filter.operator)) throw new DataverseQueryGuardError("field_denied", "Choice filters support only equality and membership operations.");
+	const resolve = (value) => {
+		const code = typeof value === "string" && Object.hasOwn(choices, value) ? choices[value] : value;
+		if (typeof code !== "number" || !Object.values(choices).includes(code)) throw new DataverseQueryGuardError("field_denied", "The choice filter value is not in the configured option set.");
+		return code;
+	};
+	return Array.isArray(filter.value) ? filter.value.map(resolve) : resolve(filter.value);
+}
 function renderSqlScopePredicate(template, scope) {
 	const replacements = {
 		delegatedUserAccountIds: scope.delegatedUserAccountIds,
@@ -12421,34 +13479,40 @@ function renderDataverseSql(entityMapInput, queryInput, delegatedScope, maximumR
 	if (!Number.isInteger(maximumRows) || maximumRows < 1) throw new Error("Dataverse maximum row count must be a positive integer.");
 	const entity = entityMap.entities.find((candidate) => candidate.canonical === query.entity);
 	if (!entity) throw new DataverseQueryGuardError("entity_denied", "Dataverse entity is not allowlisted.");
-	if (query.expand.length > 0) throw new DataverseQueryGuardError("relationship_denied", "Dataverse relationship expansion is not allowlisted by the semantic map.");
+	const projection = resolveOpportunityProjection(entityMap, query);
 	const attributes = new Map(entity.attributes.map((attribute) => [attribute.canonical, attribute]));
-	const column = (canonical) => {
+	const attribute = (canonical) => {
 		const attribute = attributes.get(canonical);
 		if (!attribute) throw new DataverseQueryGuardError("field_denied", "Dataverse field is not allowlisted.");
-		return toSqlColumn(attribute.logicalName);
+		return attribute;
 	};
+	const column = (canonical) => toSqlColumn(attribute(canonical).logicalName);
 	const top = Math.min(query.top, maximumRows);
 	const dealTeamColumn = dealTeamOpportunityColumn[toSqlColumn(entity.logicalName)];
 	const useJoinScope = options.enforceScope !== false && Boolean(delegatedScope.currentUserId) && Boolean(dealTeamColumn);
-	const qualify = (sqlColumn) => useJoinScope ? `m.${sqlColumn}` : sqlColumn;
-	const selectColumns = query.select.map((canonical) => qualify(column(canonical)));
-	const whereClauses = query.filter.map((filter) => `${qualify(column(filter.field))} ${sqlOperator(filter.operator)} ${sqlValue(filter.operator, filter.value)}`);
+	const excludedAccountIds = options.enforceScope === false ? [] : [...new Set(delegatedScope.excludedAccountIds ?? [])];
+	if (excludedAccountIds.some((accountId) => !isSafeIdentifier(accountId))) throw new DataverseQueryGuardError("scope_required", "An excluded TLC account id is invalid.");
+	const excludeAccounts = Boolean(dealTeamColumn) && excludedAccountIds.length > 0;
+	const useAlias = useJoinScope || projection.length > 0 || excludeAccounts && entity.logicalName !== "opportunity";
+	const qualify = (sqlColumn) => useAlias ? `m.${sqlColumn}` : sqlColumn;
+	const selectColumns = [...query.select.map((canonical) => qualify(column(canonical))), ...projection.map((field) => `scopeop.${field.column} AS ${field.canonical}`)];
+	const whereClauses = query.filter.map((filter) => `${qualify(column(filter.field))} ${sqlOperator(filter.operator)} ${sqlValue(filter.operator, choiceFilterValue(attribute(filter.field), filter))}`);
 	if (useJoinScope) {
 		const userId = delegatedScope.currentUserId;
 		if (!isSafeIdentifier(userId)) throw new DataverseQueryGuardError("scope_required", "The delegated user id is missing or invalid.");
 		whereClauses.unshift(`dt.msp_dealteamuserid = '${userId}'`, "dt.statecode = 0");
-		const excludedAccountIds = [...new Set(delegatedScope.excludedAccountIds ?? [])];
-		if (excludedAccountIds.some((accountId) => !isSafeIdentifier(accountId))) throw new DataverseQueryGuardError("scope_required", "An excluded TLC account id is invalid.");
-		if (excludedAccountIds.length > 0) {
-			const ids = excludedAccountIds.map((accountId) => `'${accountId}'`).join(", ");
-			whereClauses.push(`${toSqlColumn(entity.logicalName) === "opportunity" ? "m" : "scopeop"}.parentaccountid NOT IN (${ids})`);
-		}
 	} else if (options.enforceScope !== false && entity.userScopePredicate !== void 0) whereClauses.push(renderSqlScopePredicate(entity.userScopePredicate, delegatedScope));
+	if (excludeAccounts) {
+		const ids = excludedAccountIds.map((accountId) => `'${accountId}'`).join(", ");
+		const accountColumn = entity.logicalName === "opportunity" ? qualify("parentaccountid") : "scopeop.parentaccountid";
+		whereClauses.push(`${accountColumn} NOT IN (${ids})`);
+	}
 	const orderBy = query.orderBy.map((order) => `${qualify(column(order.field))} ${order.direction.toUpperCase()}`);
 	let sql = `SELECT TOP ${top} ${selectColumns.join(", ")} FROM ${toSqlColumn(entity.logicalName)}`;
-	if (useJoinScope) sql += ` m JOIN msp_dealteam dt ON m.${dealTeamColumn} = dt.msp_parentopportunityid`;
-	if (useJoinScope && (delegatedScope.excludedAccountIds?.length ?? 0) > 0 && toSqlColumn(entity.logicalName) !== "opportunity") sql += ` JOIN opportunity scopeop ON m.${dealTeamColumn} = scopeop.opportunityid`;
+	if (useAlias) sql += " m";
+	if (useJoinScope) sql += ` JOIN msp_dealteam dt ON m.${dealTeamColumn} = dt.msp_parentopportunityid`;
+	const excludesParent = excludeAccounts && entity.logicalName !== "opportunity";
+	if (projection.length > 0 || excludesParent) sql += ` ${excludesParent ? "JOIN" : "LEFT JOIN"} opportunity scopeop ON m.${dealTeamColumn} = scopeop.opportunityid`;
 	if (whereClauses.length > 0) sql += ` WHERE ${whereClauses.join(" AND ")}`;
 	if (orderBy.length > 0) sql += ` ORDER BY ${orderBy.join(", ")}`;
 	return sql;
@@ -12477,16 +13541,18 @@ var DataverseMcpReadAdapter = class {
 			toolCallId: this.createToolCallId()
 		};
 		const target = Math.max(1, Math.min(query.top, this.maximumRows));
+		const collected = [];
 		try {
+			context.signal?.throwIfAborted();
 			if (target <= READ_QUERY_PER_CALL_LIMIT) {
-				const page = await this.fetchPage(query, context, target);
+				const page = await measurePerformance("plays.dataverse.page", this.options.performanceReporter, () => this.fetchPage(query, context, target));
 				const truncated = page.recordCount > page.records.length;
 				return this.assembleResult(page.records, page.recordCount, truncated, checkedAt, lineage);
 			}
-			const collected = [];
 			let lastId;
 			let exhausted = false;
 			while (collected.length < target && !exhausted) {
+				context.signal?.throwIfAborted();
 				const pageSize = Math.min(READ_QUERY_PER_CALL_LIMIT, target - collected.length);
 				const pageQuery = {
 					...query,
@@ -12501,19 +13567,31 @@ var DataverseMcpReadAdapter = class {
 					}],
 					top: pageSize
 				};
-				const page = await this.fetchPage(pageQuery, context, pageSize);
+				const page = await measurePerformance("plays.dataverse.page", this.options.performanceReporter, () => this.fetchPage(pageQuery, context, pageSize));
 				collected.push(...page.records);
 				const lastRecordId = page.records.at(-1)?.["id"];
 				if (page.records.length < pageSize || typeof lastRecordId !== "string") exhausted = true;
 				else lastId = lastRecordId;
+				if (context.onProgress) {
+					const progress = this.assembleResult(sortRecords([...collected], query.orderBy), collected.length, true, checkedAt, lineage);
+					progress.sourceHealth.detail = `Dataverse MCP loaded ${collected.length} rows; the query is still running and coverage is incomplete.`;
+					context.onProgress(progress);
+					context.signal?.throwIfAborted();
+				}
 			}
 			const ordered = sortRecords(collected, query.orderBy).slice(0, target);
 			return this.assembleResult(ordered, collected.length, !exhausted, checkedAt, lineage);
 		} catch (error) {
 			const code = errorCode(error);
-			if (code === "aborted" || error instanceof Error && error.name === "AbortError") throw error;
+			if (context.signal?.aborted || code === "aborted" || error instanceof Error && error.name === "AbortError") throw error;
 			if (isUnauthorizedCode(code)) return failureResult("unauthorized", "unauthorized", `Dataverse MCP delegated authorization is unavailable (${code}).`, checkedAt, lineage);
 			if (error instanceof DataverseMcpAdapterError) throw error;
+			if (!code || !availabilityErrorCodes.has(code)) throw error;
+			if (collected.length > 0) {
+				const partial = this.assembleResult(sortRecords(collected, query.orderBy), collected.length, true, checkedAt, lineage);
+				partial.sourceHealth.detail = "Dataverse MCP stopped before all pages could be read; the displayed results are incomplete.";
+				return partial;
+			}
 			return failureResult("partial", "unavailable", "Dataverse MCP data is temporarily unavailable.", checkedAt, lineage);
 		}
 	}
@@ -12528,6 +13606,7 @@ var DataverseMcpReadAdapter = class {
 			arguments: { querytext },
 			...context.signal ? { signal: context.signal } : {}
 		});
+		context.signal?.throwIfAborted();
 		if (result.kind !== "untrusted-mcp-data") throw new DataverseMcpAdapterError("malformed_response", "Dataverse MCP result was not marked as untrusted data.");
 		assertNotMcpError(result.data);
 		return {
@@ -12552,6 +13631,14 @@ var DataverseMcpReadAdapter = class {
 	}
 };
 var READ_QUERY_PER_CALL_LIMIT = 20;
+var availabilityErrorCodes = /* @__PURE__ */ new Set([
+	"transport",
+	"timeout",
+	"rate_limited",
+	"circuit_open",
+	"disposed",
+	"response_too_large"
+]);
 function sortRecords(records, orderBy) {
 	if (orderBy.length === 0) return records;
 	return [...records].sort((left, right) => {
@@ -12608,7 +13695,16 @@ function mapRowsToCanonical(entityMap, query, rows) {
 		if (!attribute) throw new DataverseMcpAdapterError("malformed_response", "Dataverse field mapping disappeared after translation.");
 		return attribute;
 	});
-	return rows.map((row) => Object.fromEntries(selected.map((attribute) => [attribute.canonical, row[toSqlColumn(attribute.logicalName)] ?? row[attribute.logicalName] ?? null])));
+	const projection = resolveOpportunityProjection(entityMap, query);
+	return rows.map((row) => Object.fromEntries([...selected.map((attribute) => [attribute.canonical, canonicalAttributeValue(attribute, row[toSqlColumn(attribute.logicalName)] ?? row[attribute.logicalName] ?? null)]), ...projection.map((field) => [field.canonical, row[field.canonical] ?? row[field.canonical.toLowerCase()] ?? null])]));
+}
+function canonicalAttributeValue(attribute, value) {
+	if (!attribute.optionSet || value === null) return value;
+	const code = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+	const label = Object.entries(attribute.optionSet).find(([, candidate]) => candidate === code)?.[0];
+	if (label) return label;
+	if (typeof value === "string" && Object.hasOwn(attribute.optionSet, value)) return value;
+	throw new DataverseMcpAdapterError("malformed_response", `Dataverse returned an unmapped choice value for ${attribute.canonical}.`);
 }
 function failureResult(state, sourceState, detail, checkedAt, lineage) {
 	return {
@@ -12842,9 +13938,11 @@ var McpClientPool = class {
 	entries = /* @__PURE__ */ new Map();
 	createClient;
 	now;
+	performanceReporter;
 	disposed = false;
 	constructor(options) {
 		this.now = options.now ?? Date.now;
+		this.performanceReporter = options.performanceReporter;
 		this.createClient = options.clientFactory ?? ((server) => new McpHttpClient({
 			serverUrl: server.serverUrl,
 			accessTokenProvider: () => options.accessTokenProvider(server),
@@ -12953,7 +14051,7 @@ var McpClientPool = class {
 		if (entry.client) return entry.client;
 		if (!entry.initialization) {
 			const client = this.createClient(entry.config);
-			entry.initialization = client.initialize(signal).then(() => {
+			entry.initialization = measurePerformance(`mcp.initialize.${entry.config.id}`, this.performanceReporter, () => client.initialize(signal)).then(() => {
 				if (this.disposed) throw new McpPoolError("disposed", "MCP client pool has been disposed.");
 				entry.client = client;
 				entry.health = "healthy";
@@ -13238,6 +14336,7 @@ var WorkflowRuntime = class {
 	completions = /* @__PURE__ */ new Map();
 	now;
 	createId;
+	maxActiveRuns;
 	resultAssembler;
 	onStepError;
 	constructor(registry, executor, options = {}) {
@@ -13245,6 +14344,8 @@ var WorkflowRuntime = class {
 		this.executor = executor;
 		this.now = options.now ?? Date.now;
 		this.createId = options.createId ?? randomUUID;
+		this.maxActiveRuns = options.maxActiveRuns ?? 100;
+		if (!Number.isInteger(this.maxActiveRuns) || this.maxActiveRuns < 1) throw new Error("Workflow active-run limit must be a positive integer.");
 		this.resultAssembler = options.resultAssembler;
 		this.onStepError = options.onStepError;
 		this.history = new WorkflowRunHistory({
@@ -13261,6 +14362,7 @@ var WorkflowRuntime = class {
 		const scope = scopeRefSchema.parse(request.scope);
 		if (definition.scope !== scope.kind) throw new WorkflowRuntimeError("scope_mismatch", `Workflow ${definition.id} requires ${definition.scope} scope.`);
 		if (definition.executionMode === "agentic") throw new WorkflowRuntimeError("unsupported_execution_mode", "This runtime does not execute agentic workflows.");
+		if (this.history.activeCount() >= this.maxActiveRuns) throw new WorkflowRuntimeError("capacity_exceeded", "Too many workflow runs are active. Wait for a run to finish or cancel one, then try again.");
 		const runId = this.createId();
 		const correlationId = request.correlationId ?? this.createId();
 		const run = workflowRunSchema.parse({
@@ -13282,6 +14384,10 @@ var WorkflowRuntime = class {
 			this.execute(runId, definition, request.input);
 		});
 		return run;
+	}
+	/** Number of queued or running runs; retention never removes them. */
+	activeRunCount() {
+		return this.history.activeCount();
 	}
 	get(runId) {
 		return this.history.get(runId);
@@ -13329,6 +14435,7 @@ var WorkflowRuntime = class {
 			for (const step of definition.connectorPlan) {
 				const callStarted = this.now();
 				const stepAbort = linkedAbortController(controller.signal);
+				let latestProgress;
 				try {
 					const connectorResult = await withTimeout(this.executor.execute(step, {
 						runId,
@@ -13336,7 +14443,30 @@ var WorkflowRuntime = class {
 						correlationId: run.telemetry.correlationId,
 						scope: run.scope,
 						input,
-						signal: stepAbort.controller.signal
+						signal: stepAbort.controller.signal,
+						onProgress: (progress) => {
+							const current = this.history.get(runId);
+							if (!this.resultAssembler || !current || current.status !== "running" || stepAbort.controller.signal.aborted) return;
+							const progressiveResult = {
+								...result,
+								steps: [...result.steps, executionStep(step, progress)]
+							};
+							progressiveResult.output = this.resultAssembler.assemble({
+								definition,
+								scope: current.scope,
+								input,
+								steps: progressiveResult.steps,
+								generatedAt: iso(this.now())
+							});
+							this.results.set(resultRef, structuredClone(progressiveResult));
+							current.telemetry.firstResultMs ??= Math.max(0, this.now() - startedMs);
+							run = workflowRunSchema.parse({
+								...current,
+								resultRef
+							});
+							this.history.set(run);
+							latestProgress = progress;
+						}
 					}), Math.max(0, definition.sla.timeoutMs - (this.now() - startedMs)), stepAbort.controller);
 					const current = this.history.get(runId);
 					if (!current || current.status !== "running" || controller.signal.aborted) return;
@@ -13351,13 +14481,7 @@ var WorkflowRuntime = class {
 						truncated: connectorResult.truncated
 					});
 					if (run.telemetry.firstResultMs === void 0 && connectorResult.state !== "unauthorized") run.telemetry.firstResultMs = Math.max(0, this.now() - startedMs);
-					result.steps.push({
-						connector: step.connector,
-						operation: step.operation,
-						data: connectorResult.data,
-						...connectorResult.lineage ? { lineage: connectorResult.lineage } : {},
-						...connectorResult.sourceHealth ? { sourceHealth: connectorResult.sourceHealth } : {}
-					});
+					result.steps.push(executionStep(step, connectorResult));
 					if (connectorResult.state === "unauthorized") {
 						outcome = step.required ? "unauthorized" : "partial";
 						this.onStepError?.({
@@ -13403,12 +14527,28 @@ var WorkflowRuntime = class {
 						operation: step.operation,
 						status: unauthorized ? "unauthorized" : "failed",
 						durationMs: Math.max(0, this.now() - callStarted),
-						recordCount: 0,
-						truncated: false
+						recordCount: latestProgress?.rowCount ?? 0,
+						truncated: latestProgress !== void 0
 					});
 					this.history.set(run);
 					if (step.required) {
 						if (unauthorized) {
+							this.results.delete(resultRef);
+							delete run.resultRef;
+							this.history.set(run);
+							if (latestProgress) result.steps.push(executionStep(step, {
+								state: "unauthorized",
+								data: [],
+								rowCount: 0,
+								truncated: false,
+								...latestProgress.lineage ? { lineage: latestProgress.lineage } : {},
+								sourceHealth: {
+									source: step.connector,
+									state: "unauthorized",
+									detail: `${step.connector} delegated authorization is unavailable.`,
+									checkedAt: iso(this.now())
+								}
+							}));
 							outcome = "unauthorized";
 							break;
 						}
@@ -13431,6 +14571,15 @@ var WorkflowRuntime = class {
 				} finally {
 					stepAbort.dispose();
 				}
+			}
+			function executionStep(step, result) {
+				return {
+					connector: step.connector,
+					operation: step.operation,
+					data: result.data,
+					...result.lineage ? { lineage: result.lineage } : {},
+					...result.sourceHealth ? { sourceHealth: result.sourceHealth } : {}
+				};
 			}
 			const current = this.history.get(runId);
 			if (!current || current.status !== "running" || controller.signal.aborted) return;
@@ -13587,9 +14736,14 @@ var workflowHostOperationSchema = z.enum([
 var SharedWorkflowHost = class {
 	registry;
 	runtime;
-	constructor(registry, runtime) {
+	outputs;
+	constructor(registry, runtime, outputs = /* @__PURE__ */ new Map()) {
 		this.registry = registry;
 		this.runtime = runtime;
+		this.outputs = outputs;
+	}
+	activeRunCount() {
+		return this.runtime.activeRunCount();
 	}
 	listDefinitions(rawRequest) {
 		const request = listWorkflowDefinitionsRequestSchema.parse(rawRequest);
@@ -13609,9 +14763,14 @@ var SharedWorkflowHost = class {
 		const run = this.runtime.get(request.runId);
 		if (!run) throw new WorkflowRuntimeError("run_not_found", `Workflow run ${request.runId} is not available.`);
 		const result = run.resultRef ? this.runtime.getResult(run.resultRef) : void 0;
+		const registered = this.outputs.get(run.workflowId);
 		return workflowRunViewSchema.parse({
 			run,
-			...result?.output === void 0 ? {} : { output: initialWorkflowOutputSchema.parse(result.output) }
+			...result?.output === void 0 ? {} : registered ? { extensionOutput: {
+				workflowId: run.workflowId,
+				outputSchemaRef: registered.outputSchemaRef,
+				data: registered.schema.parse(result.output)
+			} } : { output: initialWorkflowOutputSchema.parse(result.output) }
 		});
 	}
 	cancel(rawRequest) {
@@ -13719,29 +14878,65 @@ var WorkflowRegistryError = class extends Error {
 	}
 };
 //#endregion
+//#region packages/orchestrator/workflows/registration.ts
+function composeWorkflows(base, registrations = []) {
+	const taken = new Set(base.definitions.map(({ id }) => id));
+	const registered = /* @__PURE__ */ new Map();
+	for (const registration of registrations) {
+		const definition = workflowDefinitionSchema.parse(registration.definition);
+		if (taken.has(definition.id)) throw new WorkflowRegistryError("invalid_registration", `Workflow ${definition.id} is already registered.`);
+		if (definition.executionMode === "agentic") throw new WorkflowRegistryError("invalid_registration", `Workflow ${definition.id} cannot use agentic execution; only deterministic and composite plans are supported.`);
+		if (definition.auth.allowedWrite) throw new WorkflowRegistryError("invalid_registration", `Workflow ${definition.id} must be read-only; writes use the reviewed mutation path.`);
+		taken.add(definition.id);
+		registered.set(definition.id, {
+			...registration,
+			definition
+		});
+	}
+	return {
+		definitions: [...base.definitions, ...[...registered.values()].map(({ definition }) => definition)],
+		executor: { execute: (step, context) => (registered.get(context.workflowId)?.executor ?? base.executor).execute(step, context) },
+		assembler: { assemble: (context) => {
+			const registration = registered.get(context.definition.id);
+			if (!registration) return base.assembler.assemble(context);
+			return registration.outputSchema.parse(registration.assembler.assemble(context));
+		} },
+		outputs: new Map([...registered].map(([id, { definition, outputSchema }]) => [id, {
+			outputSchemaRef: definition.outputSchemaRef,
+			schema: outputSchema
+		}]))
+	};
+}
+//#endregion
 //#region packages/orchestrator/workflows/configured-host.ts
 function createConfiguredWorkflowHost(options) {
 	const pool = new McpClientPool({
 		registry: options.registry,
-		accessTokenProvider: (server) => options.getAccessToken(server)
+		accessTokenProvider: (server) => options.getAccessToken(server),
+		...options.performanceReporter ? { performanceReporter: options.performanceReporter } : {}
 	});
 	const broker = new McpToolBroker({
 		registry: options.registry,
 		policy: options.policy,
 		invokeTool: (serverId, tool, args, signal) => pool.callTool(serverId, tool, args, signal)
 	});
-	const executor = new InitialWorkflowConnectorExecutor(new DataverseMcpReadAdapter({
-		entityMap: options.entityMap,
-		broker,
-		...options.enforceDelegatedScope === void 0 ? {} : { enforceDelegatedScope: options.enforceDelegatedScope },
-		...options.maximumRows === void 0 ? {} : { maximumRows: options.maximumRows }
-	}), new MsxMcpReadAdapter(broker), options.resolveDelegatedScope);
-	const workflowRegistry = new WorkflowRegistry(initialWorkflowDefinitions);
+	const composition = composeWorkflows({
+		definitions: initialWorkflowDefinitions,
+		executor: new InitialWorkflowConnectorExecutor(new DataverseMcpReadAdapter({
+			entityMap: options.entityMap,
+			broker,
+			...options.performanceReporter ? { performanceReporter: options.performanceReporter } : {},
+			...options.enforceDelegatedScope === void 0 ? {} : { enforceDelegatedScope: options.enforceDelegatedScope },
+			...options.maximumRows === void 0 ? {} : { maximumRows: options.maximumRows }
+		}), new MsxMcpReadAdapter(broker), options.resolveDelegatedScope, options.performanceReporter),
+		assembler: new InitialWorkflowResultAssembler()
+	}, options.registrations);
+	const workflowRegistry = new WorkflowRegistry(composition.definitions);
 	return {
-		host: new SharedWorkflowHost(workflowRegistry, new WorkflowRuntime(workflowRegistry, executor, {
-			resultAssembler: new InitialWorkflowResultAssembler(),
+		host: new SharedWorkflowHost(workflowRegistry, new WorkflowRuntime(workflowRegistry, composition.executor, {
+			resultAssembler: composition.assembler,
 			...options.onStepError ? { onStepError: options.onStepError } : {}
-		})),
+		}), composition.outputs),
 		dispose: () => pool.dispose()
 	};
 }
@@ -13985,13 +15180,18 @@ var ThinSliceOrchestrator = class {
 	taskAgents;
 	performanceReporter;
 	recordCreation;
+	knowledge;
 	mutationListeners = /* @__PURE__ */ new Set();
-	constructor(msx, mcem, taskAgents = {}, performanceReporter, recordCreation) {
+	constructor(msx, mcem, taskAgents = {}, performanceReporter, recordCreation, knowledge = new KnowledgeSearchService()) {
 		this.msx = msx;
 		this.mcem = mcem;
 		this.taskAgents = taskAgents;
 		this.performanceReporter = performanceReporter;
 		this.recordCreation = recordCreation;
+		this.knowledge = knowledge;
+	}
+	searchKnowledge(request) {
+		return this.knowledge.searchKnowledge(request);
 	}
 	withReadContext(operation, signal) {
 		signal?.throwIfAborted();
@@ -14361,6 +15561,27 @@ function errorMessage(error) {
 }
 //#endregion
 //#region packages/orchestrator/task-agents.ts
+function createFoundryTaskAgents(environment, credential, client = createFoundryOpenAIClient(environment.foundry.projectEndpoint, credential), performanceReporter) {
+	const bindings = environment.foundry.agents;
+	const agents = {
+		"account-pulse": bindings.accountPulse,
+		"mcem-coach": bindings.mcemCoach,
+		"pursuit-executive": bindings.pursuitExecutive,
+		"risk-solution-play": bindings.riskSolutionPlay
+	};
+	return Object.fromEntries(workflowAgentCapabilityValues.map((capability) => [capability, {
+		version: "active",
+		agent: new FoundryPromptAgent({
+			projectEndpoint: environment.foundry.projectEndpoint,
+			agentName: agents[capability].name,
+			requestTimeoutMs: environment.foundry.requestTimeoutMs,
+			credential,
+			openAIClient: client,
+			serializeContext: serializeAgentContext,
+			...foundryAgentTuning(environment, performanceReporter)
+		})
+	}]));
+}
 /** Optional latency controls shared by every host that builds Foundry prompt agents. */
 function foundryAgentTuning(environment, performanceReporter) {
 	return {
@@ -14368,6 +15589,16 @@ function foundryAgentTuning(environment, performanceReporter) {
 		maxOutputTokens: environment.foundry.maxOutputTokens,
 		performanceReporter
 	};
+}
+//#endregion
+//#region apps/desktop/electron/main/task-agents.ts
+/**
+* Desktop keeps its own sample guidance; live mode uses the shared Foundry factory so the model
+* input is serialized identically to every other host.
+*/
+function createDesktopTaskAgents(options) {
+	if (!options.environment || !options.credential) return options.sample();
+	return createFoundryTaskAgents(options.environment, options.credential, options.client, options.performanceReporter);
 }
 //#endregion
 //#region apps/desktop/electron/main/azure-cli-token-provider.ts
@@ -15390,7 +16621,7 @@ function createVoiceIpcHandler(host) {
 }
 //#endregion
 //#region packages/common/fixtures/seller-dashboard.ts
-var asOf = "2026-10-10";
+var asOf$1 = "2026-10-10";
 var generatedAt = "2026-10-10T09:00:00.000Z";
 var end = "2026-12-31";
 var accountInputs = [
@@ -15489,7 +16720,7 @@ var metricInputs = [
 	}
 ];
 function recordTiming(value) {
-	return value === null ? "undated" : value < asOf ? "overdue" : value > end ? "future" : "in-quarter";
+	return value === null ? "undated" : value < asOf$1 ? "overdue" : value > end ? "future" : "in-quarter";
 }
 function createSampleSellerDashboard() {
 	const metrics = metricInputs.map((metric, index) => {
@@ -15893,7 +17124,7 @@ function createSampleSellerDashboard() {
 				label: "FY27 Q2 official YTD period",
 				start: "2026-07-01",
 				end,
-				today: asOf
+				today: asOf$1
 			},
 			sources: {
 				earnings: {
@@ -16367,7 +17598,7 @@ function createSellerDashboardHost(options) {
 	}
 	return new SharedSellerDashboardHost(new WindowsSellerDashboardConnector(options));
 }
-var text = z.string().max(4e3);
+var text$2 = z.string().max(4e3);
 var id$1 = z.string().trim().min(1).max(200);
 var referenceId = z.string().min(1).max(1200);
 var count = z.number().int().nonnegative().nullable();
@@ -16422,8 +17653,8 @@ var seReporterSchema = z.object({
 }).strict();
 var seManagerSchema = z.object({
 	name: id$1,
-	alias: text,
-	system_user_id: text
+	alias: text$2,
+	system_user_id: text$2
 }).strict();
 var seAssignmentSchema = z.object({
 	managerId: id$1,
@@ -16442,23 +17673,23 @@ var seMilestoneSchema = z.object({
 	accountId: id$1,
 	opportunityId: id$1,
 	name: id$1,
-	category: text,
-	status: text,
-	commitment: text,
+	category: text$2,
+	status: text$2,
+	commitment: text$2,
 	monthlyAcr: amount,
 	date: seReportDateSchema.nullable(),
 	committedOn: seReportDateSchema.nullable(),
 	completedOn: seReportDateSchema.nullable(),
 	createdOn: seReportDateSchema.nullable(),
-	blocker: text
+	blocker: text$2
 }).strict();
 var seTaskSchema = z.object({
 	id: id$1,
 	ownerId: id$1,
 	milestoneId: id$1,
-	milestoneName: text,
+	milestoneName: text$2,
 	accountId: id$1,
-	subject: text,
+	subject: text$2,
 	categoryCode: z.string(),
 	state: z.number().int(),
 	actualEnd: seReportDateSchema.nullable(),
@@ -16505,8 +17736,8 @@ var accountContext = z.object({
 	ownership
 }).strict();
 var seNarrativeItemSchema = accountContext.extend({
-	title: text,
-	text,
+	title: text$2,
+	text: text$2,
 	source_refs: sourceRefs
 }).strict();
 var seCustomerUpdateSchema = accountContext.extend({
@@ -16516,17 +17747,17 @@ var seCustomerUpdateSchema = accountContext.extend({
 		"advisory",
 		"watchlist"
 	]),
-	summary: text,
-	impact: text,
+	summary: text$2,
+	impact: text$2,
 	msx: z.array(z.object({
-		label: text,
-		text
+		label: text$2,
+		text: text$2
 	}).strict()).max(30),
 	m365: z.array(z.object({
-		label: text,
-		text
+		label: text$2,
+		text: text$2
 	}).strict()).max(30),
-	next_actions: z.array(text).max(30),
+	next_actions: z.array(text$2).max(30),
 	source_refs: sourceRefs,
 	confidence: z.enum([
 		"high",
@@ -16535,18 +17766,18 @@ var seCustomerUpdateSchema = accountContext.extend({
 	])
 }).strict();
 var seInitiativeSchema = accountContext.extend({
-	sales_territory_name: text,
-	big_bet_opportunity: text,
-	customer_need_business_outcome: text,
-	plan: text,
+	sales_territory_name: text$2,
+	big_bet_opportunity: text$2,
+	customer_need_business_outcome: text$2,
+	plan: text$2,
 	fy26_acr_year: amount,
-	obstacles_help_needed: text,
+	obstacles_help_needed: text$2,
 	confidence_level: z.enum([
 		"high",
 		"medium",
 		"low"
 	]),
-	next_steps: z.array(text).max(30),
+	next_steps: z.array(text$2).max(30),
 	known_amounts: z.array(z.number().finite()).max(30),
 	source_refs: sourceRefs
 }).strict();
@@ -16555,9 +17786,9 @@ var seNarrativeBundleSchema = z.object({
 	priority_initiatives: z.array(seInitiativeSchema).max(200),
 	account_notes: z.array(seNarrativeItemSchema).max(500),
 	partners: z.array(seNarrativeItemSchema.extend({
-		partner: text,
-		engagement_strategy: text,
-		solution_play: text
+		partner: text$2,
+		engagement_strategy: text$2,
+		solution_play: text$2
 	}).strict()).max(200),
 	technical_themes: z.array(seNarrativeItemSchema.extend({ type: z.enum([
 		"win",
@@ -16567,7 +17798,7 @@ var seNarrativeBundleSchema = z.object({
 		"risk"
 	]) }).strict()).max(200),
 	cross_pillar_dependencies: z.array(seNarrativeItemSchema.extend({ pillar: id$1 }).strict()).max(200),
-	next_month_priorities: z.array(seNarrativeItemSchema.extend({ expected_outcome: text }).strict()).max(200),
+	next_month_priorities: z.array(seNarrativeItemSchema.extend({ expected_outcome: text$2 }).strict()).max(200),
 	leadership_decisions: z.array(seNarrativeItemSchema).max(200),
 	scrum_rollup_bullets: z.array(seNarrativeItemSchema).max(200),
 	follow_up_required: z.array(seNarrativeItemSchema).max(200)
@@ -16614,8 +17845,8 @@ var scorecard$1 = seKpisSchema.extend({
 		milestone_count: count,
 		monthly_acr: amount
 	}).strict(),
-	top_wins: z.array(text),
-	top_risks_blockers: z.array(text),
+	top_wins: z.array(text$2),
+	top_risks_blockers: z.array(text$2),
 	hok_categories: z.array(z.object({
 		category: id$1,
 		period: count,
@@ -16653,7 +17884,7 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 	account_scope: z.object({
 		assignment_source: z.literal("AccountAssignmentsWithCustomerIds"),
 		manager_system_user_id: id$1,
-		manager_alias: text,
+		manager_alias: text$2,
 		eligible_assignment_types: z.tuple([z.literal("Primary"), z.literal("Backup")]),
 		primary_accounts: z.array(accountContext),
 		secondary_accounts: z.array(accountContext),
@@ -16661,7 +17892,7 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 			reason: id$1,
 			count: z.number().int().nonnegative()
 		}).strict()),
-		mapping_gaps: z.array(text)
+		mapping_gaps: z.array(text$2)
 	}).strict(),
 	status: z.enum([
 		"draft",
@@ -16681,7 +17912,7 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 	schema_contract: z.object({
 		source: z.enum(["manager_profile.shared_contract", "explicit_test_contract"]),
 		version: z.literal("2.0"),
-		path: text,
+		path: text$2,
 		content_hash: id$1,
 		fallback_used: z.literal(false),
 		test_mode: z.boolean()
@@ -16696,7 +17927,7 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 	}).strict()).max(1e4),
 	sources_unavailable: z.array(z.object({
 		source: id$1,
-		reason: text
+		reason: text$2
 	}).strict()),
 	source_coverage: z.array(seAccessSchema),
 	generation: z.object({
@@ -16710,11 +17941,11 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 	}).strict(),
 	source_reports: z.array(id$1),
 	executive_summary: z.object({
-		headline: text,
-		overall_status: text,
-		running_hot: z.array(text),
-		needs_attention: z.array(text),
-		next_month_focus: z.array(text)
+		headline: text$2,
+		overall_status: text$2,
+		running_hot: z.array(text$2),
+		needs_attention: z.array(text$2),
+		next_month_focus: z.array(text$2)
 	}).strict(),
 	scorecard: scorecard$1,
 	event_date_coverage: eventCoverage,
@@ -16762,17 +17993,17 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 			account_id: id$1,
 			account: id$1,
 			ownership: z.literal("Secondary"),
-			milestone_id: text,
-			milestone: text,
-			support_description: text,
+			milestone_id: text$2,
+			milestone: text$2,
+			support_description: text$2,
 			hok_count: count
 		}).strict())
 	}).strict(),
 	asks_for_manager: z.array(z.object({
-		ask: text,
-		why_it_matters: text,
-		customer: text,
-		urgency: text,
+		ask: text$2,
+		why_it_matters: text$2,
+		customer: text$2,
+		urgency: text$2,
 		source_refs: sourceRefs
 	}).strict()).max(50)
 }).strict().superRefine((report, context) => {
@@ -16831,7 +18062,7 @@ var seReportingRequestSchema = z.discriminatedUnion("operation", [
 		runId: id$1,
 		asks: z.array(z.object({
 			reportId: id$1,
-			text
+			text: text$2
 		}).strict()).max(100),
 		approve: z.boolean(),
 		confirmed: z.literal(true)
@@ -16880,11 +18111,11 @@ var seReportingResponseSchema = z.discriminatedUnion("kind", [base$2.extend({
 	run: seReportingRunSchema.nullable(),
 	publishPreview: sePublishPreviewSchema.nullable(),
 	published: z.array(z.string().max(2e3)),
-	message: text
+	message: text$2
 }).strict(), base$2.extend({
 	kind: z.literal("error"),
 	code: id$1,
-	message: text,
+	message: text$2,
 	access: z.array(seAccessSchema)
 }).strict()]);
 //#endregion
@@ -16966,6 +18197,7 @@ function seReportRelativePath(report, extension) {
 	return segments.join("/");
 }
 function renderSeReportHtml(raw, options = {}) {
+	const styleNonce = options.styleNonce && /^[A-Za-z0-9+/_-]{16,128}={0,2}$/.test(options.styleNonce) ? options.styleNonce : "";
 	const report = seReportSchema.parse(raw);
 	const references = (ids) => `<ul>${ids.map((id) => {
 		const reference = report.source_references.find((row) => row.id === id);
@@ -17024,7 +18256,7 @@ function renderSeReportHtml(raw, options = {}) {
 	]), "Cross Collaboration", "No Cross Collaboration activity this period.");
 	const asks = report.asks_for_manager.length ? report.asks_for_manager.map((row) => `<article class="note"><p class="verbatim">${escape(row.ask)}</p>${detail("Why it matters", row.why_it_matters)}${detail("Customer", row.customer)}${detail("Urgency", row.urgency)}${row.source_refs.length ? references(row.source_refs) : ""}</article>`).join("") : "<p class=\"muted\">No asks provided by the reporter.</p>";
 	const filters = options.includeFilters === false ? "" : `<fieldset class="report-status-filter"><legend>Customer update status</legend>${report.dashboard.customer_update_filters.map((value) => `<label><input type="radio" name="customer-status" value="${escape(value)}"${value === "All" ? " checked" : ""}>${escape(value.replaceAll("_", " "))}</label>`).join("")}</fieldset>`;
-	return `<!doctype html><html lang="en"${options.dark ? " class=\"dark\"" : ""}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'"><title>${escape(report.executive_summary.headline)}</title><style>
+	return `<!doctype html><html lang="en"${options.dark ? " class=\"dark\"" : ""}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${styleNonce ? `'nonce-${styleNonce}'` : "'unsafe-inline'"}; script-src 'none'; img-src 'none'; base-uri 'none'; form-action 'none'"><title>${escape(report.executive_summary.headline)}</title><style${styleNonce ? ` nonce="${styleNonce}"` : ""}>
     :root{color-scheme:light;--bg:#f4f6f9;--surface:#fff;--fg:#202b3c;--muted:#596579;--line:#d6dce5;--accent:#165ac0}
     :root.dark{color-scheme:dark;--bg:#151c28;--surface:#202b3b;--fg:#edf2fa;--muted:#bcc7d8;--line:#42516a;--accent:#93c5fd}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.55 "Segoe UI",Arial,sans-serif}main{max-width:1480px;margin:auto;padding:24px}h1{font-size:28px;margin:4px 0}h2{font-size:20px;margin:0 0 14px}h3{font-size:16px;margin:0 0 6px}h4,p{margin:6px 0}section{margin:20px 0;padding:20px;background:var(--surface);border:1px solid var(--line);border-radius:12px}.muted,small{color:var(--muted)}.banner{padding:10px;border:1px solid var(--line);border-radius:8px}.kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;padding:0;border:0;background:none}.kpi{padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}.kpi span,.kpi strong,.kpi small{display:block}.kpi strong{font-size:30px;line-height:1.4}.chip,.status{display:inline-block;border:1px solid var(--line);border-radius:20px;padding:2px 9px;font-size:12px}.table-wrap{overflow:auto}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}caption{text-align:left;color:var(--muted);padding:0 0 12px}th,td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:12px;color:var(--muted)}th:last-child,td:last-child{text-align:right;white-space:nowrap}.customer,.note{padding:14px 0;border-bottom:1px solid var(--line)}.customer{border-left:4px solid var(--line);padding:16px;margin:12px 0}.customer header{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.customer h3{margin-right:auto}.status-running_hot{border-left-color:#db3750}.status-with_blocker{border-left-color:#ce7a13}.status-advisory{border-left-color:#218653}.status-watchlist{border-left-color:#7b8798}.signals{display:grid;grid-template-columns:1fr 1fr;gap:20px}.signals h4{color:var(--accent)}details{margin-top:12px}summary{cursor:pointer;padding:10px 0;font-weight:600}summary:focus-visible{outline:2px solid var(--accent)}.secondary-view{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:0 20px}.secondary-view>summary{padding:16px 0}.secondary-view section{border:0;border-top:1px solid var(--line);border-radius:0;padding:18px 0}.verbatim{white-space:pre-wrap}.customer[hidden]{display:none}
@@ -17053,29 +18285,300 @@ function renderSeReportHtml(raw, options = {}) {
     </details></main></body></html>`;
 }
 //#endregion
-//#region packages/connectors/common/http-response.ts
-var ResponseSizeError = class extends Error {
-	constructor() {
-		super("The response exceeded its byte budget.");
-		this.name = "ResponseSizeError";
+//#region packages/connectors/graph/se-evidence.ts
+var graphRoot$2 = "https://graph.microsoft.com/v1.0";
+var privateContent$2 = (value) => /salary|compensation|performance review|human resources|privileged legal|legal advice/i.test(value);
+var escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Account matching, text cleanup and window/privacy filtering shared by every Graph evidence source. */
+var SeEvidenceCollector = class {
+	accounts;
+	source;
+	start;
+	end;
+	output = [];
+	constructor(accounts, source, start, end) {
+		this.accounts = accounts;
+		this.source = source;
+		this.start = start;
+		this.end = end;
+	}
+	matches(body) {
+		return [...new Map(this.accounts.filter((row) => new RegExp(`(?:^|[^\\p{L}\\p{N}])${escapeRegExp(row.accountName)}(?:$|[^\\p{L}\\p{N}])`, "iu").test(body)).map((row) => [row.accountId.toLowerCase(), row])).values()];
+	}
+	add(id, body, occurred, reference, qualifies = this.source !== "m365_calendar") {
+		const occurredOn = typeof occurred === "string" && /^\d{4}-\d{2}-\d{2}/.test(occurred) ? occurred.slice(0, 10) : null;
+		if (!occurredOn || occurredOn < this.start || occurredOn > this.end || privateContent$2(body) || !isHttps(reference)) return;
+		const plain = body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+		for (const account of this.matches(plain)) this.output.push(seEvidenceSchema.parse({
+			id: `${this.source}:${id}:${account.accountId}`,
+			accountId: account.accountId,
+			source: this.source,
+			date: occurredOn,
+			summary: plain,
+			reference,
+			qualifies
+		}));
 	}
 };
-async function readBoundedText(response, maximumBytes) {
-	if (!response.body) return "";
-	const reader = response.body.getReader();
-	const chunks = [];
-	let bytes = 0;
-	while (true) {
-		const chunk = await reader.read();
-		if (chunk.done) break;
-		bytes += chunk.value.byteLength;
-		if (bytes > maximumBytes) {
-			await reader.cancel();
-			throw new ResponseSizeError();
-		}
-		chunks.push(chunk.value);
+function isHttps(value) {
+	try {
+		return new URL(value).protocol === "https:";
+	} catch {
+		return false;
 	}
-	return Buffer.concat(chunks).toString("utf8");
+}
+var calendarEvent = z.object({
+	id: z.string(),
+	subject: z.string().nullable().optional(),
+	bodyPreview: z.string().nullable().optional(),
+	start: z.object({ dateTime: z.string() }),
+	isCancelled: z.boolean().optional(),
+	webLink: z.string()
+});
+var mailMessage = z.object({
+	id: z.string(),
+	subject: z.string().nullable(),
+	receivedDateTime: z.string(),
+	body: z.object({ content: z.string() }),
+	webLink: z.string()
+});
+var chat = z.object({
+	id: z.string(),
+	topic: z.string().nullable().optional()
+});
+var chatMessage = z.object({
+	id: z.string(),
+	createdDateTime: z.string(),
+	body: z.object({ content: z.string() })
+});
+/**
+* Read-only Microsoft Graph evidence for SE reporting: calendar (context only), mail and Teams chats
+* (including meeting chats). Uses the signed-in user's delegated Calendars/Mail/Chat read grants.
+*/
+var GraphSeEvidenceConnector = class {
+	api;
+	accounts;
+	constructor(api, accounts) {
+		this.api = api;
+		this.accounts = accounts;
+	}
+	async read(source, start, end) {
+		const collector = new SeEvidenceCollector(this.accounts, source, start, end);
+		const nextDay = /* @__PURE__ */ new Date(`${end}T00:00:00Z`);
+		nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+		if (source === "m365_calendar") {
+			const rows = await this.api.pages(`${graphRoot$2}/me/calendarView?startDateTime=${start}T00:00:00Z&endDateTime=${nextDay.toISOString()}&$select=id,subject,bodyPreview,start,isCancelled,webLink&$top=100`);
+			for (const raw of rows) {
+				const row = calendarEvent.parse(raw);
+				if (row.isCancelled) continue;
+				collector.add(row.id, `${row.subject ?? ""}\n${row.bodyPreview ?? ""}`, row.start.dateTime, row.webLink);
+			}
+		} else if (source === "m365_email") {
+			const filter = encodeURIComponent(`receivedDateTime ge ${start}T00:00:00Z and receivedDateTime lt ${nextDay.toISOString()}`);
+			const rows = await this.api.pages(`${graphRoot$2}/me/messages?$filter=${filter}&$select=id,subject,receivedDateTime,body,webLink&$expand=attachments($select=id,name,contentType,size)&$top=100`);
+			for (const raw of rows) {
+				const row = mailMessage.parse(raw);
+				collector.add(row.id, `${row.subject ?? ""}\n${row.body.content}`, row.receivedDateTime, row.webLink);
+			}
+		} else if (source === "m365_teams") {
+			const chats = await this.api.pages(`${graphRoot$2}/me/chats?$select=id,topic,chatType&$top=50`, 20);
+			for (const raw of chats) {
+				const item = chat.parse(raw);
+				const messages = await this.api.pages(`${graphRoot$2}/chats/${encodeURIComponent(item.id)}/messages?$top=50`, 200);
+				for (const message of messages) {
+					const row = chatMessage.parse(message);
+					collector.add(row.id, `${item.topic ?? ""}\n${row.body.content}`, row.createdDateTime, `https://teams.microsoft.com/l/chat/${encodeURIComponent(item.id)}/conversations?messageId=${encodeURIComponent(row.id)}`);
+				}
+			}
+		} else throw new Error(`The ${source} source is not supported by the Graph evidence connector.`);
+		return collector.output;
+	}
+};
+//#endregion
+//#region packages/connectors/se-reporting/dataverse.ts
+var formattedSuffix$1 = "@OData.Community.Display.V1.FormattedValue";
+var guidLike = /^[0-9a-zA-Z-]{1,64}$/;
+var fieldPattern = /^[A-Za-z][A-Za-z0-9_]*$/;
+var chunkSize$1 = 40;
+var privateContent$1 = (value) => /salary|compensation|performance review|human resources|privileged legal|legal advice/i.test(value);
+var text$1 = (row, key) => {
+	const value = row[key];
+	return typeof value === "string" && value.trim() ? value : void 0;
+};
+var formatted$1 = (row, key) => text$1(row, `${key}${formattedSuffix$1}`);
+var day$1 = (value) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : null;
+/**
+* Dataverse-first milestone/task provider for the SE reporting model. It produces the same
+* SeMilestone/SeTask rows as the Power BI reader; it never infers assignment scope.
+*/
+var DataverseSeReader = class {
+	source;
+	options;
+	constructor(source, options = {}) {
+		this.source = source;
+		this.options = options;
+		if (options.riskField && !fieldPattern.test(options.riskField)) throw new Error("The risk/blocker field name is invalid.");
+	}
+	/** Enabled direct reports from the Dynamics manager hierarchy (maintained for the target teams). */
+	async readDirectReports(managerId) {
+		this.assertUser(managerId);
+		return (await this.source.readRows("systemusers", {
+			"$select": "systemuserid,fullname",
+			"$filter": `_parentsystemuserid_value eq ${managerId} and isdisabled eq false`,
+			"$top": "200"
+		})).flatMap((row) => {
+			const id = text$1(row, "systemuserid");
+			return id ? [{
+				id,
+				displayName: text$1(row, "fullname") ?? "Unnamed user"
+			}] : [];
+		});
+	}
+	async readMilestones(reporterId) {
+		this.assertUser(reporterId);
+		const ids = [...new Set(await this.source.listMilestoneTeamMilestoneIds(reporterId))];
+		if (ids.length === 0) return {
+			milestones: [],
+			gaps: []
+		};
+		const select = [
+			"msp_engagementmilestoneid",
+			"_msp_opportunityid_value",
+			"msp_name",
+			"msp_milestonecategory",
+			"msp_milestonestatus",
+			"msp_commitmentrecommendation",
+			"msp_monthlyuse",
+			"msp_milestonedate",
+			"msp_committedon",
+			"msp_completedon",
+			"createdon",
+			...this.options.riskField ? [this.options.riskField] : []
+		].join(",");
+		const rows = await this.readByIds("msp_engagementmilestones", "msp_engagementmilestoneid", ids, select);
+		const accounts = await this.readAccounts(rows.map((row) => text$1(row, "_msp_opportunityid_value")));
+		const milestones = [];
+		let unresolved = 0;
+		for (const row of rows) {
+			const opportunityId = text$1(row, "_msp_opportunityid_value");
+			const accountId = opportunityId ? accounts.get(opportunityId) : void 0;
+			if (!opportunityId || !accountId) {
+				unresolved += 1;
+				continue;
+			}
+			milestones.push(seMilestoneSchema.parse({
+				id: text$1(row, "msp_engagementmilestoneid"),
+				reporterId,
+				accountId,
+				opportunityId,
+				name: text$1(row, "msp_name") ?? "",
+				category: formatted$1(row, "msp_milestonecategory") ?? "",
+				status: formatted$1(row, "msp_milestonestatus") ?? "",
+				commitment: formatted$1(row, "msp_commitmentrecommendation") ?? "",
+				monthlyAcr: typeof row["msp_monthlyuse"] === "number" ? row["msp_monthlyuse"] : null,
+				date: day$1(row["msp_milestonedate"]),
+				committedOn: day$1(row["msp_committedon"]),
+				completedOn: day$1(row["msp_completedon"]),
+				createdOn: day$1(row["createdon"]),
+				blocker: this.options.riskField ? text$1(row, this.options.riskField) ?? "" : ""
+			}));
+		}
+		return {
+			milestones,
+			gaps: unresolved ? ["A milestone with an unresolved opportunity/account path was excluded."] : []
+		};
+	}
+	async readTasks(reporterId, window) {
+		this.assertUser(reporterId);
+		const visible = (await this.source.readRows("tasks", {
+			"$select": "activityid,_ownerid_value,_regardingobjectid_value,subject,msp_taskcategory,statecode,actualend,actualstart",
+			"$filter": `_ownerid_value eq ${reporterId} and ((actualend ge ${window.fiscalStart} and actualend lt ${window.endExclusive}) or (actualstart ge ${window.start} and actualstart lt ${window.endExclusive}))`
+		})).filter((row) => !privateContent$1(text$1(row, "subject") ?? ""));
+		const milestoneIds = [...new Set(visible.map((row) => text$1(row, "_regardingobjectid_value")).filter((id) => Boolean(id)))];
+		const milestoneRows = milestoneIds.length ? await this.readByIds("msp_engagementmilestones", "msp_engagementmilestoneid", milestoneIds, "msp_engagementmilestoneid,_msp_opportunityid_value") : [];
+		const opportunityByMilestone = new Map(milestoneRows.map((row) => [text$1(row, "msp_engagementmilestoneid") ?? "", text$1(row, "_msp_opportunityid_value")]));
+		const accounts = await this.readAccounts([...opportunityByMilestone.values()]);
+		const tasks = [];
+		let unresolved = 0;
+		for (const row of visible) {
+			const milestoneId = text$1(row, "_regardingobjectid_value") ?? "";
+			const opportunityId = opportunityByMilestone.get(milestoneId);
+			const accountId = opportunityId ? accounts.get(opportunityId) : void 0;
+			if (!accountId) {
+				unresolved += 1;
+				continue;
+			}
+			tasks.push(seTaskSchema.parse({
+				id: text$1(row, "activityid"),
+				ownerId: reporterId,
+				milestoneId,
+				milestoneName: formatted$1(row, "_regardingobjectid_value") ?? "",
+				accountId,
+				subject: text$1(row, "subject") ?? "",
+				categoryCode: typeof row["msp_taskcategory"] === "number" ? String(row["msp_taskcategory"]) : "",
+				state: typeof row["statecode"] === "number" ? row["statecode"] : 0,
+				actualEnd: day$1(row["actualend"]),
+				activityDate: day$1(row["actualstart"])
+			}));
+		}
+		return {
+			tasks,
+			gaps: unresolved ? ["A task with an unresolved milestone/opportunity/account path was excluded."] : []
+		};
+	}
+	assertUser(userId) {
+		if (!guidLike.test(userId)) throw new Error("The user id is invalid.");
+	}
+	async readAccounts(opportunityIds) {
+		const ids = [...new Set(opportunityIds.filter((id) => Boolean(id)))];
+		if (ids.length === 0) return /* @__PURE__ */ new Map();
+		const rows = await this.readByIds("opportunities", "opportunityid", ids, "opportunityid,_parentaccountid_value");
+		return new Map(rows.flatMap((row) => {
+			const id = text$1(row, "opportunityid");
+			const account = text$1(row, "_parentaccountid_value");
+			return id && account ? [[id, account]] : [];
+		}));
+	}
+	async readByIds(entitySet, field, ids, select) {
+		const chunks = [];
+		for (let offset = 0; offset < ids.length; offset += chunkSize$1) chunks.push(ids.slice(offset, offset + chunkSize$1));
+		const rows = [];
+		for (let offset = 0; offset < chunks.length; offset += 2) {
+			const pages = await Promise.all(chunks.slice(offset, offset + 2).map((chunk) => this.source.readRows(entitySet, {
+				"$select": select,
+				"$filter": chunk.map((id) => `${field} eq ${id}`).join(" or ")
+			})));
+			rows.push(...pages.flat());
+		}
+		return rows;
+	}
+};
+function compareProviders(dataverse, powerbi) {
+	const left = new Set(dataverse.map((id) => id.toLowerCase()));
+	const right = new Set(powerbi.map((id) => id.toLowerCase()));
+	const common = [...left].filter((id) => right.has(id)).length;
+	const union = (/* @__PURE__ */ new Set([...left, ...right])).size;
+	return {
+		dataverse: left.size,
+		powerbi: right.size,
+		common,
+		onlyDataverse: left.size - common,
+		onlyPowerBi: right.size - common,
+		ratio: union === 0 ? 1 : common / union
+	};
+}
+var defaultParityThreshold = .99;
+/** Counts-only parity verdict: Dataverse replaces Power BI for a capability only when the id sets agree. */
+function evaluateParity(input, threshold = defaultParityThreshold) {
+	const milestones = compareProviders(...input.milestones);
+	const tasks = compareProviders(...input.tasks);
+	const pct = (value) => Math.round(value * 1e3) / 10;
+	return {
+		ok: milestones.ratio >= threshold && tasks.ratio >= threshold,
+		milestones,
+		tasks,
+		detail: `Dataverse parity: milestones ${pct(milestones.ratio)}% (${milestones.common}/${Math.max(milestones.dataverse, milestones.powerbi)}), tasks ${pct(tasks.ratio)}% (${tasks.common}/${Math.max(tasks.dataverse, tasks.powerbi)}); threshold ${pct(threshold)}%.`
+	};
 }
 //#endregion
 //#region packages/connectors/se-reporting/types.ts
@@ -17369,7 +18872,7 @@ var LiveSeReportingReader = class {
 				access.push({
 					source,
 					state: "available",
-					detail: "Delegated source probe succeeded."
+					detail: source === "msx" ? `Delegated source probe succeeded.${await this.hierarchyNote(inspection)}` : "Delegated source probe succeeded."
 				});
 			} catch (error) {
 				access.push({
@@ -17381,47 +18884,23 @@ var LiveSeReportingReader = class {
 		}
 		return access;
 	}
+	/** Counts-only sanity check of the Dynamics hierarchy against the assignment-derived manager; never changes scope. */
+	async hierarchyNote(inspection) {
+		if (!this.options.dataverse) return "";
+		try {
+			const reports = await new DataverseSeReader(this.options.dataverse).readDirectReports(inspection.contract.manager.system_user_id);
+			return reports.some((row) => lower(row.id) === lower(inspection.owner.system_user_id)) ? ` Dataverse hierarchy: the reporter is a direct report of the contract manager (${reports.length} direct reports).` : ` Dataverse hierarchy: the reporter is not a direct report of the contract manager (${reports.length} direct reports); assignments from the semantic model remain authoritative.`;
+		} catch {
+			return " Dataverse hierarchy could not be read.";
+		}
+	}
 	async collect(profile, inspection, options) {
 		const now = (this.options.now ?? (() => /* @__PURE__ */ new Date()))();
 		const dates = seReportingDates(options.period);
 		if (dates.end > now.toISOString().slice(0, 10)) throw new SeReportingError("incomplete-reporting-month", "Choose a completed reporting month. A future month-end cannot be represented as a full-month report.");
-		const ownFilter = `LOWER(PodMilestones[Pod Member ID]) = ${quote(lower(inspection.owner.system_user_id))}`;
-		const sample = (await this.api.query(profile.semanticModelId, `EVALUATE TOPN(1, FILTER(PodMilestones, ${ownFilter}), PodMilestones[Milestone ID])`))[0];
-		const column = (name) => sample && name in sample ? `PodMilestones[${name}]` : "BLANK()";
-		const milestones = (await this.api.query(profile.semanticModelId, `EVALUATE SELECTCOLUMNS(FILTER(PodMilestones, ${ownFilter}), "id", [Milestone ID], "reporterId", [Pod Member ID], "accountId", RELATED(opportunity[customerid]), "opportunityId", [Opportunity ID], "name", [Milestone], "category", [Category], "status", [Status], "commitment", [Commitment Recommendation], "monthlyAcr", [Monthly ACR], "date", [Milestone Date], "committedOn", ${column("Committed On")}, "completedOn", ${column("Completed On")}, "createdOn", ${column("Created On")}, "blocker", [Risk / Blocker Details])`)).map((row) => seMilestoneSchema.parse({
-			...row,
-			category: row["category"] ?? "",
-			commitment: row["commitment"] ?? "",
-			blocker: row["blocker"] ?? "",
-			date: date(row["date"]),
-			committedOn: date(row["committedOn"]),
-			completedOn: date(row["completedOn"]),
-			createdOn: date(row["createdOn"])
-		}));
-		const taskOwner = `LOWER(task[ownerid]) = ${quote(lower(inspection.owner.system_user_id))}`;
-		const taskSample = (await this.api.query(profile.semanticModelId, `EVALUATE TOPN(1, FILTER(task, ${taskOwner}))`))[0];
-		const actualStart = taskSample && "actualstart" in taskSample ? "task[actualstart]" : "BLANK()";
-		const endExclusive = /* @__PURE__ */ new Date(`${dates.end}T00:00:00Z`);
-		endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
-		const nextDay = daxDate(endExclusive.toISOString().slice(0, 10));
-		const taskRows = await this.api.query(profile.semanticModelId, `EVALUATE SELECTCOLUMNS(FILTER(task, ${taskOwner} && ((task[actualend] >= ${daxDate(dates.fiscal.start)} && task[actualend] < ${nextDay}) || (${actualStart} >= ${daxDate(dates.start)} && ${actualStart} < ${nextDay}))), "id", [activityid], "ownerId", [ownerid], "milestoneId", [regardingobjectid], "milestoneName", [regardingobjectidname], "accountId", VAR TargetMilestone = task[regardingobjectid] VAR ParentOpportunity = CALCULATE(SELECTEDVALUE(PodMilestones[Opportunity ID]), FILTER(ALL(PodMilestones), LOWER(PodMilestones[Milestone ID]) = LOWER(TargetMilestone))) RETURN LOOKUPVALUE(opportunity[customerid], opportunity[opportunityid], ParentOpportunity), "subject", [subject], "categoryCode", [msp_taskcategory], "state", [statecode], "actualEnd", [actualend], "activityDate", ${actualStart})`);
-		const tasks = [];
-		const mappingGaps = [...inspection.mappingGaps];
-		for (const row of taskRows) {
-			if (privateContent(String(row["subject"] ?? ""))) continue;
-			if (typeof row["accountId"] !== "string" || !row["accountId"]) {
-				mappingGaps.push("A task with an unresolved milestone/opportunity/account path was excluded.");
-				continue;
-			}
-			tasks.push(seTaskSchema.parse({
-				...row,
-				subject: row["subject"] ?? "",
-				milestoneName: row["milestoneName"] ?? "",
-				categoryCode: row["categoryCode"] === null ? "" : String(row["categoryCode"]),
-				actualEnd: date(row["actualEnd"]),
-				activityDate: date(row["activityDate"])
-			}));
-		}
+		const msx = await this.readMsx(profile, inspection, dates);
+		const { milestones, tasks } = msx;
+		const mappingGaps = [...inspection.mappingGaps, ...msx.gaps];
 		const input = {
 			mode: "live",
 			runId: options.runId,
@@ -17431,20 +18910,12 @@ var LiveSeReportingReader = class {
 			pillar: options.pillar,
 			asOf: now.toISOString().slice(0, 10),
 			generatedAt: now.toISOString(),
-			eventDateCoverage: {
-				committed: Boolean(sample && "Committed On" in sample),
-				completed: Boolean(sample && "Completed On" in sample),
-				created: Boolean(sample && "Created On" in sample)
-			},
+			eventDateCoverage: msx.coverage,
 			milestones,
 			tasks,
 			mappingGaps,
 			evidence: [],
-			access: [...inspection.access, {
-				source: "msx",
-				state: "available",
-				detail: "Complete reporter-scoped milestone and task inventories read."
-			}],
+			access: [...inspection.access, ...msx.access],
 			narratives: {
 				customer_updates: [],
 				priority_initiatives: [],
@@ -17492,64 +18963,135 @@ var LiveSeReportingReader = class {
 		if (input.access.filter((row) => row.state === "unavailable" && !options.allowUnavailable.includes(row.source)).length) throw new SeReportingError("degraded-approval-required", "Some enabled sources are unavailable. Explicitly approve each missing source, disable it in the profile, or stop. No draft was generated.", input.access);
 		return input;
 	}
+	async readMsx(profile, inspection, dates) {
+		const preference = this.options.dataverse ? this.options.sourcePreference ?? "powerbi" : "powerbi";
+		if (preference === "powerbi") return this.readPowerBiMsx(profile, inspection, dates);
+		if (preference === "dataverse") return this.readDataverseMsx(inspection, dates);
+		let dataverse;
+		try {
+			dataverse = await this.readDataverseMsx(inspection, dates);
+		} catch {
+			return {
+				...await this.readPowerBiMsx(profile, inspection, dates),
+				access: [{
+					source: "msx",
+					state: "available",
+					detail: "Dataverse was unavailable; the Power BI inventories were used."
+				}]
+			};
+		}
+		const powerBi = await this.readPowerBiMsx(profile, inspection, dates);
+		const parity = evaluateParity({
+			milestones: [dataverse.milestones.map((row) => row.id), powerBi.milestones.map((row) => row.id)],
+			tasks: [dataverse.tasks.map((row) => row.id), powerBi.tasks.map((row) => row.id)]
+		});
+		return parity.ok ? {
+			...dataverse,
+			access: [{
+				source: "msx",
+				state: "available",
+				detail: `Complete reporter-scoped inventories read from Dataverse. ${parity.detail}`
+			}]
+		} : {
+			...powerBi,
+			access: [{
+				source: "msx",
+				state: "available",
+				detail: `Dataverse parity was not met, so the Power BI inventories were used. ${parity.detail}`
+			}]
+		};
+	}
+	async readDataverseMsx(inspection, dates) {
+		const reader = new DataverseSeReader(this.options.dataverse, this.options.riskField ? { riskField: this.options.riskField } : {});
+		const reporterId = inspection.owner.system_user_id;
+		const endExclusive = /* @__PURE__ */ new Date(`${dates.end}T00:00:00Z`);
+		endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+		const [milestones, tasks] = await Promise.all([reader.readMilestones(reporterId), reader.readTasks(reporterId, {
+			fiscalStart: dates.fiscal.start,
+			start: dates.start,
+			endExclusive: endExclusive.toISOString().slice(0, 10)
+		})]);
+		return {
+			milestones: milestones.milestones,
+			tasks: tasks.tasks,
+			gaps: [.../* @__PURE__ */ new Set([...milestones.gaps, ...tasks.gaps])],
+			coverage: {
+				committed: true,
+				completed: true,
+				created: true
+			},
+			access: [{
+				source: "msx",
+				state: "available",
+				detail: "Complete reporter-scoped milestone and task inventories read from Dataverse."
+			}]
+		};
+	}
+	async readPowerBiMsx(profile, inspection, dates) {
+		const ownFilter = `LOWER(PodMilestones[Pod Member ID]) = ${quote(lower(inspection.owner.system_user_id))}`;
+		const sample = (await this.api.query(profile.semanticModelId, `EVALUATE TOPN(1, FILTER(PodMilestones, ${ownFilter}), PodMilestones[Milestone ID])`))[0];
+		const column = (name) => sample && name in sample ? `PodMilestones[${name}]` : "BLANK()";
+		const milestones = (await this.api.query(profile.semanticModelId, `EVALUATE SELECTCOLUMNS(FILTER(PodMilestones, ${ownFilter}), "id", [Milestone ID], "reporterId", [Pod Member ID], "accountId", RELATED(opportunity[customerid]), "opportunityId", [Opportunity ID], "name", [Milestone], "category", [Category], "status", [Status], "commitment", [Commitment Recommendation], "monthlyAcr", [Monthly ACR], "date", [Milestone Date], "committedOn", ${column("Committed On")}, "completedOn", ${column("Completed On")}, "createdOn", ${column("Created On")}, "blocker", [Risk / Blocker Details])`)).map((row) => seMilestoneSchema.parse({
+			...row,
+			category: row["category"] ?? "",
+			commitment: row["commitment"] ?? "",
+			blocker: row["blocker"] ?? "",
+			date: date(row["date"]),
+			committedOn: date(row["committedOn"]),
+			completedOn: date(row["completedOn"]),
+			createdOn: date(row["createdOn"])
+		}));
+		const taskOwner = `LOWER(task[ownerid]) = ${quote(lower(inspection.owner.system_user_id))}`;
+		const taskSample = (await this.api.query(profile.semanticModelId, `EVALUATE TOPN(1, FILTER(task, ${taskOwner}))`))[0];
+		const actualStart = taskSample && "actualstart" in taskSample ? "task[actualstart]" : "BLANK()";
+		const endExclusive = /* @__PURE__ */ new Date(`${dates.end}T00:00:00Z`);
+		endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+		const nextDay = daxDate(endExclusive.toISOString().slice(0, 10));
+		const taskRows = await this.api.query(profile.semanticModelId, `EVALUATE SELECTCOLUMNS(FILTER(task, ${taskOwner} && ((task[actualend] >= ${daxDate(dates.fiscal.start)} && task[actualend] < ${nextDay}) || (${actualStart} >= ${daxDate(dates.start)} && ${actualStart} < ${nextDay}))), "id", [activityid], "ownerId", [ownerid], "milestoneId", [regardingobjectid], "milestoneName", [regardingobjectidname], "accountId", VAR TargetMilestone = task[regardingobjectid] VAR ParentOpportunity = CALCULATE(SELECTEDVALUE(PodMilestones[Opportunity ID]), FILTER(ALL(PodMilestones), LOWER(PodMilestones[Milestone ID]) = LOWER(TargetMilestone))) RETURN LOOKUPVALUE(opportunity[customerid], opportunity[opportunityid], ParentOpportunity), "subject", [subject], "categoryCode", [msp_taskcategory], "state", [statecode], "actualEnd", [actualend], "activityDate", ${actualStart})`);
+		const tasks = [];
+		const gaps = [];
+		for (const row of taskRows) {
+			if (privateContent(String(row["subject"] ?? ""))) continue;
+			if (typeof row["accountId"] !== "string" || !row["accountId"]) {
+				gaps.push("A task with an unresolved milestone/opportunity/account path was excluded.");
+				continue;
+			}
+			tasks.push(seTaskSchema.parse({
+				...row,
+				subject: row["subject"] ?? "",
+				milestoneName: row["milestoneName"] ?? "",
+				categoryCode: row["categoryCode"] === null ? "" : String(row["categoryCode"]),
+				actualEnd: date(row["actualEnd"]),
+				activityDate: date(row["activityDate"])
+			}));
+		}
+		return {
+			milestones,
+			tasks,
+			gaps: [...new Set(gaps)],
+			coverage: {
+				committed: Boolean(sample && "Committed On" in sample),
+				completed: Boolean(sample && "Completed On" in sample),
+				created: Boolean(sample && "Created On" in sample)
+			},
+			access: [{
+				source: "msx",
+				state: "available",
+				detail: "Complete reporter-scoped milestone and task inventories read."
+			}]
+		};
+	}
 	async readEvidence(source, profile, inspection, start, end) {
 		const accounts = inspection.assignments.filter((row) => inspection.contract.allowedAtus.includes(row.atu));
-		const output = [];
-		const nextDay = /* @__PURE__ */ new Date(`${end}T00:00:00Z`);
-		nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-		const matches = (body) => [...new Map(accounts.filter((row) => {
-			const name = row.accountName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-			return new RegExp(`(?:^|[^\\p{L}\\p{N}])${name}(?:$|[^\\p{L}\\p{N}])`, "iu").test(body);
-		}).map((row) => [lower(row.accountId), row])).values()];
-		const add = (id, body, occurred, reference) => {
-			const occurredOn = date(occurred);
-			if (!occurredOn || occurredOn < start || occurredOn > end || privateContent(body)) return;
-			const plain = body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-			for (const account of matches(plain)) output.push(seEvidenceSchema.parse({
-				id: `${source}:${id}:${account.accountId}`,
-				accountId: account.accountId,
-				source,
-				date: occurredOn,
-				summary: plain,
-				reference,
-				qualifies: source !== "m365_calendar"
-			}));
-		};
-		if (source === "m365_calendar") await this.api.pages(`${graphRoot$1}/me/calendarView?startDateTime=${start}T00:00:00Z&endDateTime=${nextDay.toISOString()}&$select=id,subject,start,end&$top=100`);
-		else if (source === "m365_email") {
-			const filter = encodeURIComponent(`receivedDateTime ge ${start}T00:00:00Z and receivedDateTime lt ${nextDay.toISOString()}`);
-			const rows = await this.api.pages(`${graphRoot$1}/me/messages?$filter=${filter}&$select=id,subject,receivedDateTime,body,webLink&$expand=attachments($select=id,name,contentType,size)&$top=100`);
-			for (const raw of rows) {
-				const row = z.object({
-					id: z.string(),
-					subject: z.string().nullable(),
-					receivedDateTime: z.string(),
-					body: z.object({ content: z.string() }),
-					webLink: z.url()
-				}).parse(raw);
-				add(row.id, `${row.subject ?? ""}\n${row.body.content}`, row.receivedDateTime, row.webLink);
-			}
-		} else if (source === "m365_teams") {
-			const chats = await this.api.pages(`${graphRoot$1}/me/chats?$select=id&$top=50`, 20);
-			for (const chat of chats) {
-				const chatId = z.string().parse(chat["id"]);
-				const messages = await this.api.pages(`${graphRoot$1}/chats/${encodeURIComponent(chatId)}/messages?$top=50`, 200);
-				for (const raw of messages) {
-					const row = z.object({
-						id: z.string(),
-						createdDateTime: z.string(),
-						body: z.object({ content: z.string() })
-					}).parse(raw);
-					add(row.id, row.body.content, row.createdDateTime, `https://teams.microsoft.com/l/chat/${encodeURIComponent(chatId)}/conversations?messageId=${encodeURIComponent(row.id)}`);
-				}
-			}
-		} else if (source === "wiki") {
+		if (source === "m365_calendar" || source === "m365_email" || source === "m365_teams") return new GraphSeEvidenceConnector(this.api, accounts).read(source, start, end);
+		const collector = new SeEvidenceCollector(accounts, source, start, end);
+		if (source === "wiki") {
 			if (!profile.wikiUrl) throw new SeReportingError("wiki-unconfigured", "No optional wiki location was configured.");
 			const item = await this.api.share(profile.wikiUrl);
 			if (!/\.(md|txt)$/i.test(item.name)) throw new SeReportingError("wiki-format-unsupported", "The optional wiki connector supports an explicitly configured UTF-8 Markdown or text file.");
 			const body = await this.api.file(item.parentReference.driveId, item.id, new URL(profile.wikiUrl).hostname);
 			if (privateContent(body)) return [];
-			for (const account of matches(body)) output.push(seEvidenceSchema.parse({
+			for (const account of collector.matches(body)) collector.output.push(seEvidenceSchema.parse({
 				id: `wiki:${item.id}:${account.accountId}`,
 				accountId: account.accountId,
 				source,
@@ -17568,13 +19110,13 @@ var LiveSeReportingReader = class {
 					lastModifiedDateTime: z.string(),
 					parentReference: z.object({ driveId: z.string() })
 				}).parse(raw);
-				if (item.lastModifiedDateTime.slice(0, 10) < start || item.lastModifiedDateTime.slice(0, 10) > end || !matches(item.name).length) continue;
+				if (item.lastModifiedDateTime.slice(0, 10) < start || item.lastModifiedDateTime.slice(0, 10) > end || !collector.matches(item.name).length) continue;
 				if (!/\.(md|txt)$/i.test(item.name)) throw new SeReportingError("file-content-unsupported", "A matching supporting file requires an approved document-text connector. Metadata alone was not treated as outcome evidence.");
 				const body = await this.api.file(item.parentReference.driveId, item.id, new URL(item.webUrl).hostname);
-				add(item.id, `${item.name}\n${body}`, item.lastModifiedDateTime, item.webUrl);
+				collector.add(item.id, `${item.name}\n${body}`, item.lastModifiedDateTime, item.webUrl);
 			}
 		}
-		return output;
+		return collector.output;
 	}
 };
 //#endregion
@@ -18650,6 +20192,10 @@ function createSampleSeReportingHost() {
 }
 //#endregion
 //#region packages/orchestrator/se-reporting/composition.ts
+function resolveSeSourcePreference(environment) {
+	const value = environment["TLC_SE_SOURCE"]?.trim().toLowerCase();
+	return value === "auto" || value === "dataverse" ? value : "powerbi";
+}
 function createSeReportingHost(options) {
 	if (options.mode === "sample") return createSampleSeReportingHost();
 	const environment = options.environment ?? process.env;
@@ -18660,7 +20206,12 @@ function createSeReportingHost(options) {
 		},
 		expectedEmail: async () => (await options.identity())?.email,
 		expectedObjectId: async () => (await options.identity())?.objectId,
-		...options.fetcher ? { fetcher: options.fetcher } : {}
+		...options.fetcher ? { fetcher: options.fetcher } : {},
+		...options.dataverse ? {
+			dataverse: options.dataverse,
+			sourcePreference: resolveSeSourcePreference(environment)
+		} : {},
+		...environment["TLC_MSX_RISK_DETAILS_FIELD"]?.trim() ? { riskField: environment["TLC_MSX_RISK_DETAILS_FIELD"].trim() } : {}
 	});
 	let model;
 	return new SharedSeReportingHost({
@@ -18696,6 +20247,840 @@ function createSeReportingIpcHandler(host) {
 var sellerDashboardIpcChannel = "tlc:seller-dashboard";
 function createSellerDashboardIpcHandler(host) {
 	return (request) => host.invoke(request);
+}
+//#endregion
+//#region apps/desktop/electron/main/stage-pipeline-ipc.ts
+var stagePipelineIpcChannel = "tlc:stage-pipeline-review";
+function createStagePipelineIpcHandler(host) {
+	return (request) => host.invoke(request);
+}
+//#endregion
+//#region packages/common/fixtures/stage-pipeline-review.ts
+var asOf = "2026-10-21";
+var customers = [
+	"CONTOSO HEALTH SYSTEM",
+	"FABRIKAM CLINICS",
+	"NORTHWIND HOSPITAL GROUP",
+	"TAILSPIN CARE NETWORK",
+	"ADVENTURE WORKS MEDICAL"
+];
+var workloads = [
+	"Azure SQL modernization",
+	"Fabric analytics platform",
+	"GitHub Copilot and DevOps",
+	"AI Foundry clinical copilot",
+	"ExpressRoute for DC1",
+	"Databricks lakehouse",
+	"Arc-enabled SQL",
+	"Resiliency posture",
+	"App Service migration",
+	"AKS landing zone",
+	"Data warehouse refresh",
+	"Imaging archive to Blob",
+	"Zero-trust data protection"
+];
+var partners = [
+	null,
+	"Global Delivery Center",
+	"Example Partner One",
+	null,
+	"Example Partner Two",
+	null
+];
+var competitors = [
+	{
+		name: null,
+		threat: "None"
+	},
+	{
+		name: null,
+		threat: "None"
+	},
+	{
+		name: "AWS | Other",
+		threat: "Medium"
+	},
+	{
+		name: null,
+		threat: "Low"
+	},
+	{
+		name: "Competitor X",
+		threat: "High"
+	}
+];
+var forecasts = [
+	"Uncommitted",
+	"Uncommitted",
+	"Uncommitted",
+	"Committed",
+	"Uncommitted"
+];
+var milestoneStatuses = [
+	"On Track",
+	"On Track",
+	"On Track",
+	"Completed",
+	"On Track",
+	"At Risk",
+	"Completed",
+	"Cancelled",
+	"Blocked",
+	"Hygiene/Duplicate",
+	"On Track",
+	"Lost to Competitor"
+];
+function addDays(value, days) {
+	const parsed = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
+	parsed.setUTCDate(parsed.getUTCDate() + days);
+	return parsed.toISOString().slice(0, 10);
+}
+function opportunity$1(index) {
+	const customer = customers[index % customers.length] ?? customers[0];
+	const microsoftServices = index >= 44;
+	const inbound = !microsoftServices && index >= 36;
+	const consuming = index % 4 !== 3;
+	const closeOffset = index % 7 === 2 ? -(20 + index * 9) : 12 + index * 37 % 330;
+	const competitor = competitors[index % competitors.length] ?? competitors[0];
+	const recurring = consuming ? 1e3 + index * 7919 % 9e4 : 0;
+	const label = workloads[index % workloads.length] ?? workloads[0];
+	return {
+		id: `sample-opp-${String(index + 1).padStart(3, "0")}`,
+		number: `7-SAMPLE${String(index + 1).padStart(3, "0")}`,
+		customer,
+		owner: "Sample Seller",
+		editable: true,
+		name: microsoftServices ? `Unified support plan ${index - 43}` : `${inbound ? "Inbound: " : ""}${label}`,
+		notes: index % 3 === 0 ? `AB - 12/Oct - sample note: partner is validating the workload plan for ${label.toLowerCase()}.` : "",
+		contact: `Contact ${index % 9 + 1}`,
+		scope: microsoftServices ? "microsoft-services" : "azure",
+		solutionArea: microsoftServices ? "Microsoft Services" : "Cloud and AI Platforms",
+		inbound,
+		stage: stagePipelineStages[(index * 2 + (microsoftServices ? 1 : 0)) % stagePipelineStages.length] ?? "Listen & Consult",
+		status: index % 17 === 5 ? "On Hold" : "In Progress",
+		forecast: forecasts[index % forecasts.length] ?? "Uncommitted",
+		closeDate: addDays(asOf, closeOffset),
+		daysInStage: index * 13 % 120,
+		idleDays: consuming ? index * 11 % 110 : null,
+		consumedRecurring: recurring,
+		consumedNonRecurring: consuming && index % 5 === 0 ? 2e3 + index * 310 : 0,
+		maccCommit: index % 11 === 0 ? 8e6 + index * 15e4 : 0,
+		partner: partners[index % partners.length] ?? null,
+		competitor: {
+			name: competitor.name,
+			threat: competitor.threat
+		},
+		solutionTagReview: index % 13 === 4
+	};
+}
+function milestonesFor(row, index) {
+	const total = 1 + index % 4;
+	return Array.from({ length: total }, (_, offset) => {
+		const position = index * 5 + offset;
+		const status = milestoneStatuses[position % milestoneStatuses.length] ?? "On Track";
+		const dayOffset = (status === "On Track" || status === "At Risk" || status === "Blocked") && position % 6 === 0 ? -(10 + position % 40) : 20 + position * 29 % 380;
+		return {
+			id: `sample-ms-${String(index + 1).padStart(3, "0")}-${offset + 1}`,
+			number: `7-SAMPLEM${String(position + 1).padStart(4, "0")}`,
+			opportunityId: row.id,
+			name: [
+				"pilot",
+				"production",
+				"prod expansion",
+				"phase 2: services",
+				"DC1 circuits"
+			][position % 5] ?? "pilot",
+			workload: "Azure",
+			estimatedMonthlyAcr: [
+				150,
+				700,
+				3e3,
+				5e3,
+				2e4,
+				500
+			][position % 6] ?? 150,
+			commitment: status === "Completed" || position % 9 === 0 ? "Committed" : "Uncommitted",
+			status,
+			date: addDays(asOf, dayOffset),
+			comment: position % 4 === 0 ? `Sample update: customer validated the plan and will confirm usage next month (ref ${position + 1}).` : "",
+			owner: [
+				"Sample Owner A",
+				"Sample Owner B",
+				"Sample Owner C"
+			][position % 3] ?? "Sample Owner A"
+		};
+	});
+}
+function acrFor() {
+	const weights = [
+		.3,
+		.25,
+		.2,
+		.15,
+		.1
+	];
+	const round = (value) => Math.round(value / 1e3) * 1e3;
+	return {
+		source: "sample",
+		syncedAt: "2026-09-30",
+		lastActualMonth: "2026-09",
+		accounts: customers.map((customer, accountIndex) => {
+			const weight = weights[accountIndex] ?? .1;
+			return {
+				customer,
+				months: Array.from({ length: 12 }, (_, i) => {
+					const projected = Math.max(0, i - 2);
+					return {
+						month: `${i < 6 ? 2026 : 2027}-${String((i + 6) % 12 + 1).padStart(2, "0")}`,
+						actual: round(1333e3 * weight * Math.min(i + 1, 3)),
+						baseline: round(103e4 * weight * projected),
+						committed: round(22e3 * weight * projected),
+						uncommitted: round(29e4 * weight * projected),
+						stage1: round(43e4 * weight * projected),
+						target: round(1441e3 * weight * (i + 1))
+					};
+				})
+			};
+		})
+	};
+}
+var sampleReports = [
+	{
+		id: "sample-report-a",
+		displayName: "Sample Report A"
+	},
+	{
+		id: "sample-report-b",
+		displayName: "Sample Report B"
+	},
+	{
+		id: "sample-report-c",
+		displayName: "Sample Report C"
+	}
+];
+function reportPortfolio() {
+	const opportunities = [];
+	const milestones = [];
+	for (let index = 0; index < 18; index += 1) {
+		const base = opportunity$1(index);
+		const owner = sampleReports[index % sampleReports.length].displayName;
+		const row = {
+			...base,
+			id: `sample-rpt-opp-${String(index + 1).padStart(3, "0")}`,
+			number: `7-SAMPLER${String(index + 1).padStart(3, "0")}`,
+			name: `${base.name} (team)`,
+			owner,
+			editable: false
+		};
+		opportunities.push(row);
+		milestones.push(...milestonesFor(row, index).map((milestone) => ({
+			...milestone,
+			id: milestone.id.replace("sample-ms-", "sample-rpt-ms-"),
+			number: milestone.number.replace("SAMPLEM", "SAMPLERM"),
+			owner
+		})));
+	}
+	return {
+		opportunities,
+		milestones
+	};
+}
+function createSampleStagePipelineReview(options = {}) {
+	const scope = options.scope ?? "mine";
+	const own = Array.from({ length: 46 }, (_, index) => opportunity$1(index));
+	const ownMilestones = own.flatMap((row, index) => milestonesFor(row, index));
+	const team = scope === "mine" ? {
+		opportunities: [],
+		milestones: []
+	} : reportPortfolio();
+	const selected = options.reportIds?.length ? new Set(sampleReports.filter((report) => options.reportIds.includes(report.id)).map((report) => report.displayName)) : void 0;
+	const teamOpportunities = selected ? team.opportunities.filter((row) => selected.has(row.owner)) : team.opportunities;
+	const opportunities = scope === "reports" ? teamOpportunities : [...own, ...teamOpportunities];
+	const included = new Set(opportunities.map((row) => row.id));
+	const milestones = [...scope === "reports" ? [] : ownMilestones, ...team.milestones].filter((row) => included.has(row.opportunityId));
+	return stagePipelineSnapshotSchema.parse({
+		contractVersion: "1.1",
+		kind: "snapshot",
+		mode: "sample",
+		state: "fresh",
+		message: "Synthetic sample data: every customer, opportunity, milestone and amount is fictitious.",
+		generatedAt: `${asOf}T09:00:00.000Z`,
+		owner: "Sample Seller",
+		asOf,
+		fiscalYear: 2027,
+		scope,
+		reports: scope === "mine" ? [] : sampleReports.map((report) => ({ ...report })),
+		sources: [
+			...scope === "mine" ? [] : [{
+				source: "hierarchy",
+				state: "complete",
+				detail: "Synthetic sample direct reports.",
+				count: sampleReports.length
+			}],
+			{
+				source: "opportunities",
+				state: "complete",
+				detail: "Synthetic sample opportunities.",
+				count: opportunities.length
+			},
+			{
+				source: "milestones",
+				state: "complete",
+				detail: "Synthetic sample milestones."
+			},
+			{
+				source: "macc",
+				state: "complete",
+				detail: "Synthetic sample MACC commitments."
+			},
+			{
+				source: "acr",
+				state: "complete",
+				detail: "Synthetic sample ACR series."
+			}
+		],
+		opportunities,
+		milestones,
+		acr: acrFor()
+	});
+}
+//#endregion
+//#region packages/connectors/msx/stage-pipeline-mapping.ts
+var formattedSuffix = "@OData.Community.Display.V1.FormattedValue";
+var msPerDay = 864e5;
+var defaultInboundSourceCodes = /* @__PURE__ */ new Set([
+	861981141,
+	861980002,
+	861981086,
+	861981236
+]);
+var forecastLabels = {
+	100000001: "Pipeline",
+	100000002: "Best case",
+	100000003: "Committed",
+	100000004: "Omitted",
+	100000005: "Won",
+	100000006: "Lost"
+};
+var threatByCode = {
+	861980001: "None",
+	861980002: "Medium",
+	861980003: "High"
+};
+var milestoneStatusByCode = {
+	86198e4: "On Track",
+	861980001: "At Risk",
+	861980002: "Blocked",
+	861980003: "Completed",
+	861980004: "Cancelled",
+	861980005: "Lost to Competitor",
+	861980006: "Hygiene/Duplicate"
+};
+var azureSolutionArea = 39438e4;
+var servicesSolutionArea = 861980011;
+var unknownSolutionArea = 861980013;
+var openMilestoneStatuses = /* @__PURE__ */ new Set([
+	"On Track",
+	"At Risk",
+	"Blocked"
+]);
+function text(row, key) {
+	const value = row[key];
+	return typeof value === "string" && value.trim() ? value : void 0;
+}
+function number(row, key) {
+	const value = row[key];
+	return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+}
+function formatted(row, key) {
+	return text(row, `${key}${formattedSuffix}`);
+}
+var maxText = 3e4;
+var maxName = 500;
+var maxId = 200;
+var clip = (value, max) => value.length > max ? value.slice(0, max) : value;
+function day(value) {
+	return value && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : void 0;
+}
+function daysBetween(from, to) {
+	return Math.max(0, Math.floor((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / msPerDay));
+}
+function parseStage(label) {
+	if (typeof label !== "string") return void 0;
+	const normalized = label.replace(/^\s*\d+\s*-\s*/, "").trim().toLowerCase();
+	return stagePipelineStages.find((stage) => stage.toLowerCase() === normalized);
+}
+function mapOpportunityRow(row, context) {
+	const id = text(row, "opportunityid");
+	const accountId = text(row, "_parentaccountid_value");
+	const customer = formatted(row, "_parentaccountid_value");
+	if (!id || !accountId || !customer) return {
+		kind: "excluded",
+		reason: "account"
+	};
+	const stage = parseStage(row["msp_activesalesstage"]);
+	if (!stage) return {
+		kind: "excluded",
+		reason: "stage"
+	};
+	const area = number(row, "msp_solutionarea");
+	const unknownArea = area === unknownSolutionArea;
+	const scope = area === azureSolutionArea || unknownArea ? "azure" : area === servicesSolutionArea ? "microsoft-services" : void 0;
+	if (!scope) return {
+		kind: "excluded",
+		reason: "solution-area"
+	};
+	const closeDate = day(text(row, "msp_estcompletiondate")) ?? day(text(row, "estimatedclosedate"));
+	if (!closeDate) return {
+		kind: "excluded",
+		reason: "close-date"
+	};
+	const recurring = Math.max(0, number(row, "msp_consumptionconsumedrecurring") ?? 0);
+	const nonRecurring = Math.max(0, number(row, "msp_consumptionconsumednonrecurring") ?? 0);
+	const reportedDays = number(row, "msp_daysinstage") ?? 0;
+	const stageChanged = day(text(row, "msp_currentsalesstagemodifiedon"));
+	const commentChanged = day(text(row, "msp_forecastcomments_lastmodifiedon_datetime"));
+	const forecastCode = number(row, "msdyn_forecastcategory");
+	const competitorName = formatted(row, "_msp_primarycompetitor_value") ?? text(row, "msp_othercompetitor");
+	const state = number(row, "statecode");
+	const sourceCode = number(row, "msp_sourcesubtypecode");
+	return {
+		kind: "row",
+		row: {
+			id: clip(id, maxId),
+			number: clip(text(row, "msp_opportunitynumber") ?? id, maxName),
+			customer: clip(customer, maxName),
+			name: clip(text(row, "name") ?? "Untitled opportunity", maxName),
+			owner: clip(formatted(row, "_ownerid_value") ?? "", maxId),
+			editable: context.editableIds.has(id),
+			notes: clip(text(row, "msp_forecastcomments") ?? "", maxText),
+			contact: clip(formatted(row, "_parentcontactid_value") ?? "", maxText),
+			scope,
+			solutionArea: clip(formatted(row, "msp_solutionarea") ?? (scope === "azure" ? "Cloud and AI Platforms" : "Microsoft Services"), maxName),
+			inbound: sourceCode !== void 0 && context.inboundCodes.has(sourceCode),
+			stage,
+			status: state === 1 ? "Won" : state === 2 ? "Lost" : "In Progress",
+			forecast: clip(formatted(row, "msdyn_forecastcategory") ?? (forecastCode !== void 0 ? forecastLabels[forecastCode] : void 0) ?? "Not set", maxName),
+			closeDate,
+			daysInStage: reportedDays > 0 ? reportedDays : stageChanged ? daysBetween(stageChanged, context.asOf) : 0,
+			idleDays: recurring + nonRecurring > 0 && commentChanged ? daysBetween(commentChanged, context.asOf) : null,
+			consumedRecurring: recurring,
+			consumedNonRecurring: nonRecurring,
+			maccCommit: 0,
+			partner: clip(formatted(row, "_msp_partneraccountid_value") ?? "", maxText) || null,
+			competitor: {
+				name: competitorName && competitorName.toLowerCase() !== "none" ? clip(competitorName, maxText) : null,
+				threat: threatByCode[number(row, "msp_competethreatlevel") ?? 0] ?? "None"
+			},
+			solutionTagReview: unknownArea
+		}
+	};
+}
+function mapMilestoneRow(row) {
+	const id = text(row, "msp_engagementmilestoneid");
+	const opportunityId = text(row, "_msp_opportunityid_value");
+	const statusCode = number(row, "msp_milestonestatus");
+	const status = statusCode === void 0 ? void 0 : milestoneStatusByCode[statusCode];
+	if (!id || !opportunityId || !status) return void 0;
+	return {
+		id: clip(id, maxId),
+		number: clip(text(row, "msp_milestonenumber") ?? id, maxName),
+		opportunityId: clip(opportunityId, maxId),
+		name: clip(text(row, "msp_name") ?? "Unnamed milestone", maxName),
+		workload: clip(formatted(row, "msp_workload") ?? formatted(row, "msp_milestoneworkload") ?? "", maxText),
+		estimatedMonthlyAcr: Math.max(0, number(row, "msp_monthlyuse") ?? 0),
+		commitment: number(row, "msp_commitmentrecommendation") === 861980003 ? "Committed" : "Uncommitted",
+		status,
+		date: day(text(row, "msp_milestonedate")) ?? null,
+		comment: clip(text(row, "msp_forecastcomments") ?? "", maxText),
+		owner: clip(formatted(row, "_ownerid_value") ?? "", maxText)
+	};
+}
+function isOpenMilestoneStatus(status) {
+	return openMilestoneStatuses.has(status);
+}
+function fiscalMonths(fiscalYear) {
+	return Array.from({ length: 12 }, (_, index) => {
+		const month = (index + 6) % 12 + 1;
+		return `${index < 6 ? fiscalYear - 1 : fiscalYear}-${String(month).padStart(2, "0")}`;
+	});
+}
+function fiscalYearFor(date) {
+	const year = Number(date.slice(0, 4));
+	return Number(date.slice(5, 7)) >= 7 ? year + 1 : year;
+}
+/**
+* Cumulative fiscal-year ACR pipe from open milestones only. Actuals, baseline and target are
+* never fabricated: they stay null until an ACR source is connected.
+*/
+function deriveAcrPipe(input) {
+	const months = fiscalMonths(input.fiscalYear);
+	const opportunityById = new Map(input.opportunities.map((row) => [row.id, row]));
+	const customers = [...new Set(input.opportunities.map((row) => row.customer))].sort((left, right) => left.localeCompare(right));
+	const layers = new Map(customers.map((customer) => [customer, {
+		committed: new Array(12).fill(0),
+		uncommitted: new Array(12).fill(0),
+		stage1: new Array(12).fill(0)
+	}]));
+	for (const milestone of input.milestones) {
+		const opportunity = opportunityById.get(milestone.opportunityId);
+		if (!opportunity || opportunity.status !== "In Progress" || !isOpenMilestoneStatus(milestone.status) || !milestone.date) continue;
+		const dated = milestone.date.slice(0, 7);
+		if (dated > months[11]) continue;
+		const start = Math.max(0, months.indexOf(dated));
+		const layer = layers.get(opportunity.customer);
+		if (!layer) continue;
+		const target = milestone.commitment === "Committed" ? layer.committed : opportunity.stage === "Listen & Consult" ? layer.stage1 : layer.uncommitted;
+		for (let index = start; index < 12; index += 1) target[index] = (target[index] ?? 0) + milestone.estimatedMonthlyAcr * (index - start + 1);
+	}
+	return {
+		source: "derived-pipeline-only",
+		syncedAt: null,
+		lastActualMonth: null,
+		accounts: customers.map((customer) => {
+			const layer = layers.get(customer);
+			return {
+				customer,
+				months: months.map((month, index) => ({
+					month,
+					actual: null,
+					baseline: null,
+					target: null,
+					committed: layer.committed[index] ?? 0,
+					uncommitted: layer.uncommitted[index] ?? 0,
+					stage1: layer.stage1[index] ?? 0
+				}))
+			};
+		})
+	};
+}
+//#endregion
+//#region packages/connectors/msx/stage-pipeline.ts
+var StagePipelineSourceError = class extends Error {
+	code;
+	constructor(code, message, cause) {
+		super(message, cause === void 0 ? void 0 : { cause });
+		this.code = code;
+		this.name = "StagePipelineSourceError";
+	}
+};
+var failureMessages = {
+	"unauthorized": "MSX did not accept the signed-in credential. Sign in again and retry.",
+	"forbidden": "MSX denied access to the requested portfolio data for this user.",
+	"throttled": "MSX is throttling requests. Retry in a moment.",
+	"source-unavailable": "MSX could not be reached or returned an unexpected response."
+};
+function classifyStagePipelineError(error) {
+	if (error instanceof StagePipelineSourceError) return error;
+	const status = typeof error === "object" && error !== null && "status" in error ? error.status : void 0;
+	const code = status === 401 ? "unauthorized" : status === 403 ? "forbidden" : status === 429 ? "throttled" : "source-unavailable";
+	return new StagePipelineSourceError(code, failureMessages[code], error);
+}
+var chunkSize = 40;
+var concurrentUsers = 4;
+var opportunitySelect = [
+	"opportunityid",
+	"name",
+	"statecode",
+	"statuscode",
+	"_parentaccountid_value",
+	"_ownerid_value",
+	"_parentcontactid_value",
+	"msp_opportunitynumber",
+	"msp_activesalesstage",
+	"msp_currentsalesstagemodifiedon",
+	"msp_daysinstage",
+	"msp_estcompletiondate",
+	"estimatedclosedate",
+	"msdyn_forecastcategory",
+	"msp_forecastcomments",
+	"msp_forecastcomments_lastmodifiedon_datetime",
+	"msp_consumptionconsumedrecurring",
+	"msp_consumptionconsumednonrecurring",
+	"msp_solutionarea",
+	"msp_sourcesubtypecode",
+	"msp_competethreatlevel",
+	"_msp_primarycompetitor_value",
+	"msp_othercompetitor",
+	"_msp_partneraccountid_value",
+	"modifiedon"
+].join(",");
+var milestoneSelect = [
+	"msp_engagementmilestoneid",
+	"msp_milestonenumber",
+	"msp_name",
+	"_msp_opportunityid_value",
+	"msp_milestonedate",
+	"msp_milestonestatus",
+	"msp_commitmentrecommendation",
+	"msp_monthlyuse",
+	"msp_workload",
+	"msp_forecastcomments",
+	"_ownerid_value",
+	"modifiedon"
+].join(",");
+var LiveStagePipelineConnector = class {
+	source;
+	now;
+	inboundCodes;
+	opportunityLimit;
+	milestoneLimit;
+	constructor(source, options = {}) {
+		this.source = source;
+		this.now = options.now ?? (() => /* @__PURE__ */ new Date());
+		this.inboundCodes = options.inboundCodes ?? defaultInboundSourceCodes;
+		this.opportunityLimit = options.limits?.opportunities ?? 5e3;
+		this.milestoneLimit = options.limits?.milestones ?? 25e3;
+	}
+	async load(request) {
+		try {
+			return await this.build(request);
+		} catch (error) {
+			throw classifyStagePipelineError(error);
+		}
+	}
+	async build(request) {
+		const generatedAt = this.now();
+		const asOf = generatedAt.toISOString().slice(0, 10);
+		const me = await this.source.getCurrentUserId();
+		const includesSeller = request.scope !== "reports";
+		const [owner, discovered] = await Promise.all([this.readDisplayName(me), request.scope === "mine" ? Promise.resolve([]) : this.readDirectReports(me)]);
+		const selected = request.reportIds ? discovered.filter((report) => request.reportIds.includes(report.id)) : discovered;
+		const sources = [];
+		if (request.scope !== "mine") sources.push({
+			source: "hierarchy",
+			state: "complete",
+			detail: `${discovered.length} direct report${discovered.length === 1 ? "" : "s"} found in the Dynamics manager hierarchy.`,
+			count: discovered.length
+		});
+		const mine = includesSeller ? await this.readPortfolio(me) : {
+			ids: /* @__PURE__ */ new Set(),
+			failed: []
+		};
+		if (includesSeller && "dealTeamFailure" in mine && mine.dealTeamFailure) throw mine.dealTeamFailure;
+		const reportReads = await mapInGroups(selected, concurrentUsers, async (report) => ({
+			report,
+			read: await this.readPortfolio(report.id)
+		}));
+		const degradedReports = reportReads.filter(({ read }) => read.failed.length > 0).length;
+		const sellerPartial = includesSeller && mine.failed.length > 0;
+		const mineIds = "dealTeamFailure" in mine && mine.dealTeamFailure ? /* @__PURE__ */ new Set() : mine.ids;
+		const ids = new Set(includesSeller ? mineIds : []);
+		for (const { read } of reportReads) for (const id of read.ids) ids.add(id);
+		const candidateIds = [...ids];
+		const [rawOpportunities, rawMilestones] = await Promise.all([this.readChunks("opportunities", "opportunityid", candidateIds, opportunitySelect), this.readChunks("msp_engagementmilestones", "_msp_opportunityid_value", candidateIds, milestoneSelect)]);
+		const mapped = rawOpportunities.map((row) => mapOpportunityRow(row, {
+			asOf,
+			editableIds: mineIds,
+			inboundCodes: this.inboundCodes
+		}));
+		const rows = [];
+		let excluded = 0;
+		for (const result of mapped) if (result.kind === "row") rows.push(result.row);
+		else excluded += 1;
+		rows.sort((left, right) => left.customer.localeCompare(right.customer) || left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+		const opportunityTruncated = rows.length > this.opportunityLimit;
+		const opportunities = rows.slice(0, this.opportunityLimit);
+		const includedIds = new Set(opportunities.map((row) => row.id));
+		const allMilestones = [];
+		let skippedMilestones = 0;
+		for (const row of rawMilestones) {
+			const milestone = mapMilestoneRow(row);
+			if (milestone && !includedIds.has(milestone.opportunityId)) continue;
+			if (milestone) allMilestones.push(milestone);
+			else skippedMilestones += 1;
+		}
+		allMilestones.sort((left, right) => (left.date ?? "9999").localeCompare(right.date ?? "9999") || left.id.localeCompare(right.id));
+		const milestoneTruncated = allMilestones.length > this.milestoneLimit;
+		const milestones = allMilestones.slice(0, this.milestoneLimit);
+		const opportunityNotes = [];
+		if (excluded > 0) opportunityNotes.push(`${excluded} opportunit${excluded === 1 ? "y was" : "ies were"} excluded (unsupported solution area, pre-qualification stage, missing account or close date).`);
+		if (sellerPartial) opportunityNotes.push("The seller milestone-team membership could not be read.");
+		if (degradedReports > 0) opportunityNotes.push(`${degradedReports} direct report portfolio${degradedReports === 1 ? " was" : "s were"} not fully readable.`);
+		if (opportunityTruncated) opportunityNotes.push(`The list was truncated at ${this.opportunityLimit} opportunities.`);
+		sources.push({
+			source: "opportunities",
+			state: opportunityNotes.length ? "partial" : "complete",
+			detail: opportunityNotes.join(" ") || "All open opportunities in scope were read from MSX.",
+			count: opportunities.length
+		});
+		const milestoneNotes = [];
+		if (skippedMilestones > 0) milestoneNotes.push(`${skippedMilestones} milestone${skippedMilestones === 1 ? " has" : "s have"} an unrecognized status and ${skippedMilestones === 1 ? "was" : "were"} skipped.`);
+		if (milestoneTruncated) milestoneNotes.push(`The list was truncated at ${this.milestoneLimit} milestones.`);
+		sources.push({
+			source: "milestones",
+			state: milestoneNotes.length ? "partial" : "complete",
+			detail: milestoneNotes.join(" ") || "All open-opportunity milestones were read from MSX.",
+			count: milestones.length
+		});
+		sources.push({
+			source: "macc",
+			state: "unavailable",
+			detail: "MACC commitments are account-level in Dataverse; per-opportunity MACC is not available, so MACC & Commits is empty."
+		});
+		sources.push({
+			source: "acr",
+			state: "unavailable",
+			detail: "Monthly ACR actuals, baseline and target are not connected. The chart shows pipeline layers derived from open milestones."
+		});
+		return stagePipelineSnapshotSchema.parse({
+			contractVersion: "1.1",
+			kind: "snapshot",
+			mode: "live",
+			state: "fresh",
+			message: "Live read-only data from MSX.",
+			generatedAt: generatedAt.toISOString(),
+			owner,
+			asOf,
+			fiscalYear: fiscalYearFor(asOf),
+			scope: request.scope,
+			reports: request.scope === "mine" ? [] : discovered.map((report) => ({
+				id: report.id,
+				displayName: report.displayName
+			})),
+			sources,
+			opportunities,
+			milestones,
+			acr: deriveAcrPipe({
+				fiscalYear: fiscalYearFor(asOf),
+				opportunities,
+				milestones
+			})
+		});
+	}
+	async readDisplayName(userId) {
+		try {
+			const name = (await this.source.readRows("systemusers", {
+				"$select": "systemuserid,fullname",
+				"$filter": `systemuserid eq ${userId}`,
+				"$top": "1"
+			}))[0]?.["fullname"];
+			return typeof name === "string" ? name : "";
+		} catch {
+			return "";
+		}
+	}
+	async readDirectReports(userId) {
+		return (await this.source.readRows("systemusers", {
+			"$select": "systemuserid,fullname",
+			"$filter": `_parentsystemuserid_value eq ${userId} and isdisabled eq false`,
+			"$top": "50"
+		})).flatMap((row) => typeof row["systemuserid"] === "string" ? [{
+			id: row["systemuserid"],
+			displayName: typeof row["fullname"] === "string" && row["fullname"] ? row["fullname"] : "Unnamed user"
+		}] : []).sort((left, right) => left.displayName.localeCompare(right.displayName));
+	}
+	async readPortfolio(userId) {
+		const [dealTeam, milestoneTeam] = await Promise.allSettled([this.source.listDealTeamOpportunityIds(userId), this.source.listMilestoneTeamOpportunityIds(userId)]);
+		const ids = /* @__PURE__ */ new Set();
+		const failed = [];
+		for (const result of [dealTeam, milestoneTeam]) if (result.status === "fulfilled") for (const id of result.value) ids.add(id);
+		else failed.push(result.reason);
+		return {
+			ids,
+			failed,
+			...dealTeam.status === "rejected" ? { dealTeamFailure: classifyStagePipelineError(dealTeam.reason) } : {}
+		};
+	}
+	async readChunks(entitySet, field, ids, select) {
+		const chunks = [];
+		for (let offset = 0; offset < ids.length; offset += chunkSize) chunks.push(ids.slice(offset, offset + chunkSize));
+		return (await mapInGroups(chunks, 2, (chunk) => this.source.readRows(entitySet, {
+			"$select": select,
+			"$filter": `statecode eq 0 and (${chunk.map((id) => `${field} eq ${id}`).join(" or ")})`
+		}))).flat();
+	}
+};
+async function mapInGroups(items, size, run) {
+	const results = [];
+	for (let offset = 0; offset < items.length; offset += size) results.push(...await Promise.all(items.slice(offset, offset + size).map(run)));
+	return results;
+}
+//#endregion
+//#region packages/orchestrator/stage-pipeline-cache.ts
+/**
+* Per-user in-memory cache in front of a live loader: TTL reads, single-flight reloads, and a visibly
+* stale last-good snapshot when a reload fails. Nothing is persisted.
+*/
+var CachedStagePipelineLoader = class {
+	inner;
+	entries = /* @__PURE__ */ new Map();
+	inflight = /* @__PURE__ */ new Map();
+	now;
+	ttlMs;
+	maxEntries;
+	constructor(inner, options = {}) {
+		this.inner = inner;
+		this.now = options.now ?? Date.now;
+		this.ttlMs = options.ttlMs ?? 3e5;
+		this.maxEntries = options.maxEntries ?? 8;
+	}
+	invalidate() {
+		this.entries.clear();
+	}
+	async load(request, context = { fresh: false }) {
+		const key = `${request.scope}|${[...request.reportIds ?? []].sort().join(",")}`;
+		const cached = this.entries.get(key);
+		if (!context.fresh && cached && this.now() - cached.loadedAt < this.ttlMs) return cached.snapshot;
+		const running = this.inflight.get(key);
+		if (running) return running;
+		const pending = this.reload(key, request, context, cached).finally(() => {
+			this.inflight.delete(key);
+		});
+		this.inflight.set(key, pending);
+		return pending;
+	}
+	async reload(key, request, context, previous) {
+		try {
+			const snapshot = await this.inner.load(request, context);
+			this.entries.delete(key);
+			this.entries.set(key, {
+				snapshot,
+				loadedAt: this.now()
+			});
+			while (this.entries.size > this.maxEntries) this.entries.delete(this.entries.keys().next().value);
+			return snapshot;
+		} catch (error) {
+			if (!previous) throw error;
+			const reason = error instanceof StagePipelineSourceError ? error.message : "The source returned an unexpected error.";
+			return {
+				...previous.snapshot,
+				state: "stale",
+				message: `Showing data generated ${previous.snapshot.generatedAt}. The latest refresh failed: ${reason}`
+			};
+		}
+	}
+};
+//#endregion
+//#region packages/orchestrator/stage-pipeline-review.ts
+var SharedStagePipelineReviewHost = class {
+	loader;
+	constructor(loader) {
+		this.loader = loader;
+	}
+	async invoke(rawRequest) {
+		const request = stagePipelineRequestSchema.parse(rawRequest);
+		try {
+			return stagePipelineResponseSchema.parse(await this.loader.load(request, { fresh: request.operation === "refresh" }));
+		} catch (error) {
+			if (!(error instanceof StagePipelineSourceError)) throw error;
+			return stagePipelineResponseSchema.parse({
+				contractVersion: "1.1",
+				kind: "unavailable",
+				code: error.code,
+				message: error.message
+			});
+		}
+	}
+};
+function createStagePipelineReviewHost(options) {
+	if (options.mode === "sample") return new SharedStagePipelineReviewHost({ load: async (request) => createSampleStagePipelineReview({
+		scope: request.scope,
+		...request.reportIds ? { reportIds: request.reportIds } : {}
+	}) });
+	const { source, cache, ...rest } = options;
+	const { mode: _ignored, ...connectorOptions } = rest;
+	return new SharedStagePipelineReviewHost(new CachedStagePipelineLoader(new LiveStagePipelineConnector(source, connectorOptions), cache));
 }
 //#endregion
 //#region apps/desktop/electron/main/window-bounds.ts
@@ -20894,6 +23279,12 @@ function createMutationSession(options) {
 	};
 }
 //#endregion
+//#region apps/desktop/electron/main/knowledge-ipc.ts
+var knowledgeSearchIpcChannel = "tlc:search-knowledge";
+function createKnowledgeSearchIpcHandler(host) {
+	return async (input) => knowledgeSearchResponseSchema.parse(await host.searchKnowledge(knowledgeSearchRequestSchema.parse(input)));
+}
+//#endregion
 //#region apps/desktop/electron/main/index.ts
 var currentDirectory = dirname(fileURLToPath(import.meta.url));
 var desktopRoot = resolve(currentDirectory, "../..");
@@ -20946,6 +23337,10 @@ var sellerDashboardHost = createSellerDashboardHost({
 });
 var seReportingHost = createSeReportingHost({
 	mode: dataMode,
+	dataverse: {
+		readRows: (entitySet, parameters) => liveMsxConnector.readRows(entitySet, parameters),
+		listMilestoneTeamMilestoneIds: (userId) => liveMsxConnector.listMilestoneTeamMilestoneIds(userId)
+	},
 	identity: async () => {
 		const email = (await tokenProvider.getAuthStatus()).userEmail;
 		return email ? {
@@ -20972,9 +23367,24 @@ var localStoreMsxConnector = liveMsxConnector ? void 0 : createLocalStoreMsxConn
 	TLC_DATA_STORE_PATH: process.env["TLC_DATA_STORE_PATH"]?.trim() || resolve(app.getPath("userData"), "sample.sqlite")
 });
 var msxConnector = liveMsxConnector ?? localStoreMsxConnector ?? new FixtureMsxConnector();
+var stagePipelineHost = liveMsxConnector ? createStagePipelineReviewHost({
+	mode: "live",
+	source: liveMsxConnector
+}) : createStagePipelineReviewHost({ mode: "sample" });
 var creationWriter = localStoreMsxConnector?.createRecordCreationWriter();
 var recordCreation = new RecordCreationService(msxConnector, creationWriter ?? liveMsxConnector ?? new SampleRecordCreationCatalog(msxConnector), creationWriter ? { writer: creationWriter } : {});
-var meetingConnector = liveMsxConnector ? new LiveMeetingCaptureConnector(liveMsxConnector) : localStoreMsxConnector;
+var meetingGraph = liveMsxConnector ? new GraphMeetingConnector(async (purpose) => {
+	const interactive = authentication?.mode === "interactive-browser";
+	let token;
+	try {
+		token = await credentials.msx.getToken(interactive ? [...meetingScopesFor(purpose)] : meetingGraphDefaultScope);
+	} catch (error) {
+		throw meetingSignInFailure(error);
+	}
+	if (!token) throw meetingSignInFailure("A delegated Microsoft Graph token was not returned.");
+	return interactive ? token.token : assertCliTokenCanReadMeetings(token.token, purpose);
+}) : void 0;
+var meetingConnector = liveMsxConnector ? new LiveMeetingCaptureConnector(liveMsxConnector, void 0, meetingGraph) : localStoreMsxConnector;
 var foundryOpenAIClient = runtimeEnvironment ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry) : void 0;
 /** Foundry model-backed meeting-signal extractor when TLC_MEETING_EXTRACTOR=foundry; else the deterministic offline extractor. */
 var meetingExtractor = runtimeEnvironment && foundryOpenAIClient && (process.env["TLC_MEETING_EXTRACTOR"] ?? "").toLowerCase() === "foundry" ? createFoundryMeetingExtractor({
@@ -20982,34 +23392,28 @@ var meetingExtractor = runtimeEnvironment && foundryOpenAIClient && (process.env
 	model: process.env["TLC_MEETING_MODEL"]?.trim() || "gpt-6.1-sol",
 	requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs
 }) : void 0;
-var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, Object.fromEntries([
-	"account-pulse",
-	"mcem-coach",
-	"pursuit-executive",
-	"risk-solution-play"
-].map((capability) => {
-	if (!runtimeEnvironment) return [capability, {
+var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, createDesktopTaskAgents({
+	environment: runtimeEnvironment,
+	credential: credentials.foundry,
+	client: foundryOpenAIClient,
+	performanceReporter: reportPerformance,
+	sample: () => Object.fromEntries([
+		"account-pulse",
+		"mcem-coach",
+		"pursuit-executive",
+		"risk-solution-play"
+	].map((capability) => [capability, {
 		version: "sample-v2",
 		agent: { invoke: async (context) => buildSampleAgentResponse(capability, context) }
-	}];
-	const binding = {
-		"account-pulse": runtimeEnvironment.foundry.agents.accountPulse,
-		"mcem-coach": runtimeEnvironment.foundry.agents.mcemCoach,
-		"pursuit-executive": runtimeEnvironment.foundry.agents.pursuitExecutive,
-		"risk-solution-play": runtimeEnvironment.foundry.agents.riskSolutionPlay
-	}[capability];
-	return [capability, {
-		version: "active",
-		agent: new FoundryPromptAgent({
-			projectEndpoint: runtimeEnvironment.foundry.projectEndpoint,
-			agentName: binding.name,
-			requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
-			credential: credentials.foundry,
-			openAIClient: foundryOpenAIClient,
-			...foundryAgentTuning(runtimeEnvironment, reportPerformance)
-		})
-	}];
-})), reportPerformance, recordCreation);
+	}]))
+}), reportPerformance, recordCreation, createKnowledgeSearch({
+	mode: dataMode,
+	getGraphToken: async () => {
+		const token = await credentials.msx.getToken(authentication?.mode === "interactive-browser" ? [...seismicGraphScopes] : seismicGraphDefaultScope);
+		if (!token) throw new Error("A delegated Microsoft Graph token was not returned.");
+		return token.token;
+	}
+}));
 var presentation = createPresentationOwner(orchestrator);
 var clearSourceSession = () => presentation.session.clear();
 var backgroundEnabled = process.env["TLC_BACKGROUND_SYNC"] === "1";
@@ -21082,6 +23486,7 @@ var configuredWorkflowHost = dataMode === "sample" ? void 0 : createLivePlayWork
 	registry: mcpRegistry,
 	policy: mcpPolicy,
 	entityMap: dataverseEntityMap,
+	...reportPerformance ? { performanceReporter: reportPerformance } : {},
 	getAccessToken: async (server) => {
 		const token = await credentials.msx.getToken(server.authentication.scopes);
 		if (!token) throw new Error("A delegated MCP access token is unavailable.");
@@ -21092,8 +23497,8 @@ var configuredWorkflowHost = dataMode === "sample" ? void 0 : createLivePlayWork
 		return liveMsxConnector.getCurrentUserId();
 	},
 	resolveExcludedAccountIds: async () => {
-		if (!liveMsxConnector) return [];
-		return (await liveMsxConnector.listAccounts({ includeHidden: true })).filter((account) => account.visibility === "hidden").map((account) => account.id);
+		if (!liveMsxConnector) throw new Error("Live Plays require the live MSX connection.");
+		return (await portfolioPreferenceStore.read(await liveMsxConnector.getCurrentUserId())).hiddenAccountIds;
 	},
 	onStepError: (info) => {
 		console.error(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? "required" : "optional"} step failed: ${info.message}`);
@@ -21165,6 +23570,11 @@ function registerIpc() {
 	});
 	const invokeSellerDashboard = createSellerDashboardIpcHandler(sellerDashboardHost);
 	const invokeSeReporting = createSeReportingIpcHandler(seReportingHost);
+	const searchKnowledge = createKnowledgeSearchIpcHandler(orchestrator);
+	ipcMain.handle(knowledgeSearchIpcChannel, (event, request) => {
+		assertTrustedSender(event);
+		return searchKnowledge(request);
+	});
 	ipcMain.handle(seReportingIpcChannel, (event, request) => {
 		assertTrustedSender(event);
 		return invokeSeReporting(request);
@@ -21172,6 +23582,11 @@ function registerIpc() {
 	ipcMain.handle(sellerDashboardIpcChannel, (event, request) => {
 		assertTrustedSender(event);
 		return invokeSellerDashboard(request);
+	});
+	const invokeStagePipeline = createStagePipelineIpcHandler(stagePipelineHost);
+	ipcMain.handle(stagePipelineIpcChannel, (event, request) => {
+		assertTrustedSender(event);
+		return invokeStagePipeline(request);
 	});
 	const invokeVoice = createVoiceIpcHandler(voiceHost);
 	ipcMain.handle(voiceIpcChannel, (event, request) => {

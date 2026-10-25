@@ -11,6 +11,8 @@ import type { WorkingSelection } from './accounts.js'
 import type { PortfolioPanes } from './workspace-navigation.js'
 import { useResponsiveDisclosure } from './use-responsive-disclosure.js'
 import { TeamsMcemStageBoard } from './mcem-stage-board.js'
+import { ResizableSplit } from '../../../shared/resizable-split.js'
+import { GuidanceWorkbenchPane } from '../../../shared/guidance-pane.js'
 
 export type DetailTab = 'overview' | 'guidance' | 'stages'
 const tabs: Array<{ id: DetailTab; label: string }> = [{ id: 'overview', label: 'Overview' }, { id: 'guidance', label: 'Guidance' }, { id: 'stages', label: 'MCEM Stages' }]
@@ -58,8 +60,9 @@ export function OpportunityWorkbench({ client, selection, opportunities, milesto
       window.open(url, '_blank', 'noopener,noreferrer')
     } catch (cause) { setError(String(cause)) }
   }
-  return <>
-    <section id="portfolio-details-panel" className="pane opportunity-details" hidden={!panes.detailsExpanded} aria-label="Opportunity details">
+  return <ResizableSplit className="opportunity-workbench" label="opportunity details panel" controls="portfolio-details-panel"
+    defaultRatio={2 / 3} minFirst={320} minSecond={240} firstVisible={panes.detailsExpanded} secondVisible={panes.actionsExpanded}>
+    <GuidanceWorkbenchPane id="portfolio-details-panel" className="pane opportunity-details pane-scroll" hidden={!panes.detailsExpanded}>
       <header className="opportunity-heading"><h2><MsxOpportunityLink opportunity={selection.opportunity} onOpen={openOpportunityInBrowser} onError={setError} /></h2>
         <p className="muted">{selection.account.name} | Owner: {selection.opportunity.owner ?? 'Account team'} | Stage {selection.opportunity.recordedStage} | Close: {selection.opportunity.closeDate}</p>
       </header>
@@ -104,10 +107,10 @@ export function OpportunityWorkbench({ client, selection, opportunities, milesto
       </div>
       {busy && <p role="status">Evaluating current MCEM evidence...</p>}
       {error && <p className="error-banner" role="alert">{error}</p>}
-    </section>
-    <details className="recommendations-region" ref={actionDisclosure} open hidden={!panes.actionsExpanded}><summary className="pane-disclosure-toggle">Next Best Actions and evidence</summary>
+    </GuidanceWorkbenchPane>
+    <details className="recommendations-region pane-scroll" ref={actionDisclosure} open hidden={!panes.actionsExpanded}><summary className="pane-disclosure-toggle">Next Best Actions and evidence</summary>
       <NextBestActions evaluation={evaluation} loading={busy} error={error || undefined} onRun={() => { void runCoach() }} onOpenEvidence={openEvidence} />
       {evaluation && <p className="muted">Checked {new Date(evaluation.generatedAt).toLocaleString()} - {evaluation.state}</p>}
     </details>
-  </>
+  </ResizableSplit>
 }

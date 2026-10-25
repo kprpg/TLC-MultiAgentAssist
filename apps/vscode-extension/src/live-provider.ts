@@ -7,13 +7,15 @@ import {
 } from '../../../packages/common/index.js'
 import type { TokenCredential } from '@azure/core-auth'
 import { foundryEnvironmentSchema } from '../../../packages/common/configuration/foundry-environment.js'
+import type { MeetingTokenPurpose } from '../../../packages/common/configuration/meeting-sources.js'
 import mcpServersJson from '../../../config/mcp.servers.json' with { type: 'json' }
 import mcpToolPolicyJson from '../../../config/mcp.tool-policy.json' with { type: 'json' }
 import dataverseEntityMapJson from '../../../config/dataverse.entity-map.json' with { type: 'json' }
 import foundryEnvironmentJson from '../../../config/foundry.environment.json' with { type: 'json' }
 import { LiveMsxConnector, LiveMeetingCaptureConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
+import { GraphMeetingConnector } from '../../../packages/connectors/graph/meetings.js'
 import { RecordCreationService } from '../../../packages/orchestrator/record-creation/service.js'
-import { JsonFilePortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
+import { JsonFilePortfolioPreferenceStore, MemoryPortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
 import { createFoundryOpenAIClient } from '../../../packages/connectors/foundry/index.js'
 import { createFoundryMeetingExtractor } from '../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
 import type { MeetingExtractorFn } from '../../../packages/connectors/local-store/index.js'
@@ -24,6 +26,7 @@ import { createLivePlayWorkflowHost, type WorkflowStepErrorInfo } from '../../..
 import type { ExtensionDataProvider } from './data-provider.js'
 import { ExtensionMcemGuidanceConnector } from './mcem-guidance.js'
 import { buildLiveDataProvider, buildLiveTaskAgents } from './live-provider-core.js'
+import { createStagePipelineReviewHost } from '../../../packages/orchestrator/stage-pipeline-review.js'
 import { bindSourceToken } from '../../../packages/orchestrator/mutations/core-adapter.js'
 import { createSeReportingHost } from '../../../packages/orchestrator/se-reporting/composition.js'
 import type { SeReportingResource } from '../../../packages/common/contracts/se-reporting.js'
@@ -75,7 +78,8 @@ export function createLiveDataProvider(
     preferenceFilePath?: string,
     foundryCredential?: TokenCredential,
     getReportingToken?: (resource: SeReportingResource) => Promise<string>,
-    getGraphKnowledgeToken?: () => Promise<string>
+    getGraphKnowledgeToken?: () => Promise<string>,
+    getMeetingGraphToken?: (purpose: MeetingTokenPurpose) => Promise<string>
 ): ExtensionDataProvider {
     const sourceToken = bindSourceToken(getToken, 'https://microsoftsales.crm.dynamics.com')
     const registry = mcpServerRegistrySchema.parse(mcpServersJson)
@@ -84,13 +88,14 @@ export function createLiveDataProvider(
     const metadata = msxWriteMetadataFromEnvironment(process.env)
     const performanceReporter = createPerformanceReporter(process.env['TLC_PERFORMANCE'] === '1',
         (message) => console.info(`[performance] ${message}`))
-    const msx = preferenceFilePath
-        ? new LiveMsxConnector({ getAccessToken: sourceToken }, fetch, undefined, performanceReporter, metadata, new JsonFilePortfolioPreferenceStore(preferenceFilePath))
-        : new LiveMsxConnector({ getAccessToken: sourceToken }, fetch, undefined, performanceReporter, metadata)
+    const portfolioPreferenceStore = preferenceFilePath
+        ? new JsonFilePortfolioPreferenceStore(preferenceFilePath)
+        : new MemoryPortfolioPreferenceStore()
+    const msx = new LiveMsxConnector({ getAccessToken: sourceToken }, fetch, undefined, performanceReporter, metadata, portfolioPreferenceStore)
     const taskAgents = (useFoundryAgents ? buildFoundryTaskAgents(foundryCredential, performanceReporter) : undefined) ?? buildLiveTaskAgents()
     const orchestrator = new ThinSliceOrchestrator(msx, new ExtensionMcemGuidanceConnector(), taskAgents, performanceReporter, new RecordCreationService(msx, msx),
         createKnowledgeSearch({ mode: 'live', ...(getGraphKnowledgeToken ? { getGraphToken: getGraphKnowledgeToken } : {}) }))
-    const meetingConnector = new LiveMeetingCaptureConnector(msx)
+    const meetingConnector = new LiveMeetingCaptureConnector(msx, undefined, getMeetingGraphToken ? new GraphMeetingConnector(getMeetingGraphToken) : undefined)
     const meetingExtractor = buildFoundryMeetingExtractor(process.env, foundryCredential)
 
     const configured = createLivePlayWorkflowHost({
@@ -99,15 +104,16 @@ export function createLiveDataProvider(
         entityMap,
         getAccessToken: () => sourceToken(),
         resolveCurrentUserId: () => msx.getCurrentUserId(),
-        resolveExcludedAccountIds: async () => (await msx.listAccounts({ includeHidden: true }))
-            .filter((candidate) => candidate.visibility === 'hidden')
-            .map((candidate) => candidate.id),
+        resolveExcludedAccountIds: async () =>
+            (await portfolioPreferenceStore.read(await msx.getCurrentUserId())).hiddenAccountIds,
+        ...(performanceReporter ? { performanceReporter } : {}),
         ...(onStepError ? { onStepError } : {})
     })
     const reportingHost = createSeReportingHost({
+        dataverse: msx,
         mode: 'live', identity: async () => ({ key: account, email: account }),
         ...(getReportingToken ? { getToken: getReportingToken } : {}),
         ...(foundryCredential ? { foundryCredential } : {})
     })
-    return buildLiveDataProvider({ orchestrator, host: configured.host, account, meetingConnector, getSourceToken: sourceToken, reportingHost, ...(meetingExtractor ? { meetingExtractor } : {}), dispose: () => configured.dispose() })
+    return buildLiveDataProvider({ orchestrator, host: configured.host, account, meetingConnector, getSourceToken: sourceToken, reportingHost, stagePipelineHost: createStagePipelineReviewHost({ mode: 'live', source: msx }), ...(meetingExtractor ? { meetingExtractor } : {}), dispose: () => configured.dispose() })
 }

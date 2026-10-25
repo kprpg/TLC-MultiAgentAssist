@@ -107,7 +107,7 @@ function createDefinition(
         connectorPlan,
         inputSchemaRef: `workflow-input-${id.toLowerCase()}.v1`,
         outputSchemaRef: `workflow-output-${id.toLowerCase()}.v1`,
-        sla: { targetMs: 4_000, timeoutMs: 12_000 },
+        sla: { targetMs: 4_000, timeoutMs: 60_000 },
         auth: { requiresDelegatedUser: true, allowedWrite: false },
         ui: { cardStyle, resultPriority: 'high', showInQuickLaunch: true }
     }

@@ -1,9 +1,12 @@
 # Data mapping — contract ↔ MSX / Dataverse / MSXi
 
-Status today: the dashboard runs in **sample mode** from `createSampleStagePipelineReview()`
-(`packages/common/fixtures/stage-pipeline-review.ts`). `StagePipelineReviewPane` accepts an
-`invoke(request) => Promise<StagePipelineResponse>` prop; `DashboardWorkspace` forwards an optional
-`invokeStagePipelineReview`. No Desktop/Web/VS Code transport or connector exists yet.
+Status: sample mode uses `createSampleStagePipelineReview({ scope, reportIds })` (`packages/common/fixtures/stage-pipeline-review.ts`); live mode is implemented.
+
+- Contract: `stagePipelineReviewContractVersion` **1.1** (scope mine/reports/both, `reports`, per-source `sources` health, `capabilities`, nullable ACR with `acr.source`). There is no `capabilities` field: managers may not edit, so no manager forecast commit exists and report-scope rows are never editable.
+- Connector: `packages/connectors/msx/stage-pipeline.ts` (+ `stage-pipeline-mapping.ts`) reads through `LiveMsxConnector.readRows/listDealTeamOpportunityIds/listMilestoneTeamOpportunityIds`.
+- Host: `packages/orchestrator/stage-pipeline-review.ts` (+ `stage-pipeline-cache.ts`: 5-minute per-user cache, single-flight, stale fallback). Operation `stagePipelineReview` over Electron IPC `tlc:stage-pipeline-review`, `POST /api/stage-pipeline-review`, the VS Code bridge and Teams operations.
+- Live ACR actuals/baseline/target are **not connected** (no Dataverse source); the chart uses pipeline layers derived from open milestones. Per-opportunity MACC is not available (account-level `msp_maccdata` only).
+- Writes reuse the existing confirmed operations (`updateOpportunity`, `updateMilestone`, `createMilestoneActivity`); there is deliberately no manager forecast commit (decision: managers may not edit).
 
 ## Contract (`stagePipelineSnapshotSchema`, v1.0)
 

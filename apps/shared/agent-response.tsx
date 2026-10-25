@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import Markdown from 'react-markdown'
+import type { UrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AgentCapability } from '../../packages/common/contracts/index.js'
 import { buildAgentFollowUpPrompt, responseFeedbackPrompt, responseFollowUps } from './agent-follow-up.js'
 import { formatResponseMarkdown } from './response-markdown.js'
 import { useAgentRun, type AgentInvoke } from './use-agent-run.js'
+import { CustomerEmailActions } from './customer-email-actions.js'
+import { locateCustomerEmail, type CustomerEmailAction } from './customer-email.js'
 import './agent-response.css'
 
 export interface AgentFollowUpContext {
@@ -18,28 +21,35 @@ interface AgentResponseProps {
     content: string
     busy?: boolean
     followUp?: AgentFollowUpContext | undefined
+    emailAction?: CustomerEmailAction | undefined
+    emailDraftRequested?: boolean
+    urlTransform?: UrlTransform | undefined
     onOpenEvidence: (url: string) => void | Promise<void>
 }
 
-export function AgentResponse({ content, busy = false, followUp, onOpenEvidence }: AgentResponseProps) {
+export function AgentResponse({ content, busy = false, followUp, emailAction, emailDraftRequested = false, urlTransform, onOpenEvidence }: AgentResponseProps) {
     const [linkError, setLinkError] = useState('')
+    const formatted = useMemo(() => formatResponseMarkdown(content), [content])
+    const email = useMemo(() => busy ? undefined : locateCustomerEmail(content, emailDraftRequested), [content, busy, emailDraftRequested])
     async function openEvidence(url: string) {
         setLinkError('')
         try { await onOpenEvidence(url) }
         catch (error) { setLinkError(error instanceof Error ? error.message : 'The evidence link could not be opened.') }
     }
+    const markdown = (value: string) => <div className="agent-response-markdown">
+        <Markdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={urlTransform} components={{
+            a: ({ href, children }) => <a href={href} onClick={(event) => { event.preventDefault(); if (href) void openEvidence(href) }}>{children}</a>
+        }}>{value}</Markdown>
+    </div>
     return <>
-        <div className="agent-response-markdown">
-            <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{
-                a: ({ href, children }) => <a href={href} onClick={(event) => { event.preventDefault(); if (href) void openEvidence(href) }}>{children}</a>
-            }}>{formatResponseMarkdown(content)}</Markdown>
-        </div>
+        {email && <CustomerEmailActions key={content} draft={email.draft} emailAction={emailAction} />}
+        {markdown(formatted)}
         {linkError && <p role="alert">{linkError}</p>}
-        {followUp && <AgentFollowUps content={content} busy={busy} followUp={followUp} onOpenEvidence={onOpenEvidence} />}
+        {followUp && <AgentFollowUps content={content} busy={busy} followUp={followUp} emailAction={emailAction} urlTransform={urlTransform} onOpenEvidence={onOpenEvidence} />}
     </>
 }
 
-function AgentFollowUps({ content, busy = false, followUp, onOpenEvidence }: AgentResponseProps & { followUp: AgentFollowUpContext }) {
+function AgentFollowUps({ content, busy = false, followUp, emailAction, urlTransform, onOpenEvidence }: AgentResponseProps & { followUp: AgentFollowUpContext }) {
     const [selected, setSelected] = useState('')
     const [error, setError] = useState('')
     const [replyOpen, setReplyOpen] = useState(false)
@@ -78,7 +88,7 @@ function AgentFollowUps({ content, busy = false, followUp, onOpenEvidence }: Age
         {error && <p role="alert">{error}</p>}
         {agentResult && <article className="agent-follow-up-response" aria-label="Agent follow-up response">
             <header><strong>Follow-up</strong><span>{selected}</span></header>
-            <AgentResponse key={agentResult.correlationId} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'} followUp={followUp} onOpenEvidence={onOpenEvidence} />
+            <AgentResponse key={agentResult.correlationId} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'} followUp={followUp} emailAction={emailAction} emailDraftRequested={/\be[-\u2010-\u2015]?mail\b/i.test(selected)} urlTransform={urlTransform} onOpenEvidence={onOpenEvidence} />
         </article>}
     </section>
 }

@@ -1,4 +1,4 @@
-import type { McpServer, McpServerId, McpServerRegistry } from '../../common/index.js'
+import { measurePerformance, type McpServer, type McpServerId, type McpServerRegistry, type PerformanceReporter } from '../../common/index.js'
 import { McpHttpClient, McpTransportError } from './index.js'
 import type { McpAccessTokenProvider } from './index.js'
 
@@ -50,6 +50,7 @@ export type McpClientPoolOptions = {
     accessTokenProvider: (server: McpServer) => ReturnType<McpAccessTokenProvider>
     clientFactory?: ClientFactory
     now?: () => number
+    performanceReporter?: PerformanceReporter
 }
 
 const retryableCodes = new Set(['rate_limited', 'timeout', 'transport'])
@@ -58,10 +59,12 @@ export class McpClientPool {
     private readonly entries = new Map<McpServerId, PoolEntry>()
     private readonly createClient: ClientFactory
     private readonly now: () => number
+    private readonly performanceReporter: PerformanceReporter | undefined
     private disposed = false
 
     constructor(options: McpClientPoolOptions) {
         this.now = options.now ?? Date.now
+        this.performanceReporter = options.performanceReporter
         this.createClient = options.clientFactory ?? ((server) => new McpHttpClient({
             serverUrl: server.serverUrl,
             accessTokenProvider: () => options.accessTokenProvider(server),
@@ -193,7 +196,7 @@ export class McpClientPool {
         if (entry.client) return entry.client
         if (!entry.initialization) {
             const client = this.createClient(entry.config)
-            entry.initialization = client.initialize(signal)
+            entry.initialization = measurePerformance(`mcp.initialize.${entry.config.id}`, this.performanceReporter, () => client.initialize(signal))
                 .then(() => {
                     if (this.disposed) {
                         throw new McpPoolError('disposed', 'MCP client pool has been disposed.')

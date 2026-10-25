@@ -8,6 +8,75 @@ This pass addressed two reported latency areas: initial MSX population and expli
 
 ## Changes
 
+### Plays: deadlines, query cost, and first-page results
+
+The initial Play cohort uses a **60-second total workflow deadline**, retaining its
+4-second first-result target. Desktop/Web and VS Code derive their polling deadline
+from the workflow definition plus 15 seconds of completion/transport grace (75 seconds
+for this cohort). The Dataverse MCP per-call timeout remains 60 seconds; increasing
+that setting alone cannot override the workflow deadline.
+
+Live Plays still read at most **100 rows**, in guarded **20-row keyset pages**:
+
+- Desktop and VS Code read hidden-account IDs directly from the same per-user
+  preference store used by Portfolio, as Web already does. A Play no longer needs
+  to load all accounts/opportunities just to resolve those exclusions.
+- Milestone/activity queries can project only their parent opportunity's allowlisted
+  `accountId` and `name` in the original read. Other relationships/parent fields
+  remain denied, and the existing entity/field allowlists, Deal Team user scope,
+  hidden-account exclusions, and MCP budgets remain enforced.
+- Those parent fields eliminate subsequent opportunity-lookup pages: a saturated
+  100-row Play needs five Dataverse calls, rather than up to eleven, fitting the
+  existing eight-call request budget.
+- Milestone status filters use `msp_milestonestatus` numeric choice values instead
+  of localized `msp_milestonestatusname` labels. Values come from the
+  [reviewed microsoftsales metadata captured on 2026-10-16](../research/MSX-Opportunity-Milestone-Metadata.md#milestone-status---msp_milestonestatus).
+  Responses map back to the existing canonical labels; unmapped codes fail
+  explicitly instead of inventing a status.
+
+Each fetched page is published through the existing strict workflow result contract
+while the run remains `running`. All three UIs show early results as **incomplete**,
+with no percentage or claim of full portfolio coverage. Guidance handoff is available
+only after completion. Reaching the 100-row ceiling remains partial; a full final page
+does not prove that no further rows exist. A later availability failure retains
+already-read rows with an explicit incomplete-coverage message. Cancellation/timeouts
+remain terminal, late pages cannot overwrite them, and required-source authorization failures do not
+retain previously published page data.
+
+Set `TLC_PERFORMANCE=1` before starting a live host to record:
+
+| Operation | Measurement |
+| --- | --- |
+| `plays.scope` | Delegated identity and fresh hidden-account preference resolution |
+| `mcp.initialize.dataverse` | Cold MCP initialization; warm calls reuse the client |
+| `plays.dataverse.page` | Each guarded page read, including response validation/mapping |
+
+Run telemetry's `firstResultMs` records the first published page rather than the
+last page. Timing events contain only operation, duration and outcome: no SQL,
+prompt text, customer identifiers/names, or tokens.
+
+Repeatable validation:
+
+```powershell
+npm run test:regression:plays
+npm run test:smoke:plays
+```
+
+The regression command covers contracts, numeric choice mapping, delegated queries,
+fresh exclusions, query budgets, deadline/grace behavior, cancellation/revocation,
+first-page publication, and IPC/HTTP/VS Code bridge parity. These tests are also
+discovered by the existing `npm test`, `phase0:check`, `validate:major`, and CI unit
+test runs. The smoke command builds Desktop and VS Code, then exercises first-page,
+partial, and failed results in Desktop, Web, and the VS Code webview. It also covers
+existing workflow history, card rendering, cancellation and agent-handoff journeys.
+All these UI tests remain part of the existing revamp smoke suite.
+
+The offline integration fixture executes the rendered SQL against sanitized SQLite
+tables (translating only `TOP` to `LIMIT`). With a simulated one-second page round
+trip, it verifies first results at one second and all five pages at five seconds.
+This is a deterministic regression threshold, **not a live performance benchmark**.
+Live latency must be measured separately with an authenticated MCP connection.
+
 ### Local startup diagnostic
 
 The automatic MCEM diagnostic no longer invokes Foundry. It now builds the diagnostic from the cached MSX context, local MCEM guidance, and deterministic local evaluation.

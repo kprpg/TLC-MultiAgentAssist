@@ -1,13 +1,17 @@
 import { randomUUID } from 'node:crypto'
 import {
+    measurePerformance,
     type AgentCapability,
+    type DataverseAttributeMapping,
     type DataverseEntityMap,
     type GuardedQueryRequest,
     type McpEvidenceLineage,
+    type PerformanceReporter,
     type ScopeRef
 } from '../../common/index.js'
 import {
     renderDataverseSql,
+    resolveOpportunityProjection,
     toSqlColumn,
     type DataverseDelegatedScope
 } from './query-guard.js'
@@ -39,6 +43,7 @@ export type DataverseMcpQueryContext = {
     scope: ScopeRef
     delegatedScope: DataverseDelegatedScope
     signal?: AbortSignal
+    onProgress?: (result: DataverseMcpQueryResult) => void
 }
 
 export type DataverseMcpSourceHealth = {
@@ -63,6 +68,7 @@ export type DataverseMcpReadAdapterOptions = {
     maximumRows?: number
     now?: () => Date
     createToolCallId?: () => string
+    performanceReporter?: PerformanceReporter
     // When false, omit the explicit delegated-scope IN predicate and trust the delegated token's row-level security.
     enforceDelegatedScope?: boolean
 }
@@ -89,18 +95,20 @@ export class DataverseMcpReadAdapter {
             toolCallId: this.createToolCallId()
         }
         const target = Math.max(1, Math.min(query.top, this.maximumRows))
+        const collected: Array<Record<string, unknown>> = []
 
         try {
+            context.signal?.throwIfAborted()
             if (target <= READ_QUERY_PER_CALL_LIMIT) {
-                const page = await this.fetchPage(query, context, target)
+                const page = await measurePerformance('plays.dataverse.page', this.options.performanceReporter, () => this.fetchPage(query, context, target))
                 const truncated = page.recordCount > page.records.length
                 return this.assembleResult(page.records, page.recordCount, truncated, checkedAt, lineage)
             }
             // The OOB Dataverse read_query caps each call at 20 rows and has no OFFSET, so page by primary id.
-            const collected: Array<Record<string, unknown>> = []
             let lastId: string | undefined
             let exhausted = false
             while (collected.length < target && !exhausted) {
+                context.signal?.throwIfAborted()
                 const pageSize = Math.min(READ_QUERY_PER_CALL_LIMIT, target - collected.length)
                 const pageQuery: GuardedQueryRequest = {
                     ...query,
@@ -108,21 +116,33 @@ export class DataverseMcpReadAdapter {
                     filter: lastId === undefined ? query.filter : [...query.filter, { field: 'id', operator: 'gt', value: lastId }],
                     top: pageSize
                 }
-                const page = await this.fetchPage(pageQuery, context, pageSize)
+                const page = await measurePerformance('plays.dataverse.page', this.options.performanceReporter, () => this.fetchPage(pageQuery, context, pageSize))
                 collected.push(...page.records)
                 const lastRecordId = page.records.at(-1)?.['id']
                 if (page.records.length < pageSize || typeof lastRecordId !== 'string') exhausted = true
                 else lastId = lastRecordId
+                if (context.onProgress) {
+                    const progress = this.assembleResult(sortRecords([...collected], query.orderBy), collected.length, true, checkedAt, lineage)
+                    progress.sourceHealth.detail = `Dataverse MCP loaded ${collected.length} rows; the query is still running and coverage is incomplete.`
+                    context.onProgress(progress)
+                    context.signal?.throwIfAborted()
+                }
             }
             const ordered = sortRecords(collected, query.orderBy).slice(0, target)
             return this.assembleResult(ordered, collected.length, !exhausted, checkedAt, lineage)
         } catch (error) {
             const code = errorCode(error)
-            if (code === 'aborted' || (error instanceof Error && error.name === 'AbortError')) throw error
+            if (context.signal?.aborted || code === 'aborted' || (error instanceof Error && error.name === 'AbortError')) throw error
             if (isUnauthorizedCode(code)) {
                 return failureResult('unauthorized', 'unauthorized', `Dataverse MCP delegated authorization is unavailable (${code}).`, checkedAt, lineage)
             }
             if (error instanceof DataverseMcpAdapterError) throw error
+            if (!code || !availabilityErrorCodes.has(code)) throw error
+            if (collected.length > 0) {
+                const partial = this.assembleResult(sortRecords(collected, query.orderBy), collected.length, true, checkedAt, lineage)
+                partial.sourceHealth.detail = 'Dataverse MCP stopped before all pages could be read; the displayed results are incomplete.'
+                return partial
+            }
             return failureResult('partial', 'unavailable', 'Dataverse MCP data is temporarily unavailable.', checkedAt, lineage)
         }
     }
@@ -148,6 +168,7 @@ export class DataverseMcpReadAdapter {
             arguments: { querytext },
             ...(context.signal ? { signal: context.signal } : {})
         })
+        context.signal?.throwIfAborted()
         if (result.kind !== 'untrusted-mcp-data') {
             throw new DataverseMcpAdapterError('malformed_response', 'Dataverse MCP result was not marked as untrusted data.')
         }
@@ -182,6 +203,7 @@ export class DataverseMcpReadAdapter {
 }
 
 const READ_QUERY_PER_CALL_LIMIT = 20
+const availabilityErrorCodes = new Set(['transport', 'timeout', 'rate_limited', 'circuit_open', 'disposed', 'response_too_large'])
 
 function sortRecords(
     records: Array<Record<string, unknown>>,
@@ -257,10 +279,23 @@ function mapRowsToCanonical(
         if (!attribute) throw new DataverseMcpAdapterError('malformed_response', 'Dataverse field mapping disappeared after translation.')
         return attribute
     })
-    return rows.map((row) => Object.fromEntries(selected.map((attribute) => [
-        attribute.canonical,
-        row[toSqlColumn(attribute.logicalName)] ?? row[attribute.logicalName] ?? null
-    ])))
+    const projection = resolveOpportunityProjection(entityMap, query)
+    return rows.map((row) => Object.fromEntries([
+        ...selected.map((attribute) => [
+            attribute.canonical,
+            canonicalAttributeValue(attribute, row[toSqlColumn(attribute.logicalName)] ?? row[attribute.logicalName] ?? null)
+        ]),
+        ...projection.map((field) => [field.canonical, row[field.canonical] ?? row[field.canonical.toLowerCase()] ?? null])
+    ]))
+}
+
+function canonicalAttributeValue(attribute: DataverseAttributeMapping, value: unknown): unknown {
+    if (!attribute.optionSet || value === null) return value
+    const code = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value
+    const label = Object.entries(attribute.optionSet).find(([, candidate]) => candidate === code)?.[0]
+    if (label) return label
+    if (typeof value === 'string' && Object.hasOwn(attribute.optionSet, value)) return value
+    throw new DataverseMcpAdapterError('malformed_response', `Dataverse returned an unmapped choice value for ${attribute.canonical}.`)
 }
 
 function failureResult(

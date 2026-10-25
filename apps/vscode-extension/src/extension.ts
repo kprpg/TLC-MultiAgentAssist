@@ -14,6 +14,8 @@ import { createMutationSession } from '../../../packages/orchestrator/mutations/
 import { MutationSyncClient } from '../../shared/mutation-sync.js'
 import { accountSchema } from '../../../packages/common/contracts/index.js'
 import { seismicGraphScopes } from '../../../packages/common/configuration/knowledge-sources.js'
+import { meetingScopesFor, type MeetingTokenPurpose } from '../../../packages/common/configuration/meeting-sources.js'
+import { meetingSignInFailure } from '../../../packages/connectors/common/meeting-source.js'
 
 let disposeCurrentProvider: (() => Promise<void>) | undefined
 
@@ -372,6 +374,16 @@ export function activate(context: vscode.ExtensionContext): void {
                 const session = await vscode.authentication.getSession('microsoft', [...seismicGraphScopes], { createIfNone: true })
                 if (!session || session.account.label.toLowerCase() !== account.toLowerCase()) {
                     throw new Error('The Seismic Graph session must match the TLC account.')
+                }
+                return session.accessToken
+            }, async (purpose: MeetingTokenPurpose) => {
+                const purposeScopes = (value: MeetingTokenPurpose) => [...meetingScopesFor(value)]
+                let session: vscode.AuthenticationSession | undefined
+                try {
+                    session = await vscode.authentication.getSession('microsoft', purposeScopes(purpose), { createIfNone: true })
+                } catch (error) { throw meetingSignInFailure(error) }
+                if (!session || session.account.label.toLowerCase() !== account.toLowerCase()) {
+                    throw meetingSignInFailure(`the Microsoft account used for Teams meetings (${session?.account.label ?? 'none'}) is not the TLC account`)
                 }
                 return session.accessToken
             }))

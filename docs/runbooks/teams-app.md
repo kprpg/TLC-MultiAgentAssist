@@ -585,6 +585,14 @@ temporary acquisition failures now have distinct, actionable errors with their
 correlation reference, rather than a generic `operation failed`. An optional
 Graph-authentication failure does not discard a valid MSX connection.
 
+In a Graph-enabled live profile, **Teams meeting** first lists the signed-in
+user's own recent (14 days) past Teams meetings from their calendar, newest
+first, by title and date/time. Nothing is read from a transcript until the user
+chooses a meeting; the choice is sent as a short opaque handle that the server
+re-verifies against the user's current calendar, never as a client-supplied
+link. Choosing a meeting then runs the same transcript acquisition as a pasted
+join link. The join-link field remains as a fallback.
+
 Sample mode retains the bundled transcript picker and also supports
 **Paste / upload** against the canonical sample store. No extraction path writes
 MSX automatically, changes tenant policy, or treats manual input as Graph

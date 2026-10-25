@@ -2,6 +2,7 @@ import { createServer, type Server } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildWebApiHandler, type WebRuntime } from '../../../apps/web/src/app.js'
 import { contractVersion } from '../../../packages/common/index.js'
+import { meetingSourceError } from '../../../packages/connectors/common/meeting-source.js'
 
 const authenticationHeaders = {
     'x-ms-client-principal': 'encoded-principal',
@@ -394,6 +395,49 @@ describe('hosted web API', () => {
         expect(response.status).toBe(200)
         expect(await response.json()).toMatchObject([{ id: 'transcript-1', subject: 'Executive review' }])
         expect(listMeetingTranscripts).toHaveBeenCalledWith('opportunity-1')
+    })
+
+    it('lists calendar meetings without a segment count so the picker can show their date and time', async () => {
+        const listMeetingTranscripts = vi.fn(async () => [
+            { id: 'gm_abcdefghijklmnopqrstuvwxyz012345', subject: 'Arc review', occurredAt: '2026-10-23T14:00:00.000Z', meetingType: 'customer' as const, source: 'teams' as const }
+        ])
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => ({ ...runtime(), listMeetingTranscripts }) }))
+
+        const response = await fetch(`${baseUrl}/api/meeting-transcripts?opportunityId=opportunity-1`, { headers: authenticationHeaders })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual([{ id: 'gm_abcdefghijklmnopqrstuvwxyz012345', subject: 'Arc review', occurredAt: '2026-10-23T14:00:00.000Z', meetingType: 'customer', source: 'teams' }])
+    })
+
+    it('shows the actionable reason when Teams meetings are unavailable instead of the generic server failure', async () => {
+        const reason = meetingSourceError('denied', 'http_403')
+        const listMeetingTranscripts = vi.fn(async () => { throw reason })
+        const proposeMeetingChangeSet = vi.fn(async () => { throw meetingSourceError('no-transcript') })
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => ({ ...runtime(), listMeetingTranscripts, proposeMeetingChangeSet }) }))
+
+        const listed = await fetch(`${baseUrl}/api/meeting-transcripts?opportunityId=opportunity-1`, { headers: authenticationHeaders })
+        expect(listed.status).toBe(409)
+        expect(await listed.json()).toMatchObject({ code: 'denied', error: reason.message })
+        expect(reason.message).toContain('Paste / upload')
+
+        const proposed = await fetch(`${baseUrl}/api/opportunities/opportunity-1/meeting-change-set`, {
+            method: 'POST',
+            headers: { ...authenticationHeaders, 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' },
+            body: JSON.stringify({ transcriptId: 'gm_abcdefghijklmnopqrstuvwxyz012345' })
+        })
+        expect(proposed.status).toBe(409)
+        expect(await proposed.json()).toMatchObject({ code: 'no-transcript' })
+        expect(proposeMeetingChangeSet).toHaveBeenCalledWith({ opportunityId: 'opportunity-1', transcriptId: 'gm_abcdefghijklmnopqrstuvwxyz012345' })
+    })
+
+    it('still masks unexpected failures with the generic message', async () => {
+        const listMeetingTranscripts = vi.fn(async () => { throw new Error('connection string leaked here') })
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => ({ ...runtime(), listMeetingTranscripts }) }))
+
+        const response = await fetch(`${baseUrl}/api/meeting-transcripts`, { headers: authenticationHeaders })
+
+        expect(response.status).toBe(500)
+        expect(JSON.stringify(await response.json())).not.toContain('connection string')
     })
 
     it('fetches a single meeting transcript by id', async () => {

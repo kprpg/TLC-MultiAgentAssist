@@ -38,6 +38,40 @@ describe('live source bootstrap without hosted optional dependencies', () => {
       expect(transport).toHaveBeenCalled()
     } finally { await services.dispose() }
   })
+  it('lists the signed-in user\'s recent Teams meetings with a separate Graph token and verifies a handle before resolving it', async () => {
+    const teams = 'https://teams.microsoft.com/l/meetup-join/19%3ameeting_abc%40thread.v2/0?context=%7b%7d'
+    const getToken = vi.fn(async (resource: 'msx' | 'mcp' | 'graph') => `${resource}-token`)
+    const transport = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input))
+      expect(init?.method ?? 'GET').toBe('GET')
+      if (url.hostname !== 'graph.microsoft.com') return Response.json({ value: [] })
+      expect(new Headers(init?.headers).get('authorization')).toContain('graph-token')
+      if (url.pathname === '/v1.0/me/calendarView') {
+        return Response.json({ value: [{
+          id: 'event-1', subject: 'Arc review', isOnlineMeeting: true, isCancelled: false,
+          start: { dateTime: '2026-10-23T14:00:00.0000000', timeZone: 'UTC' }, end: { dateTime: '2026-10-23T15:00:00.0000000', timeZone: 'UTC' },
+          onlineMeeting: { joinUrl: teams }, attendees: []
+        }] })
+      }
+      if (url.pathname === '/v1.0/me') return Response.json({ mail: 'me@contoso.com' })
+      if (url.pathname === '/v1.0/me/onlineMeetings') return Response.json({ value: [{ id: 'online-1' }] })
+      return Response.json({ error: { code: 'NotFound' } }, { status: 404 })
+    })
+    const services = await createLiveApplicationServices({
+      environment: {}, msxResource: 'https://microsoftsales.crm.dynamics.com', guidanceMode: 'deterministic',
+      getToken, preferences: new MemoryPortfolioPreferenceStore(), fetchImplementation: transport
+    })
+    try {
+      const listed = await services.listRecentMeetings()
+      expect(listed).toHaveLength(1)
+      expect(listed[0]).toMatchObject({ subject: 'Arc review', occurredAt: '2026-10-23T14:00:00.000Z', meetingType: 'internal', source: 'teams' })
+      expect(listed[0]!.id).toMatch(/^gm_[A-Za-z0-9_-]{32}$/)
+      expect(JSON.stringify(listed)).not.toContain('teams.microsoft.com')
+      expect(getToken).toHaveBeenCalledWith('graph')
+      await expect(services.resolveRecentMeeting(listed[0]!.id)).resolves.toEqual({ meetingId: 'online-1', meetingType: 'internal' })
+      await expect(services.resolveRecentMeeting(`gm_${'z'.repeat(32)}`)).rejects.toMatchObject({ code: 'meeting_not_in_recent_calendar' })
+    } finally { await services.dispose() }
+  })
   it('requires an explicit deterministic choice instead of falling back from broken Foundry', async () => {
     await expect(createLiveApplicationServices({
       environment: {}, msxResource: 'https://microsoftsales.crm.dynamics.com',

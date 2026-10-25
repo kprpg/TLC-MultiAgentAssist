@@ -35,7 +35,7 @@ export function NextBestActions({
     const recommendations = evaluation?.recommendations ?? []
 
     return (
-        <aside id="next-best-actions-panel" className="pane next-best-actions-pane" aria-labelledby="next-best-actions-title">
+        <aside id="next-best-actions-panel" className="pane next-best-actions-pane pane-scroll" aria-labelledby="next-best-actions-title">
             <div className="next-best-actions-heading">
                 <div>
                     <span className="eyebrow">ROLE BASED</span>

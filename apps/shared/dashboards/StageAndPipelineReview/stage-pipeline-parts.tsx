@@ -23,10 +23,11 @@ export function OpenInMsx({ entity, id, label = 'Open in MSX' }: { entity: 'oppo
     return <a className="sprv-open" href={msxRecordUrl(entity, id)} target="_blank" rel="noopener noreferrer" title={`${label} (opens in your browser)`} aria-label={`${label}: ${id}`}>↗</a>
 }
 
-export function RowActions({ row, marks, onToggle }: {
+export function RowActions({ row, marks, onToggle, onEdit }: {
     row: StagePipelineOpportunity
     marks: ReviewMarks
     onToggle(kind: keyof ReviewMarks, id: string): void
+    onEdit?: (row: StagePipelineOpportunity) => void
 }): ReactElement {
     const [copied, setCopied] = useState(false)
     const copy = () => {
@@ -37,6 +38,7 @@ export function RowActions({ row, marks, onToggle }: {
     }
     return <span className="sprv-row-actions">
         <OpenInMsx entity="opportunity" id={row.id} />
+        {onEdit && row.editable && <button type="button" aria-label={`Add forecast comment to ${row.name}`} title="Add forecast comment" onClick={() => onEdit(row)}>✎</button>}
         <button type="button" aria-pressed={marks.focus.has(row.id)} aria-label={`${marks.focus.has(row.id) ? 'Remove focus from' : 'Focus'} ${row.name}`} title="Focus" onClick={() => onToggle('focus', row.id)}>{marks.focus.has(row.id) ? '★' : '☆'}</button>
         <button type="button" aria-pressed={marks.reviewed.has(row.id)} aria-label={`${marks.reviewed.has(row.id) ? 'Unmark' : 'Mark'} ${row.name} as reviewed`} title="Reviewed" onClick={() => onToggle('reviewed', row.id)}>{marks.reviewed.has(row.id) ? '✔' : '✓'}</button>
         <a className="sprv-mail" href={`mailto:?subject=${encodeURIComponent(`${row.customer} - ${row.name}`)}`} aria-label={`Email about ${row.name}`} title="Email">✉</a>

@@ -204,6 +204,11 @@ up" confusion:
 Guidance:
 
 - To iterate quickly with breakpoints, keep using **F5**.
+- For a quieter Debug Console, select **Run TLC Assist Extension (isolated)**. Its
+  `--disable-extensions` argument disables other installed extensions only in the
+  development-host window, while TLC and built-in Microsoft authentication remain
+  available. It does not change TLC settings, storage, your normal editor, or the existing
+  integration-testing profiles. Remaining Node warnings are not suppressed.
 - To use the extension in your everyday editor without the debugger, use
   `npm run ext:reinstall:insiders`.
 - Avoid running both at once for the same editor: if the Extension Development Host and an

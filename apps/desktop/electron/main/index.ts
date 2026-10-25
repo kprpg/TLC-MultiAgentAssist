@@ -40,6 +40,8 @@ import { createSellerDashboardHost } from '../../../../packages/orchestrator/sel
 import { createSeReportingHost, seReportingScopes } from '../../../../packages/orchestrator/se-reporting/composition.js'
 import { createSeReportingIpcHandler, seReportingIpcChannel } from './se-reporting-ipc.js'
 import { createSellerDashboardIpcHandler, sellerDashboardIpcChannel } from './seller-dashboard-ipc.js'
+import { createStagePipelineIpcHandler, stagePipelineIpcChannel } from './stage-pipeline-ipc.js'
+import { createStagePipelineReviewHost } from '../../../../packages/orchestrator/stage-pipeline-review.js'
 import { desktopWindowBounds } from './window-bounds.js'
 import { createMutationSyncIpcHandler, createPortfolioIpcHandlers } from './portfolio-ipc.js'
 import { createPresentationOwner } from '../../../shared/presentation-owner.js'
@@ -49,6 +51,9 @@ import { bindSourceToken } from '../../../../packages/orchestrator/mutations/cor
 import { cacheControlRequestSchema, cacheControlResponseSchema } from '../../../../packages/common/contracts/cache-sync.js'
 import { createKnowledgeSearch } from '../../../../packages/orchestrator/knowledge-search.js'
 import { seismicGraphDefaultScope, seismicGraphScopes } from '../../../../packages/common/configuration/knowledge-sources.js'
+import { meetingGraphDefaultScope, meetingScopesFor } from '../../../../packages/common/configuration/meeting-sources.js'
+import { assertCliTokenCanReadMeetings, meetingSignInFailure } from '../../../../packages/connectors/common/meeting-source.js'
+import { GraphMeetingConnector } from '../../../../packages/connectors/graph/meetings.js'
 import { createKnowledgeSearchIpcHandler, knowledgeSearchIpcChannel } from './knowledge-ipc.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
@@ -127,6 +132,11 @@ const sellerDashboardHost = createSellerDashboardHost({
 })
 const seReportingHost = createSeReportingHost({
   mode: dataMode,
+  // The live MSX connector is created below; it is only dereferenced when a report is generated.
+  dataverse: {
+    readRows: (entitySet, parameters) => liveMsxConnector!.readRows(entitySet, parameters),
+    listMilestoneTeamMilestoneIds: (userId) => liveMsxConnector!.listMilestoneTeamMilestoneIds(userId)
+  },
   identity: async () => {
     const email = (await tokenProvider.getAuthStatus()).userEmail
     return email ? { key: email, email } : undefined
@@ -158,15 +168,27 @@ const localStoreMsxConnector = liveMsxConnector ? undefined : createLocalStoreMs
   TLC_DATA_STORE_PATH: process.env['TLC_DATA_STORE_PATH']?.trim() || resolve(app.getPath('userData'), 'sample.sqlite')
 })
 const msxConnector = liveMsxConnector ?? localStoreMsxConnector ?? new FixtureMsxConnector()
+const stagePipelineHost = liveMsxConnector
+  ? createStagePipelineReviewHost({ mode: 'live', source: liveMsxConnector })
+  : createStagePipelineReviewHost({ mode: 'sample' })
 const creationWriter = localStoreMsxConnector?.createRecordCreationWriter()
 const recordCreation = new RecordCreationService(
   msxConnector,
   creationWriter ?? liveMsxConnector ?? new SampleRecordCreationCatalog(msxConnector),
   creationWriter ? { writer: creationWriter } : {}
 )
-// Meeting capture: absent for the in-memory fixture; the SQLite test store implements it directly,
-// live wraps the delegated MSX connection (Graph transcript acquisition is not wired yet - paste/upload only).
-const meetingConnector = liveMsxConnector ? new LiveMeetingCaptureConnector(liveMsxConnector) : localStoreMsxConnector
+// Meeting capture: absent for the in-memory fixture; the SQLite test store implements it directly. Live wraps the
+// delegated MSX connection and lists/reads Teams meetings with a separate delegated Graph token.
+const meetingGraph = liveMsxConnector ? new GraphMeetingConnector(async (purpose) => {
+  const interactive = authentication?.mode === 'interactive-browser'
+  let token: Awaited<ReturnType<typeof credentials.msx.getToken>>
+  try { token = await credentials.msx.getToken(interactive ? [...meetingScopesFor(purpose)] : meetingGraphDefaultScope) } catch (error) {
+    throw meetingSignInFailure(error)
+  }
+  if (!token) throw meetingSignInFailure('A delegated Microsoft Graph token was not returned.')
+  return interactive ? token.token : assertCliTokenCanReadMeetings(token.token, purpose)
+}) : undefined
+const meetingConnector = liveMsxConnector ? new LiveMeetingCaptureConnector(liveMsxConnector, undefined, meetingGraph) : localStoreMsxConnector
 const foundryOpenAIClient = runtimeEnvironment
   ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry)
   : undefined
@@ -267,6 +289,7 @@ const configuredWorkflowHost = dataMode === 'sample' ? undefined : createLivePla
   registry: mcpRegistry,
   policy: mcpPolicy,
   entityMap: dataverseEntityMap,
+  ...(reportPerformance ? { performanceReporter: reportPerformance } : {}),
   getAccessToken: async (server: McpServer) => {
     const token = await credentials.msx.getToken(server.authentication.scopes)
     if (!token) throw new Error('A delegated MCP access token is unavailable.')
@@ -277,10 +300,8 @@ const configuredWorkflowHost = dataMode === 'sample' ? undefined : createLivePla
     return liveMsxConnector.getCurrentUserId()
   },
   resolveExcludedAccountIds: async () => {
-    if (!liveMsxConnector) return []
-    return (await liveMsxConnector.listAccounts({ includeHidden: true }))
-      .filter((account) => account.visibility === 'hidden')
-      .map((account) => account.id)
+    if (!liveMsxConnector) throw new Error('Live Plays require the live MSX connection.')
+    return (await portfolioPreferenceStore.read(await liveMsxConnector.getCurrentUserId())).hiddenAccountIds
   },
   onStepError: (info) => {
     console.error(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? 'required' : 'optional'} step failed: ${info.message}`)
@@ -361,6 +382,11 @@ function registerIpc(): void {
   ipcMain.handle(sellerDashboardIpcChannel, (event, request: unknown) => {
     assertTrustedSender(event)
     return invokeSellerDashboard(request)
+  })
+  const invokeStagePipeline = createStagePipelineIpcHandler(stagePipelineHost)
+  ipcMain.handle(stagePipelineIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return invokeStagePipeline(request)
   })
   const invokeVoice = createVoiceIpcHandler(voiceHost)
   ipcMain.handle(voiceIpcChannel, (event, request: unknown) => {

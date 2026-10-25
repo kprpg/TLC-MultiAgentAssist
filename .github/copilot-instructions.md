@@ -31,6 +31,7 @@ apps/shared             genuinely cross-UI code only (e.g. discovery)
 ```
 
 ### Rule 1 — The backend is stable and lives behind versioned contracts
+
 - Treat `packages/common`, `packages/connectors`, and `packages/agents` as a stable backend.
 - All cross-layer data crosses a **Zod contract** in `packages/common`. Changing a contract shape is a
   breaking change: bump the relevant version field (`contractVersion`, `workflowContractVersion`) and
@@ -41,6 +42,7 @@ apps/shared             genuinely cross-UI code only (e.g. discovery)
   contracts.
 
 ### Rule 2 — The orchestrator/harness is the single middle layer
+
 - `ThinSliceOrchestrator` (`packages/orchestrator/index.ts`) and
   `SharedWorkflowHost`/`WorkflowHost` (`packages/orchestrator/workflows/host.ts`) are the one harness
   shared by **all** hosts. Do not fork per-UI orchestrators or re-implement orchestration in a host.
@@ -52,15 +54,19 @@ apps/shared             genuinely cross-UI code only (e.g. discovery)
   [MOD-2](../docs/engineering/01-modularization.md) / [TEST-3](../docs/engineering/04-testing-strategy.md).
 
 ### Rule 3 — Dependencies flow one way
+
 - Allowed: `apps/*` → `packages/orchestrator` → `packages/{common,connectors,agents}`.
 - Forbidden: core depending on an app; one app depending on another app's internals (e.g. web importing
   `apps/desktop/...`). If two UIs need the same code, lift it into `packages/*` or `apps/shared`, don't
   cross-import. See [MOD-5](../docs/engineering/01-modularization.md).
 
 ### Rule 4 — UI layers are isolated and interchangeable
-- Keep Desktop, VS Code webview, and Web as thin view layers. Shared presentation/logic (view-model
+
+- Keep Desktop, VS Code webview,Web and TEAMs as thin view layers. Shared presentation/logic (view-model
   mapping, markdown rendering, prompt catalog, sort/sample helpers) belongs in a **browser-safe**
   shared module, not copied per UI. Do not add a fourth copy of logic that already exists elsewhere.
+- All UI layers must rely on the orchestrator for business logic and not implement it themselves.
+- All UI layers must present a consistent user experience and interface, ensuring that the look, feel, and behavior are uniform across Desktop, VS Code webview, Web, and TEAMs, and whenever a change is made in one layer, it should be reflected consistently in the others.
 - The VS Code webview cannot import Node-backed `packages/common`; shared UI code it consumes must be
   browser-safe (no Node built-ins). See the renderer-import memory and
   [MOD-3/MOD-4](../docs/engineering/01-modularization.md).
@@ -69,28 +75,33 @@ apps/shared             genuinely cross-UI code only (e.g. discovery)
   See [UI-1](../docs/engineering/02-ui-layout.md).
 
 ### Rule 5 — One composition root per host
+
 - Connector/agent/workflow-host wiring is assembled once per host (desktop main, web runtime, vscode
   provider). Don't duplicate the capability list
   (`account-pulse`, `mcem-coach`, `pursuit-executive`, `risk-solution-play`) or re-hand-wire assembly
   inline. Prefer the shared factory path. See [MOD-1](../docs/engineering/01-modularization.md).
 
 ### Rule 6 — Tests mirror the layer you touched
+
 Before a major check-in, add/extend tests for the layer(s) you changed:
+
 - **Backend** (common/connectors/agents): unit + contract tests; deterministic fixtures, no live
   network in the default suite (live tests stay opt-in behind `TLC_RUN_LIVE_SMOKE`).
 - **Orchestrator/harness**: operation unit tests + transport-parity + lifecycle tests.
 - **Functional e2e**: a journey assertion on the affected surface(s).
 - **UI**: static render at minimum; interaction tests for new interactive components.
 - Agent behavior changes must update/execute the relevant `golden-scenarios.json`.
-See [`04-testing-strategy.md`](../docs/engineering/04-testing-strategy.md) for the full taxonomy and
-the currently-missing types (security, a11y, performance, golden-scenario evaluation).
+  See [`04-testing-strategy.md`](../docs/engineering/04-testing-strategy.md) for the full taxonomy and
+  the currently-missing types (security, a11y, performance, golden-scenario evaluation).
 
 ### Rule 7 — Teams stays a stub until explicitly built
+
 Teams is not implemented. Any Teams work is a **stub behind the same orchestrator contracts** — no
 business logic in a Teams layer, no new backend coupling. See
 [MOD-6](../docs/engineering/01-modularization.md).
 
 ### Rule 8 — Security and privacy are non-negotiable
+
 - Preserve the trust boundaries: Electron `assertTrustedSender`, web same-origin + Easy-Auth checks,
   the Dataverse `query-guard` allowlists, MCP default-deny + approval gates + field redaction, and
   HTTPS-only evidence links.
@@ -99,7 +110,9 @@ business logic in a Teams layer, no new backend coupling. See
 - Run secret scanning on changed files before committing.
 
 ## Required checks before a major check-in
+
 Run and keep green:
+
 - `npm run phase0:check` — structure + preflight + lint + typecheck + unit/contract tests.
 - `npm run validate:major` — typecheck + tests + desktop smoke (for host/UI/orchestrator changes).
 - For UI/e2e-affecting changes also run the relevant smoke:
@@ -109,6 +122,7 @@ Run and keep green:
   [TEST-9](../docs/engineering/04-testing-strategy.md).
 
 ## Definition of done for a major change
+
 1. Smallest change that fully satisfies the request; no unrelated edits.
 2. Boundaries respected (Rules 1–5, 8); no new cross-app or UI→connector imports.
 3. Contracts versioned if shapes changed; manifests/golden-scenarios in sync.

@@ -1,6 +1,8 @@
-import type {
-    GuardedQueryRequest,
-    WorkflowResultCard
+import {
+    measurePerformance,
+    type GuardedQueryRequest,
+    type PerformanceReporter,
+    type WorkflowResultCard
 } from '../../common/index.js'
 import type {
     DataverseDelegatedScope,
@@ -32,7 +34,8 @@ export class InitialWorkflowConnectorExecutor implements WorkflowConnectorExecut
     constructor(
         private readonly dataverse: DataverseReader,
         private readonly msx: MsxReadConnector,
-        private readonly resolveDelegatedScope: ResolveDelegatedScope
+        private readonly resolveDelegatedScope: ResolveDelegatedScope,
+        private readonly performanceReporter?: PerformanceReporter
     ) { }
 
     async execute(
@@ -42,17 +45,22 @@ export class InitialWorkflowConnectorExecutor implements WorkflowConnectorExecut
         const workflowId = requireInitialWorkflowId(context.workflowId)
         const input = parseInitialWorkflowInput(workflowId, context.input)
         if (step.connector === 'dataverse-mcp') {
+            const onProgress = context.onProgress
             const queryContext = {
                 correlationId: context.correlationId,
                 capability: 'account-pulse' as const,
                 scope: context.scope,
-                delegatedScope: await this.resolveDelegatedScope(context.scope),
-                signal: context.signal
+                delegatedScope: await measurePerformance('plays.scope', this.performanceReporter, async () => this.resolveDelegatedScope(context.scope)),
+                signal: context.signal,
+                ...(onProgress ? { onProgress: (progress: Awaited<ReturnType<DataverseReader['query']>>) => onProgress({
+                    state: progress.state, data: progress.records, rowCount: progress.recordCount, truncated: progress.truncated,
+                    lineage: progress.lineage, sourceHealth: progress.sourceHealth
+                }) } : {})
             }
             const result = await this.dataverse.query(buildInitialWorkflowQuery(workflowId, input), queryContext)
             return {
                 state: result.state,
-                data: await this.attachOpportunityAccounts(workflowId, result.records, queryContext),
+                data: result.records,
                 rowCount: result.recordCount,
                 truncated: result.truncated,
                 lineage: result.lineage,
@@ -71,46 +79,9 @@ export class InitialWorkflowConnectorExecutor implements WorkflowConnectorExecut
         return fromMsxResult(result)
     }
 
-    // Milestone and activity rows only carry an opportunity id; resolve the owning account so every play result can hand off to its agent.
-    private async attachOpportunityAccounts(
-        workflowId: InitialWorkflowId,
-        records: Array<Record<string, unknown>>,
-        queryContext: Parameters<DataverseReader['query']>[1]
-    ): Promise<Array<Record<string, unknown>>> {
-        if (opportunityScopedWorkflows.has(workflowId) || workflowId === 'WF-009') return records
-        const opportunityIds = [...new Set(records.flatMap((record) => text(record.opportunityId) && !text(record.accountId) ? [text(record.opportunityId)!] : []))]
-        if (opportunityIds.length === 0) return records
-        const accounts = new Map<string, { accountId: string; name?: string }>()
-        try {
-            for (let start = 0; start < opportunityIds.length; start += opportunityLookupBatchSize) {
-                const batch = opportunityIds.slice(start, start + opportunityLookupBatchSize)
-                const lookup = await this.dataverse.query({
-                    entity: 'opportunity', select: ['id', 'accountId', 'name'],
-                    filter: [{ field: 'id', operator: 'in', value: batch }],
-                    orderBy: [], top: batch.length, expand: []
-                }, queryContext)
-                for (const row of lookup.records) {
-                    const id = text(row.id)
-                    const accountId = text(row.accountId)
-                    if (id && accountId) accounts.set(id, { accountId, ...(text(row.name) ? { name: text(row.name)! } : {}) })
-                }
-            }
-        } catch (error) {
-            if (queryContext.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error
-        }
-        return records.map((record) => {
-            const match = accounts.get(text(record.opportunityId) ?? '')
-            if (!match || text(record.accountId)) return record
-            return {
-                ...record,
-                accountId: match.accountId,
-                ...(match.name && !text(record.opportunityName) ? { opportunityName: match.name } : {})
-            }
-        })
-    }
 }
 
-const opportunityLookupBatchSize = 50
+const opportunityProjection: GuardedQueryRequest['expand'] = [{ relationship: 'opportunity', select: ['accountId', 'name'] }]
 
 export class InitialWorkflowResultAssembler implements WorkflowResultAssembler {
     assemble(context: Parameters<WorkflowResultAssembler['assemble']>[0]): InitialWorkflowOutput {
@@ -164,7 +135,7 @@ export function buildInitialWorkflowQuery(workflowId: InitialWorkflowId, input: 
                     { field: 'dueDate', operator: 'on-or-after', value: input.asOf },
                     { field: 'dueDate', operator: 'on-or-before', value: addDays(input.asOf, input.meetingWindowDays ?? 14) }
                 ],
-                orderBy: [{ field: 'dueDate', direction: 'asc' }], top: 500, expand: []
+                orderBy: [{ field: 'dueDate', direction: 'asc' }], top: 500, expand: opportunityProjection
             }
         case 'WF-009':
             return {
@@ -178,7 +149,7 @@ export function buildInitialWorkflowQuery(workflowId: InitialWorkflowId, input: 
                     { field: 'dueDate', operator: 'on-or-before', value: subtractDays(input.asOf, input.followUpAfterDays ?? 14) },
                     { field: 'status', operator: 'ne', value: 'Completed' }
                 ],
-                orderBy: [{ field: 'dueDate', direction: 'asc' }], top: 500, expand: []
+                orderBy: [{ field: 'dueDate', direction: 'asc' }], top: 500, expand: opportunityProjection
             }
         case 'WF-012':
             return milestoneQuery(input.asOf, [])
@@ -200,7 +171,7 @@ function milestoneQuery(asOf: string, extraFilters: GuardedQueryRequest['filter'
     return {
         entity: 'engagementMilestone', select: ['id', 'opportunityId', 'name', 'status', 'targetDate'],
         filter: [{ field: 'targetDate', operator: 'on-or-before', value: asOf }, ...extraFilters],
-        orderBy: [{ field: 'targetDate', direction: 'asc' }], top: 500, expand: []
+        orderBy: [{ field: 'targetDate', direction: 'asc' }], top: 500, expand: opportunityProjection
     }
 }
 

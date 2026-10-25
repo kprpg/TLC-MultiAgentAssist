@@ -2,10 +2,10 @@ import { createServer } from 'node:http'
 import { resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import { buildWebApiHandler, type WebRuntime } from './app.js'
-import { assertLoopbackHost, createAzureCliAuthentication, createAzureCliGraphKnowledgeTokenProvider, createSampleAuthentication } from './authentication.js'
+import { assertLoopbackHost, createAzureCliAuthentication, createAzureCliGraphKnowledgeTokenProvider, createAzureCliGraphMeetingTokenProvider, createSampleAuthentication } from './authentication.js'
 import { buildStaticHandler, setSecurityHeaders } from './hosting.js'
 import { listenWebServer } from './listener.js'
-import { createHostedRuntimeFactory, createHostedWorkflowHostResolver, createWebSellerDashboardHost, createWebSeReportingResolver } from './runtime.js'
+import { createHostedRuntimeFactory, createHostedWorkflowHostResolver, createWebSellerDashboardHost, createWebSeReportingResolver, createWebStagePipelineResolver } from './runtime.js'
 import { createSampleWorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import { FixtureMsxConnector } from '../../../packages/connectors/msx/index.js'
 import { createLocalStoreMsxConnector } from '../../../packages/connectors/local-store/index.js'
@@ -78,7 +78,10 @@ const sampleRuntime = sampleMsx
     : undefined
 const createRuntime = sampleRuntime
     ? () => sampleRuntime
-    : await createHostedRuntimeFactory(mode === 'azure-cli' ? { getGraphKnowledgeToken: createAzureCliGraphKnowledgeTokenProvider() } : {})
+    : await createHostedRuntimeFactory(mode === 'azure-cli' ? {
+        getGraphKnowledgeToken: createAzureCliGraphKnowledgeTokenProvider(),
+        getGraphMeetingToken: createAzureCliGraphMeetingTokenProvider()
+    } : {})
 const sampleMutationPath = resolve(process.env['TLC_MUTATION_STATE_PATH'] || '.tlc/web-sample-mutations.sqlite')
 const sampleMutationState = sampleRuntime && (process.env['TLC_BACKGROUND_SYNC'] === '1' || existsSync(sampleMutationPath))
     ? await localMutationState(sampleMutationPath) : undefined
@@ -105,6 +108,7 @@ const handleApi = buildWebApiHandler({
     createRuntime,
     resolveWorkflowHost,
     resolveSellerDashboardHost: () => createWebSellerDashboardHost(mode === 'sample' ? 'sample' : 'live'),
+    resolveStagePipelineReviewHost: createWebStagePipelineResolver(mode),
     resolveSeReportingHost: createWebSeReportingResolver(mode, 'foundryCredential' in createRuntime ? createRuntime.foundryCredential : undefined),
     ...(authenticate ? { authenticate } : {}),
     ...(mode !== 'easy-auth' ? { shutdown: closeLocalServer } : {}),

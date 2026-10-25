@@ -670,10 +670,10 @@ export class LiveMsxConnector implements MsxConnector {
     return context.memberships
   }
 
-  private async readMilestoneTeamMemberships(): Promise<Array<{ milestoneId: string }>> {
+  private async readMilestoneTeamMemberships(userId?: string): Promise<Array<{ milestoneId: string }>> {
     const templateId = await this.resolveMilestoneTeamTemplateId().catch(() => undefined)
     if (!templateId) return []
-    const userId = await this.getCurrentUserId()
+    userId ??= await this.getCurrentUserId()
     const teams = await this.requestAll<{ _regardingobjectid_value?: string }>('teams', {
       '$select': '_regardingobjectid_value',
       '$filter': `teamtype eq 1 and _teamtemplateid_value eq ${templateId} and teammembership_association/any(member:member/systemuserid eq ${userId})`
@@ -1347,6 +1347,40 @@ export class LiveMsxConnector implements MsxConnector {
         throw error
       })
     return this.currentUserIdPromise
+  }
+
+  /** Read-only, bounded Dataverse read for dashboard sources. Entity-set names are plain identifiers; every page stays on the trusted origin. */
+  async readRows(entitySet: string, parameters: Record<string, string>): Promise<Array<Record<string, unknown>>> {
+    if (!navigationPropertyPattern.test(entitySet)) throw new Error('The entity set name is invalid.')
+    return this.requestAll<Record<string, unknown>>(entitySet, parameters)
+  }
+
+  /** Opportunity ids on the given user's active deal teams. */
+  async listDealTeamOpportunityIds(userId: string): Promise<string[]> {
+    if (!guidPattern.test(userId)) throw new Error('The user id must be a valid MSX GUID.')
+    const rows = await this.requestAll<DealTeamRow>('msp_dealteams', {
+      '$select': '_msp_parentopportunityid_value',
+      '$filter': `statecode eq 0 and _msp_dealteamuserid_value eq ${userId}`
+    })
+    return unique(rows.map((row) => row._msp_parentopportunityid_value).filter(isPresent))
+  }
+
+  /** Milestone ids on the given user's milestone-team (access team) memberships. */
+  async listMilestoneTeamMilestoneIds(userId: string): Promise<string[]> {
+    if (!guidPattern.test(userId)) throw new Error('The user id must be a valid MSX GUID.')
+    return unique((await this.readMilestoneTeamMemberships(userId)).map((membership) => membership.milestoneId))
+  }
+
+  /** Parent opportunity ids of the given user's milestone-team (access team) memberships. */
+  async listMilestoneTeamOpportunityIds(userId: string): Promise<string[]> {
+    if (!guidPattern.test(userId)) throw new Error('The user id must be a valid MSX GUID.')
+    const memberships = await this.readMilestoneTeamMemberships(userId)
+    if (memberships.length === 0) return []
+    const rows = await this.requestByIds<{ msp_engagementmilestoneid: string; _msp_opportunityid_value?: string }>(
+      'msp_engagementmilestones', 'msp_engagementmilestoneid',
+      unique(memberships.map((membership) => membership.milestoneId)), 'msp_engagementmilestoneid,_msp_opportunityid_value'
+    )
+    return unique(rows.map((row) => row._msp_opportunityid_value).filter(isPresent))
   }
 
   async assertNativeIdentity(entraObjectId: string): Promise<string> {

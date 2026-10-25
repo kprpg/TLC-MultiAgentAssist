@@ -39,6 +39,12 @@ describe('initial workflow cohort contracts', () => {
         }
     })
 
+    it('allows a minute for paginated live reads without relaxing the first-result target', () => {
+        for (const definition of initialWorkflowDefinitions) {
+            expect(definition.sla).toEqual({ targetMs: 4_000, timeoutMs: 60_000 })
+        }
+    })
+
     it('applies defaults while rejecting malformed, unknown, and out-of-range input', () => {
         expect(parseInitialWorkflowInput('WF-001', { asOf: '2026-09-12' })).toEqual({
             asOf: '2026-09-12', staleAfterDays: 30

@@ -2,6 +2,8 @@ import { AzureCliCredential } from '@azure/identity'
 import type { TokenCredential } from '@azure/core-auth'
 import type { AuthenticatedRequest } from './app.js'
 import { seismicGraphDefaultScope } from '../../../packages/common/configuration/knowledge-sources.js'
+import { meetingGraphDefaultScope, type MeetingTokenPurpose } from '../../../packages/common/configuration/meeting-sources.js'
+import { assertCliTokenCanReadMeetings, meetingSignInFailure } from '../../../packages/connectors/common/meeting-source.js'
 
 const defaultMsxScope = 'https://microsoftsales.crm.dynamics.com/.default'
 
@@ -59,12 +61,22 @@ export function createSampleAuthentication() {
     })
 }
 
-export function createAzureCliGraphKnowledgeTokenProvider(credential: TokenCredential = new AzureCliCredential({ processTimeoutInMs: 30_000 })) {
+export function createAzureCliGraphKnowledgeTokenProvider(credential: TokenCredential = new AzureCliCredential({ processTimeoutInMs: 30_000 }), scope: string = seismicGraphDefaultScope) {
     return async (authentication: AuthenticatedRequest): Promise<string> => {
-        const token = await credential.getToken(seismicGraphDefaultScope)
+        const token = await credential.getToken(scope)
         if (!token || readMicrosoftCorpId(token.token, '@microsoft.com').toLowerCase() !== authentication.userEmail.toLowerCase()) {
             throw new Error('The delegated Graph account must match the authenticated TLC web user.')
         }
         return token.token
+    }
+}
+
+/** Delegated Graph token for Teams meeting lookup. Azure CLI tokens lack calendar scopes, which is reported up front. */
+export function createAzureCliGraphMeetingTokenProvider(credential?: TokenCredential) {
+    const base = createAzureCliGraphKnowledgeTokenProvider(credential, meetingGraphDefaultScope)
+    return async (authentication: AuthenticatedRequest, purpose: MeetingTokenPurpose = 'transcript'): Promise<string> => {
+        let token: string
+        try { token = await base(authentication) } catch (error) { throw meetingSignInFailure(error) }
+        return assertCliTokenCanReadMeetings(token, purpose)
     }
 }

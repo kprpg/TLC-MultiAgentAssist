@@ -87,8 +87,10 @@ import { createResponseDocumentBuffer } from '../../../packages/documents/respon
 import { invokeWorkflowHost, WorkflowRuntimeError, type WorkflowHost, type WorkflowHostOperation } from '../../../packages/orchestrator/workflows/index.js'
 import { createBrowserOnlyVoiceHost, type SharedVoiceInputHost } from '../../../packages/orchestrator/voice-input.js'
 import type { SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
+import type { StagePipelineReviewHost } from '../../../packages/orchestrator/stage-pipeline-review.js'
 import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
 import { RecordCreationError } from '../../../packages/orchestrator/record-creation/service.js'
+import { MeetingSourceError } from '../../../packages/connectors/common/meeting-source.js'
 import { portfolioReadRequestSchema, portfolioIndexSchema, portfolioWorkspaceRequestSchema, portfolioWorkspaceSchema, type PortfolioReadRequest, type PortfolioIndex, type PortfolioWorkspaceRequest, type PortfolioWorkspace } from '../../../packages/common/contracts/index.js'
 import { mutationSyncRequestSchema, mutationSyncResponseSchema, type MutationSyncRequest, type MutationSyncResponse } from '../../../packages/common/contracts/cache-sync.js'
 import { MutationDispatchPreventedError } from '../../../packages/orchestrator/mutations/host.js'
@@ -145,6 +147,7 @@ export interface AuthenticatedRequest {
 export interface WebApiOptions {
     resolveSeReportingHost?(authentication: AuthenticatedRequest): Promise<SeReportingHost> | SeReportingHost
     resolveSellerDashboardHost?(authentication: AuthenticatedRequest): Promise<SellerDashboardHost> | SellerDashboardHost
+    resolveStagePipelineReviewHost?(authentication: AuthenticatedRequest): Promise<StagePipelineReviewHost> | StagePipelineReviewHost
     resolveVoiceHost?(authentication: AuthenticatedRequest): SharedVoiceInputHost
     createRuntime(authentication: AuthenticatedRequest): Promise<WebRuntime> | WebRuntime
     resolveWorkflowHost?(authentication: AuthenticatedRequest): Promise<WorkflowHost> | WorkflowHost
@@ -226,6 +229,11 @@ export function buildWebApiHandler(options: WebApiOptions) {
             }
             if (request.method === 'POST' && url.pathname === '/api/seller-dashboard' && options.resolveSellerDashboardHost) {
                 const host = await options.resolveSellerDashboardHost(authentication)
+                sendJson(response, 200, await host.invoke(await readJsonBody(request)))
+                return true
+            }
+            if (request.method === 'POST' && url.pathname === '/api/stage-pipeline-review' && options.resolveStagePipelineReviewHost) {
+                const host = await options.resolveStagePipelineReviewHost(authentication)
                 sendJson(response, 200, await host.invoke(await readJsonBody(request)))
                 return true
             }
@@ -526,6 +534,11 @@ export function buildWebApiHandler(options: WebApiOptions) {
                 return true
             }
             const source = sourceHttpFailure(error)
+            if (error instanceof MeetingSourceError) {
+                options.onError?.(error, correlationId)
+                sendJson(response, 409, { error: error.message, code: error.code, correlationId })
+                return true
+            }
             if (source) {
                 if (source.retryAfterSeconds !== undefined) response.setHeader('retry-after', String(source.retryAfterSeconds))
                 options.onError?.(new Error(`Source request failed with status ${source.status}.`), correlationId)

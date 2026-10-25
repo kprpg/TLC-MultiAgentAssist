@@ -42,7 +42,8 @@ export const meetingTranscriptSummarySchema = z.object({
     source: meetingSourceSchema,
     opportunityId: z.string().min(1).optional(),
     opportunityName: z.string().min(1).optional(),
-    segmentCount: z.number().int().nonnegative()
+    /** Absent for calendar candidates, whose transcript is only fetched after the user chooses Extract. */
+    segmentCount: z.number().int().nonnegative().optional()
 }).strict()
 
 export const meetingTranscriptSegmentSchema = z.object({

@@ -3,6 +3,7 @@ import {
     WorkflowRegistry,
     WorkflowRuntime,
     WorkflowRuntimeError,
+    initialWorkflowDefinitions,
     type WorkflowConnectorExecutor,
     type WorkflowConnectorResult
 } from '../../../packages/orchestrator/workflows/index.js'
@@ -140,6 +141,48 @@ describe('workflow runtime', () => {
             const started = engine.start({ workflowId: 'WF-001', scope })
             await vi.advanceTimersByTimeAsync(5_000)
             expect((await engine.wait(started.runId)).status).toBe('failed')
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
+    it('allows a live Play to finish after the former 12-second deadline', async () => {
+        vi.useFakeTimers()
+        try {
+            const execute = vi.fn<WorkflowConnectorExecutor['execute']>(() => new Promise((resolve) => {
+                setTimeout(() => resolve({ state: 'complete', data: [], rowCount: 0, truncated: false }), 20_000)
+            }))
+            const engine = new WorkflowRuntime(new WorkflowRegistry(initialWorkflowDefinitions), { execute })
+            const started = engine.start({ workflowId: 'WF-004', scope })
+
+            await vi.advanceTimersByTimeAsync(12_000)
+            expect(engine.get(started.runId)?.status).toBe('running')
+            await vi.advanceTimersByTimeAsync(8_000)
+
+            expect((await engine.wait(started.runId)).status).toBe('completed')
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
+    it('aborts a stalled live Play at the advertised 60-second deadline', async () => {
+        vi.useFakeTimers()
+        try {
+            let signal: AbortSignal | undefined
+            const execute: WorkflowConnectorExecutor['execute'] = (_step, context) => {
+                signal = context.signal
+                return new Promise(() => undefined)
+            }
+            const engine = new WorkflowRuntime(new WorkflowRegistry(initialWorkflowDefinitions), { execute })
+            const started = engine.start({ workflowId: 'WF-004', scope })
+
+            await vi.advanceTimersByTimeAsync(59_999)
+            expect(engine.get(started.runId)?.status).toBe('running')
+            expect(signal?.aborted).toBe(false)
+            await vi.advanceTimersByTimeAsync(1)
+
+            expect((await engine.wait(started.runId)).status).toBe('failed')
+            expect(signal?.aborted).toBe(true)
         } finally {
             vi.useRealTimers()
         }
