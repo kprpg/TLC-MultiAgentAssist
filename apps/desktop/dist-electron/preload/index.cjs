@@ -5001,7 +5001,8 @@ object({
 	source: meetingSourceSchema,
 	opportunityId: string().min(1).optional(),
 	opportunityName: string().min(1).optional(),
-	segmentCount: number().int().nonnegative()
+	/** Absent for calendar candidates, whose transcript is only fetched after the user chooses Extract. */
+	segmentCount: number().int().nonnegative().optional()
 }).strict();
 var meetingTranscriptSegmentSchema = object({
 	segmentId: string().min(1),
@@ -5626,11 +5627,32 @@ var stagePipelineThreatSchema = _enum([
 	"Medium",
 	"High"
 ]);
+var stagePipelineViewScopeSchema = _enum([
+	"mine",
+	"reports",
+	"both"
+]);
+var stagePipelineSourceNames = [
+	"opportunities",
+	"milestones",
+	"macc",
+	"acr",
+	"hierarchy"
+];
+var stagePipelineAcrSources = [
+	"sample",
+	"mint",
+	"semantic-model",
+	"derived-pipeline-only",
+	"unavailable"
+];
 var stagePipelineOpportunitySchema = object({
 	id: identifier$1,
 	number: name,
 	customer: name,
 	name,
+	owner: string().max(200),
+	editable: boolean(),
 	notes: text,
 	contact: text,
 	scope: stagePipelineScopeSchema,
@@ -5670,24 +5692,51 @@ var stagePipelineMilestoneSchema = object({
 	comment: text,
 	owner: text
 }).strict();
+var acrMonthSchema = object({
+	month,
+	actual: nonnegative.nullable(),
+	baseline: nonnegative.nullable(),
+	committed: nonnegative,
+	uncommitted: nonnegative,
+	stage1: nonnegative,
+	target: nonnegative.nullable()
+}).strict();
 var stagePipelineAcrSchema = object({
-	syncedAt: date,
-	lastActualMonth: month,
+	source: _enum(stagePipelineAcrSources),
+	syncedAt: date.nullable(),
+	lastActualMonth: month.nullable(),
 	accounts: array(object({
 		customer: name,
-		months: array(object({
-			month,
-			actual: nonnegative,
-			baseline: nonnegative,
-			committed: nonnegative,
-			uncommitted: nonnegative,
-			stage1: nonnegative,
-			target: nonnegative
-		}).strict()).length(12)
+		months: array(acrMonthSchema).length(12)
 	}).strict()).max(500)
+}).strict().superRefine((acr, context) => {
+	const connected = acr.source === "sample" || acr.source === "mint" || acr.source === "semantic-model";
+	const measured = acr.accounts.flatMap((account) => account.months).flatMap((row) => [
+		row.actual,
+		row.baseline,
+		row.target
+	]);
+	if (!(connected ? acr.syncedAt !== null && acr.lastActualMonth !== null && measured.every((value) => value !== null) : acr.syncedAt === null && acr.lastActualMonth === null && measured.every((value) => value === null))) context.addIssue({
+		code: "custom",
+		message: connected ? "A connected ACR source must provide actuals, baseline, target and sync dates." : "An unconnected ACR source must not report actuals, baseline, target or sync dates."
+	});
+});
+var stagePipelineSourceHealthSchema = object({
+	source: _enum(stagePipelineSourceNames),
+	state: _enum([
+		"complete",
+		"partial",
+		"unavailable"
+	]),
+	detail: text,
+	count: count.optional()
+}).strict();
+var stagePipelineReportSchema = object({
+	id: identifier$1,
+	displayName: name
 }).strict();
 var stagePipelineSnapshotSchema = object({
-	contractVersion: literal("1.0"),
+	contractVersion: literal("1.1"),
 	kind: literal("snapshot"),
 	mode: _enum(["sample", "live"]),
 	state: _enum(["fresh", "stale"]),
@@ -5696,10 +5745,28 @@ var stagePipelineSnapshotSchema = object({
 	owner: string().max(200),
 	asOf: date,
 	fiscalYear: number().int().min(2e3).max(2100),
+	scope: stagePipelineViewScopeSchema,
+	reports: array(stagePipelineReportSchema).max(50),
+	sources: array(stagePipelineSourceHealthSchema).max(10),
 	opportunities: array(stagePipelineOpportunitySchema).max(5e3),
 	milestones: array(stagePipelineMilestoneSchema).max(25e3),
 	acr: stagePipelineAcrSchema
 }).strict().superRefine((value, context) => {
+	if (value.scope === "mine" && value.reports.length > 0) context.addIssue({
+		code: "custom",
+		path: ["reports"],
+		message: "The seller portfolio scope has no direct reports."
+	});
+	if (new Set(value.reports.map((row) => row.id)).size !== value.reports.length) context.addIssue({
+		code: "custom",
+		path: ["reports"],
+		message: "Report ids must be unique."
+	});
+	if (new Set(value.sources.map((row) => row.source)).size !== value.sources.length) context.addIssue({
+		code: "custom",
+		path: ["sources"],
+		message: "Each source may be reported once."
+	});
 	const ids = /* @__PURE__ */ new Set();
 	for (const [index, row] of value.opportunities.entries()) {
 		if (ids.has(row.id)) context.addIssue({
@@ -5737,19 +5804,29 @@ var stagePipelineSnapshotSchema = object({
 	}
 });
 var stagePipelineUnavailableSchema = object({
-	contractVersion: literal("1.0"),
+	contractVersion: literal("1.1"),
 	kind: literal("unavailable"),
 	code: _enum([
 		"source-unavailable",
 		"unauthorized",
+		"forbidden",
+		"throttled",
 		"invalid-snapshot"
 	]),
 	message: text
 }).strict();
 object({
-	contractVersion: literal("1.0"),
-	operation: literal("get")
-}).strict();
+	contractVersion: literal("1.1"),
+	operation: _enum(["get", "refresh"]),
+	scope: stagePipelineViewScopeSchema.default("mine"),
+	reportIds: array(identifier$1).max(50).optional()
+}).strict().superRefine((value, context) => {
+	if (value.reportIds && value.scope === "mine") context.addIssue({
+		code: "custom",
+		path: ["reportIds"],
+		message: "Direct reports can only be selected for a reports scope."
+	});
+});
 union([stagePipelineSnapshotSchema, stagePipelineUnavailableSchema]);
 //#endregion
 //#region packages/common/contracts/record-creation.ts
@@ -6530,6 +6607,7 @@ electron.contextBridge.exposeInMainWorld("tlc", {
 		};
 	},
 	invokeSellerDashboard: (request) => electron.ipcRenderer.invoke("tlc:seller-dashboard", request),
+	invokeStagePipelineReview: (request) => electron.ipcRenderer.invoke("tlc:stage-pipeline-review", request),
 	invokeSeReporting: (request) => electron.ipcRenderer.invoke("tlc:se-reporting", request),
 	invokeVoice: (request) => electron.ipcRenderer.invoke("tlc:voice-input", request),
 	exitApplication: () => electron.ipcRenderer.invoke("tlc:exit-application"),

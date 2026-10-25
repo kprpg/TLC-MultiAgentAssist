@@ -90,6 +90,7 @@ import type { SellerDashboardHost } from '../../../packages/orchestrator/seller-
 import type { StagePipelineReviewHost } from '../../../packages/orchestrator/stage-pipeline-review.js'
 import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
 import { RecordCreationError } from '../../../packages/orchestrator/record-creation/service.js'
+import { MeetingSourceError } from '../../../packages/connectors/common/meeting-source.js'
 import { portfolioReadRequestSchema, portfolioIndexSchema, portfolioWorkspaceRequestSchema, portfolioWorkspaceSchema, type PortfolioReadRequest, type PortfolioIndex, type PortfolioWorkspaceRequest, type PortfolioWorkspace } from '../../../packages/common/contracts/index.js'
 import { mutationSyncRequestSchema, mutationSyncResponseSchema, type MutationSyncRequest, type MutationSyncResponse } from '../../../packages/common/contracts/cache-sync.js'
 import { MutationDispatchPreventedError } from '../../../packages/orchestrator/mutations/host.js'
@@ -533,6 +534,11 @@ export function buildWebApiHandler(options: WebApiOptions) {
                 return true
             }
             const source = sourceHttpFailure(error)
+            if (error instanceof MeetingSourceError) {
+                options.onError?.(error, correlationId)
+                sendJson(response, 409, { error: error.message, code: error.code, correlationId })
+                return true
+            }
             if (source) {
                 if (source.retryAfterSeconds !== undefined) response.setHeader('retry-after', String(source.retryAfterSeconds))
                 options.onError?.(new Error(`Source request failed with status ${source.status}.`), correlationId)

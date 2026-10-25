@@ -51,6 +51,9 @@ import { bindSourceToken } from '../../../../packages/orchestrator/mutations/cor
 import { cacheControlRequestSchema, cacheControlResponseSchema } from '../../../../packages/common/contracts/cache-sync.js'
 import { createKnowledgeSearch } from '../../../../packages/orchestrator/knowledge-search.js'
 import { seismicGraphDefaultScope, seismicGraphScopes } from '../../../../packages/common/configuration/knowledge-sources.js'
+import { meetingGraphDefaultScope, meetingScopesFor } from '../../../../packages/common/configuration/meeting-sources.js'
+import { assertCliTokenCanReadMeetings, meetingSignInFailure } from '../../../../packages/connectors/common/meeting-source.js'
+import { GraphMeetingConnector } from '../../../../packages/connectors/graph/meetings.js'
 import { createKnowledgeSearchIpcHandler, knowledgeSearchIpcChannel } from './knowledge-ipc.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
@@ -174,9 +177,18 @@ const recordCreation = new RecordCreationService(
   creationWriter ?? liveMsxConnector ?? new SampleRecordCreationCatalog(msxConnector),
   creationWriter ? { writer: creationWriter } : {}
 )
-// Meeting capture: absent for the in-memory fixture; the SQLite test store implements it directly,
-// live wraps the delegated MSX connection (Graph transcript acquisition is not wired yet - paste/upload only).
-const meetingConnector = liveMsxConnector ? new LiveMeetingCaptureConnector(liveMsxConnector) : localStoreMsxConnector
+// Meeting capture: absent for the in-memory fixture; the SQLite test store implements it directly. Live wraps the
+// delegated MSX connection and lists/reads Teams meetings with a separate delegated Graph token.
+const meetingGraph = liveMsxConnector ? new GraphMeetingConnector(async (purpose) => {
+  const interactive = authentication?.mode === 'interactive-browser'
+  let token: Awaited<ReturnType<typeof credentials.msx.getToken>>
+  try { token = await credentials.msx.getToken(interactive ? [...meetingScopesFor(purpose)] : meetingGraphDefaultScope) } catch (error) {
+    throw meetingSignInFailure(error)
+  }
+  if (!token) throw meetingSignInFailure('A delegated Microsoft Graph token was not returned.')
+  return interactive ? token.token : assertCliTokenCanReadMeetings(token.token, purpose)
+}) : undefined
+const meetingConnector = liveMsxConnector ? new LiveMeetingCaptureConnector(liveMsxConnector, undefined, meetingGraph) : localStoreMsxConnector
 const foundryOpenAIClient = runtimeEnvironment
   ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry)
   : undefined

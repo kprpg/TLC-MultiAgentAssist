@@ -89,7 +89,7 @@ function servicesFor(backend: ReturnType<typeof createControlledLiveBackend>): A
     seReporting: { invoke: disabled },
     stagePipelineReview: { invoke: disabled },
     meetings: { proposeMeetingChangeSet: disabled, applyMeetingChangeSet: disabled },
-    acquireTranscripts: disabled, resolveMeeting: disabled, listTranscriptSources: disabled, proposeTranscript: disabled,
+    acquireTranscripts: disabled, resolveMeeting: disabled, listTranscriptSources: disabled, listRecentMeetings: disabled, resolveRecentMeeting: disabled, proposeTranscript: disabled,
     refreshSource: () => backend.msx.refresh(),
     withReadContext: (action) => backend.core.withReadContext(action),
     withReviewedVersions: disabled, dispose: async () => undefined

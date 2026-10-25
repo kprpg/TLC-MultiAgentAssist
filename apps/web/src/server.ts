@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 import { buildWebApiHandler, type WebRuntime } from './app.js'
-import { assertLoopbackHost, createAzureCliAuthentication, createAzureCliGraphKnowledgeTokenProvider, createSampleAuthentication } from './authentication.js'
+import { assertLoopbackHost, createAzureCliAuthentication, createAzureCliGraphKnowledgeTokenProvider, createAzureCliGraphMeetingTokenProvider, createSampleAuthentication } from './authentication.js'
 import { buildStaticHandler, setSecurityHeaders } from './hosting.js'
 import { listenWebServer } from './listener.js'
 import { createHostedRuntimeFactory, createHostedWorkflowHostResolver, createWebSellerDashboardHost, createWebSeReportingResolver, createWebStagePipelineResolver } from './runtime.js'
@@ -78,7 +78,10 @@ const sampleRuntime = sampleMsx
     : undefined
 const createRuntime = sampleRuntime
     ? () => sampleRuntime
-    : await createHostedRuntimeFactory(mode === 'azure-cli' ? { getGraphKnowledgeToken: createAzureCliGraphKnowledgeTokenProvider() } : {})
+    : await createHostedRuntimeFactory(mode === 'azure-cli' ? {
+        getGraphKnowledgeToken: createAzureCliGraphKnowledgeTokenProvider(),
+        getGraphMeetingToken: createAzureCliGraphMeetingTokenProvider()
+    } : {})
 const sampleMutationPath = resolve(process.env['TLC_MUTATION_STATE_PATH'] || '.tlc/web-sample-mutations.sqlite')
 const sampleMutationState = sampleRuntime && (process.env['TLC_BACKGROUND_SYNC'] === '1' || existsSync(sampleMutationPath))
     ? await localMutationState(sampleMutationPath) : undefined

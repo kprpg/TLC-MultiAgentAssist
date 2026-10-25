@@ -3,7 +3,9 @@ import type { TokenCredential } from '@azure/core-auth'
 import { resolve } from 'node:path'
 import { createPerformanceReporter, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy } from '../../../packages/common/index.js'
 import { loadFoundryEnvironmentFromEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
+import type { MeetingTokenPurpose } from '../../../packages/common/configuration/meeting-sources.js'
 import { LiveMeetingCaptureConnector, LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
+import { GraphMeetingConnector } from '../../../packages/connectors/graph/meetings.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
 import { RecordCreationService } from '../../../packages/orchestrator/record-creation/service.js'
@@ -120,6 +122,8 @@ export interface HostedRuntimeOptions {
     environment?: NodeJS.ProcessEnv
     workingDirectory?: string
     getGraphKnowledgeToken?(authentication: AuthenticatedRequest): Promise<string>
+    /** Delegated Graph token for Teams meeting lookup. Absent in hosted Easy Auth until a caller-bound provider exists. */
+    getGraphMeetingToken?(authentication: AuthenticatedRequest, purpose?: MeetingTokenPurpose): Promise<string>
 }
 
 export async function createHostedRuntimeFactory(options: HostedRuntimeOptions = {}) {
@@ -166,7 +170,8 @@ export async function createHostedRuntimeFactory(options: HostedRuntimeOptions =
     const factory = (authentication: AuthenticatedRequest): WebRuntime => {
         const { accessToken } = authentication
         const msx = new LiveMsxConnector({ getAccessToken: async () => accessToken }, fetch, undefined, performanceReporter, msxWriteMetadataFromEnvironment(environment), portfolioPreferenceStore)
-        const meetingConnector = new LiveMeetingCaptureConnector(msx)
+        const meetingConnector = new LiveMeetingCaptureConnector(msx, undefined, options.getGraphMeetingToken
+            ? new GraphMeetingConnector((purpose) => options.getGraphMeetingToken!(authentication, purpose)) : undefined)
         const core = new ThinSliceOrchestrator(msx, guidance, taskAgents, performanceReporter, new RecordCreationService(msx, msx),
             createKnowledgeSearch({
                 mode: 'live', environment,

@@ -621,7 +621,8 @@ var meetingTranscriptSummarySchema = z.object({
 	source: meetingSourceSchema,
 	opportunityId: z.string().min(1).optional(),
 	opportunityName: z.string().min(1).optional(),
-	segmentCount: z.number().int().nonnegative()
+	/** Absent for calendar candidates, whose transcript is only fetched after the user chooses Extract. */
+	segmentCount: z.number().int().nonnegative().optional()
 }).strict();
 var meetingTranscriptSegmentSchema = z.object({
 	segmentId: z.string().min(1),
@@ -813,7 +814,7 @@ var voiceResponseSchema = z.discriminatedUnion("kind", [z.object({
 	kind: z.literal("availability"),
 	availability: voiceAvailabilitySchema
 }).strict(), voiceSessionSchema]);
-var text$4 = z.string().max(3e4);
+var text$6 = z.string().max(3e4);
 var name$1 = z.string().min(1).max(500);
 var identifier$3 = z.string().min(1).max(200);
 var tpid = z.string().regex(/^[1-9][0-9]{0,19}$/);
@@ -887,58 +888,58 @@ var accountSchema = z.object({
 		noPipeline: z.boolean(),
 		noInQuarterPipeline: z.boolean()
 	}).strict(),
-	nextAction: text$4
+	nextAction: text$6
 }).strict();
 var opportunitySchema$1 = z.object({
 	id: identifier$3,
-	number: text$4,
+	number: text$6,
 	tpid,
 	account: name$1,
 	name: name$1,
-	owner: text$4,
-	stage: text$4,
-	solutionArea: text$4,
-	salesPlay: text$4,
-	intent: text$4,
+	owner: text$6,
+	stage: text$6,
+	solutionArea: text$6,
+	salesPlay: text$6,
+	intent: text$6,
 	estimatedValue: amount$1.nullable(),
-	currency: text$4,
+	currency: text$6,
 	monthlyRunRate: amount$1.nullable(),
 	closeDate: date$3.nullable(),
-	state: text$4,
-	forecastComments: text$4,
+	state: text$6,
+	forecastComments: text$6,
 	timing,
-	relevance: text$4,
+	relevance: text$6,
 	modifiedAt: timestamp$1.optional(),
 	estimatedBilledRevenue: amount$1.nullable().optional(),
 	estimatedSqlRevenue: amount$1.nullable().optional()
 }).strict();
 var milestoneSchema$1 = z.object({
 	id: identifier$3,
-	number: text$4,
+	number: text$6,
 	opportunityId: identifier$3,
 	opportunityName: name$1,
 	tpid,
 	account: name$1,
 	name: name$1,
-	owner: text$4,
-	category: text$4,
-	status: text$4,
-	commitment: text$4,
+	owner: text$6,
+	category: text$6,
+	status: text$6,
+	commitment: text$6,
 	monthly: amount$1.nullable(),
 	date: date$3.nullable(),
-	workload: text$4,
-	forecastComments: text$4,
-	currency: text$4,
+	workload: text$6,
+	forecastComments: text$6,
+	currency: text$6,
 	active: z.boolean().nullable(),
 	timing,
 	metricCandidates: z.array(name$1).max(100),
-	mappingBasis: text$4,
-	classification: text$4,
+	mappingBasis: text$6,
+	classification: text$6,
 	scenarioCredit: amount$1.nullable(),
 	modifiedAt: timestamp$1.optional(),
 	commitmentChangedAt: timestamp$1.optional(),
-	region: text$4.optional(),
-	riskDetails: text$4.optional()
+	region: text$6.optional(),
+	riskDetails: text$6.optional()
 }).strict();
 var coverageSchema = z.object({
 	metric: name$1,
@@ -948,14 +949,14 @@ var coverageSchema = z.object({
 	committedMonthly: amount$1,
 	uncommittedMonthly: amount$1,
 	verifiedPeriodCredit: z.null(),
-	state: text$4,
+	state: text$6,
 	mappingSupported: z.boolean(),
 	mappingReviewRequired: z.boolean(),
 	scenarioAllowed: z.boolean(),
 	scenarioCommittedCredit: amount$1.nullable(),
 	scenarioUncommittedCredit: amount$1.nullable(),
 	scenarioRemainingGap: amount$1.nullable(),
-	nextAction: text$4
+	nextAction: text$6
 }).strict();
 var sellerDashboardReportSchema = z.object({
 	schemaVersion: z.literal(1),
@@ -969,7 +970,7 @@ var sellerDashboardReportSchema = z.object({
 			metric: name$1,
 			bucket: name$1,
 			hintSupported: z.boolean(),
-			state: text$4,
+			state: text$6,
 			scenarioAllowed: z.boolean()
 		}).strict()).max(100),
 		unmappedProductionCandidates: count$2
@@ -991,7 +992,7 @@ var sellerDashboardReportSchema = z.object({
 		pipeline: z.object({
 			status: quality,
 			asOf: timestamp$1.nullable(),
-			errors: z.array(text$4).max(1e3)
+			errors: z.array(text$6).max(1e3)
 		}).strict(),
 		quota: z.object({
 			name: name$1,
@@ -999,7 +1000,7 @@ var sellerDashboardReportSchema = z.object({
 			accounts: count$2.max(200)
 		}).strict()
 	}).strict(),
-	warnings: z.array(text$4).max(1e3),
+	warnings: z.array(text$6).max(1e3),
 	official: z.object({
 		weightedAttainment: amount$1,
 		closedMonthAttainment: amount$1.nullable(),
@@ -1020,11 +1021,11 @@ var sellerDashboardReportSchema = z.object({
 			"Medium",
 			"Low"
 		]),
-		issue: text$4,
-		action: text$4,
-		owner: text$4
+		issue: text$6,
+		action: text$6,
+		owner: text$6
 	}).strict()).max(2e4),
-	methodology: z.array(text$4).max(100)
+	methodology: z.array(text$6).max(100)
 }).strict().superRefine((report, context) => {
 	const reject = (message) => context.addIssue({
 		code: "custom",
@@ -1092,7 +1093,7 @@ var supplementSourceSchema = z.object({
 	asOf: timestamp$1,
 	start: date$3,
 	end: date$3,
-	detail: text$4
+	detail: text$6
 }).strict().refine((source) => source.start <= source.end, "Invalid supplemental source interval.");
 var sellerDashboardSupplementSchema = z.object({
 	schemaVersion: z.literal(1),
@@ -1131,14 +1132,14 @@ var sellerDashboardSupplementSchema = z.object({
 			tpid,
 			workload: name$1,
 			monthlyOpportunity: nonnegative$1,
-			evidence: text$4
+			evidence: text$6
 		}).strict()).max(5e4)
 	}).strict().nullable(),
 	conversion: z.object({
 		source: supplementSourceSchema,
 		accounts: z.array(z.object({
 			tpid,
-			territory: text$4,
+			territory: text$6,
 			startingMonthly: nonnegative$1,
 			convertedMonthly: nonnegative$1,
 			inQuarterMonthly: nonnegative$1,
@@ -1171,7 +1172,7 @@ var sellerDashboardSnapshotSchema = z.object({
 	kind: z.literal("snapshot"),
 	mode: z.enum(["sample", "live"]),
 	state: z.enum(["ready", "stale"]),
-	message: text$4,
+	message: text$6,
 	report: sellerDashboardReportSchema,
 	supplement: sellerDashboardSupplementSchema.nullable()
 }).strict().superRefine((snapshot, context) => {
@@ -1218,7 +1219,7 @@ var sellerDashboardRequestSchema = z.discriminatedUnion("operation", [z.object({
 }).strict()]);
 var identifier$2 = z.string().min(1).max(200);
 var name = z.string().min(1).max(500);
-var text$3 = z.string().max(3e4);
+var text$5 = z.string().max(3e4);
 var nonnegative = z.number().finite().nonnegative();
 var count$1 = z.number().int().nonnegative();
 var date$2 = z.iso.date();
@@ -1249,13 +1250,34 @@ var stagePipelineThreatSchema = z.enum([
 	"Medium",
 	"High"
 ]);
+var stagePipelineViewScopeSchema = z.enum([
+	"mine",
+	"reports",
+	"both"
+]);
+var stagePipelineSourceNames = [
+	"opportunities",
+	"milestones",
+	"macc",
+	"acr",
+	"hierarchy"
+];
+var stagePipelineAcrSources = [
+	"sample",
+	"mint",
+	"semantic-model",
+	"derived-pipeline-only",
+	"unavailable"
+];
 var stagePipelineOpportunitySchema = z.object({
 	id: identifier$2,
 	number: name,
 	customer: name,
 	name,
-	notes: text$3,
-	contact: text$3,
+	owner: z.string().max(200),
+	editable: z.boolean(),
+	notes: text$5,
+	contact: text$5,
 	scope: stagePipelineScopeSchema,
 	solutionArea: name,
 	inbound: z.boolean(),
@@ -1273,9 +1295,9 @@ var stagePipelineOpportunitySchema = z.object({
 	consumedRecurring: nonnegative,
 	consumedNonRecurring: nonnegative,
 	maccCommit: nonnegative,
-	partner: text$3.nullable(),
+	partner: text$5.nullable(),
 	competitor: z.object({
-		name: text$3.nullable(),
+		name: text$5.nullable(),
 		threat: stagePipelineThreatSchema
 	}).strict(),
 	solutionTagReview: z.boolean()
@@ -1285,45 +1307,89 @@ var stagePipelineMilestoneSchema = z.object({
 	number: name,
 	opportunityId: identifier$2,
 	name,
-	workload: text$3,
+	workload: text$5,
 	estimatedMonthlyAcr: nonnegative,
 	commitment: z.enum(["Committed", "Uncommitted"]),
 	status: stagePipelineMilestoneStatusSchema,
 	date: date$2.nullable(),
-	comment: text$3,
-	owner: text$3
+	comment: text$5,
+	owner: text$5
 }).strict();
 var acrMonthSchema = z.object({
 	month,
-	actual: nonnegative,
-	baseline: nonnegative,
+	actual: nonnegative.nullable(),
+	baseline: nonnegative.nullable(),
 	committed: nonnegative,
 	uncommitted: nonnegative,
 	stage1: nonnegative,
-	target: nonnegative
+	target: nonnegative.nullable()
 }).strict();
 var stagePipelineAcrSchema = z.object({
-	syncedAt: date$2,
-	lastActualMonth: month,
+	source: z.enum(stagePipelineAcrSources),
+	syncedAt: date$2.nullable(),
+	lastActualMonth: month.nullable(),
 	accounts: z.array(z.object({
 		customer: name,
 		months: z.array(acrMonthSchema).length(12)
 	}).strict()).max(500)
+}).strict().superRefine((acr, context) => {
+	const connected = acr.source === "sample" || acr.source === "mint" || acr.source === "semantic-model";
+	const measured = acr.accounts.flatMap((account) => account.months).flatMap((row) => [
+		row.actual,
+		row.baseline,
+		row.target
+	]);
+	if (!(connected ? acr.syncedAt !== null && acr.lastActualMonth !== null && measured.every((value) => value !== null) : acr.syncedAt === null && acr.lastActualMonth === null && measured.every((value) => value === null))) context.addIssue({
+		code: "custom",
+		message: connected ? "A connected ACR source must provide actuals, baseline, target and sync dates." : "An unconnected ACR source must not report actuals, baseline, target or sync dates."
+	});
+});
+var stagePipelineSourceHealthSchema = z.object({
+	source: z.enum(stagePipelineSourceNames),
+	state: z.enum([
+		"complete",
+		"partial",
+		"unavailable"
+	]),
+	detail: text$5,
+	count: count$1.optional()
+}).strict();
+var stagePipelineReportSchema = z.object({
+	id: identifier$2,
+	displayName: name
 }).strict();
 var stagePipelineSnapshotSchema = z.object({
-	contractVersion: z.literal("1.0"),
+	contractVersion: z.literal("1.1"),
 	kind: z.literal("snapshot"),
 	mode: z.enum(["sample", "live"]),
 	state: z.enum(["fresh", "stale"]),
-	message: text$3,
+	message: text$5,
 	generatedAt: timestamp,
 	owner: z.string().max(200),
 	asOf: date$2,
 	fiscalYear: z.number().int().min(2e3).max(2100),
+	scope: stagePipelineViewScopeSchema,
+	reports: z.array(stagePipelineReportSchema).max(50),
+	sources: z.array(stagePipelineSourceHealthSchema).max(10),
 	opportunities: z.array(stagePipelineOpportunitySchema).max(5e3),
 	milestones: z.array(stagePipelineMilestoneSchema).max(25e3),
 	acr: stagePipelineAcrSchema
 }).strict().superRefine((value, context) => {
+	if (value.scope === "mine" && value.reports.length > 0) context.addIssue({
+		code: "custom",
+		path: ["reports"],
+		message: "The seller portfolio scope has no direct reports."
+	});
+	if (new Set(value.reports.map((row) => row.id)).size !== value.reports.length) context.addIssue({
+		code: "custom",
+		path: ["reports"],
+		message: "Report ids must be unique."
+	});
+	if (new Set(value.sources.map((row) => row.source)).size !== value.sources.length) context.addIssue({
+		code: "custom",
+		path: ["sources"],
+		message: "Each source may be reported once."
+	});
 	const ids = /* @__PURE__ */ new Set();
 	for (const [index, row] of value.opportunities.entries()) {
 		if (ids.has(row.id)) context.addIssue({
@@ -1361,20 +1427,30 @@ var stagePipelineSnapshotSchema = z.object({
 	}
 });
 var stagePipelineUnavailableSchema = z.object({
-	contractVersion: z.literal("1.0"),
+	contractVersion: z.literal("1.1"),
 	kind: z.literal("unavailable"),
 	code: z.enum([
 		"source-unavailable",
 		"unauthorized",
+		"forbidden",
+		"throttled",
 		"invalid-snapshot"
 	]),
-	message: text$3
+	message: text$5
 }).strict();
-z.object({
-	contractVersion: z.literal("1.0"),
-	operation: z.literal("get")
-}).strict();
-z.union([stagePipelineSnapshotSchema, stagePipelineUnavailableSchema]);
+var stagePipelineRequestSchema = z.object({
+	contractVersion: z.literal("1.1"),
+	operation: z.enum(["get", "refresh"]),
+	scope: stagePipelineViewScopeSchema.default("mine"),
+	reportIds: z.array(identifier$2).max(50).optional()
+}).strict().superRefine((value, context) => {
+	if (value.reportIds && value.scope === "mine") context.addIssue({
+		code: "custom",
+		path: ["reportIds"],
+		message: "Direct reports can only be selected for a reports scope."
+	});
+});
+var stagePipelineResponseSchema = z.union([stagePipelineSnapshotSchema, stagePipelineUnavailableSchema]);
 //#endregion
 //#region packages/common/contracts/record-creation.ts
 var clientKeySchema = z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
@@ -4057,10 +4133,10 @@ var LiveMsxConnector = class {
 		});
 		return context.memberships;
 	}
-	async readMilestoneTeamMemberships() {
+	async readMilestoneTeamMemberships(userId) {
 		const templateId = await this.resolveMilestoneTeamTemplateId().catch(() => void 0);
 		if (!templateId) return [];
-		const userId = await this.getCurrentUserId();
+		userId ??= await this.getCurrentUserId();
 		return unique((await this.requestAll("teams", {
 			"$select": "_regardingobjectid_value",
 			"$filter": `teamtype eq 1 and _teamtemplateid_value eq ${templateId} and teammembership_association/any(member:member/systemuserid eq ${userId})`
@@ -4676,6 +4752,31 @@ var LiveMsxConnector = class {
 		});
 		return this.currentUserIdPromise;
 	}
+	/** Read-only, bounded Dataverse read for dashboard sources. Entity-set names are plain identifiers; every page stays on the trusted origin. */
+	async readRows(entitySet, parameters) {
+		if (!navigationPropertyPattern.test(entitySet)) throw new Error("The entity set name is invalid.");
+		return this.requestAll(entitySet, parameters);
+	}
+	/** Opportunity ids on the given user's active deal teams. */
+	async listDealTeamOpportunityIds(userId) {
+		if (!guidPattern.test(userId)) throw new Error("The user id must be a valid MSX GUID.");
+		return unique((await this.requestAll("msp_dealteams", {
+			"$select": "_msp_parentopportunityid_value",
+			"$filter": `statecode eq 0 and _msp_dealteamuserid_value eq ${userId}`
+		})).map((row) => row._msp_parentopportunityid_value).filter(isPresent));
+	}
+	/** Milestone ids on the given user's milestone-team (access team) memberships. */
+	async listMilestoneTeamMilestoneIds(userId) {
+		if (!guidPattern.test(userId)) throw new Error("The user id must be a valid MSX GUID.");
+		return unique((await this.readMilestoneTeamMemberships(userId)).map((membership) => membership.milestoneId));
+	}
+	/** Parent opportunity ids of the given user's milestone-team (access team) memberships. */
+	async listMilestoneTeamOpportunityIds(userId) {
+		if (!guidPattern.test(userId)) throw new Error("The user id must be a valid MSX GUID.");
+		const memberships = await this.readMilestoneTeamMemberships(userId);
+		if (memberships.length === 0) return [];
+		return unique((await this.requestByIds("msp_engagementmilestones", "msp_engagementmilestoneid", unique(memberships.map((membership) => membership.milestoneId)), "msp_engagementmilestoneid,_msp_opportunityid_value")).map((row) => row._msp_opportunityid_value).filter(isPresent));
+	}
 	async assertNativeIdentity(entraObjectId) {
 		const userId = await this.getCurrentUserId();
 		if (!guidPattern.test(entraObjectId) || !guidPattern.test(userId)) throw new Error("The native source identity mapping is invalid.");
@@ -5081,6 +5182,525 @@ function mapOpportunityObservations(opportunity, milestones) {
 	}
 	return observations;
 }
+//#endregion
+//#region packages/connectors/common/meeting-source.ts
+/** A user-safe failure from the Teams meeting source. The message never contains tokens or record identifiers. */
+var MeetingSourceError = class extends Error {
+	code;
+	constructor(code, message) {
+		super(message);
+		this.code = code;
+		this.name = "MeetingSourceError";
+	}
+};
+var pasteHint = "You can still use Paste / upload with a transcript you are authorized to provide.";
+var meetingSourceMessages = {
+	"not-configured": `Automatic Teams meeting lookup needs delegated Microsoft Graph access, which this connection does not provide. ${pasteHint}`,
+	"sign-in-required": `Microsoft Graph sign-in or consent is required to list your Teams meetings. Approve the Calendars, Online meetings and transcript permissions, then try again. ${pasteHint}`,
+	denied: `Microsoft Graph did not allow access to your calendar, this meeting or its transcript. The account may lack the delegated permissions, or you may not be the organizer or an authorized attendee. ${pasteHint}`,
+	"admin-blocked": `Your organization has blocked Graph transcript access, and this app cannot bypass that policy. ${pasteHint}`,
+	"not-found": `That meeting is no longer in your recent calendar, or its Teams identity could not be verified. Refresh the list and choose again. ${pasteHint}`,
+	unavailable: `Microsoft Graph meeting lookup is temporarily unavailable. Try again later. ${pasteHint}`,
+	"no-transcript": `No transcript is available for this meeting yet. Transcription may not have been turned on, may still be processing, or you may not be the organizer or an authorized attendee. Choose another meeting. ${pasteHint}`,
+	"too-large": `This meeting's transcript is larger than the supported review size. ${pasteHint}`,
+	"cli-sign-in": `This connection uses Azure CLI sign-in, which cannot read your calendar or meeting transcripts. Switch to interactive sign-in (authentication mode "interactive-browser") and approve the Calendars permission, or use Paste / upload. ${pasteHint}`,
+	"sign-in-failed": `The Microsoft sign-in needed to list your Teams meetings did not complete. ${pasteHint}`
+};
+/** Collapses a host sign-in failure (never a token) into one short, printable line for the user. */
+function meetingSignInFailure(reason) {
+	const text = (reason instanceof Error ? reason.message : String(reason)).replace(/[^\x20-\x7E]+/g, " ").trim().slice(0, 160);
+	const base = meetingSourceMessages["sign-in-failed"];
+	return new MeetingSourceError("sign-in-failed", text ? `${base} Reason: ${text}` : base);
+}
+function meetingSourceError(code, reference) {
+	const base = meetingSourceMessages[code];
+	return new MeetingSourceError(code, reference && /^[A-Za-z0-9_]{1,100}$/.test(reference) ? `${base} (reference ${reference})` : base);
+}
+/**
+* Azure CLI tokens do not carry calendar or meeting permissions. Reading the token's own `scp` claim lets the host say so
+* instead of making a Graph call that can only fail. Opaque or scope-less tokens are left for Graph to judge.
+*/
+function assertCliTokenCanReadMeetings(token, purpose) {
+	const payload = token.split(".")[1];
+	let scopes;
+	try {
+		const claims = JSON.parse(Buffer.from(payload ?? "", "base64url").toString("utf8"));
+		if (typeof claims.scp === "string") scopes = claims.scp.split(" ");
+	} catch {
+		return token;
+	}
+	if (!scopes) return token;
+	const required = purpose === "list" ? "Calendars." : "OnlineMeetingTranscript.";
+	if (!scopes.some((scope) => scope.startsWith(required))) throw meetingSourceError("cli-sign-in");
+	return token;
+}
+//#endregion
+//#region packages/common/configuration/meeting-sources.ts
+/** Delegated Microsoft Graph permissions for listing recent Teams meetings and reading their transcripts. */
+var meetingGraphScopes = [
+	"https://graph.microsoft.com/Calendars.Read",
+	"https://graph.microsoft.com/OnlineMeetings.Read",
+	"https://graph.microsoft.com/OnlineMeetingTranscript.Read.All"
+];
+/** Listing the dropdown needs only user-consentable permissions; transcript scopes are requested on Extract. */
+var meetingListScopes = ["https://graph.microsoft.com/User.Read", "https://graph.microsoft.com/Calendars.Read"];
+var meetingGraphDefaultScope = "https://graph.microsoft.com/.default";
+var meetingScopesFor = (purpose) => purpose === "list" ? meetingListScopes : meetingGraphScopes;
+//#endregion
+//#region packages/agents/meeting-signal-extractor/src/transcript-parse.ts
+/**
+* Transcript parsing for *actual* meeting recordings.
+*
+* Phase 1 testing uses a real recording's transcript (uploaded or pasted) against the
+* SQLite opportunity/milestone store. This converts WebVTT (what Microsoft Graph returns
+* for Teams meeting transcripts) or a simple `Speaker: text` paste into the canonical
+* `MeetingTranscript` the extractor consumes. Phase 2 (live Graph) reuses the same shape.
+*/
+function parseTimestampMs(stamp) {
+	const m = stamp.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?$/);
+	if (!m || m[2] === void 0 || m[3] === void 0) return void 0;
+	const hours = m[1] ? Number(m[1]) : 0;
+	const minutes = Number(m[2]);
+	const seconds = Number(m[3]);
+	const millis = m[4] ? Number(m[4].padEnd(3, "0")) : 0;
+	return ((hours * 60 + minutes) * 60 + seconds) * 1e3 + millis;
+}
+/** Strips WebVTT speaker voice tags: `<v Priya Nair>text</v>` -> `{ speaker, text }`. */
+function extractVoiceTag(line, attributionAllowed = true) {
+	if (!attributionAllowed) return { text: line.replace(/<\/?v(?:\s+[^>]*)?>/gi, "").trim() };
+	const voice = line.match(/^<v\s+([^>]+)>(.*)$/i);
+	if (voice && voice[1] !== void 0) return {
+		speaker: voice[1].trim(),
+		text: (voice[2] ?? "").replace(/<\/v>\s*$/i, "").trim()
+	};
+	const colon = line.match(/^([A-Z][\w .'-]{1,60}?):\s+(.*)$/);
+	if (colon && colon[1] !== void 0) return {
+		speaker: colon[1].trim(),
+		text: (colon[2] ?? "").trim()
+	};
+	return { text: line.trim() };
+}
+function parseVtt(raw, attributionAllowed) {
+	const lines = raw.replace(/\r/g, "").split("\n");
+	const segments = [];
+	let startMs;
+	let endMs;
+	let buffer = [];
+	const flush = () => {
+		if (buffer.length === 0) return;
+		const joined = buffer.join(" ").trim();
+		if (joined) {
+			const { speaker, text } = extractVoiceTag(joined, attributionAllowed);
+			if (text) segments.push({
+				text,
+				...startMs !== void 0 ? { startMs } : {},
+				...endMs !== void 0 ? { endMs } : {},
+				...speaker ? { speaker } : {}
+			});
+		}
+		buffer = [];
+		startMs = void 0;
+		endMs = void 0;
+	};
+	for (const line of lines) {
+		const trimmed = line.trim();
+		if (trimmed === "") {
+			flush();
+			continue;
+		}
+		if (/^WEBVTT/i.test(trimmed) || /^NOTE\b/i.test(trimmed)) continue;
+		const cue = trimmed.match(/^([\d:.]+)\s*-->\s*([\d:.]+)/);
+		if (cue && cue[1] !== void 0 && cue[2] !== void 0) {
+			flush();
+			startMs = parseTimestampMs(cue[1]);
+			endMs = parseTimestampMs(cue[2]);
+			continue;
+		}
+		if (buffer.length === 0 && startMs === void 0 && /^[\w-]+$/.test(trimmed) && !/\s/.test(trimmed)) continue;
+		buffer.push(trimmed);
+	}
+	flush();
+	return segments;
+}
+function parsePlainText(raw, attributionAllowed) {
+	return raw.replace(/\r/g, "").split("\n").map((line) => line.trim()).filter((line) => line.length > 0).map((line) => {
+		const { speaker, text } = extractVoiceTag(line, attributionAllowed);
+		return {
+			text,
+			...speaker ? { speaker } : {}
+		};
+	}).filter((seg) => seg.text.length > 0);
+}
+/** Parses a raw transcript (WebVTT or `Speaker: text`) into a validated `MeetingTranscript`. */
+function parseTranscriptContent(raw, options = {}) {
+	const looksLikeVtt = options.format === "vtt" || options.format !== "text" && (/^\uFEFF?WEBVTT/i.test(raw.trimStart()) || /-->/.test(raw));
+	const attributionAllowed = options.attribution !== "prohibited";
+	const segments = (looksLikeVtt ? parseVtt(raw, attributionAllowed) : parsePlainText(raw, attributionAllowed)).map((seg, index) => ({
+		segmentId: `seg-${index + 1}`,
+		...seg
+	}));
+	const transcript = {
+		id: options.id ?? `upload-${Date.now()}`,
+		meetingType: options.meetingType ?? "customer",
+		source: options.source ?? "upload",
+		segments,
+		...options.opportunityId ? { opportunityId: options.opportunityId } : {},
+		...options.title ? { title: options.title } : {}
+	};
+	return meetingTranscriptSchema.parse(transcript);
+}
+//#endregion
+//#region packages/connectors/common/http-response.ts
+var ResponseSizeError = class extends Error {
+	constructor() {
+		super("The response exceeded its byte budget.");
+		this.name = "ResponseSizeError";
+	}
+};
+async function readBoundedText(response, maximumBytes) {
+	if (!response.body) return "";
+	const reader = response.body.getReader();
+	const chunks = [];
+	let bytes = 0;
+	while (true) {
+		const chunk = await reader.read();
+		if (chunk.done) break;
+		bytes += chunk.value.byteLength;
+		if (bytes > maximumBytes) {
+			await reader.cancel();
+			throw new ResponseSizeError();
+		}
+		chunks.push(chunk.value);
+	}
+	return Buffer.concat(chunks).toString("utf8");
+}
+//#endregion
+//#region packages/connectors/graph/meetings.ts
+var GraphMeetingError = class extends Error {
+	state;
+	code;
+	constructor(state, code) {
+		super(`Meeting transcript acquisition is ${state} (${code}).`);
+		this.state = state;
+		this.code = code;
+		this.name = "GraphMeetingError";
+	}
+};
+/** Converts any Graph meeting failure into a message that is safe and actionable for every UI. */
+function toMeetingSourceError(error) {
+	if (error instanceof MeetingSourceError) return error;
+	if (error instanceof GraphMeetingError) {
+		if (error.code === "content_budget_exceeded" || error.code === "invalid_transcript_segments" || error.code === "transcript_count_exceeded") return meetingSourceError("too-large");
+		if (error.code === "invalid_meeting_handle" || error.code === "meeting_not_in_recent_calendar" || error.code === "meeting_unavailable" || error.code === "invalid_meeting_link") return meetingSourceError("not-found");
+		const code = error.code;
+		if (error.state === "admin-blocked") return meetingSourceError("admin-blocked", code);
+		if (error.state === "auth-required") return meetingSourceError("sign-in-required", code);
+		if (error.state === "denied") return meetingSourceError("denied", code);
+		if (error.state === "unsupported") return meetingSourceError("not-found", code);
+		return meetingSourceError("unavailable", code);
+	}
+	return meetingSourceError("unavailable");
+}
+var graphRoot$3 = "https://graph.microsoft.com/v1.0";
+var teamsHosts = ["teams.microsoft.com", "teams.cloud.microsoft"];
+var recentEvent = z.object({
+	id: z.string().min(1).max(1e3),
+	subject: z.string().nullable().optional(),
+	isCancelled: z.boolean().optional(),
+	isOnlineMeeting: z.boolean().optional(),
+	start: z.object({
+		dateTime: z.string(),
+		timeZone: z.string().optional()
+	}),
+	end: z.object({
+		dateTime: z.string(),
+		timeZone: z.string().optional()
+	}),
+	onlineMeeting: z.object({ joinUrl: z.string().nullable().optional() }).nullable().optional(),
+	attendees: z.array(z.object({
+		type: z.string().optional(),
+		emailAddress: z.object({ address: z.string().nullable().optional() }).nullable().optional()
+	})).optional()
+});
+var recentPage = z.object({ value: z.array(z.unknown()).max(200) });
+var selfProfile = z.object({
+	mail: z.string().nullable().optional(),
+	userPrincipalName: z.string().nullable().optional()
+});
+var handlePattern = /^gm_[A-Za-z0-9_-]{32}$/;
+function meetingHandle(eventId) {
+	return `gm_${createHash("sha256").update(eventId).digest("base64url").slice(0, 32)}`;
+}
+function utcInstant(value) {
+	if (value.timeZone && value.timeZone.toUpperCase() !== "UTC") return void 0;
+	const parsed = Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(value.dateTime) ? value.dateTime : `${value.dateTime}Z`);
+	return Number.isFinite(parsed) ? parsed : void 0;
+}
+function isTeamsJoinUrl(value) {
+	try {
+		const url = new URL(value);
+		return url.protocol === "https:" && teamsHosts.includes(url.hostname) && !url.username && !url.password;
+	} catch {
+		return false;
+	}
+}
+/** Combines a meeting's transcripts (restarted recordings produce several) into one reviewable transcript. */
+function mergeMeetingTranscripts(transcripts, handle) {
+	const [first] = transcripts;
+	if (!first) return void 0;
+	if (transcripts.length === 1) return first;
+	const id = `graph-${createHash("sha256").update(transcripts.map((item) => item.id).join("|")).digest("hex").slice(0, 24)}`;
+	const segments = transcripts.flatMap((transcript, index) => transcript.segments.map((segment) => ({
+		...segment,
+		segmentId: `t${index + 1}-${segment.segmentId}`
+	})));
+	if (segments.length > 2e3) throw new GraphMeetingError("paused", "invalid_transcript_segments");
+	return {
+		...first,
+		id: id || handle,
+		segments
+	};
+}
+var transcriptPage = z.object({
+	value: z.array(z.object({ id: z.string().min(1).max(500) })),
+	"@odata.nextLink": z.url().optional()
+});
+var GraphMeetingConnector = class {
+	getAccessToken;
+	fetcher;
+	maximumBytes;
+	constructor(getAccessToken, fetcher = fetch, options = {}) {
+		this.getAccessToken = getAccessToken;
+		this.fetcher = fetcher;
+		this.maximumBytes = options.maximumBytes ?? 512e3;
+		if (!Number.isSafeInteger(this.maximumBytes) || this.maximumBytes < 1) throw new Error("A positive transcript byte budget is required.");
+	}
+	async resolveMeeting(joinUrl) {
+		const url = new URL(joinUrl);
+		if (url.protocol !== "https:" || !["teams.microsoft.com", "teams.cloud.microsoft"].includes(url.hostname) || url.username || url.password) throw new GraphMeetingError("unsupported", "invalid_meeting_link");
+		const endpoint = new URL(`${graphRoot$3}/me/onlineMeetings`);
+		endpoint.searchParams.set("$filter", `JoinWebUrl eq '${joinUrl.replaceAll("'", "''")}'`);
+		const response = await this.request(endpoint);
+		const value = z.object({ value: z.array(z.object({ id: z.string().min(1) })).max(1) }).parse(JSON.parse(await this.read(response)));
+		if (!value.value[0]) throw new GraphMeetingError("denied", "meeting_unavailable");
+		return value.value[0].id;
+	}
+	/** Lists past, non-cancelled Teams meetings from the signed-in user's calendar, newest first. */
+	async listRecentMeetings(options = {}) {
+		const now = options.now ?? /* @__PURE__ */ new Date();
+		const days = options.days ?? 14;
+		const limit = options.limit ?? 25;
+		const endpoint = new URL(`${graphRoot$3}/me/calendarView`);
+		endpoint.searchParams.set("startDateTime", (/* @__PURE__ */ new Date(now.getTime() - days * 864e5)).toISOString());
+		endpoint.searchParams.set("endDateTime", now.toISOString());
+		endpoint.searchParams.set("$select", "id,subject,start,end,isOnlineMeeting,isCancelled,onlineMeeting,attendees");
+		endpoint.searchParams.set("$orderby", "start/dateTime desc");
+		endpoint.searchParams.set("$top", "50");
+		const response = await this.request(endpoint, "application/json", "list");
+		let page;
+		try {
+			page = recentPage.parse(JSON.parse(await this.read(response, 2e6)));
+		} catch (error) {
+			if (error instanceof GraphMeetingError) throw error;
+			throw new GraphMeetingError("paused", "invalid_calendar_response");
+		}
+		const candidates = [];
+		for (const raw of page.value) {
+			const parsed = recentEvent.safeParse(raw);
+			if (!parsed.success) continue;
+			const event = parsed.data;
+			const joinUrl = event.onlineMeeting?.joinUrl;
+			const startsAt = utcInstant(event.start);
+			const endsAt = utcInstant(event.end);
+			if (event.isCancelled || event.isOnlineMeeting === false || !joinUrl || !isTeamsJoinUrl(joinUrl) || startsAt === void 0 || endsAt === void 0 || endsAt > now.getTime()) continue;
+			candidates.push({
+				event,
+				startsAt,
+				joinUrl
+			});
+		}
+		candidates.sort((left, right) => right.startsAt - left.startsAt);
+		const selected = candidates.slice(0, limit);
+		const domain = selected.length ? await this.ownDomain() : void 0;
+		return selected.map(({ event, startsAt, joinUrl }) => ({
+			handle: meetingHandle(event.id),
+			subject: event.subject?.trim() || "(No subject)",
+			startsAt: new Date(startsAt).toISOString(),
+			meetingType: this.classify(event.attendees ?? [], domain),
+			joinUrl
+		}));
+	}
+	/** Verifies the handle against the user's current recent calendar before any Graph meeting lookup. */
+	async resolveRecentMeeting(handle, options = {}) {
+		if (!handlePattern.test(handle)) throw new GraphMeetingError("unsupported", "invalid_meeting_handle");
+		const found = (await this.listRecentMeetings(options)).find((meeting) => meeting.handle === handle);
+		if (!found) throw new GraphMeetingError("unsupported", "meeting_not_in_recent_calendar");
+		return {
+			...found,
+			meetingId: await this.resolveMeeting(found.joinUrl)
+		};
+	}
+	async acquireRecentMeeting(handle, opportunityId, options = {}) {
+		const meeting = await this.resolveRecentMeeting(handle, options);
+		return {
+			...await this.acquire({
+				meetingId: meeting.meetingId,
+				opportunityId,
+				meetingType: meeting.meetingType
+			}),
+			meetingType: meeting.meetingType
+		};
+	}
+	/** Acquires and merges every transcript for a chosen recent meeting; `undefined` when none exists yet. */
+	async acquireRecentTranscript(handle, opportunityId, options = {}) {
+		return mergeMeetingTranscripts((await this.acquireRecentMeeting(handle, opportunityId, options)).transcripts, handle);
+	}
+	ownDomainRequest;
+	ownDomain() {
+		this.ownDomainRequest ??= (async () => {
+			try {
+				const endpoint = new URL(`${graphRoot$3}/me`);
+				endpoint.searchParams.set("$select", "mail,userPrincipalName");
+				const profile = selfProfile.parse(JSON.parse(await this.read(await this.request(endpoint, "application/json", "list"))));
+				return (profile.mail ?? profile.userPrincipalName ?? "").split("@")[1]?.toLowerCase() || void 0;
+			} catch {
+				return;
+			}
+		})();
+		return this.ownDomainRequest;
+	}
+	/** `customer` when anyone outside the signed-in user's domain was invited; the reviewer can still correct the result. */
+	classify(attendees, domain) {
+		if (!domain) return "customer";
+		return attendees.some((attendee) => {
+			if (attendee.type === "resource") return false;
+			const attendeeDomain = attendee.emailAddress?.address?.split("@")[1]?.toLowerCase();
+			return attendeeDomain !== void 0 && attendeeDomain !== domain;
+		}) ? "customer" : "internal";
+	}
+	async acquire(input) {
+		if (!input.meetingId || input.meetingId.length > 500 || /[/:\\?#\r\n]/.test(input.meetingId)) throw new GraphMeetingError("unsupported", "invalid_meeting_id");
+		const meetingPath = `${graphRoot$3}/me/onlineMeetings/${encodeURIComponent(input.meetingId)}`;
+		let requests = 0;
+		const get = async (url, accept = "application/json") => {
+			if (++requests > 30) throw new GraphMeetingError("paused", "request_budget_exhausted");
+			const target = new URL(url);
+			if (target.origin !== "https://graph.microsoft.com" || !target.pathname.startsWith(new URL(meetingPath).pathname) || target.username || target.password || target.hash) throw new GraphMeetingError("unsupported", "invalid_graph_continuation");
+			return this.request(target, accept);
+		};
+		const meeting = z.object({
+			id: z.string().min(1),
+			subject: z.string().optional()
+		}).parse(JSON.parse(await this.read(await get(meetingPath))));
+		if (meeting.id !== input.meetingId) throw new GraphMeetingError("denied", "meeting_identity_mismatch");
+		const ids = [];
+		let next = `${meetingPath}/transcripts`;
+		const visited = /* @__PURE__ */ new Set();
+		while (next) {
+			if (visited.has(next)) throw new GraphMeetingError("paused", "repeated_page");
+			visited.add(next);
+			const page = transcriptPage.parse(JSON.parse(await this.read(await get(next))));
+			for (const row of page.value) if (!ids.includes(row.id)) ids.push(row.id);
+			if (ids.length > 20) throw new GraphMeetingError("paused", "transcript_count_exceeded");
+			next = page["@odata.nextLink"];
+		}
+		const transcripts = [];
+		const contentVersions = {};
+		let unattributed = false;
+		let totalBytes = 0;
+		for (const id of ids) {
+			const endpoint = `${meetingPath}/transcripts/${encodeURIComponent(id)}/content`;
+			let response;
+			let prohibited = false;
+			try {
+				response = await get(endpoint, "text/vtt");
+			} catch (error) {
+				if (!(error instanceof GraphMeetingError) || error.code !== "SpeakerAttributionNotAllowed") throw error;
+				response = await get(endpoint, "application/vnd.microsoft.graph.transcript+text");
+				prohibited = true;
+				unattributed = true;
+			}
+			const contentType = response.headers.get("content-type")?.split(";")[0]?.trim();
+			if (contentType && ![
+				"text/vtt",
+				"text/plain",
+				"application/vnd.microsoft.graph.transcript+text"
+			].includes(contentType)) throw new GraphMeetingError("unsupported", "unexpected_content_type");
+			if (contentType === "application/vnd.microsoft.graph.transcript+text") {
+				prohibited = true;
+				unattributed = true;
+			}
+			const content = await this.read(response);
+			totalBytes += Buffer.byteLength(content);
+			if (totalBytes > this.maximumBytes || content.length > 15e4) throw new GraphMeetingError("paused", "content_budget_exceeded");
+			const transcript = parseTranscriptContent(content, {
+				id,
+				source: "teams",
+				meetingType: input.meetingType,
+				opportunityId: input.opportunityId,
+				attribution: prohibited ? "prohibited" : "allowed",
+				...meeting.subject ? { title: meeting.subject } : {}
+			});
+			if (!transcript.segments.length || transcript.segments.length > 2e3) throw new GraphMeetingError("unsupported", "invalid_transcript_segments");
+			transcripts.push(transcript);
+			contentVersions[id] = createHash("sha256").update(content).digest("hex");
+		}
+		return {
+			state: transcripts.length ? "ready" : "waiting",
+			meetingId: input.meetingId,
+			transcripts,
+			attribution: transcripts.length ? unattributed ? "unattributed" : "attributed" : "unknown",
+			contentVersions
+		};
+	}
+	async request(url, accept = "application/json", purpose = "transcript") {
+		let token;
+		try {
+			token = await this.getAccessToken(purpose);
+		} catch (error) {
+			if (error instanceof MeetingSourceError) throw error;
+			if (error instanceof Error && error.name === "TeamsAuthorizationError") throw error;
+			throw new GraphMeetingError("auth-required", "delegated_session_unavailable");
+		}
+		if (!token) throw new GraphMeetingError("auth-required", "missing_delegated_token");
+		let response;
+		try {
+			response = await this.fetcher(url, {
+				method: "GET",
+				redirect: "error",
+				signal: AbortSignal.timeout(3e4),
+				headers: {
+					authorization: `Bearer ${token}`,
+					accept
+				}
+			});
+		} catch {
+			throw new GraphMeetingError("paused", "graph_transport");
+		}
+		if (response.ok) return response;
+		let code = `http_${response.status}`;
+		const text = await this.read(response);
+		try {
+			const error = z.object({ error: z.object({
+				code: z.string().optional(),
+				innerError: z.object({ code: z.string().optional() }).optional()
+			}) }).parse(JSON.parse(text));
+			const candidate = error.error.innerError?.code ?? error.error.code;
+			if (candidate && /^[A-Za-z0-9_]{1,100}$/.test(candidate)) code = candidate;
+		} catch {
+			throw new GraphMeetingError(response.status === 401 ? "auth-required" : response.status === 403 ? "denied" : "paused", code);
+		}
+		throw new GraphMeetingError(code === "GraphAccessToTranscriptsDisabled" ? "admin-blocked" : response.status === 401 ? "auth-required" : response.status === 403 ? "denied" : response.status === 404 ? "unsupported" : "paused", code);
+	}
+	async read(response, maximumBytes = this.maximumBytes) {
+		try {
+			return await readBoundedText(response, maximumBytes);
+		} catch (error) {
+			if (error instanceof ResponseSizeError) throw new GraphMeetingError("paused", "content_budget_exceeded");
+			throw error;
+		}
+	}
+};
 //#endregion
 //#region packages/agents/meeting-signal-extractor/src/index.ts
 /**
@@ -5665,15 +6285,44 @@ function datePrefix(when) {
 var LiveMeetingCaptureConnector = class {
 	msx;
 	now;
-	constructor(msx, now = () => /* @__PURE__ */ new Date()) {
+	meetings;
+	constructor(msx, now = () => /* @__PURE__ */ new Date(), meetings) {
 		this.msx = msx;
 		this.now = now;
+		this.meetings = meetings;
 	}
-	/** Graph-based transcript discovery is a later step; the live path uses paste/upload today. */
+	/** Recent Teams meetings from the signed-in user's calendar; transcripts are fetched only when one is chosen. */
 	async listMeetingTranscripts() {
-		return [];
+		const meetings = this.requireMeetings();
+		try {
+			return (await meetings.listRecentMeetings()).map((meeting) => meetingTranscriptSummarySchema.parse({
+				id: meeting.handle,
+				subject: meeting.subject,
+				occurredAt: meeting.startsAt,
+				meetingType: meeting.meetingType,
+				source: "teams"
+			}));
+		} catch (error) {
+			throw toMeetingSourceError(error);
+		}
 	}
+	/** Full transcripts are not previewed; a chosen meeting is acquired during Extract & Review. */
 	async getMeetingTranscript() {}
+	requireMeetings() {
+		if (!this.meetings) throw meetingSourceError("not-configured");
+		return this.meetings;
+	}
+	async loadMeetingTranscript(handle, opportunityId) {
+		const meetings = this.requireMeetings();
+		let transcript;
+		try {
+			transcript = await meetings.acquireRecentTranscript(handle, opportunityId);
+		} catch (error) {
+			throw toMeetingSourceError(error);
+		}
+		if (!transcript) throw meetingSourceError("no-transcript");
+		return transcript;
+	}
 	buildOpportunitySnapshot(name, id, value, comments) {
 		return {
 			id,
@@ -5706,8 +6355,8 @@ var LiveMeetingCaptureConnector = class {
 		};
 	}
 	async proposeMeetingChangeSet(request, extractor) {
-		if (!request.transcript) throw new Error("Live meeting capture needs a pasted or uploaded transcript (Graph acquisition is not wired yet).");
-		const transcript = meetingTranscriptSchema.parse(request.transcript);
+		if (!request.transcript && !request.transcriptId) throw new Error("Choose a Teams meeting, or paste or upload a transcript.");
+		const transcript = meetingTranscriptSchema.parse(request.transcript ?? await this.loadMeetingTranscript(request.transcriptId, request.opportunityId));
 		const context = await this.msx.getOpportunityContext(request.opportunityId);
 		const milestones = await this.msx.listMilestones(request.opportunityId);
 		const opportunity = this.buildOpportunitySnapshot(context.opportunity.name, context.opportunity.id, context.opportunity.value, context.opportunity.comments);
@@ -10623,109 +11272,6 @@ function createFoundryMeetingExtractor(options) {
 	};
 }
 //#endregion
-//#region packages/agents/meeting-signal-extractor/src/transcript-parse.ts
-/**
-* Transcript parsing for *actual* meeting recordings.
-*
-* Phase 1 testing uses a real recording's transcript (uploaded or pasted) against the
-* SQLite opportunity/milestone store. This converts WebVTT (what Microsoft Graph returns
-* for Teams meeting transcripts) or a simple `Speaker: text` paste into the canonical
-* `MeetingTranscript` the extractor consumes. Phase 2 (live Graph) reuses the same shape.
-*/
-function parseTimestampMs(stamp) {
-	const m = stamp.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?$/);
-	if (!m || m[2] === void 0 || m[3] === void 0) return void 0;
-	const hours = m[1] ? Number(m[1]) : 0;
-	const minutes = Number(m[2]);
-	const seconds = Number(m[3]);
-	const millis = m[4] ? Number(m[4].padEnd(3, "0")) : 0;
-	return ((hours * 60 + minutes) * 60 + seconds) * 1e3 + millis;
-}
-/** Strips WebVTT speaker voice tags: `<v Priya Nair>text</v>` -> `{ speaker, text }`. */
-function extractVoiceTag(line, attributionAllowed = true) {
-	if (!attributionAllowed) return { text: line.replace(/<\/?v(?:\s+[^>]*)?>/gi, "").trim() };
-	const voice = line.match(/^<v\s+([^>]+)>(.*)$/i);
-	if (voice && voice[1] !== void 0) return {
-		speaker: voice[1].trim(),
-		text: (voice[2] ?? "").replace(/<\/v>\s*$/i, "").trim()
-	};
-	const colon = line.match(/^([A-Z][\w .'-]{1,60}?):\s+(.*)$/);
-	if (colon && colon[1] !== void 0) return {
-		speaker: colon[1].trim(),
-		text: (colon[2] ?? "").trim()
-	};
-	return { text: line.trim() };
-}
-function parseVtt(raw, attributionAllowed) {
-	const lines = raw.replace(/\r/g, "").split("\n");
-	const segments = [];
-	let startMs;
-	let endMs;
-	let buffer = [];
-	const flush = () => {
-		if (buffer.length === 0) return;
-		const joined = buffer.join(" ").trim();
-		if (joined) {
-			const { speaker, text } = extractVoiceTag(joined, attributionAllowed);
-			if (text) segments.push({
-				text,
-				...startMs !== void 0 ? { startMs } : {},
-				...endMs !== void 0 ? { endMs } : {},
-				...speaker ? { speaker } : {}
-			});
-		}
-		buffer = [];
-		startMs = void 0;
-		endMs = void 0;
-	};
-	for (const line of lines) {
-		const trimmed = line.trim();
-		if (trimmed === "") {
-			flush();
-			continue;
-		}
-		if (/^WEBVTT/i.test(trimmed) || /^NOTE\b/i.test(trimmed)) continue;
-		const cue = trimmed.match(/^([\d:.]+)\s*-->\s*([\d:.]+)/);
-		if (cue && cue[1] !== void 0 && cue[2] !== void 0) {
-			flush();
-			startMs = parseTimestampMs(cue[1]);
-			endMs = parseTimestampMs(cue[2]);
-			continue;
-		}
-		if (buffer.length === 0 && startMs === void 0 && /^[\w-]+$/.test(trimmed) && !/\s/.test(trimmed)) continue;
-		buffer.push(trimmed);
-	}
-	flush();
-	return segments;
-}
-function parsePlainText(raw, attributionAllowed) {
-	return raw.replace(/\r/g, "").split("\n").map((line) => line.trim()).filter((line) => line.length > 0).map((line) => {
-		const { speaker, text } = extractVoiceTag(line, attributionAllowed);
-		return {
-			text,
-			...speaker ? { speaker } : {}
-		};
-	}).filter((seg) => seg.text.length > 0);
-}
-/** Parses a raw transcript (WebVTT or `Speaker: text`) into a validated `MeetingTranscript`. */
-function parseTranscriptContent(raw, options = {}) {
-	const looksLikeVtt = options.format === "vtt" || options.format !== "text" && (/^\uFEFF?WEBVTT/i.test(raw.trimStart()) || /-->/.test(raw));
-	const attributionAllowed = options.attribution !== "prohibited";
-	const segments = (looksLikeVtt ? parseVtt(raw, attributionAllowed) : parsePlainText(raw, attributionAllowed)).map((seg, index) => ({
-		segmentId: `seg-${index + 1}`,
-		...seg
-	}));
-	const transcript = {
-		id: options.id ?? `upload-${Date.now()}`,
-		meetingType: options.meetingType ?? "customer",
-		source: options.source ?? "upload",
-		segments,
-		...options.opportunityId ? { opportunityId: options.opportunityId } : {},
-		...options.title ? { title: options.title } : {}
-	};
-	return meetingTranscriptSchema.parse(transcript);
-}
-//#endregion
 //#region packages/agents/mcem-coach/src/milestone-signals.ts
 var RISK_STATUSES = /* @__PURE__ */ new Set(["at risk", "blocked"]);
 var UNCOMMITTED = "uncommitted";
@@ -11641,31 +12187,6 @@ function sampleKnowledgeSearchResponse(input) {
 	});
 }
 //#endregion
-//#region packages/connectors/common/http-response.ts
-var ResponseSizeError = class extends Error {
-	constructor() {
-		super("The response exceeded its byte budget.");
-		this.name = "ResponseSizeError";
-	}
-};
-async function readBoundedText(response, maximumBytes) {
-	if (!response.body) return "";
-	const reader = response.body.getReader();
-	const chunks = [];
-	let bytes = 0;
-	while (true) {
-		const chunk = await reader.read();
-		if (chunk.done) break;
-		bytes += chunk.value.byteLength;
-		if (bytes > maximumBytes) {
-			await reader.cancel();
-			throw new ResponseSizeError();
-		}
-		chunks.push(chunk.value);
-	}
-	return Buffer.concat(chunks).toString("utf8");
-}
-//#endregion
 //#region packages/connectors/seismic/graph.ts
 var graphSearchUrl = "https://graph.microsoft.com/v1.0/search/query";
 var searchResponse = z.object({ value: z.array(z.object({
@@ -11696,7 +12217,7 @@ var mimeTypes = {
 	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
 	"text/html": "html"
 };
-var text$2 = (value) => value.replace(/<[^>]*>/g, "").trim();
+var text$4 = (value) => value.replace(/<[^>]*>/g, "").trim();
 function fileType(value, url) {
 	if (typeof value === "string") {
 		const normalized = value.toLowerCase().trim().replace(/^\./, "");
@@ -11795,9 +12316,9 @@ var SeismicM365Provider = class {
 				id: resource.id ?? hitId,
 				evidenceId: `knowledge:seismic-m365:${config.connectionId}:${resource.id ?? hitId}`,
 				source: this.id,
-				title: typeof title === "string" ? text$2(title) : title,
+				title: typeof title === "string" ? text$4(title) : title,
 				url,
-				...summary ? { snippet: text$2(summary).slice(0, 4e3) } : {},
+				...summary ? { snippet: text$4(summary).slice(0, 4e3) } : {},
 				...modified === void 0 ? {} : { lastModifiedAt: modified },
 				connectionId: config.connectionId,
 				untrusted: true
@@ -12490,7 +13011,7 @@ function buildInitialWorkflowQuery(workflowId, input) {
 			}, {
 				field: "dueDate",
 				operator: "on-or-before",
-				value: addDays(input.asOf, input.meetingWindowDays ?? 14)
+				value: addDays$1(input.asOf, input.meetingWindowDays ?? 14)
 			}],
 			orderBy: [{
 				field: "dueDate",
@@ -12644,7 +13165,7 @@ function buildCard(workflowId, title, records, queueItems, evidenceIds) {
 	};
 	if (workflowId === "WF-008") {
 		const perAccount = /* @__PURE__ */ new Map();
-		for (const record of records) perAccount.set(text$1(record.accountId) ?? "Unassigned", (perAccount.get(text$1(record.accountId) ?? "Unassigned") ?? 0) + 1);
+		for (const record of records) perAccount.set(text$3(record.accountId) ?? "Unassigned", (perAccount.get(text$3(record.accountId) ?? "Unassigned") ?? 0) + 1);
 		const topCount = perAccount.size > 0 ? Math.max(...perAccount.values()) : 0;
 		return {
 			kind: "metric-strip",
@@ -12697,8 +13218,8 @@ function buildQueueItems(workflowId, records, input, evidenceIds) {
 		const threshold = input.maximumActiveItems ?? 20;
 		const owners = /* @__PURE__ */ new Map();
 		for (const record of records) {
-			const ownerId = text$1(record.ownerId) ?? "unassigned";
-			const ownerName = text$1(record.opportunityOwnerName) ?? (ownerId === "unassigned" ? "Unassigned owner" : "Owner name unavailable");
+			const ownerId = text$3(record.ownerId) ?? "unassigned";
+			const ownerName = text$3(record.opportunityOwnerName) ?? (ownerId === "unassigned" ? "Unassigned owner" : "Owner name unavailable");
 			const current = owners.get(ownerId);
 			owners.set(ownerId, {
 				count: (current?.count ?? 0) + 1,
@@ -12716,10 +13237,10 @@ function buildQueueItems(workflowId, records, input, evidenceIds) {
 		}));
 	}
 	return records.map((record, index) => {
-		const recordId = text$1(record.id) ?? `${index + 1}`;
+		const recordId = text$3(record.id) ?? `${index + 1}`;
 		const dueDate = date$1(record.targetDate) ?? date$1(record.dueDate) ?? date$1(record.closeDate);
-		const opportunityId = text$1(record.opportunityId) ?? (opportunityScopedWorkflows.has(workflowId) ? text$1(record.id) : void 0);
-		const opportunityName = text$1(record.opportunityName) ?? (opportunityScopedWorkflows.has(workflowId) ? text$1(record.name) : void 0);
+		const opportunityId = text$3(record.opportunityId) ?? (opportunityScopedWorkflows.has(workflowId) ? text$3(record.id) : void 0);
+		const opportunityName = text$3(record.opportunityName) ?? (opportunityScopedWorkflows.has(workflowId) ? text$3(record.name) : void 0);
 		const owner = queueOwnerName(workflowId, record);
 		return {
 			id: `${workflowId}:${recordId}`,
@@ -12727,8 +13248,8 @@ function buildQueueItems(workflowId, records, input, evidenceIds) {
 			priority: workflowId === "WF-003" && Number(record.recordedStage ?? 0) >= 4 || workflowId === "WF-005" && record.status === "Blocked" ? "P0" : "P1",
 			title: queueTitle(workflowId, record),
 			...owner ? { owner } : {},
-			...text$1(record.accountId) ? { accountId: text$1(record.accountId) } : {},
-			...text$1(record.accountName) ? { accountName: text$1(record.accountName) } : {},
+			...text$3(record.accountId) ? { accountId: text$3(record.accountId) } : {},
+			...text$3(record.accountName) ? { accountName: text$3(record.accountName) } : {},
 			...opportunityId ? { opportunityId } : {},
 			...opportunityName ? { opportunityName } : {},
 			...dueDate ? { dueDate } : {},
@@ -12745,10 +13266,10 @@ var opportunityScopedWorkflows = /* @__PURE__ */ new Set([
 	"WF-011"
 ]);
 function queueOwnerName(workflowId, record) {
-	return text$1(record.owner) ?? (opportunityScopedWorkflows.has(workflowId) ? text$1(record.opportunityOwnerName) : void 0) ?? (text$1(record.ownerId) ? "Owner name unavailable" : void 0);
+	return text$3(record.owner) ?? (opportunityScopedWorkflows.has(workflowId) ? text$3(record.opportunityOwnerName) : void 0) ?? (text$3(record.ownerId) ? "Owner name unavailable" : void 0);
 }
 function queueTitle(workflowId, record) {
-	const label = text$1(record.name) ?? text$1(record.subject) ?? "Untitled record";
+	const label = text$3(record.name) ?? text$3(record.subject) ?? "Untitled record";
 	return `${{
 		"WF-001": "Review stale opportunity",
 		"WF-002": "Triage overdue milestone",
@@ -12790,10 +13311,10 @@ var curatedOpportunityFields = [
 	"probability"
 ];
 function reconcileRecords(dataverseRecords, msxRecords) {
-	const base = deduplicate(dataverseRecords, (record) => text$1(record.id));
-	const enrichment = new Map(deduplicate(msxRecords, (record) => text$1(record.id)).map((record) => [text$1(record.id), record]));
+	const base = deduplicate(dataverseRecords, (record) => text$3(record.id));
+	const enrichment = new Map(deduplicate(msxRecords, (record) => text$3(record.id)).map((record) => [text$3(record.id), record]));
 	return base.map((record) => {
-		const matchId = text$1(record.opportunityId) ?? text$1(record.id);
+		const matchId = text$3(record.opportunityId) ?? text$3(record.id);
 		const curated = matchId ? enrichment.get(matchId) : void 0;
 		if (!curated) return record;
 		const merged = { ...record };
@@ -12801,10 +13322,10 @@ function reconcileRecords(dataverseRecords, msxRecords) {
 			const value = curated[field];
 			if (value !== void 0 && value !== null && value !== "") merged[field] = value;
 		}
-		if (text$1(curated.name)) merged.opportunityName = curated.name;
-		if (text$1(curated.owner)) merged.opportunityOwnerName = curated.owner;
-		if (!text$1(merged.accountId) && text$1(curated.accountId)) merged.accountId = curated.accountId;
-		if (!text$1(merged.accountName) && text$1(curated.accountName)) merged.accountName = curated.accountName;
+		if (text$3(curated.name)) merged.opportunityName = curated.name;
+		if (text$3(curated.owner)) merged.opportunityOwnerName = curated.owner;
+		if (!text$3(merged.accountId) && text$3(curated.accountId)) merged.accountId = curated.accountId;
+		if (!text$3(merged.accountName) && text$3(curated.accountName)) merged.accountName = curated.accountName;
 		return merged;
 	});
 }
@@ -12837,7 +13358,7 @@ function primitiveRow(record, columns) {
 		return [column, typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? value : null];
 	}));
 }
-function text$1(value) {
+function text$3(value) {
 	return typeof value === "string" && value.length > 0 ? value : void 0;
 }
 function date$1(value) {
@@ -12848,7 +13369,7 @@ function subtractDays(value, days) {
 	result.setUTCDate(result.getUTCDate() - days);
 	return result.toISOString().slice(0, 10);
 }
-function addDays(value, days) {
+function addDays$1(value, days) {
 	const result = /* @__PURE__ */ new Date(`${value}T00:00:00.000Z`);
 	result.setUTCDate(result.getUTCDate() + days);
 	return result.toISOString().slice(0, 10);
@@ -16100,7 +16621,7 @@ function createVoiceIpcHandler(host) {
 }
 //#endregion
 //#region packages/common/fixtures/seller-dashboard.ts
-var asOf = "2026-10-10";
+var asOf$1 = "2026-10-10";
 var generatedAt = "2026-10-10T09:00:00.000Z";
 var end = "2026-12-31";
 var accountInputs = [
@@ -16199,7 +16720,7 @@ var metricInputs = [
 	}
 ];
 function recordTiming(value) {
-	return value === null ? "undated" : value < asOf ? "overdue" : value > end ? "future" : "in-quarter";
+	return value === null ? "undated" : value < asOf$1 ? "overdue" : value > end ? "future" : "in-quarter";
 }
 function createSampleSellerDashboard() {
 	const metrics = metricInputs.map((metric, index) => {
@@ -16603,7 +17124,7 @@ function createSampleSellerDashboard() {
 				label: "FY27 Q2 official YTD period",
 				start: "2026-07-01",
 				end,
-				today: asOf
+				today: asOf$1
 			},
 			sources: {
 				earnings: {
@@ -17077,7 +17598,7 @@ function createSellerDashboardHost(options) {
 	}
 	return new SharedSellerDashboardHost(new WindowsSellerDashboardConnector(options));
 }
-var text = z.string().max(4e3);
+var text$2 = z.string().max(4e3);
 var id$1 = z.string().trim().min(1).max(200);
 var referenceId = z.string().min(1).max(1200);
 var count = z.number().int().nonnegative().nullable();
@@ -17132,8 +17653,8 @@ var seReporterSchema = z.object({
 }).strict();
 var seManagerSchema = z.object({
 	name: id$1,
-	alias: text,
-	system_user_id: text
+	alias: text$2,
+	system_user_id: text$2
 }).strict();
 var seAssignmentSchema = z.object({
 	managerId: id$1,
@@ -17152,23 +17673,23 @@ var seMilestoneSchema = z.object({
 	accountId: id$1,
 	opportunityId: id$1,
 	name: id$1,
-	category: text,
-	status: text,
-	commitment: text,
+	category: text$2,
+	status: text$2,
+	commitment: text$2,
 	monthlyAcr: amount,
 	date: seReportDateSchema.nullable(),
 	committedOn: seReportDateSchema.nullable(),
 	completedOn: seReportDateSchema.nullable(),
 	createdOn: seReportDateSchema.nullable(),
-	blocker: text
+	blocker: text$2
 }).strict();
 var seTaskSchema = z.object({
 	id: id$1,
 	ownerId: id$1,
 	milestoneId: id$1,
-	milestoneName: text,
+	milestoneName: text$2,
 	accountId: id$1,
-	subject: text,
+	subject: text$2,
 	categoryCode: z.string(),
 	state: z.number().int(),
 	actualEnd: seReportDateSchema.nullable(),
@@ -17215,8 +17736,8 @@ var accountContext = z.object({
 	ownership
 }).strict();
 var seNarrativeItemSchema = accountContext.extend({
-	title: text,
-	text,
+	title: text$2,
+	text: text$2,
 	source_refs: sourceRefs
 }).strict();
 var seCustomerUpdateSchema = accountContext.extend({
@@ -17226,17 +17747,17 @@ var seCustomerUpdateSchema = accountContext.extend({
 		"advisory",
 		"watchlist"
 	]),
-	summary: text,
-	impact: text,
+	summary: text$2,
+	impact: text$2,
 	msx: z.array(z.object({
-		label: text,
-		text
+		label: text$2,
+		text: text$2
 	}).strict()).max(30),
 	m365: z.array(z.object({
-		label: text,
-		text
+		label: text$2,
+		text: text$2
 	}).strict()).max(30),
-	next_actions: z.array(text).max(30),
+	next_actions: z.array(text$2).max(30),
 	source_refs: sourceRefs,
 	confidence: z.enum([
 		"high",
@@ -17245,18 +17766,18 @@ var seCustomerUpdateSchema = accountContext.extend({
 	])
 }).strict();
 var seInitiativeSchema = accountContext.extend({
-	sales_territory_name: text,
-	big_bet_opportunity: text,
-	customer_need_business_outcome: text,
-	plan: text,
+	sales_territory_name: text$2,
+	big_bet_opportunity: text$2,
+	customer_need_business_outcome: text$2,
+	plan: text$2,
 	fy26_acr_year: amount,
-	obstacles_help_needed: text,
+	obstacles_help_needed: text$2,
 	confidence_level: z.enum([
 		"high",
 		"medium",
 		"low"
 	]),
-	next_steps: z.array(text).max(30),
+	next_steps: z.array(text$2).max(30),
 	known_amounts: z.array(z.number().finite()).max(30),
 	source_refs: sourceRefs
 }).strict();
@@ -17265,9 +17786,9 @@ var seNarrativeBundleSchema = z.object({
 	priority_initiatives: z.array(seInitiativeSchema).max(200),
 	account_notes: z.array(seNarrativeItemSchema).max(500),
 	partners: z.array(seNarrativeItemSchema.extend({
-		partner: text,
-		engagement_strategy: text,
-		solution_play: text
+		partner: text$2,
+		engagement_strategy: text$2,
+		solution_play: text$2
 	}).strict()).max(200),
 	technical_themes: z.array(seNarrativeItemSchema.extend({ type: z.enum([
 		"win",
@@ -17277,7 +17798,7 @@ var seNarrativeBundleSchema = z.object({
 		"risk"
 	]) }).strict()).max(200),
 	cross_pillar_dependencies: z.array(seNarrativeItemSchema.extend({ pillar: id$1 }).strict()).max(200),
-	next_month_priorities: z.array(seNarrativeItemSchema.extend({ expected_outcome: text }).strict()).max(200),
+	next_month_priorities: z.array(seNarrativeItemSchema.extend({ expected_outcome: text$2 }).strict()).max(200),
 	leadership_decisions: z.array(seNarrativeItemSchema).max(200),
 	scrum_rollup_bullets: z.array(seNarrativeItemSchema).max(200),
 	follow_up_required: z.array(seNarrativeItemSchema).max(200)
@@ -17324,8 +17845,8 @@ var scorecard$1 = seKpisSchema.extend({
 		milestone_count: count,
 		monthly_acr: amount
 	}).strict(),
-	top_wins: z.array(text),
-	top_risks_blockers: z.array(text),
+	top_wins: z.array(text$2),
+	top_risks_blockers: z.array(text$2),
 	hok_categories: z.array(z.object({
 		category: id$1,
 		period: count,
@@ -17363,7 +17884,7 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 	account_scope: z.object({
 		assignment_source: z.literal("AccountAssignmentsWithCustomerIds"),
 		manager_system_user_id: id$1,
-		manager_alias: text,
+		manager_alias: text$2,
 		eligible_assignment_types: z.tuple([z.literal("Primary"), z.literal("Backup")]),
 		primary_accounts: z.array(accountContext),
 		secondary_accounts: z.array(accountContext),
@@ -17371,7 +17892,7 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 			reason: id$1,
 			count: z.number().int().nonnegative()
 		}).strict()),
-		mapping_gaps: z.array(text)
+		mapping_gaps: z.array(text$2)
 	}).strict(),
 	status: z.enum([
 		"draft",
@@ -17391,7 +17912,7 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 	schema_contract: z.object({
 		source: z.enum(["manager_profile.shared_contract", "explicit_test_contract"]),
 		version: z.literal("2.0"),
-		path: text,
+		path: text$2,
 		content_hash: id$1,
 		fallback_used: z.literal(false),
 		test_mode: z.boolean()
@@ -17406,7 +17927,7 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 	}).strict()).max(1e4),
 	sources_unavailable: z.array(z.object({
 		source: id$1,
-		reason: text
+		reason: text$2
 	}).strict()),
 	source_coverage: z.array(seAccessSchema),
 	generation: z.object({
@@ -17420,11 +17941,11 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 	}).strict(),
 	source_reports: z.array(id$1),
 	executive_summary: z.object({
-		headline: text,
-		overall_status: text,
-		running_hot: z.array(text),
-		needs_attention: z.array(text),
-		next_month_focus: z.array(text)
+		headline: text$2,
+		overall_status: text$2,
+		running_hot: z.array(text$2),
+		needs_attention: z.array(text$2),
+		next_month_focus: z.array(text$2)
 	}).strict(),
 	scorecard: scorecard$1,
 	event_date_coverage: eventCoverage,
@@ -17472,17 +17993,17 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 			account_id: id$1,
 			account: id$1,
 			ownership: z.literal("Secondary"),
-			milestone_id: text,
-			milestone: text,
-			support_description: text,
+			milestone_id: text$2,
+			milestone: text$2,
+			support_description: text$2,
 			hok_count: count
 		}).strict())
 	}).strict(),
 	asks_for_manager: z.array(z.object({
-		ask: text,
-		why_it_matters: text,
-		customer: text,
-		urgency: text,
+		ask: text$2,
+		why_it_matters: text$2,
+		customer: text$2,
+		urgency: text$2,
 		source_refs: sourceRefs
 	}).strict()).max(50)
 }).strict().superRefine((report, context) => {
@@ -17541,7 +18062,7 @@ var seReportingRequestSchema = z.discriminatedUnion("operation", [
 		runId: id$1,
 		asks: z.array(z.object({
 			reportId: id$1,
-			text
+			text: text$2
 		}).strict()).max(100),
 		approve: z.boolean(),
 		confirmed: z.literal(true)
@@ -17590,11 +18111,11 @@ var seReportingResponseSchema = z.discriminatedUnion("kind", [base$2.extend({
 	run: seReportingRunSchema.nullable(),
 	publishPreview: sePublishPreviewSchema.nullable(),
 	published: z.array(z.string().max(2e3)),
-	message: text
+	message: text$2
 }).strict(), base$2.extend({
 	kind: z.literal("error"),
 	code: id$1,
-	message: text,
+	message: text$2,
 	access: z.array(seAccessSchema)
 }).strict()]);
 //#endregion
@@ -17762,6 +18283,302 @@ function renderSeReportHtml(raw, options = {}) {
     ${notes("Next Month Priorities", report.next_month_priorities, references)}${notes("Leadership decisions", report.leadership_decisions, references)}
     ${notes("Scrum rollup bullets", report.scrum_rollup_bullets, references)}${notes("Follow-up required", report.follow_up_required, references)}
     </details></main></body></html>`;
+}
+//#endregion
+//#region packages/connectors/graph/se-evidence.ts
+var graphRoot$2 = "https://graph.microsoft.com/v1.0";
+var privateContent$2 = (value) => /salary|compensation|performance review|human resources|privileged legal|legal advice/i.test(value);
+var escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** Account matching, text cleanup and window/privacy filtering shared by every Graph evidence source. */
+var SeEvidenceCollector = class {
+	accounts;
+	source;
+	start;
+	end;
+	output = [];
+	constructor(accounts, source, start, end) {
+		this.accounts = accounts;
+		this.source = source;
+		this.start = start;
+		this.end = end;
+	}
+	matches(body) {
+		return [...new Map(this.accounts.filter((row) => new RegExp(`(?:^|[^\\p{L}\\p{N}])${escapeRegExp(row.accountName)}(?:$|[^\\p{L}\\p{N}])`, "iu").test(body)).map((row) => [row.accountId.toLowerCase(), row])).values()];
+	}
+	add(id, body, occurred, reference, qualifies = this.source !== "m365_calendar") {
+		const occurredOn = typeof occurred === "string" && /^\d{4}-\d{2}-\d{2}/.test(occurred) ? occurred.slice(0, 10) : null;
+		if (!occurredOn || occurredOn < this.start || occurredOn > this.end || privateContent$2(body) || !isHttps(reference)) return;
+		const plain = body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+		for (const account of this.matches(plain)) this.output.push(seEvidenceSchema.parse({
+			id: `${this.source}:${id}:${account.accountId}`,
+			accountId: account.accountId,
+			source: this.source,
+			date: occurredOn,
+			summary: plain,
+			reference,
+			qualifies
+		}));
+	}
+};
+function isHttps(value) {
+	try {
+		return new URL(value).protocol === "https:";
+	} catch {
+		return false;
+	}
+}
+var calendarEvent = z.object({
+	id: z.string(),
+	subject: z.string().nullable().optional(),
+	bodyPreview: z.string().nullable().optional(),
+	start: z.object({ dateTime: z.string() }),
+	isCancelled: z.boolean().optional(),
+	webLink: z.string()
+});
+var mailMessage = z.object({
+	id: z.string(),
+	subject: z.string().nullable(),
+	receivedDateTime: z.string(),
+	body: z.object({ content: z.string() }),
+	webLink: z.string()
+});
+var chat = z.object({
+	id: z.string(),
+	topic: z.string().nullable().optional()
+});
+var chatMessage = z.object({
+	id: z.string(),
+	createdDateTime: z.string(),
+	body: z.object({ content: z.string() })
+});
+/**
+* Read-only Microsoft Graph evidence for SE reporting: calendar (context only), mail and Teams chats
+* (including meeting chats). Uses the signed-in user's delegated Calendars/Mail/Chat read grants.
+*/
+var GraphSeEvidenceConnector = class {
+	api;
+	accounts;
+	constructor(api, accounts) {
+		this.api = api;
+		this.accounts = accounts;
+	}
+	async read(source, start, end) {
+		const collector = new SeEvidenceCollector(this.accounts, source, start, end);
+		const nextDay = /* @__PURE__ */ new Date(`${end}T00:00:00Z`);
+		nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+		if (source === "m365_calendar") {
+			const rows = await this.api.pages(`${graphRoot$2}/me/calendarView?startDateTime=${start}T00:00:00Z&endDateTime=${nextDay.toISOString()}&$select=id,subject,bodyPreview,start,isCancelled,webLink&$top=100`);
+			for (const raw of rows) {
+				const row = calendarEvent.parse(raw);
+				if (row.isCancelled) continue;
+				collector.add(row.id, `${row.subject ?? ""}\n${row.bodyPreview ?? ""}`, row.start.dateTime, row.webLink);
+			}
+		} else if (source === "m365_email") {
+			const filter = encodeURIComponent(`receivedDateTime ge ${start}T00:00:00Z and receivedDateTime lt ${nextDay.toISOString()}`);
+			const rows = await this.api.pages(`${graphRoot$2}/me/messages?$filter=${filter}&$select=id,subject,receivedDateTime,body,webLink&$expand=attachments($select=id,name,contentType,size)&$top=100`);
+			for (const raw of rows) {
+				const row = mailMessage.parse(raw);
+				collector.add(row.id, `${row.subject ?? ""}\n${row.body.content}`, row.receivedDateTime, row.webLink);
+			}
+		} else if (source === "m365_teams") {
+			const chats = await this.api.pages(`${graphRoot$2}/me/chats?$select=id,topic,chatType&$top=50`, 20);
+			for (const raw of chats) {
+				const item = chat.parse(raw);
+				const messages = await this.api.pages(`${graphRoot$2}/chats/${encodeURIComponent(item.id)}/messages?$top=50`, 200);
+				for (const message of messages) {
+					const row = chatMessage.parse(message);
+					collector.add(row.id, `${item.topic ?? ""}\n${row.body.content}`, row.createdDateTime, `https://teams.microsoft.com/l/chat/${encodeURIComponent(item.id)}/conversations?messageId=${encodeURIComponent(row.id)}`);
+				}
+			}
+		} else throw new Error(`The ${source} source is not supported by the Graph evidence connector.`);
+		return collector.output;
+	}
+};
+//#endregion
+//#region packages/connectors/se-reporting/dataverse.ts
+var formattedSuffix$1 = "@OData.Community.Display.V1.FormattedValue";
+var guidLike = /^[0-9a-zA-Z-]{1,64}$/;
+var fieldPattern = /^[A-Za-z][A-Za-z0-9_]*$/;
+var chunkSize$1 = 40;
+var privateContent$1 = (value) => /salary|compensation|performance review|human resources|privileged legal|legal advice/i.test(value);
+var text$1 = (row, key) => {
+	const value = row[key];
+	return typeof value === "string" && value.trim() ? value : void 0;
+};
+var formatted$1 = (row, key) => text$1(row, `${key}${formattedSuffix$1}`);
+var day$1 = (value) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : null;
+/**
+* Dataverse-first milestone/task provider for the SE reporting model. It produces the same
+* SeMilestone/SeTask rows as the Power BI reader; it never infers assignment scope.
+*/
+var DataverseSeReader = class {
+	source;
+	options;
+	constructor(source, options = {}) {
+		this.source = source;
+		this.options = options;
+		if (options.riskField && !fieldPattern.test(options.riskField)) throw new Error("The risk/blocker field name is invalid.");
+	}
+	/** Enabled direct reports from the Dynamics manager hierarchy (maintained for the target teams). */
+	async readDirectReports(managerId) {
+		this.assertUser(managerId);
+		return (await this.source.readRows("systemusers", {
+			"$select": "systemuserid,fullname",
+			"$filter": `_parentsystemuserid_value eq ${managerId} and isdisabled eq false`,
+			"$top": "200"
+		})).flatMap((row) => {
+			const id = text$1(row, "systemuserid");
+			return id ? [{
+				id,
+				displayName: text$1(row, "fullname") ?? "Unnamed user"
+			}] : [];
+		});
+	}
+	async readMilestones(reporterId) {
+		this.assertUser(reporterId);
+		const ids = [...new Set(await this.source.listMilestoneTeamMilestoneIds(reporterId))];
+		if (ids.length === 0) return {
+			milestones: [],
+			gaps: []
+		};
+		const select = [
+			"msp_engagementmilestoneid",
+			"_msp_opportunityid_value",
+			"msp_name",
+			"msp_milestonecategory",
+			"msp_milestonestatus",
+			"msp_commitmentrecommendation",
+			"msp_monthlyuse",
+			"msp_milestonedate",
+			"msp_committedon",
+			"msp_completedon",
+			"createdon",
+			...this.options.riskField ? [this.options.riskField] : []
+		].join(",");
+		const rows = await this.readByIds("msp_engagementmilestones", "msp_engagementmilestoneid", ids, select);
+		const accounts = await this.readAccounts(rows.map((row) => text$1(row, "_msp_opportunityid_value")));
+		const milestones = [];
+		let unresolved = 0;
+		for (const row of rows) {
+			const opportunityId = text$1(row, "_msp_opportunityid_value");
+			const accountId = opportunityId ? accounts.get(opportunityId) : void 0;
+			if (!opportunityId || !accountId) {
+				unresolved += 1;
+				continue;
+			}
+			milestones.push(seMilestoneSchema.parse({
+				id: text$1(row, "msp_engagementmilestoneid"),
+				reporterId,
+				accountId,
+				opportunityId,
+				name: text$1(row, "msp_name") ?? "",
+				category: formatted$1(row, "msp_milestonecategory") ?? "",
+				status: formatted$1(row, "msp_milestonestatus") ?? "",
+				commitment: formatted$1(row, "msp_commitmentrecommendation") ?? "",
+				monthlyAcr: typeof row["msp_monthlyuse"] === "number" ? row["msp_monthlyuse"] : null,
+				date: day$1(row["msp_milestonedate"]),
+				committedOn: day$1(row["msp_committedon"]),
+				completedOn: day$1(row["msp_completedon"]),
+				createdOn: day$1(row["createdon"]),
+				blocker: this.options.riskField ? text$1(row, this.options.riskField) ?? "" : ""
+			}));
+		}
+		return {
+			milestones,
+			gaps: unresolved ? ["A milestone with an unresolved opportunity/account path was excluded."] : []
+		};
+	}
+	async readTasks(reporterId, window) {
+		this.assertUser(reporterId);
+		const visible = (await this.source.readRows("tasks", {
+			"$select": "activityid,_ownerid_value,_regardingobjectid_value,subject,msp_taskcategory,statecode,actualend,actualstart",
+			"$filter": `_ownerid_value eq ${reporterId} and ((actualend ge ${window.fiscalStart} and actualend lt ${window.endExclusive}) or (actualstart ge ${window.start} and actualstart lt ${window.endExclusive}))`
+		})).filter((row) => !privateContent$1(text$1(row, "subject") ?? ""));
+		const milestoneIds = [...new Set(visible.map((row) => text$1(row, "_regardingobjectid_value")).filter((id) => Boolean(id)))];
+		const milestoneRows = milestoneIds.length ? await this.readByIds("msp_engagementmilestones", "msp_engagementmilestoneid", milestoneIds, "msp_engagementmilestoneid,_msp_opportunityid_value") : [];
+		const opportunityByMilestone = new Map(milestoneRows.map((row) => [text$1(row, "msp_engagementmilestoneid") ?? "", text$1(row, "_msp_opportunityid_value")]));
+		const accounts = await this.readAccounts([...opportunityByMilestone.values()]);
+		const tasks = [];
+		let unresolved = 0;
+		for (const row of visible) {
+			const milestoneId = text$1(row, "_regardingobjectid_value") ?? "";
+			const opportunityId = opportunityByMilestone.get(milestoneId);
+			const accountId = opportunityId ? accounts.get(opportunityId) : void 0;
+			if (!accountId) {
+				unresolved += 1;
+				continue;
+			}
+			tasks.push(seTaskSchema.parse({
+				id: text$1(row, "activityid"),
+				ownerId: reporterId,
+				milestoneId,
+				milestoneName: formatted$1(row, "_regardingobjectid_value") ?? "",
+				accountId,
+				subject: text$1(row, "subject") ?? "",
+				categoryCode: typeof row["msp_taskcategory"] === "number" ? String(row["msp_taskcategory"]) : "",
+				state: typeof row["statecode"] === "number" ? row["statecode"] : 0,
+				actualEnd: day$1(row["actualend"]),
+				activityDate: day$1(row["actualstart"])
+			}));
+		}
+		return {
+			tasks,
+			gaps: unresolved ? ["A task with an unresolved milestone/opportunity/account path was excluded."] : []
+		};
+	}
+	assertUser(userId) {
+		if (!guidLike.test(userId)) throw new Error("The user id is invalid.");
+	}
+	async readAccounts(opportunityIds) {
+		const ids = [...new Set(opportunityIds.filter((id) => Boolean(id)))];
+		if (ids.length === 0) return /* @__PURE__ */ new Map();
+		const rows = await this.readByIds("opportunities", "opportunityid", ids, "opportunityid,_parentaccountid_value");
+		return new Map(rows.flatMap((row) => {
+			const id = text$1(row, "opportunityid");
+			const account = text$1(row, "_parentaccountid_value");
+			return id && account ? [[id, account]] : [];
+		}));
+	}
+	async readByIds(entitySet, field, ids, select) {
+		const chunks = [];
+		for (let offset = 0; offset < ids.length; offset += chunkSize$1) chunks.push(ids.slice(offset, offset + chunkSize$1));
+		const rows = [];
+		for (let offset = 0; offset < chunks.length; offset += 2) {
+			const pages = await Promise.all(chunks.slice(offset, offset + 2).map((chunk) => this.source.readRows(entitySet, {
+				"$select": select,
+				"$filter": chunk.map((id) => `${field} eq ${id}`).join(" or ")
+			})));
+			rows.push(...pages.flat());
+		}
+		return rows;
+	}
+};
+function compareProviders(dataverse, powerbi) {
+	const left = new Set(dataverse.map((id) => id.toLowerCase()));
+	const right = new Set(powerbi.map((id) => id.toLowerCase()));
+	const common = [...left].filter((id) => right.has(id)).length;
+	const union = (/* @__PURE__ */ new Set([...left, ...right])).size;
+	return {
+		dataverse: left.size,
+		powerbi: right.size,
+		common,
+		onlyDataverse: left.size - common,
+		onlyPowerBi: right.size - common,
+		ratio: union === 0 ? 1 : common / union
+	};
+}
+var defaultParityThreshold = .99;
+/** Counts-only parity verdict: Dataverse replaces Power BI for a capability only when the id sets agree. */
+function evaluateParity(input, threshold = defaultParityThreshold) {
+	const milestones = compareProviders(...input.milestones);
+	const tasks = compareProviders(...input.tasks);
+	const pct = (value) => Math.round(value * 1e3) / 10;
+	return {
+		ok: milestones.ratio >= threshold && tasks.ratio >= threshold,
+		milestones,
+		tasks,
+		detail: `Dataverse parity: milestones ${pct(milestones.ratio)}% (${milestones.common}/${Math.max(milestones.dataverse, milestones.powerbi)}), tasks ${pct(tasks.ratio)}% (${tasks.common}/${Math.max(tasks.dataverse, tasks.powerbi)}); threshold ${pct(threshold)}%.`
+	};
 }
 //#endregion
 //#region packages/connectors/se-reporting/types.ts
@@ -18055,7 +18872,7 @@ var LiveSeReportingReader = class {
 				access.push({
 					source,
 					state: "available",
-					detail: "Delegated source probe succeeded."
+					detail: source === "msx" ? `Delegated source probe succeeded.${await this.hierarchyNote(inspection)}` : "Delegated source probe succeeded."
 				});
 			} catch (error) {
 				access.push({
@@ -18067,47 +18884,23 @@ var LiveSeReportingReader = class {
 		}
 		return access;
 	}
+	/** Counts-only sanity check of the Dynamics hierarchy against the assignment-derived manager; never changes scope. */
+	async hierarchyNote(inspection) {
+		if (!this.options.dataverse) return "";
+		try {
+			const reports = await new DataverseSeReader(this.options.dataverse).readDirectReports(inspection.contract.manager.system_user_id);
+			return reports.some((row) => lower(row.id) === lower(inspection.owner.system_user_id)) ? ` Dataverse hierarchy: the reporter is a direct report of the contract manager (${reports.length} direct reports).` : ` Dataverse hierarchy: the reporter is not a direct report of the contract manager (${reports.length} direct reports); assignments from the semantic model remain authoritative.`;
+		} catch {
+			return " Dataverse hierarchy could not be read.";
+		}
+	}
 	async collect(profile, inspection, options) {
 		const now = (this.options.now ?? (() => /* @__PURE__ */ new Date()))();
 		const dates = seReportingDates(options.period);
 		if (dates.end > now.toISOString().slice(0, 10)) throw new SeReportingError("incomplete-reporting-month", "Choose a completed reporting month. A future month-end cannot be represented as a full-month report.");
-		const ownFilter = `LOWER(PodMilestones[Pod Member ID]) = ${quote(lower(inspection.owner.system_user_id))}`;
-		const sample = (await this.api.query(profile.semanticModelId, `EVALUATE TOPN(1, FILTER(PodMilestones, ${ownFilter}), PodMilestones[Milestone ID])`))[0];
-		const column = (name) => sample && name in sample ? `PodMilestones[${name}]` : "BLANK()";
-		const milestones = (await this.api.query(profile.semanticModelId, `EVALUATE SELECTCOLUMNS(FILTER(PodMilestones, ${ownFilter}), "id", [Milestone ID], "reporterId", [Pod Member ID], "accountId", RELATED(opportunity[customerid]), "opportunityId", [Opportunity ID], "name", [Milestone], "category", [Category], "status", [Status], "commitment", [Commitment Recommendation], "monthlyAcr", [Monthly ACR], "date", [Milestone Date], "committedOn", ${column("Committed On")}, "completedOn", ${column("Completed On")}, "createdOn", ${column("Created On")}, "blocker", [Risk / Blocker Details])`)).map((row) => seMilestoneSchema.parse({
-			...row,
-			category: row["category"] ?? "",
-			commitment: row["commitment"] ?? "",
-			blocker: row["blocker"] ?? "",
-			date: date(row["date"]),
-			committedOn: date(row["committedOn"]),
-			completedOn: date(row["completedOn"]),
-			createdOn: date(row["createdOn"])
-		}));
-		const taskOwner = `LOWER(task[ownerid]) = ${quote(lower(inspection.owner.system_user_id))}`;
-		const taskSample = (await this.api.query(profile.semanticModelId, `EVALUATE TOPN(1, FILTER(task, ${taskOwner}))`))[0];
-		const actualStart = taskSample && "actualstart" in taskSample ? "task[actualstart]" : "BLANK()";
-		const endExclusive = /* @__PURE__ */ new Date(`${dates.end}T00:00:00Z`);
-		endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
-		const nextDay = daxDate(endExclusive.toISOString().slice(0, 10));
-		const taskRows = await this.api.query(profile.semanticModelId, `EVALUATE SELECTCOLUMNS(FILTER(task, ${taskOwner} && ((task[actualend] >= ${daxDate(dates.fiscal.start)} && task[actualend] < ${nextDay}) || (${actualStart} >= ${daxDate(dates.start)} && ${actualStart} < ${nextDay}))), "id", [activityid], "ownerId", [ownerid], "milestoneId", [regardingobjectid], "milestoneName", [regardingobjectidname], "accountId", VAR TargetMilestone = task[regardingobjectid] VAR ParentOpportunity = CALCULATE(SELECTEDVALUE(PodMilestones[Opportunity ID]), FILTER(ALL(PodMilestones), LOWER(PodMilestones[Milestone ID]) = LOWER(TargetMilestone))) RETURN LOOKUPVALUE(opportunity[customerid], opportunity[opportunityid], ParentOpportunity), "subject", [subject], "categoryCode", [msp_taskcategory], "state", [statecode], "actualEnd", [actualend], "activityDate", ${actualStart})`);
-		const tasks = [];
-		const mappingGaps = [...inspection.mappingGaps];
-		for (const row of taskRows) {
-			if (privateContent(String(row["subject"] ?? ""))) continue;
-			if (typeof row["accountId"] !== "string" || !row["accountId"]) {
-				mappingGaps.push("A task with an unresolved milestone/opportunity/account path was excluded.");
-				continue;
-			}
-			tasks.push(seTaskSchema.parse({
-				...row,
-				subject: row["subject"] ?? "",
-				milestoneName: row["milestoneName"] ?? "",
-				categoryCode: row["categoryCode"] === null ? "" : String(row["categoryCode"]),
-				actualEnd: date(row["actualEnd"]),
-				activityDate: date(row["activityDate"])
-			}));
-		}
+		const msx = await this.readMsx(profile, inspection, dates);
+		const { milestones, tasks } = msx;
+		const mappingGaps = [...inspection.mappingGaps, ...msx.gaps];
 		const input = {
 			mode: "live",
 			runId: options.runId,
@@ -18117,20 +18910,12 @@ var LiveSeReportingReader = class {
 			pillar: options.pillar,
 			asOf: now.toISOString().slice(0, 10),
 			generatedAt: now.toISOString(),
-			eventDateCoverage: {
-				committed: Boolean(sample && "Committed On" in sample),
-				completed: Boolean(sample && "Completed On" in sample),
-				created: Boolean(sample && "Created On" in sample)
-			},
+			eventDateCoverage: msx.coverage,
 			milestones,
 			tasks,
 			mappingGaps,
 			evidence: [],
-			access: [...inspection.access, {
-				source: "msx",
-				state: "available",
-				detail: "Complete reporter-scoped milestone and task inventories read."
-			}],
+			access: [...inspection.access, ...msx.access],
 			narratives: {
 				customer_updates: [],
 				priority_initiatives: [],
@@ -18178,64 +18963,135 @@ var LiveSeReportingReader = class {
 		if (input.access.filter((row) => row.state === "unavailable" && !options.allowUnavailable.includes(row.source)).length) throw new SeReportingError("degraded-approval-required", "Some enabled sources are unavailable. Explicitly approve each missing source, disable it in the profile, or stop. No draft was generated.", input.access);
 		return input;
 	}
+	async readMsx(profile, inspection, dates) {
+		const preference = this.options.dataverse ? this.options.sourcePreference ?? "powerbi" : "powerbi";
+		if (preference === "powerbi") return this.readPowerBiMsx(profile, inspection, dates);
+		if (preference === "dataverse") return this.readDataverseMsx(inspection, dates);
+		let dataverse;
+		try {
+			dataverse = await this.readDataverseMsx(inspection, dates);
+		} catch {
+			return {
+				...await this.readPowerBiMsx(profile, inspection, dates),
+				access: [{
+					source: "msx",
+					state: "available",
+					detail: "Dataverse was unavailable; the Power BI inventories were used."
+				}]
+			};
+		}
+		const powerBi = await this.readPowerBiMsx(profile, inspection, dates);
+		const parity = evaluateParity({
+			milestones: [dataverse.milestones.map((row) => row.id), powerBi.milestones.map((row) => row.id)],
+			tasks: [dataverse.tasks.map((row) => row.id), powerBi.tasks.map((row) => row.id)]
+		});
+		return parity.ok ? {
+			...dataverse,
+			access: [{
+				source: "msx",
+				state: "available",
+				detail: `Complete reporter-scoped inventories read from Dataverse. ${parity.detail}`
+			}]
+		} : {
+			...powerBi,
+			access: [{
+				source: "msx",
+				state: "available",
+				detail: `Dataverse parity was not met, so the Power BI inventories were used. ${parity.detail}`
+			}]
+		};
+	}
+	async readDataverseMsx(inspection, dates) {
+		const reader = new DataverseSeReader(this.options.dataverse, this.options.riskField ? { riskField: this.options.riskField } : {});
+		const reporterId = inspection.owner.system_user_id;
+		const endExclusive = /* @__PURE__ */ new Date(`${dates.end}T00:00:00Z`);
+		endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+		const [milestones, tasks] = await Promise.all([reader.readMilestones(reporterId), reader.readTasks(reporterId, {
+			fiscalStart: dates.fiscal.start,
+			start: dates.start,
+			endExclusive: endExclusive.toISOString().slice(0, 10)
+		})]);
+		return {
+			milestones: milestones.milestones,
+			tasks: tasks.tasks,
+			gaps: [.../* @__PURE__ */ new Set([...milestones.gaps, ...tasks.gaps])],
+			coverage: {
+				committed: true,
+				completed: true,
+				created: true
+			},
+			access: [{
+				source: "msx",
+				state: "available",
+				detail: "Complete reporter-scoped milestone and task inventories read from Dataverse."
+			}]
+		};
+	}
+	async readPowerBiMsx(profile, inspection, dates) {
+		const ownFilter = `LOWER(PodMilestones[Pod Member ID]) = ${quote(lower(inspection.owner.system_user_id))}`;
+		const sample = (await this.api.query(profile.semanticModelId, `EVALUATE TOPN(1, FILTER(PodMilestones, ${ownFilter}), PodMilestones[Milestone ID])`))[0];
+		const column = (name) => sample && name in sample ? `PodMilestones[${name}]` : "BLANK()";
+		const milestones = (await this.api.query(profile.semanticModelId, `EVALUATE SELECTCOLUMNS(FILTER(PodMilestones, ${ownFilter}), "id", [Milestone ID], "reporterId", [Pod Member ID], "accountId", RELATED(opportunity[customerid]), "opportunityId", [Opportunity ID], "name", [Milestone], "category", [Category], "status", [Status], "commitment", [Commitment Recommendation], "monthlyAcr", [Monthly ACR], "date", [Milestone Date], "committedOn", ${column("Committed On")}, "completedOn", ${column("Completed On")}, "createdOn", ${column("Created On")}, "blocker", [Risk / Blocker Details])`)).map((row) => seMilestoneSchema.parse({
+			...row,
+			category: row["category"] ?? "",
+			commitment: row["commitment"] ?? "",
+			blocker: row["blocker"] ?? "",
+			date: date(row["date"]),
+			committedOn: date(row["committedOn"]),
+			completedOn: date(row["completedOn"]),
+			createdOn: date(row["createdOn"])
+		}));
+		const taskOwner = `LOWER(task[ownerid]) = ${quote(lower(inspection.owner.system_user_id))}`;
+		const taskSample = (await this.api.query(profile.semanticModelId, `EVALUATE TOPN(1, FILTER(task, ${taskOwner}))`))[0];
+		const actualStart = taskSample && "actualstart" in taskSample ? "task[actualstart]" : "BLANK()";
+		const endExclusive = /* @__PURE__ */ new Date(`${dates.end}T00:00:00Z`);
+		endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+		const nextDay = daxDate(endExclusive.toISOString().slice(0, 10));
+		const taskRows = await this.api.query(profile.semanticModelId, `EVALUATE SELECTCOLUMNS(FILTER(task, ${taskOwner} && ((task[actualend] >= ${daxDate(dates.fiscal.start)} && task[actualend] < ${nextDay}) || (${actualStart} >= ${daxDate(dates.start)} && ${actualStart} < ${nextDay}))), "id", [activityid], "ownerId", [ownerid], "milestoneId", [regardingobjectid], "milestoneName", [regardingobjectidname], "accountId", VAR TargetMilestone = task[regardingobjectid] VAR ParentOpportunity = CALCULATE(SELECTEDVALUE(PodMilestones[Opportunity ID]), FILTER(ALL(PodMilestones), LOWER(PodMilestones[Milestone ID]) = LOWER(TargetMilestone))) RETURN LOOKUPVALUE(opportunity[customerid], opportunity[opportunityid], ParentOpportunity), "subject", [subject], "categoryCode", [msp_taskcategory], "state", [statecode], "actualEnd", [actualend], "activityDate", ${actualStart})`);
+		const tasks = [];
+		const gaps = [];
+		for (const row of taskRows) {
+			if (privateContent(String(row["subject"] ?? ""))) continue;
+			if (typeof row["accountId"] !== "string" || !row["accountId"]) {
+				gaps.push("A task with an unresolved milestone/opportunity/account path was excluded.");
+				continue;
+			}
+			tasks.push(seTaskSchema.parse({
+				...row,
+				subject: row["subject"] ?? "",
+				milestoneName: row["milestoneName"] ?? "",
+				categoryCode: row["categoryCode"] === null ? "" : String(row["categoryCode"]),
+				actualEnd: date(row["actualEnd"]),
+				activityDate: date(row["activityDate"])
+			}));
+		}
+		return {
+			milestones,
+			tasks,
+			gaps: [...new Set(gaps)],
+			coverage: {
+				committed: Boolean(sample && "Committed On" in sample),
+				completed: Boolean(sample && "Completed On" in sample),
+				created: Boolean(sample && "Created On" in sample)
+			},
+			access: [{
+				source: "msx",
+				state: "available",
+				detail: "Complete reporter-scoped milestone and task inventories read."
+			}]
+		};
+	}
 	async readEvidence(source, profile, inspection, start, end) {
 		const accounts = inspection.assignments.filter((row) => inspection.contract.allowedAtus.includes(row.atu));
-		const output = [];
-		const nextDay = /* @__PURE__ */ new Date(`${end}T00:00:00Z`);
-		nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-		const matches = (body) => [...new Map(accounts.filter((row) => {
-			const name = row.accountName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-			return new RegExp(`(?:^|[^\\p{L}\\p{N}])${name}(?:$|[^\\p{L}\\p{N}])`, "iu").test(body);
-		}).map((row) => [lower(row.accountId), row])).values()];
-		const add = (id, body, occurred, reference) => {
-			const occurredOn = date(occurred);
-			if (!occurredOn || occurredOn < start || occurredOn > end || privateContent(body)) return;
-			const plain = body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-			for (const account of matches(plain)) output.push(seEvidenceSchema.parse({
-				id: `${source}:${id}:${account.accountId}`,
-				accountId: account.accountId,
-				source,
-				date: occurredOn,
-				summary: plain,
-				reference,
-				qualifies: source !== "m365_calendar"
-			}));
-		};
-		if (source === "m365_calendar") await this.api.pages(`${graphRoot$1}/me/calendarView?startDateTime=${start}T00:00:00Z&endDateTime=${nextDay.toISOString()}&$select=id,subject,start,end&$top=100`);
-		else if (source === "m365_email") {
-			const filter = encodeURIComponent(`receivedDateTime ge ${start}T00:00:00Z and receivedDateTime lt ${nextDay.toISOString()}`);
-			const rows = await this.api.pages(`${graphRoot$1}/me/messages?$filter=${filter}&$select=id,subject,receivedDateTime,body,webLink&$expand=attachments($select=id,name,contentType,size)&$top=100`);
-			for (const raw of rows) {
-				const row = z.object({
-					id: z.string(),
-					subject: z.string().nullable(),
-					receivedDateTime: z.string(),
-					body: z.object({ content: z.string() }),
-					webLink: z.url()
-				}).parse(raw);
-				add(row.id, `${row.subject ?? ""}\n${row.body.content}`, row.receivedDateTime, row.webLink);
-			}
-		} else if (source === "m365_teams") {
-			const chats = await this.api.pages(`${graphRoot$1}/me/chats?$select=id&$top=50`, 20);
-			for (const chat of chats) {
-				const chatId = z.string().parse(chat["id"]);
-				const messages = await this.api.pages(`${graphRoot$1}/chats/${encodeURIComponent(chatId)}/messages?$top=50`, 200);
-				for (const raw of messages) {
-					const row = z.object({
-						id: z.string(),
-						createdDateTime: z.string(),
-						body: z.object({ content: z.string() })
-					}).parse(raw);
-					add(row.id, row.body.content, row.createdDateTime, `https://teams.microsoft.com/l/chat/${encodeURIComponent(chatId)}/conversations?messageId=${encodeURIComponent(row.id)}`);
-				}
-			}
-		} else if (source === "wiki") {
+		if (source === "m365_calendar" || source === "m365_email" || source === "m365_teams") return new GraphSeEvidenceConnector(this.api, accounts).read(source, start, end);
+		const collector = new SeEvidenceCollector(accounts, source, start, end);
+		if (source === "wiki") {
 			if (!profile.wikiUrl) throw new SeReportingError("wiki-unconfigured", "No optional wiki location was configured.");
 			const item = await this.api.share(profile.wikiUrl);
 			if (!/\.(md|txt)$/i.test(item.name)) throw new SeReportingError("wiki-format-unsupported", "The optional wiki connector supports an explicitly configured UTF-8 Markdown or text file.");
 			const body = await this.api.file(item.parentReference.driveId, item.id, new URL(profile.wikiUrl).hostname);
 			if (privateContent(body)) return [];
-			for (const account of matches(body)) output.push(seEvidenceSchema.parse({
+			for (const account of collector.matches(body)) collector.output.push(seEvidenceSchema.parse({
 				id: `wiki:${item.id}:${account.accountId}`,
 				accountId: account.accountId,
 				source,
@@ -18254,13 +19110,13 @@ var LiveSeReportingReader = class {
 					lastModifiedDateTime: z.string(),
 					parentReference: z.object({ driveId: z.string() })
 				}).parse(raw);
-				if (item.lastModifiedDateTime.slice(0, 10) < start || item.lastModifiedDateTime.slice(0, 10) > end || !matches(item.name).length) continue;
+				if (item.lastModifiedDateTime.slice(0, 10) < start || item.lastModifiedDateTime.slice(0, 10) > end || !collector.matches(item.name).length) continue;
 				if (!/\.(md|txt)$/i.test(item.name)) throw new SeReportingError("file-content-unsupported", "A matching supporting file requires an approved document-text connector. Metadata alone was not treated as outcome evidence.");
 				const body = await this.api.file(item.parentReference.driveId, item.id, new URL(item.webUrl).hostname);
-				add(item.id, `${item.name}\n${body}`, item.lastModifiedDateTime, item.webUrl);
+				collector.add(item.id, `${item.name}\n${body}`, item.lastModifiedDateTime, item.webUrl);
 			}
 		}
-		return output;
+		return collector.output;
 	}
 };
 //#endregion
@@ -19336,6 +20192,10 @@ function createSampleSeReportingHost() {
 }
 //#endregion
 //#region packages/orchestrator/se-reporting/composition.ts
+function resolveSeSourcePreference(environment) {
+	const value = environment["TLC_SE_SOURCE"]?.trim().toLowerCase();
+	return value === "auto" || value === "dataverse" ? value : "powerbi";
+}
 function createSeReportingHost(options) {
 	if (options.mode === "sample") return createSampleSeReportingHost();
 	const environment = options.environment ?? process.env;
@@ -19346,7 +20206,12 @@ function createSeReportingHost(options) {
 		},
 		expectedEmail: async () => (await options.identity())?.email,
 		expectedObjectId: async () => (await options.identity())?.objectId,
-		...options.fetcher ? { fetcher: options.fetcher } : {}
+		...options.fetcher ? { fetcher: options.fetcher } : {},
+		...options.dataverse ? {
+			dataverse: options.dataverse,
+			sourcePreference: resolveSeSourcePreference(environment)
+		} : {},
+		...environment["TLC_MSX_RISK_DETAILS_FIELD"]?.trim() ? { riskField: environment["TLC_MSX_RISK_DETAILS_FIELD"].trim() } : {}
 	});
 	let model;
 	return new SharedSeReportingHost({
@@ -19382,6 +20247,840 @@ function createSeReportingIpcHandler(host) {
 var sellerDashboardIpcChannel = "tlc:seller-dashboard";
 function createSellerDashboardIpcHandler(host) {
 	return (request) => host.invoke(request);
+}
+//#endregion
+//#region apps/desktop/electron/main/stage-pipeline-ipc.ts
+var stagePipelineIpcChannel = "tlc:stage-pipeline-review";
+function createStagePipelineIpcHandler(host) {
+	return (request) => host.invoke(request);
+}
+//#endregion
+//#region packages/common/fixtures/stage-pipeline-review.ts
+var asOf = "2026-10-21";
+var customers = [
+	"CONTOSO HEALTH SYSTEM",
+	"FABRIKAM CLINICS",
+	"NORTHWIND HOSPITAL GROUP",
+	"TAILSPIN CARE NETWORK",
+	"ADVENTURE WORKS MEDICAL"
+];
+var workloads = [
+	"Azure SQL modernization",
+	"Fabric analytics platform",
+	"GitHub Copilot and DevOps",
+	"AI Foundry clinical copilot",
+	"ExpressRoute for DC1",
+	"Databricks lakehouse",
+	"Arc-enabled SQL",
+	"Resiliency posture",
+	"App Service migration",
+	"AKS landing zone",
+	"Data warehouse refresh",
+	"Imaging archive to Blob",
+	"Zero-trust data protection"
+];
+var partners = [
+	null,
+	"Global Delivery Center",
+	"Example Partner One",
+	null,
+	"Example Partner Two",
+	null
+];
+var competitors = [
+	{
+		name: null,
+		threat: "None"
+	},
+	{
+		name: null,
+		threat: "None"
+	},
+	{
+		name: "AWS | Other",
+		threat: "Medium"
+	},
+	{
+		name: null,
+		threat: "Low"
+	},
+	{
+		name: "Competitor X",
+		threat: "High"
+	}
+];
+var forecasts = [
+	"Uncommitted",
+	"Uncommitted",
+	"Uncommitted",
+	"Committed",
+	"Uncommitted"
+];
+var milestoneStatuses = [
+	"On Track",
+	"On Track",
+	"On Track",
+	"Completed",
+	"On Track",
+	"At Risk",
+	"Completed",
+	"Cancelled",
+	"Blocked",
+	"Hygiene/Duplicate",
+	"On Track",
+	"Lost to Competitor"
+];
+function addDays(value, days) {
+	const parsed = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
+	parsed.setUTCDate(parsed.getUTCDate() + days);
+	return parsed.toISOString().slice(0, 10);
+}
+function opportunity$1(index) {
+	const customer = customers[index % customers.length] ?? customers[0];
+	const microsoftServices = index >= 44;
+	const inbound = !microsoftServices && index >= 36;
+	const consuming = index % 4 !== 3;
+	const closeOffset = index % 7 === 2 ? -(20 + index * 9) : 12 + index * 37 % 330;
+	const competitor = competitors[index % competitors.length] ?? competitors[0];
+	const recurring = consuming ? 1e3 + index * 7919 % 9e4 : 0;
+	const label = workloads[index % workloads.length] ?? workloads[0];
+	return {
+		id: `sample-opp-${String(index + 1).padStart(3, "0")}`,
+		number: `7-SAMPLE${String(index + 1).padStart(3, "0")}`,
+		customer,
+		owner: "Sample Seller",
+		editable: true,
+		name: microsoftServices ? `Unified support plan ${index - 43}` : `${inbound ? "Inbound: " : ""}${label}`,
+		notes: index % 3 === 0 ? `AB - 12/Oct - sample note: partner is validating the workload plan for ${label.toLowerCase()}.` : "",
+		contact: `Contact ${index % 9 + 1}`,
+		scope: microsoftServices ? "microsoft-services" : "azure",
+		solutionArea: microsoftServices ? "Microsoft Services" : "Cloud and AI Platforms",
+		inbound,
+		stage: stagePipelineStages[(index * 2 + (microsoftServices ? 1 : 0)) % stagePipelineStages.length] ?? "Listen & Consult",
+		status: index % 17 === 5 ? "On Hold" : "In Progress",
+		forecast: forecasts[index % forecasts.length] ?? "Uncommitted",
+		closeDate: addDays(asOf, closeOffset),
+		daysInStage: index * 13 % 120,
+		idleDays: consuming ? index * 11 % 110 : null,
+		consumedRecurring: recurring,
+		consumedNonRecurring: consuming && index % 5 === 0 ? 2e3 + index * 310 : 0,
+		maccCommit: index % 11 === 0 ? 8e6 + index * 15e4 : 0,
+		partner: partners[index % partners.length] ?? null,
+		competitor: {
+			name: competitor.name,
+			threat: competitor.threat
+		},
+		solutionTagReview: index % 13 === 4
+	};
+}
+function milestonesFor(row, index) {
+	const total = 1 + index % 4;
+	return Array.from({ length: total }, (_, offset) => {
+		const position = index * 5 + offset;
+		const status = milestoneStatuses[position % milestoneStatuses.length] ?? "On Track";
+		const dayOffset = (status === "On Track" || status === "At Risk" || status === "Blocked") && position % 6 === 0 ? -(10 + position % 40) : 20 + position * 29 % 380;
+		return {
+			id: `sample-ms-${String(index + 1).padStart(3, "0")}-${offset + 1}`,
+			number: `7-SAMPLEM${String(position + 1).padStart(4, "0")}`,
+			opportunityId: row.id,
+			name: [
+				"pilot",
+				"production",
+				"prod expansion",
+				"phase 2: services",
+				"DC1 circuits"
+			][position % 5] ?? "pilot",
+			workload: "Azure",
+			estimatedMonthlyAcr: [
+				150,
+				700,
+				3e3,
+				5e3,
+				2e4,
+				500
+			][position % 6] ?? 150,
+			commitment: status === "Completed" || position % 9 === 0 ? "Committed" : "Uncommitted",
+			status,
+			date: addDays(asOf, dayOffset),
+			comment: position % 4 === 0 ? `Sample update: customer validated the plan and will confirm usage next month (ref ${position + 1}).` : "",
+			owner: [
+				"Sample Owner A",
+				"Sample Owner B",
+				"Sample Owner C"
+			][position % 3] ?? "Sample Owner A"
+		};
+	});
+}
+function acrFor() {
+	const weights = [
+		.3,
+		.25,
+		.2,
+		.15,
+		.1
+	];
+	const round = (value) => Math.round(value / 1e3) * 1e3;
+	return {
+		source: "sample",
+		syncedAt: "2026-09-30",
+		lastActualMonth: "2026-09",
+		accounts: customers.map((customer, accountIndex) => {
+			const weight = weights[accountIndex] ?? .1;
+			return {
+				customer,
+				months: Array.from({ length: 12 }, (_, i) => {
+					const projected = Math.max(0, i - 2);
+					return {
+						month: `${i < 6 ? 2026 : 2027}-${String((i + 6) % 12 + 1).padStart(2, "0")}`,
+						actual: round(1333e3 * weight * Math.min(i + 1, 3)),
+						baseline: round(103e4 * weight * projected),
+						committed: round(22e3 * weight * projected),
+						uncommitted: round(29e4 * weight * projected),
+						stage1: round(43e4 * weight * projected),
+						target: round(1441e3 * weight * (i + 1))
+					};
+				})
+			};
+		})
+	};
+}
+var sampleReports = [
+	{
+		id: "sample-report-a",
+		displayName: "Sample Report A"
+	},
+	{
+		id: "sample-report-b",
+		displayName: "Sample Report B"
+	},
+	{
+		id: "sample-report-c",
+		displayName: "Sample Report C"
+	}
+];
+function reportPortfolio() {
+	const opportunities = [];
+	const milestones = [];
+	for (let index = 0; index < 18; index += 1) {
+		const base = opportunity$1(index);
+		const owner = sampleReports[index % sampleReports.length].displayName;
+		const row = {
+			...base,
+			id: `sample-rpt-opp-${String(index + 1).padStart(3, "0")}`,
+			number: `7-SAMPLER${String(index + 1).padStart(3, "0")}`,
+			name: `${base.name} (team)`,
+			owner,
+			editable: false
+		};
+		opportunities.push(row);
+		milestones.push(...milestonesFor(row, index).map((milestone) => ({
+			...milestone,
+			id: milestone.id.replace("sample-ms-", "sample-rpt-ms-"),
+			number: milestone.number.replace("SAMPLEM", "SAMPLERM"),
+			owner
+		})));
+	}
+	return {
+		opportunities,
+		milestones
+	};
+}
+function createSampleStagePipelineReview(options = {}) {
+	const scope = options.scope ?? "mine";
+	const own = Array.from({ length: 46 }, (_, index) => opportunity$1(index));
+	const ownMilestones = own.flatMap((row, index) => milestonesFor(row, index));
+	const team = scope === "mine" ? {
+		opportunities: [],
+		milestones: []
+	} : reportPortfolio();
+	const selected = options.reportIds?.length ? new Set(sampleReports.filter((report) => options.reportIds.includes(report.id)).map((report) => report.displayName)) : void 0;
+	const teamOpportunities = selected ? team.opportunities.filter((row) => selected.has(row.owner)) : team.opportunities;
+	const opportunities = scope === "reports" ? teamOpportunities : [...own, ...teamOpportunities];
+	const included = new Set(opportunities.map((row) => row.id));
+	const milestones = [...scope === "reports" ? [] : ownMilestones, ...team.milestones].filter((row) => included.has(row.opportunityId));
+	return stagePipelineSnapshotSchema.parse({
+		contractVersion: "1.1",
+		kind: "snapshot",
+		mode: "sample",
+		state: "fresh",
+		message: "Synthetic sample data: every customer, opportunity, milestone and amount is fictitious.",
+		generatedAt: `${asOf}T09:00:00.000Z`,
+		owner: "Sample Seller",
+		asOf,
+		fiscalYear: 2027,
+		scope,
+		reports: scope === "mine" ? [] : sampleReports.map((report) => ({ ...report })),
+		sources: [
+			...scope === "mine" ? [] : [{
+				source: "hierarchy",
+				state: "complete",
+				detail: "Synthetic sample direct reports.",
+				count: sampleReports.length
+			}],
+			{
+				source: "opportunities",
+				state: "complete",
+				detail: "Synthetic sample opportunities.",
+				count: opportunities.length
+			},
+			{
+				source: "milestones",
+				state: "complete",
+				detail: "Synthetic sample milestones."
+			},
+			{
+				source: "macc",
+				state: "complete",
+				detail: "Synthetic sample MACC commitments."
+			},
+			{
+				source: "acr",
+				state: "complete",
+				detail: "Synthetic sample ACR series."
+			}
+		],
+		opportunities,
+		milestones,
+		acr: acrFor()
+	});
+}
+//#endregion
+//#region packages/connectors/msx/stage-pipeline-mapping.ts
+var formattedSuffix = "@OData.Community.Display.V1.FormattedValue";
+var msPerDay = 864e5;
+var defaultInboundSourceCodes = /* @__PURE__ */ new Set([
+	861981141,
+	861980002,
+	861981086,
+	861981236
+]);
+var forecastLabels = {
+	100000001: "Pipeline",
+	100000002: "Best case",
+	100000003: "Committed",
+	100000004: "Omitted",
+	100000005: "Won",
+	100000006: "Lost"
+};
+var threatByCode = {
+	861980001: "None",
+	861980002: "Medium",
+	861980003: "High"
+};
+var milestoneStatusByCode = {
+	86198e4: "On Track",
+	861980001: "At Risk",
+	861980002: "Blocked",
+	861980003: "Completed",
+	861980004: "Cancelled",
+	861980005: "Lost to Competitor",
+	861980006: "Hygiene/Duplicate"
+};
+var azureSolutionArea = 39438e4;
+var servicesSolutionArea = 861980011;
+var unknownSolutionArea = 861980013;
+var openMilestoneStatuses = /* @__PURE__ */ new Set([
+	"On Track",
+	"At Risk",
+	"Blocked"
+]);
+function text(row, key) {
+	const value = row[key];
+	return typeof value === "string" && value.trim() ? value : void 0;
+}
+function number(row, key) {
+	const value = row[key];
+	return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+}
+function formatted(row, key) {
+	return text(row, `${key}${formattedSuffix}`);
+}
+var maxText = 3e4;
+var maxName = 500;
+var maxId = 200;
+var clip = (value, max) => value.length > max ? value.slice(0, max) : value;
+function day(value) {
+	return value && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : void 0;
+}
+function daysBetween(from, to) {
+	return Math.max(0, Math.floor((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / msPerDay));
+}
+function parseStage(label) {
+	if (typeof label !== "string") return void 0;
+	const normalized = label.replace(/^\s*\d+\s*-\s*/, "").trim().toLowerCase();
+	return stagePipelineStages.find((stage) => stage.toLowerCase() === normalized);
+}
+function mapOpportunityRow(row, context) {
+	const id = text(row, "opportunityid");
+	const accountId = text(row, "_parentaccountid_value");
+	const customer = formatted(row, "_parentaccountid_value");
+	if (!id || !accountId || !customer) return {
+		kind: "excluded",
+		reason: "account"
+	};
+	const stage = parseStage(row["msp_activesalesstage"]);
+	if (!stage) return {
+		kind: "excluded",
+		reason: "stage"
+	};
+	const area = number(row, "msp_solutionarea");
+	const unknownArea = area === unknownSolutionArea;
+	const scope = area === azureSolutionArea || unknownArea ? "azure" : area === servicesSolutionArea ? "microsoft-services" : void 0;
+	if (!scope) return {
+		kind: "excluded",
+		reason: "solution-area"
+	};
+	const closeDate = day(text(row, "msp_estcompletiondate")) ?? day(text(row, "estimatedclosedate"));
+	if (!closeDate) return {
+		kind: "excluded",
+		reason: "close-date"
+	};
+	const recurring = Math.max(0, number(row, "msp_consumptionconsumedrecurring") ?? 0);
+	const nonRecurring = Math.max(0, number(row, "msp_consumptionconsumednonrecurring") ?? 0);
+	const reportedDays = number(row, "msp_daysinstage") ?? 0;
+	const stageChanged = day(text(row, "msp_currentsalesstagemodifiedon"));
+	const commentChanged = day(text(row, "msp_forecastcomments_lastmodifiedon_datetime"));
+	const forecastCode = number(row, "msdyn_forecastcategory");
+	const competitorName = formatted(row, "_msp_primarycompetitor_value") ?? text(row, "msp_othercompetitor");
+	const state = number(row, "statecode");
+	const sourceCode = number(row, "msp_sourcesubtypecode");
+	return {
+		kind: "row",
+		row: {
+			id: clip(id, maxId),
+			number: clip(text(row, "msp_opportunitynumber") ?? id, maxName),
+			customer: clip(customer, maxName),
+			name: clip(text(row, "name") ?? "Untitled opportunity", maxName),
+			owner: clip(formatted(row, "_ownerid_value") ?? "", maxId),
+			editable: context.editableIds.has(id),
+			notes: clip(text(row, "msp_forecastcomments") ?? "", maxText),
+			contact: clip(formatted(row, "_parentcontactid_value") ?? "", maxText),
+			scope,
+			solutionArea: clip(formatted(row, "msp_solutionarea") ?? (scope === "azure" ? "Cloud and AI Platforms" : "Microsoft Services"), maxName),
+			inbound: sourceCode !== void 0 && context.inboundCodes.has(sourceCode),
+			stage,
+			status: state === 1 ? "Won" : state === 2 ? "Lost" : "In Progress",
+			forecast: clip(formatted(row, "msdyn_forecastcategory") ?? (forecastCode !== void 0 ? forecastLabels[forecastCode] : void 0) ?? "Not set", maxName),
+			closeDate,
+			daysInStage: reportedDays > 0 ? reportedDays : stageChanged ? daysBetween(stageChanged, context.asOf) : 0,
+			idleDays: recurring + nonRecurring > 0 && commentChanged ? daysBetween(commentChanged, context.asOf) : null,
+			consumedRecurring: recurring,
+			consumedNonRecurring: nonRecurring,
+			maccCommit: 0,
+			partner: clip(formatted(row, "_msp_partneraccountid_value") ?? "", maxText) || null,
+			competitor: {
+				name: competitorName && competitorName.toLowerCase() !== "none" ? clip(competitorName, maxText) : null,
+				threat: threatByCode[number(row, "msp_competethreatlevel") ?? 0] ?? "None"
+			},
+			solutionTagReview: unknownArea
+		}
+	};
+}
+function mapMilestoneRow(row) {
+	const id = text(row, "msp_engagementmilestoneid");
+	const opportunityId = text(row, "_msp_opportunityid_value");
+	const statusCode = number(row, "msp_milestonestatus");
+	const status = statusCode === void 0 ? void 0 : milestoneStatusByCode[statusCode];
+	if (!id || !opportunityId || !status) return void 0;
+	return {
+		id: clip(id, maxId),
+		number: clip(text(row, "msp_milestonenumber") ?? id, maxName),
+		opportunityId: clip(opportunityId, maxId),
+		name: clip(text(row, "msp_name") ?? "Unnamed milestone", maxName),
+		workload: clip(formatted(row, "msp_workload") ?? formatted(row, "msp_milestoneworkload") ?? "", maxText),
+		estimatedMonthlyAcr: Math.max(0, number(row, "msp_monthlyuse") ?? 0),
+		commitment: number(row, "msp_commitmentrecommendation") === 861980003 ? "Committed" : "Uncommitted",
+		status,
+		date: day(text(row, "msp_milestonedate")) ?? null,
+		comment: clip(text(row, "msp_forecastcomments") ?? "", maxText),
+		owner: clip(formatted(row, "_ownerid_value") ?? "", maxText)
+	};
+}
+function isOpenMilestoneStatus(status) {
+	return openMilestoneStatuses.has(status);
+}
+function fiscalMonths(fiscalYear) {
+	return Array.from({ length: 12 }, (_, index) => {
+		const month = (index + 6) % 12 + 1;
+		return `${index < 6 ? fiscalYear - 1 : fiscalYear}-${String(month).padStart(2, "0")}`;
+	});
+}
+function fiscalYearFor(date) {
+	const year = Number(date.slice(0, 4));
+	return Number(date.slice(5, 7)) >= 7 ? year + 1 : year;
+}
+/**
+* Cumulative fiscal-year ACR pipe from open milestones only. Actuals, baseline and target are
+* never fabricated: they stay null until an ACR source is connected.
+*/
+function deriveAcrPipe(input) {
+	const months = fiscalMonths(input.fiscalYear);
+	const opportunityById = new Map(input.opportunities.map((row) => [row.id, row]));
+	const customers = [...new Set(input.opportunities.map((row) => row.customer))].sort((left, right) => left.localeCompare(right));
+	const layers = new Map(customers.map((customer) => [customer, {
+		committed: new Array(12).fill(0),
+		uncommitted: new Array(12).fill(0),
+		stage1: new Array(12).fill(0)
+	}]));
+	for (const milestone of input.milestones) {
+		const opportunity = opportunityById.get(milestone.opportunityId);
+		if (!opportunity || opportunity.status !== "In Progress" || !isOpenMilestoneStatus(milestone.status) || !milestone.date) continue;
+		const dated = milestone.date.slice(0, 7);
+		if (dated > months[11]) continue;
+		const start = Math.max(0, months.indexOf(dated));
+		const layer = layers.get(opportunity.customer);
+		if (!layer) continue;
+		const target = milestone.commitment === "Committed" ? layer.committed : opportunity.stage === "Listen & Consult" ? layer.stage1 : layer.uncommitted;
+		for (let index = start; index < 12; index += 1) target[index] = (target[index] ?? 0) + milestone.estimatedMonthlyAcr * (index - start + 1);
+	}
+	return {
+		source: "derived-pipeline-only",
+		syncedAt: null,
+		lastActualMonth: null,
+		accounts: customers.map((customer) => {
+			const layer = layers.get(customer);
+			return {
+				customer,
+				months: months.map((month, index) => ({
+					month,
+					actual: null,
+					baseline: null,
+					target: null,
+					committed: layer.committed[index] ?? 0,
+					uncommitted: layer.uncommitted[index] ?? 0,
+					stage1: layer.stage1[index] ?? 0
+				}))
+			};
+		})
+	};
+}
+//#endregion
+//#region packages/connectors/msx/stage-pipeline.ts
+var StagePipelineSourceError = class extends Error {
+	code;
+	constructor(code, message, cause) {
+		super(message, cause === void 0 ? void 0 : { cause });
+		this.code = code;
+		this.name = "StagePipelineSourceError";
+	}
+};
+var failureMessages = {
+	"unauthorized": "MSX did not accept the signed-in credential. Sign in again and retry.",
+	"forbidden": "MSX denied access to the requested portfolio data for this user.",
+	"throttled": "MSX is throttling requests. Retry in a moment.",
+	"source-unavailable": "MSX could not be reached or returned an unexpected response."
+};
+function classifyStagePipelineError(error) {
+	if (error instanceof StagePipelineSourceError) return error;
+	const status = typeof error === "object" && error !== null && "status" in error ? error.status : void 0;
+	const code = status === 401 ? "unauthorized" : status === 403 ? "forbidden" : status === 429 ? "throttled" : "source-unavailable";
+	return new StagePipelineSourceError(code, failureMessages[code], error);
+}
+var chunkSize = 40;
+var concurrentUsers = 4;
+var opportunitySelect = [
+	"opportunityid",
+	"name",
+	"statecode",
+	"statuscode",
+	"_parentaccountid_value",
+	"_ownerid_value",
+	"_parentcontactid_value",
+	"msp_opportunitynumber",
+	"msp_activesalesstage",
+	"msp_currentsalesstagemodifiedon",
+	"msp_daysinstage",
+	"msp_estcompletiondate",
+	"estimatedclosedate",
+	"msdyn_forecastcategory",
+	"msp_forecastcomments",
+	"msp_forecastcomments_lastmodifiedon_datetime",
+	"msp_consumptionconsumedrecurring",
+	"msp_consumptionconsumednonrecurring",
+	"msp_solutionarea",
+	"msp_sourcesubtypecode",
+	"msp_competethreatlevel",
+	"_msp_primarycompetitor_value",
+	"msp_othercompetitor",
+	"_msp_partneraccountid_value",
+	"modifiedon"
+].join(",");
+var milestoneSelect = [
+	"msp_engagementmilestoneid",
+	"msp_milestonenumber",
+	"msp_name",
+	"_msp_opportunityid_value",
+	"msp_milestonedate",
+	"msp_milestonestatus",
+	"msp_commitmentrecommendation",
+	"msp_monthlyuse",
+	"msp_workload",
+	"msp_forecastcomments",
+	"_ownerid_value",
+	"modifiedon"
+].join(",");
+var LiveStagePipelineConnector = class {
+	source;
+	now;
+	inboundCodes;
+	opportunityLimit;
+	milestoneLimit;
+	constructor(source, options = {}) {
+		this.source = source;
+		this.now = options.now ?? (() => /* @__PURE__ */ new Date());
+		this.inboundCodes = options.inboundCodes ?? defaultInboundSourceCodes;
+		this.opportunityLimit = options.limits?.opportunities ?? 5e3;
+		this.milestoneLimit = options.limits?.milestones ?? 25e3;
+	}
+	async load(request) {
+		try {
+			return await this.build(request);
+		} catch (error) {
+			throw classifyStagePipelineError(error);
+		}
+	}
+	async build(request) {
+		const generatedAt = this.now();
+		const asOf = generatedAt.toISOString().slice(0, 10);
+		const me = await this.source.getCurrentUserId();
+		const includesSeller = request.scope !== "reports";
+		const [owner, discovered] = await Promise.all([this.readDisplayName(me), request.scope === "mine" ? Promise.resolve([]) : this.readDirectReports(me)]);
+		const selected = request.reportIds ? discovered.filter((report) => request.reportIds.includes(report.id)) : discovered;
+		const sources = [];
+		if (request.scope !== "mine") sources.push({
+			source: "hierarchy",
+			state: "complete",
+			detail: `${discovered.length} direct report${discovered.length === 1 ? "" : "s"} found in the Dynamics manager hierarchy.`,
+			count: discovered.length
+		});
+		const mine = includesSeller ? await this.readPortfolio(me) : {
+			ids: /* @__PURE__ */ new Set(),
+			failed: []
+		};
+		if (includesSeller && "dealTeamFailure" in mine && mine.dealTeamFailure) throw mine.dealTeamFailure;
+		const reportReads = await mapInGroups(selected, concurrentUsers, async (report) => ({
+			report,
+			read: await this.readPortfolio(report.id)
+		}));
+		const degradedReports = reportReads.filter(({ read }) => read.failed.length > 0).length;
+		const sellerPartial = includesSeller && mine.failed.length > 0;
+		const mineIds = "dealTeamFailure" in mine && mine.dealTeamFailure ? /* @__PURE__ */ new Set() : mine.ids;
+		const ids = new Set(includesSeller ? mineIds : []);
+		for (const { read } of reportReads) for (const id of read.ids) ids.add(id);
+		const candidateIds = [...ids];
+		const [rawOpportunities, rawMilestones] = await Promise.all([this.readChunks("opportunities", "opportunityid", candidateIds, opportunitySelect), this.readChunks("msp_engagementmilestones", "_msp_opportunityid_value", candidateIds, milestoneSelect)]);
+		const mapped = rawOpportunities.map((row) => mapOpportunityRow(row, {
+			asOf,
+			editableIds: mineIds,
+			inboundCodes: this.inboundCodes
+		}));
+		const rows = [];
+		let excluded = 0;
+		for (const result of mapped) if (result.kind === "row") rows.push(result.row);
+		else excluded += 1;
+		rows.sort((left, right) => left.customer.localeCompare(right.customer) || left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+		const opportunityTruncated = rows.length > this.opportunityLimit;
+		const opportunities = rows.slice(0, this.opportunityLimit);
+		const includedIds = new Set(opportunities.map((row) => row.id));
+		const allMilestones = [];
+		let skippedMilestones = 0;
+		for (const row of rawMilestones) {
+			const milestone = mapMilestoneRow(row);
+			if (milestone && !includedIds.has(milestone.opportunityId)) continue;
+			if (milestone) allMilestones.push(milestone);
+			else skippedMilestones += 1;
+		}
+		allMilestones.sort((left, right) => (left.date ?? "9999").localeCompare(right.date ?? "9999") || left.id.localeCompare(right.id));
+		const milestoneTruncated = allMilestones.length > this.milestoneLimit;
+		const milestones = allMilestones.slice(0, this.milestoneLimit);
+		const opportunityNotes = [];
+		if (excluded > 0) opportunityNotes.push(`${excluded} opportunit${excluded === 1 ? "y was" : "ies were"} excluded (unsupported solution area, pre-qualification stage, missing account or close date).`);
+		if (sellerPartial) opportunityNotes.push("The seller milestone-team membership could not be read.");
+		if (degradedReports > 0) opportunityNotes.push(`${degradedReports} direct report portfolio${degradedReports === 1 ? " was" : "s were"} not fully readable.`);
+		if (opportunityTruncated) opportunityNotes.push(`The list was truncated at ${this.opportunityLimit} opportunities.`);
+		sources.push({
+			source: "opportunities",
+			state: opportunityNotes.length ? "partial" : "complete",
+			detail: opportunityNotes.join(" ") || "All open opportunities in scope were read from MSX.",
+			count: opportunities.length
+		});
+		const milestoneNotes = [];
+		if (skippedMilestones > 0) milestoneNotes.push(`${skippedMilestones} milestone${skippedMilestones === 1 ? " has" : "s have"} an unrecognized status and ${skippedMilestones === 1 ? "was" : "were"} skipped.`);
+		if (milestoneTruncated) milestoneNotes.push(`The list was truncated at ${this.milestoneLimit} milestones.`);
+		sources.push({
+			source: "milestones",
+			state: milestoneNotes.length ? "partial" : "complete",
+			detail: milestoneNotes.join(" ") || "All open-opportunity milestones were read from MSX.",
+			count: milestones.length
+		});
+		sources.push({
+			source: "macc",
+			state: "unavailable",
+			detail: "MACC commitments are account-level in Dataverse; per-opportunity MACC is not available, so MACC & Commits is empty."
+		});
+		sources.push({
+			source: "acr",
+			state: "unavailable",
+			detail: "Monthly ACR actuals, baseline and target are not connected. The chart shows pipeline layers derived from open milestones."
+		});
+		return stagePipelineSnapshotSchema.parse({
+			contractVersion: "1.1",
+			kind: "snapshot",
+			mode: "live",
+			state: "fresh",
+			message: "Live read-only data from MSX.",
+			generatedAt: generatedAt.toISOString(),
+			owner,
+			asOf,
+			fiscalYear: fiscalYearFor(asOf),
+			scope: request.scope,
+			reports: request.scope === "mine" ? [] : discovered.map((report) => ({
+				id: report.id,
+				displayName: report.displayName
+			})),
+			sources,
+			opportunities,
+			milestones,
+			acr: deriveAcrPipe({
+				fiscalYear: fiscalYearFor(asOf),
+				opportunities,
+				milestones
+			})
+		});
+	}
+	async readDisplayName(userId) {
+		try {
+			const name = (await this.source.readRows("systemusers", {
+				"$select": "systemuserid,fullname",
+				"$filter": `systemuserid eq ${userId}`,
+				"$top": "1"
+			}))[0]?.["fullname"];
+			return typeof name === "string" ? name : "";
+		} catch {
+			return "";
+		}
+	}
+	async readDirectReports(userId) {
+		return (await this.source.readRows("systemusers", {
+			"$select": "systemuserid,fullname",
+			"$filter": `_parentsystemuserid_value eq ${userId} and isdisabled eq false`,
+			"$top": "50"
+		})).flatMap((row) => typeof row["systemuserid"] === "string" ? [{
+			id: row["systemuserid"],
+			displayName: typeof row["fullname"] === "string" && row["fullname"] ? row["fullname"] : "Unnamed user"
+		}] : []).sort((left, right) => left.displayName.localeCompare(right.displayName));
+	}
+	async readPortfolio(userId) {
+		const [dealTeam, milestoneTeam] = await Promise.allSettled([this.source.listDealTeamOpportunityIds(userId), this.source.listMilestoneTeamOpportunityIds(userId)]);
+		const ids = /* @__PURE__ */ new Set();
+		const failed = [];
+		for (const result of [dealTeam, milestoneTeam]) if (result.status === "fulfilled") for (const id of result.value) ids.add(id);
+		else failed.push(result.reason);
+		return {
+			ids,
+			failed,
+			...dealTeam.status === "rejected" ? { dealTeamFailure: classifyStagePipelineError(dealTeam.reason) } : {}
+		};
+	}
+	async readChunks(entitySet, field, ids, select) {
+		const chunks = [];
+		for (let offset = 0; offset < ids.length; offset += chunkSize) chunks.push(ids.slice(offset, offset + chunkSize));
+		return (await mapInGroups(chunks, 2, (chunk) => this.source.readRows(entitySet, {
+			"$select": select,
+			"$filter": `statecode eq 0 and (${chunk.map((id) => `${field} eq ${id}`).join(" or ")})`
+		}))).flat();
+	}
+};
+async function mapInGroups(items, size, run) {
+	const results = [];
+	for (let offset = 0; offset < items.length; offset += size) results.push(...await Promise.all(items.slice(offset, offset + size).map(run)));
+	return results;
+}
+//#endregion
+//#region packages/orchestrator/stage-pipeline-cache.ts
+/**
+* Per-user in-memory cache in front of a live loader: TTL reads, single-flight reloads, and a visibly
+* stale last-good snapshot when a reload fails. Nothing is persisted.
+*/
+var CachedStagePipelineLoader = class {
+	inner;
+	entries = /* @__PURE__ */ new Map();
+	inflight = /* @__PURE__ */ new Map();
+	now;
+	ttlMs;
+	maxEntries;
+	constructor(inner, options = {}) {
+		this.inner = inner;
+		this.now = options.now ?? Date.now;
+		this.ttlMs = options.ttlMs ?? 3e5;
+		this.maxEntries = options.maxEntries ?? 8;
+	}
+	invalidate() {
+		this.entries.clear();
+	}
+	async load(request, context = { fresh: false }) {
+		const key = `${request.scope}|${[...request.reportIds ?? []].sort().join(",")}`;
+		const cached = this.entries.get(key);
+		if (!context.fresh && cached && this.now() - cached.loadedAt < this.ttlMs) return cached.snapshot;
+		const running = this.inflight.get(key);
+		if (running) return running;
+		const pending = this.reload(key, request, context, cached).finally(() => {
+			this.inflight.delete(key);
+		});
+		this.inflight.set(key, pending);
+		return pending;
+	}
+	async reload(key, request, context, previous) {
+		try {
+			const snapshot = await this.inner.load(request, context);
+			this.entries.delete(key);
+			this.entries.set(key, {
+				snapshot,
+				loadedAt: this.now()
+			});
+			while (this.entries.size > this.maxEntries) this.entries.delete(this.entries.keys().next().value);
+			return snapshot;
+		} catch (error) {
+			if (!previous) throw error;
+			const reason = error instanceof StagePipelineSourceError ? error.message : "The source returned an unexpected error.";
+			return {
+				...previous.snapshot,
+				state: "stale",
+				message: `Showing data generated ${previous.snapshot.generatedAt}. The latest refresh failed: ${reason}`
+			};
+		}
+	}
+};
+//#endregion
+//#region packages/orchestrator/stage-pipeline-review.ts
+var SharedStagePipelineReviewHost = class {
+	loader;
+	constructor(loader) {
+		this.loader = loader;
+	}
+	async invoke(rawRequest) {
+		const request = stagePipelineRequestSchema.parse(rawRequest);
+		try {
+			return stagePipelineResponseSchema.parse(await this.loader.load(request, { fresh: request.operation === "refresh" }));
+		} catch (error) {
+			if (!(error instanceof StagePipelineSourceError)) throw error;
+			return stagePipelineResponseSchema.parse({
+				contractVersion: "1.1",
+				kind: "unavailable",
+				code: error.code,
+				message: error.message
+			});
+		}
+	}
+};
+function createStagePipelineReviewHost(options) {
+	if (options.mode === "sample") return new SharedStagePipelineReviewHost({ load: async (request) => createSampleStagePipelineReview({
+		scope: request.scope,
+		...request.reportIds ? { reportIds: request.reportIds } : {}
+	}) });
+	const { source, cache, ...rest } = options;
+	const { mode: _ignored, ...connectorOptions } = rest;
+	return new SharedStagePipelineReviewHost(new CachedStagePipelineLoader(new LiveStagePipelineConnector(source, connectorOptions), cache));
 }
 //#endregion
 //#region apps/desktop/electron/main/window-bounds.ts
@@ -21638,6 +23337,10 @@ var sellerDashboardHost = createSellerDashboardHost({
 });
 var seReportingHost = createSeReportingHost({
 	mode: dataMode,
+	dataverse: {
+		readRows: (entitySet, parameters) => liveMsxConnector.readRows(entitySet, parameters),
+		listMilestoneTeamMilestoneIds: (userId) => liveMsxConnector.listMilestoneTeamMilestoneIds(userId)
+	},
 	identity: async () => {
 		const email = (await tokenProvider.getAuthStatus()).userEmail;
 		return email ? {
@@ -21664,9 +23367,24 @@ var localStoreMsxConnector = liveMsxConnector ? void 0 : createLocalStoreMsxConn
 	TLC_DATA_STORE_PATH: process.env["TLC_DATA_STORE_PATH"]?.trim() || resolve(app.getPath("userData"), "sample.sqlite")
 });
 var msxConnector = liveMsxConnector ?? localStoreMsxConnector ?? new FixtureMsxConnector();
+var stagePipelineHost = liveMsxConnector ? createStagePipelineReviewHost({
+	mode: "live",
+	source: liveMsxConnector
+}) : createStagePipelineReviewHost({ mode: "sample" });
 var creationWriter = localStoreMsxConnector?.createRecordCreationWriter();
 var recordCreation = new RecordCreationService(msxConnector, creationWriter ?? liveMsxConnector ?? new SampleRecordCreationCatalog(msxConnector), creationWriter ? { writer: creationWriter } : {});
-var meetingConnector = liveMsxConnector ? new LiveMeetingCaptureConnector(liveMsxConnector) : localStoreMsxConnector;
+var meetingGraph = liveMsxConnector ? new GraphMeetingConnector(async (purpose) => {
+	const interactive = authentication?.mode === "interactive-browser";
+	let token;
+	try {
+		token = await credentials.msx.getToken(interactive ? [...meetingScopesFor(purpose)] : meetingGraphDefaultScope);
+	} catch (error) {
+		throw meetingSignInFailure(error);
+	}
+	if (!token) throw meetingSignInFailure("A delegated Microsoft Graph token was not returned.");
+	return interactive ? token.token : assertCliTokenCanReadMeetings(token.token, purpose);
+}) : void 0;
+var meetingConnector = liveMsxConnector ? new LiveMeetingCaptureConnector(liveMsxConnector, void 0, meetingGraph) : localStoreMsxConnector;
 var foundryOpenAIClient = runtimeEnvironment ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry) : void 0;
 /** Foundry model-backed meeting-signal extractor when TLC_MEETING_EXTRACTOR=foundry; else the deterministic offline extractor. */
 var meetingExtractor = runtimeEnvironment && foundryOpenAIClient && (process.env["TLC_MEETING_EXTRACTOR"] ?? "").toLowerCase() === "foundry" ? createFoundryMeetingExtractor({
@@ -21864,6 +23582,11 @@ function registerIpc() {
 	ipcMain.handle(sellerDashboardIpcChannel, (event, request) => {
 		assertTrustedSender(event);
 		return invokeSellerDashboard(request);
+	});
+	const invokeStagePipeline = createStagePipelineIpcHandler(stagePipelineHost);
+	ipcMain.handle(stagePipelineIpcChannel, (event, request) => {
+		assertTrustedSender(event);
+		return invokeStagePipeline(request);
 	});
 	const invokeVoice = createVoiceIpcHandler(voiceHost);
 	ipcMain.handle(voiceIpcChannel, (event, request) => {

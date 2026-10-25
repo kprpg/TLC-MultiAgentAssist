@@ -111,6 +111,11 @@ apps/vscode-extension/src/presentation-provider.ts
                                      One provider cache for native trees and recreated webviews
 apps/shared/meeting-proposal-markdown.ts
                                      Shared browser-safe meeting proposal export format across surfaces
+apps/shared/meeting-picker.tsx       Shared "Teams meeting" dropdown, lazy list hook and date/time labels (VS Code, Desktop/Web, Teams)
+packages/common/configuration/meeting-sources.ts
+                                     Delegated Graph scopes and window/limit for the recent-meeting list
+packages/connectors/common/meeting-source.ts
+                                     User-safe MeetingSourceError and messages shared by every UI
 apps/shared/mcem-stages.ts           Browser-safe stage names and accountable role metadata
 apps/shared/mcem-stage-board.tsx     Shared Desktop/Web/Teams stage columns and presentation
 apps/shared/mcem-stage-board.css     Shared stage headers, cards, selection and gate styling
@@ -420,7 +425,8 @@ Meeting capture's Desktop/Web launcher and review modal live in the focused
 `apps/desktop/renderer-revamp/src/meeting-capture.tsx` (shared by Desktop and Web,
 not `apps/shared`, since it depends on the renderer-revamp `RevampDataClient` and
 Fluent UI already used throughout `App.tsx`). The VS Code webview keeps its own
-equivalent component. Both call the same shared connectors/extractor
+equivalent component. The "Teams meeting" dropdown inside both launchers (and in
+the Teams client) is the one shared `apps/shared/meeting-picker.tsx`. Both call the same shared connectors/extractor
 (`packages/connectors/msx/live-meeting.ts`, `packages/connectors/local-store`,
 `packages/agents/meeting-signal-extractor`) through host-specific transports:
 Electron IPC (`apps/desktop/electron/main/index.ts`), the webview bridge

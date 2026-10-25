@@ -97,7 +97,7 @@ In Microsoft Entra admin center:
 
 1. Create an app registration for this desktop app in the tenant that grants the developer access to the required resources.
 2. Under **Authentication**, add the **Mobile and desktop applications** redirect URI `http://localhost` and enable public-client flows when required by tenant policy.
-3. Under **API permissions**, add only the delegated permissions approved for MSX and Microsoft Graph/SharePoint data access. Outlook compose handoff does not require `Mail.ReadWrite` or `Mail.Send`. Foundry access is also enforced through Azure RBAC; assign the signed-in developer an appropriate project role such as **Foundry User**.
+3. Under **API permissions**, add only the delegated permissions approved for MSX and Microsoft Graph/SharePoint data access. Outlook compose handoff does not require `Mail.ReadWrite` or `Mail.Send`. Foundry access is also enforced through Azure RBAC; assign the signed-in developer an appropriate project role such as **Foundry User**. Meeting Capture's **Teams meeting** list needs delegated Graph `Calendars.Read` (user-consentable) to list meetings; `OnlineMeetings.Read` and `OnlineMeetingTranscript.Read.All` (administrator consent) are requested only when a transcript is imported. The list requires `authentication.mode: "interactive-browser"`; Azure CLI sign-in cannot read calendars and shows a message saying so. Without consent the list shows the reason and **Paste / upload** keeps working.
 4. Put only the tenant ID, client ID, redirect URI, and scopes in your private JSON file.
 
 Each developer can therefore use a different Foundry project and app registration without changing source code.

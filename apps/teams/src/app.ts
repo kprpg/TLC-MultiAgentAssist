@@ -234,7 +234,8 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
           !local.status().resources.some((resource) => resource.resource === 'mcp' && resource.state === 'connected')) {
         throw new TeamsHttpError(409, 'mcp_connection_required')
       }
-      if (isCliConfiguration(options.configuration) && ['/api/teams/meetings/resolve', '/api/teams/meetings/acquire'].includes(url.pathname)) {
+      if (isCliConfiguration(options.configuration) && (['/api/teams/meetings/resolve', '/api/teams/meetings/acquire'].includes(url.pathname)
+        || url.pathname === '/api/teams/meetings/sources' && principal.mode !== 'sample')) {
         throw new TeamsHttpError(409, 'graph_unavailable_in_cli_profile')
       }
       const services = await options.resolveServices(principal, assertion)
@@ -450,13 +451,20 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         const input = z.object({ bindingId: z.string().min(1).max(200) }).strict().parse(body)
         json(200, await actions.prepare(principal, 'publishSummary', await publications.prepareInput(principal, input.bindingId)))
       } else if (url.pathname === '/api/teams/meetings/resolve') {
-        const input = z.object({ joinUrl: z.url() }).strict().parse(body)
-        json(200, { meetingId: await services.resolveMeeting(input.joinUrl) })
+        const input = z.union([
+          z.object({ joinUrl: z.url() }).strict(),
+          z.object({ handle: z.string().regex(/^gm_[A-Za-z0-9_-]{32}$/) }).strict()
+        ]).parse(body)
+        json(200, 'handle' in input ? await services.resolveRecentMeeting(input.handle) : { meetingId: await services.resolveMeeting(input.joinUrl) })
       } else if (url.pathname === '/api/teams/meetings/sources') {
         const input = z.object({ opportunityId: z.string().min(1).max(200) }).strict().parse(body)
-        if (principal.mode !== 'sample') throw new TeamsHttpError(400, 'live_meeting_binding_required')
         await services.orchestrator.getOpportunitySnapshot(input.opportunityId)
-        json(200, await services.listTranscriptSources(input.opportunityId))
+        if (principal.mode === 'sample') {
+          json(200, await services.listTranscriptSources(input.opportunityId))
+        } else {
+          await lifecycle.assertActive(principal)
+          json(200, await services.listRecentMeetings())
+        }
       } else if (url.pathname === '/api/teams/meetings/manual') {
         const result = await acquisition.ingest(principal, body)
         await notifications.enqueueAcquisition(principal, result)

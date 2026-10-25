@@ -26,6 +26,7 @@ import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportun
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 import { readTranscriptFile } from '../../../shared/transcript-file.js'
 import { meetingProposalToMarkdown } from '../../../shared/meeting-proposal-markdown.js'
+import { MeetingPicker, useMeetingList } from '../../../shared/meeting-picker.js'
 import { DashboardWorkspace } from '../../../shared/dashboards/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
 import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
@@ -1145,7 +1146,6 @@ function MeetingCaptureLauncher({ opportunityId, opportunityName, milestones, on
     onNote: (message: string) => void
 }): ReactElement {
     const [open, setOpen] = useState(false)
-    const [transcripts, setTranscripts] = useState<MeetingTranscriptSummaryView[]>([])
     const [transcriptId, setTranscriptId] = useState('')
     const [tab, setTab] = useState<'pick' | 'paste'>('pick')
     const [pasteContent, setPasteContent] = useState('')
@@ -1155,12 +1155,13 @@ function MeetingCaptureLauncher({ opportunityId, opportunityName, milestones, on
 
     useEffect(() => {
         setOpen(false); setProposal(undefined); setPasteContent(''); setTranscriptId(''); setTab('pick')
-        dataClient.listMeetingTranscripts(opportunityId)
-            .then((list) => { setTranscripts(list); if (list[0]) setTranscriptId(list[0].id) })
-            .catch(() => setTranscripts([]))
     }, [opportunityId])
+    const meetings = useMeetingList<MeetingTranscriptSummaryView>(
+        () => dataClient.listMeetingTranscripts(opportunityId), open && tab === 'pick', opportunityId,
+        (list) => setTranscriptId((current) => list.some((item) => item.id === current) ? current : list[0]?.id ?? '')
+    )
 
-    const canExtract = tab === 'paste' ? pasteContent.trim().length > 10 : transcriptId.length > 0
+    const canExtract = tab === 'paste' ? pasteContent.trim().length > 10 : meetings.items.some((item) => item.id === transcriptId)
 
     const extract = useCallback(async () => {
         setBusy(true)
@@ -1185,13 +1186,7 @@ function MeetingCaptureLauncher({ opportunityId, opportunityName, milestones, on
                         <button className={tab === 'pick' ? 'tab active' : 'tab'} onClick={() => setTab('pick')}>Teams meeting</button>
                         <button className={tab === 'paste' ? 'tab active' : 'tab'} onClick={() => setTab('paste')}>Paste / upload</button>
                     </div>
-                    {tab === 'pick' && (transcripts.length > 0 ? (
-                        <label className="meeting-field">Meeting
-                            <select value={transcriptId} onChange={(event) => setTranscriptId(event.target.value)}>
-                                {transcripts.map((transcript) => <option key={transcript.id} value={transcript.id}>{transcript.subject} ({transcript.meetingType}, {transcript.segmentCount} lines)</option>)}
-                            </select>
-                        </label>
-                    ) : <p className="muted">No linked meeting transcripts. Use Paste / upload.</p>)}
+                    {tab === 'pick' && <MeetingPicker list={meetings} selectedId={transcriptId} onSelect={setTranscriptId} />}
                     {tab === 'paste' && (
                         <div className="meeting-paste">
                             <label className="meeting-field">Meeting type

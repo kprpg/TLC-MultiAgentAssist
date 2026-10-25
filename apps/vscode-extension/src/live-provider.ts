@@ -7,11 +7,13 @@ import {
 } from '../../../packages/common/index.js'
 import type { TokenCredential } from '@azure/core-auth'
 import { foundryEnvironmentSchema } from '../../../packages/common/configuration/foundry-environment.js'
+import type { MeetingTokenPurpose } from '../../../packages/common/configuration/meeting-sources.js'
 import mcpServersJson from '../../../config/mcp.servers.json' with { type: 'json' }
 import mcpToolPolicyJson from '../../../config/mcp.tool-policy.json' with { type: 'json' }
 import dataverseEntityMapJson from '../../../config/dataverse.entity-map.json' with { type: 'json' }
 import foundryEnvironmentJson from '../../../config/foundry.environment.json' with { type: 'json' }
 import { LiveMsxConnector, LiveMeetingCaptureConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
+import { GraphMeetingConnector } from '../../../packages/connectors/graph/meetings.js'
 import { RecordCreationService } from '../../../packages/orchestrator/record-creation/service.js'
 import { JsonFilePortfolioPreferenceStore, MemoryPortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
 import { createFoundryOpenAIClient } from '../../../packages/connectors/foundry/index.js'
@@ -76,7 +78,8 @@ export function createLiveDataProvider(
     preferenceFilePath?: string,
     foundryCredential?: TokenCredential,
     getReportingToken?: (resource: SeReportingResource) => Promise<string>,
-    getGraphKnowledgeToken?: () => Promise<string>
+    getGraphKnowledgeToken?: () => Promise<string>,
+    getMeetingGraphToken?: (purpose: MeetingTokenPurpose) => Promise<string>
 ): ExtensionDataProvider {
     const sourceToken = bindSourceToken(getToken, 'https://microsoftsales.crm.dynamics.com')
     const registry = mcpServerRegistrySchema.parse(mcpServersJson)
@@ -92,7 +95,7 @@ export function createLiveDataProvider(
     const taskAgents = (useFoundryAgents ? buildFoundryTaskAgents(foundryCredential, performanceReporter) : undefined) ?? buildLiveTaskAgents()
     const orchestrator = new ThinSliceOrchestrator(msx, new ExtensionMcemGuidanceConnector(), taskAgents, performanceReporter, new RecordCreationService(msx, msx),
         createKnowledgeSearch({ mode: 'live', ...(getGraphKnowledgeToken ? { getGraphToken: getGraphKnowledgeToken } : {}) }))
-    const meetingConnector = new LiveMeetingCaptureConnector(msx)
+    const meetingConnector = new LiveMeetingCaptureConnector(msx, undefined, getMeetingGraphToken ? new GraphMeetingConnector(getMeetingGraphToken) : undefined)
     const meetingExtractor = buildFoundryMeetingExtractor(process.env, foundryCredential)
 
     const configured = createLivePlayWorkflowHost({

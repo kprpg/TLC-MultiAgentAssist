@@ -113,6 +113,8 @@ describe('native HTTP admission without any real source access', () => {
     const headers = { authorization: `Bearer ${paired.token}` }
     for (const [path, body] of [
       ['/api/teams/meetings/resolve', { joinUrl: 'https://teams.microsoft.com/l/meetup-join/sanitized' }],
+      ['/api/teams/meetings/resolve', { handle: `gm_${'a'.repeat(32)}` }],
+      ['/api/teams/meetings/sources', { opportunityId: 'opp' }],
       ['/api/teams/meetings/acquire', { meetingId: 'sanitized', opportunityId: 'opp', meetingType: 'internal' }]
     ] as const) {
       const result = await send(path, body, headers)

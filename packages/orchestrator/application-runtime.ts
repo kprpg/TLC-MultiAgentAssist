@@ -12,7 +12,7 @@ import { ThinSliceOrchestrator, type TaskAgentRegistry } from './index.js'
 import { RecordCreationService } from './record-creation/service.js'
 import { createLivePlayWorkflowHost, createSampleWorkflowHost, type WorkflowHost } from './workflows/index.js'
 import { createDeterministicLiveTaskAgents, createFoundryTaskAgents, createSampleTaskAgents } from './task-agents.js'
-import type { MeetingTranscript } from '../common/contracts/meeting.js'
+import type { MeetingTranscript, MeetingType } from '../common/contracts/meeting.js'
 import type { MeetingTranscriptSummary } from '../common/contracts/meeting.js'
 import { GraphMeetingConnector, type GraphAcquisitionResult } from '../connectors/graph/meetings.js'
 import { createSellerDashboardHost, type SellerDashboardHost } from './seller-dashboard.js'
@@ -39,6 +39,10 @@ export interface ApplicationServices {
   acquireTranscripts(request: MeetingAcquisitionRequest): Promise<GraphAcquisitionResult>
   resolveMeeting(joinUrl: string): Promise<string>
   listTranscriptSources(opportunityId: string): Promise<MeetingTranscriptSummary[]>
+  /** Live: the signed-in user's recent Teams meetings, from their own calendar. Sample: none (bundled transcripts are used). */
+  listRecentMeetings(): Promise<MeetingTranscriptSummary[]>
+  /** Verifies a listed meeting handle against the current calendar and returns its Graph meeting identity. */
+  resolveRecentMeeting(handle: string): Promise<{ meetingId: string; meetingType: MeetingType }>
   workflowScopes: Map<string, { accountIds: string[]; opportunityIds: string[] }>
   refreshSource(): void
   withReadContext?<T>(operation: () => Promise<T>): Promise<T>
@@ -46,7 +50,7 @@ export interface ApplicationServices {
   dispose(): Promise<void>
 }
 
-function assemble(msx: MsxConnector, guidance: McemGuidanceConnector, agents: TaskAgentRegistry, recordCreation: RecordCreationService, meetings: MeetingConnector, workflows: WorkflowHost, sellerDashboard: SellerDashboardHost, seReporting: SeReportingHost, stagePipelineReview: StagePipelineReviewHost, knowledge: KnowledgeSearch, source: Pick<ApplicationServices, 'acquireTranscripts' | 'resolveMeeting' | 'listTranscriptSources'>, dispose: () => Promise<void>, refreshSource = () => {}, performanceReporter?: PerformanceReporter): ApplicationServices {
+function assemble(msx: MsxConnector, guidance: McemGuidanceConnector, agents: TaskAgentRegistry, recordCreation: RecordCreationService, meetings: MeetingConnector, workflows: WorkflowHost, sellerDashboard: SellerDashboardHost, seReporting: SeReportingHost, stagePipelineReview: StagePipelineReviewHost, knowledge: KnowledgeSearch, source: Pick<ApplicationServices, 'acquireTranscripts' | 'resolveMeeting' | 'listTranscriptSources' | 'listRecentMeetings' | 'resolveRecentMeeting'>, dispose: () => Promise<void>, refreshSource = () => {}, performanceReporter?: PerformanceReporter): ApplicationServices {
   return {
     ...(performanceReporter ? { performanceReporter } : {}),
     orchestrator: new ThinSliceOrchestrator(msx, guidance, agents, performanceReporter, recordCreation, knowledge),
@@ -77,6 +81,8 @@ export async function createSampleApplicationServices(options: { dataPath?: stri
     createStagePipelineReviewHost({ mode: 'sample' }),
     createKnowledgeSearch({ mode: 'sample' }), {
       listTranscriptSources: (opportunityId) => msx.listMeetingTranscripts(opportunityId),
+      listRecentMeetings: async () => [],
+      resolveRecentMeeting: async () => { throw new Error('Sample mode uses the bundled transcript picker, not calendar meetings.') },
       resolveMeeting: async () => { throw new Error('Sample mode uses the bundled transcript picker, not a live meeting URL.') },
       acquireTranscripts: async (request) => {
         const transcript = await msx.getMeetingTranscript(request.meetingId)
@@ -132,7 +138,7 @@ export async function createLiveApplicationServices(options: {
     resolveExcludedAccountIds: () => msx.listAccounts({ includeHidden: true }).then((accounts) =>
       accounts.filter((account) => account.visibility === 'hidden').map((account) => account.id))
   })
-  const graph = new GraphMeetingConnector(() => options.getToken('graph'))
+  const graph = new GraphMeetingConnector(() => options.getToken('graph'), options.fetchImplementation)
   return assemble(
     msx, new LocalPdfMcemGuidanceConnector(resolve(root, options.environment['TLC_MCEM_GUIDANCE_PATH'] ?? 'docs/knowledge/MCEM Overview.pdf')),
     foundry && options.foundryCredential ? createFoundryTaskAgents(foundry, options.foundryCredential) : createDeterministicLiveTaskAgents(),
@@ -149,7 +155,14 @@ export async function createLiveApplicationServices(options: {
     }), {
       acquireTranscripts: (request) => graph.acquire(request),
       resolveMeeting: (url) => graph.resolveMeeting(url),
-      listTranscriptSources: async () => { throw new Error('Live transcripts are discovered from the verified Graph meeting, not sample sources.') }
+      listTranscriptSources: async () => { throw new Error('Live transcripts are discovered from the verified Graph meeting, not sample sources.') },
+      listRecentMeetings: async () => (await graph.listRecentMeetings()).map((meeting) => ({
+        id: meeting.handle, subject: meeting.subject, occurredAt: meeting.startsAt, meetingType: meeting.meetingType, source: 'teams' as const
+      })),
+      resolveRecentMeeting: async (handle) => {
+        const meeting = await graph.resolveRecentMeeting(handle)
+        return { meetingId: meeting.meetingId, meetingType: meeting.meetingType }
+      }
     }, configured.dispose, () => msx.refresh(), options.performanceReporter
   )
 }

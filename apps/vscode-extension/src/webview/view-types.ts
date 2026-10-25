@@ -222,7 +222,7 @@ export interface MeetingTranscriptSummaryView {
     source: 'teams' | 'upload' | 'paste'
     opportunityId?: string
     opportunityName?: string
-    segmentCount: number
+    segmentCount?: number
 }
 
 export interface MeetingTranscriptSegmentView {
