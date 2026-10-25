@@ -6,6 +6,10 @@ import { seReportingRequestSchema, seReportingResponseSchema, type SeReportingRe
 import { stagePipelineRequestSchema, stagePipelineResponseSchema, type StagePipelineRequest } from '../../../../packages/common/contracts/stage-pipeline-review.js'
 import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest } from '../../../../packages/common/contracts/knowledge.js'
 import {
+    workingSessionPrepareRequestSchema, workingSessionResultSchema, workingSessionTopicRequestSchema, workingSessionTopicResponseSchema,
+    type WorkingSessionPrepareRequest, type WorkingSessionTopicRequest
+} from '../../../../packages/common/contracts/working-session.js'
+import {
     recordCreationCatalogSchema,
     recordCreationPreviewSchema,
     recordCreationPreviewRequestSchema,
@@ -57,6 +61,11 @@ import type {
 const transport = {
     searchKnowledge: async (input: KnowledgeSearchRequest) => knowledgeSearchResponseSchema.parse(
         await request('searchKnowledge', knowledgeSearchRequestSchema.parse(input))),
+    deriveWorkingSessionTopic: async (input: WorkingSessionTopicRequest) => workingSessionTopicResponseSchema.parse(
+        await request('workingSessionTopic', workingSessionTopicRequestSchema.parse(input))),
+    prepareWorkingSession: async (input: WorkingSessionPrepareRequest) => workingSessionResultSchema.parse(
+        await request('workingSessionPrepare', workingSessionPrepareRequestSchema.parse(input))),
+    openWorkingSessionFolder: async (folderPath: string): Promise<void> => { await request('workingSessionOpenFolder', { folderPath }) },
     invokeSeReporting: async (input: SeReportingRequest) => seReportingResponseSchema.parse(
         await request('seReporting', seReportingRequestSchema.parse(input))
     ),

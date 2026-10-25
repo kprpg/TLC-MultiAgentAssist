@@ -27,6 +27,7 @@ import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js
 import { readTranscriptFile } from '../../../shared/transcript-file.js'
 import { meetingProposalToMarkdown } from '../../../shared/meeting-proposal-markdown.js'
 import { MeetingPicker, useMeetingList } from '../../../shared/meeting-picker.js'
+import { WorkingSessionLauncher } from '../../../shared/working-session/working-session-launcher.js'
 import { DashboardWorkspace } from '../../../shared/dashboards/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
 import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
@@ -1602,6 +1603,7 @@ function PortfolioPanel({ focus, accountsExpanded, detailsExpanded, actionsExpan
                                 <MilestonesEditor opportunityId={selectedOpportunity.id} currency={selectedOpportunity.currency} milestones={milestones} onChanged={reloadMilestones} onNote={setNote} />
                                 <div className="actions">
                                     <button className="primary" onClick={() => void runCoach()}>Run MCEM Coach</button>
+                                    <WorkingSessionLauncher client={dataClient} opportunity={selectedOpportunity} milestones={milestones} onNote={setNote} />
                                 </div>
                                 {mcem.status === 'loading' && <p className="muted">Evaluating MCEM stage...</p>}
                                 {mcem.status === 'error' && <p className="error">{mcem.error}</p>}

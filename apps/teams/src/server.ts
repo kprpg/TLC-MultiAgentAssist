@@ -15,6 +15,9 @@ import { GraphContextAuthority } from '../../../packages/connectors/teams/contex
 import { createLiveApplicationServices, createSampleApplicationServices, type ApplicationServices } from '../../../packages/orchestrator/application-runtime.js'
 import { principalPartition, type ExecutionPrincipal, type PrincipalIdentity } from '../../../packages/orchestrator/collaboration/principal.js'
 import type { ContextAuthority } from '../../../packages/orchestrator/collaboration/contexts.js'
+import { createFoundryOpenAIClient } from '../../../packages/connectors/foundry/index.js'
+import { foundryStructuredModel, workingSessionModelName } from '../../../packages/orchestrator/working-session/index.js'
+import { createTeamsWorkingSessionHost } from './working-session.js'
 import { registerTeamsBot } from './bot.js'
 import { GraphSubscriptionConnector } from '../../../packages/connectors/graph/subscriptions.js'
 import { GraphMeetingError } from '../../../packages/connectors/graph/meetings.js'
@@ -71,6 +74,9 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   const foundry = requiresTeamsFoundryCredential(runtimeEnvironment, Boolean(hosted), isNativeConfiguration(configuration) && configuration.guidanceMode === 'foundry')
     ? await loadFoundryEnvironmentFromEnvironment(runtimeEnvironment) : undefined
   const foundryCredential = foundry ? createTeamsWorkloadCredential(runtime, foundry.authentication.foundryTenantId, runtimeEnvironment) : undefined
+  const workingSessionModelName_ = workingSessionModelName(runtimeEnvironment)
+  const workingSessionModel = foundry && foundryCredential && workingSessionModelName_
+    ? foundryStructuredModel(createFoundryOpenAIClient(foundry.foundry.projectEndpoint, foundryCredential), workingSessionModelName_) : undefined
   const initialMode = teamsDataModeSchema.parse(environment['TLC_TEAMS_INITIAL_MODE'] ?? configuration.mode)
   if (initialMode === 'live' && configuration.mode !== 'live') throw new Error('Live mode is not configured for this runtime.')
   const resources = await createTeamsStateStore(configuration, runtime, runtimeEnvironment)
@@ -250,6 +256,7 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   ) : undefined
   const configuredHandler = createTeamsHandler({
     configuration, store, resolveServices, authority, acceptNewWork, onDeactivate: stopOwnedWork,
+    workingSession: createTeamsWorkingSessionHost({ mode: configuration.mode, model: workingSessionModel, environment: runtimeEnvironment }),
     backgroundSync: runtimeEnvironment['TLC_BACKGROUND_SYNC'] === '1',
     durableMutationState: runtime.state.kind === 'table' || runtime.state.path !== ':memory:',
     ...(transport ? { deliverPublication: transport.deliverPublication, notify: transport.notify } : {}),
@@ -260,6 +267,7 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
   })
   const sampleHandler = configuration.mode === 'sample' ? configuredHandler : createTeamsHandler({
     configuration: sampleConfiguration, store: sampleResources.store, acceptNewWork,
+    workingSession: createTeamsWorkingSessionHost({ mode: 'sample', environment: runtimeEnvironment }),
     backgroundSync: runtimeEnvironment['TLC_BACKGROUND_SYNC'] === '1',
     durableMutationState: samplePath !== ':memory:',
     onDeactivate: (principal) => stopOwnedWork(principal, true),

@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { createPerformanceReporter, loadDataverseEntityMap, loadMcpServerRegistry, loadMcpToolPolicy } from '../../../packages/common/index.js'
 import { loadFoundryEnvironmentFromEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
 import type { MeetingTokenPurpose } from '../../../packages/common/configuration/meeting-sources.js'
+import { foundryStructuredModel, workingSessionModelName } from '../../../packages/orchestrator/working-session/index.js'
 import { LiveMeetingCaptureConnector, LiveMsxConnector, msxWriteMetadataFromEnvironment } from '../../../packages/connectors/msx/index.js'
 import { GraphMeetingConnector } from '../../../packages/connectors/graph/meetings.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../packages/connectors/common/index.js'
@@ -167,6 +168,9 @@ export async function createHostedRuntimeFactory(options: HostedRuntimeOptions =
         })
         : undefined
 
+    const workingSessionModelId = workingSessionModelName(environment)
+    const workingSessionModel = workingSessionModelId ? foundryStructuredModel(foundryClient, workingSessionModelId) : undefined
+
     const factory = (authentication: AuthenticatedRequest): WebRuntime => {
         const { accessToken } = authentication
         const msx = new LiveMsxConnector({ getAccessToken: async () => accessToken }, fetch, undefined, performanceReporter, msxWriteMetadataFromEnvironment(environment), portfolioPreferenceStore)
@@ -212,7 +216,7 @@ export async function createHostedRuntimeFactory(options: HostedRuntimeOptions =
             applyMeetingChangeSet: (input: Parameters<LiveMeetingCaptureConnector['applyMeetingChangeSet']>[0]) => meetingConnector.applyMeetingChangeSet(input)
         }) as WebRuntime
     }
-    return Object.assign(factory, { foundryCredential, dispose: async () => { await mutationRuntime.drain(); mutationState.close() } })
+    return Object.assign(factory, { foundryCredential, workingSessionModel, dispose: async () => { await mutationRuntime.drain(); mutationState.close() } })
 }
 
 export async function createHostedWorkflowHostResolver(options: HostedRuntimeOptions = {}) {

@@ -6,6 +6,10 @@ import type { SellerDashboardRequest, SellerDashboardResponse } from '../../../.
 import type { StagePipelineRequest, StagePipelineResponse } from '../../../../packages/common/contracts/stage-pipeline-review.js'
 import type { SeReportingRequest, SeReportingResponse } from '../../../../packages/common/contracts/se-reporting.js'
 import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest, type KnowledgeSearchResponse } from '../../../../packages/common/contracts/knowledge.js'
+import {
+  workingSessionOpenFolderRequestSchema, workingSessionPrepareRequestSchema, workingSessionResultSchema, workingSessionTopicRequestSchema, workingSessionTopicResponseSchema,
+  type WorkingSessionPrepareRequest, type WorkingSessionResult, type WorkingSessionTopicRequest, type WorkingSessionTopicResponse
+} from '../../../../packages/common/contracts/working-session.js'
 import type { DiscoverySnapshot, DiscoverySnapshotRequest, PortfolioReadRequest, PortfolioIndex, PortfolioWorkspaceRequest, PortfolioWorkspace } from '../../../../packages/common/contracts/index.js'
 import { agentTaskStreamEventSchema } from '../../../../packages/common/contracts/index.js'
 import {
@@ -15,6 +19,9 @@ import {
 
 export interface TlcDesktopApi {
   searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
+  deriveWorkingSessionTopic(request: WorkingSessionTopicRequest): Promise<WorkingSessionTopicResponse>
+  prepareWorkingSession(request: WorkingSessionPrepareRequest): Promise<WorkingSessionResult>
+  openWorkingSessionFolder(folderPath: string): Promise<void>
   invokeMutationSync(request: MutationSyncRequest): Promise<MutationSyncResponse>
   cacheControl(request: CacheControlRequest): Promise<CacheControlResponse>
   onCacheChanged(listener: (state: CacheReadState) => void): () => void
@@ -66,6 +73,13 @@ export interface TlcDesktopApi {
 const api: TlcDesktopApi = {
   searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(
     await ipcRenderer.invoke('tlc:search-knowledge', knowledgeSearchRequestSchema.parse(request))),
+  deriveWorkingSessionTopic: async (request) => workingSessionTopicResponseSchema.parse(
+    await ipcRenderer.invoke('tlc:working-session-topic', workingSessionTopicRequestSchema.parse(request))),
+  prepareWorkingSession: async (request) => workingSessionResultSchema.parse(
+    await ipcRenderer.invoke('tlc:working-session-prepare', workingSessionPrepareRequestSchema.parse(request))),
+  openWorkingSessionFolder: async (folderPath) => {
+    await ipcRenderer.invoke('tlc:working-session-open', workingSessionOpenFolderRequestSchema.parse({ folderPath }))
+  },
   invokeMutationSync: async (request) => mutationSyncResponseSchema.parse(await ipcRenderer.invoke('tlc:mutation-sync', request)),
   cacheControl: async (request) => cacheControlResponseSchema.parse(await ipcRenderer.invoke('tlc:cache-control', request)),
   onCacheChanged: (listener) => {

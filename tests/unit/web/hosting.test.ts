@@ -51,6 +51,12 @@ describe('hosted web static files', () => {
 
         expect(response.status).toBe(200)
         expect(body).toContain('<meta name="tlc-data-mode" content="sample" />')
+        expect(body).toContain('<meta name="tlc-local-exit" content="0" />')
+    })
+
+    it('advertises application exit only when the local host enables it', async () => {
+        const baseUrl = await listen('sample', true)
+        expect(await (await fetch(baseUrl)).text()).toContain('<meta name="tlc-local-exit" content="1" />')
     })
 
     it('isolates required dynamic evaluation to the offline speech worker, never the application page', async () => {
@@ -63,7 +69,7 @@ describe('hosted web static files', () => {
         expect((await fetch(baseUrl)).headers.get('content-security-policy')).not.toContain("'unsafe-eval'")
     })
 
-    async function listen(dataMode: 'live' | 'sample' = 'live'): Promise<string> {
+    async function listen(dataMode: 'live' | 'sample' = 'live', localExit = false): Promise<string> {
         staticRoot = await mkdtemp(join(tmpdir(), 'tlc-web-'))
         await mkdir(join(staticRoot, 'voice'))
         await Promise.all([
@@ -71,7 +77,7 @@ describe('hosted web static files', () => {
             writeFile(join(staticRoot, 'main.js'), 'console.log("TLC")'),
             writeFile(join(staticRoot, 'voice', 'vosk-worker.js'), 'self.postMessage("worker")')
         ])
-        const serveStatic = buildStaticHandler(staticRoot, dataMode)
+        const serveStatic = buildStaticHandler(staticRoot, dataMode, false, localExit)
         server = createServer((request, response) => {
             setSecurityHeaders(response)
             void serveStatic(request, response)

@@ -31,6 +31,7 @@ import { bindSourceToken } from '../../../packages/orchestrator/mutations/core-a
 import { createSeReportingHost } from '../../../packages/orchestrator/se-reporting/composition.js'
 import type { SeReportingResource } from '../../../packages/common/contracts/se-reporting.js'
 import { createKnowledgeSearch } from '../../../packages/orchestrator/knowledge-search.js'
+import { createExtensionWorkingSession } from './working-session.js'
 
 export function configuredFoundryTenantId(): string | undefined {
     const parsed = foundryEnvironmentSchema.safeParse(foundryEnvironmentJson)
@@ -115,5 +116,5 @@ export function createLiveDataProvider(
         ...(getReportingToken ? { getToken: getReportingToken } : {}),
         ...(foundryCredential ? { foundryCredential } : {})
     })
-    return buildLiveDataProvider({ orchestrator, host: configured.host, account, meetingConnector, getSourceToken: sourceToken, reportingHost, stagePipelineHost: createStagePipelineReviewHost({ mode: 'live', source: msx }), ...(meetingExtractor ? { meetingExtractor } : {}), dispose: () => configured.dispose() })
+    return buildLiveDataProvider({ orchestrator, host: configured.host, account, meetingConnector, getSourceToken: sourceToken, reportingHost, stagePipelineHost: createStagePipelineReviewHost({ mode: 'live', source: msx }), workingSession: createExtensionWorkingSession({ mode: 'live', knowledgeSearch: orchestrator, foundryCredential }), ...(meetingExtractor ? { meetingExtractor } : {}), dispose: () => configured.dispose() })
 }

@@ -37,6 +37,7 @@ import type { InitialWorkflowOutput } from '../../../../packages/orchestrator/wo
 import workflowDescriptions from '../../../../config/workflow-descriptions.json'
 import { createDataClient, stageOwner, type RevampDataClient } from './data-client.js'
 import { MeetingCaptureLauncher } from './meeting-capture.js'
+import { WorkingSessionLauncher } from '../../../shared/working-session/working-session-launcher.js'
 import { suggestedPrompts } from './prompt-catalog.js'
 import { formatResponseMarkdown } from './response-markdown.js'
 import { sortOpportunities, type OpportunitySort, type SortDirection } from './opportunity-sort.js'
@@ -1172,9 +1173,9 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         <span className="mode-badge">{modeLabel}</span>
         <FeedbackButton onOpenIssue={client.openEvidence} />
         <button className="profile-button" title="Signed-in user" aria-label="Signed-in user"><Person20Regular /></button>
-        <Button appearance="subtle" className="text-action" icon={<Power20Regular />} disabled={exiting} onClick={() => void exitApplication()} aria-label="Exit application" title="Exit application">
+        {client.canExitApplication !== false && <Button appearance="subtle" className="text-action" icon={<Power20Regular />} disabled={exiting} onClick={() => void exitApplication()} aria-label="Exit application" title="Exit application">
           <span className="exit-label">{exiting ? 'Exiting' : 'Exit'}</span>
-        </Button>
+        </Button>}
       </div>
     </header>
     <SourceSyncStatus client={client} showReads={['accounts', 'discover', 'new'].includes(workspaceView)} />
@@ -1269,6 +1270,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       {account && <section className={`blade opportunity-blade ${collapsed.has('opportunities') ? 'collapsed' : ''} ${opportunitiesFillAvailableSpace ? 'fill-available-space' : ''} ${mobileBlade === 'opportunities' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('opportunities') || opportunitiesFillAvailableSpace ? undefined : bladeWidths.opportunities }} aria-label="Opportunities blade">
         <BladeHeader title="Opportunities" subtitle={account.name} collapsed={collapsed.has('opportunities')} refreshing={loading} actions={<>
           {opportunity && <MeetingCaptureLauncher client={client} opportunityId={opportunity.id} opportunityName={opportunity.name} milestones={milestones} onApplied={() => void refreshOpportunityContext()} onNote={setError} />}
+          {opportunity && <WorkingSessionLauncher compact client={client} opportunity={opportunity} milestones={milestones} onNote={setError} />}
           <Menu checkedValues={{ opportunitySort: [opportunitySort] }} positioning="below-end">
             <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button" icon={<ArrowSort20Regular />} aria-label="Sort opportunities" title={`Sort opportunities by ${opportunitySort === 'closeDate' ? 'Close Date' : opportunitySort === 'stage' ? 'Stage' : 'Value'} (${opportunitySortDirection})`} /></MenuTrigger>
             <MenuPopover><MenuList aria-label="Sort opportunities by">

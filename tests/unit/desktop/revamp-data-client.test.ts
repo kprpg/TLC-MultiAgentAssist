@@ -6,6 +6,18 @@ import { LocalStoreRecordCreation } from '../../../packages/connectors/local-sto
 import { SAMPLE_USER_ID } from '../../../packages/connectors/local-store/seed.js'
 
 describe('revamp live web data client', () => {
+    it('does not advertise host shutdown without an explicit local-host capability', () => {
+        expect(createWebApiClient().canExitApplication).toBe(false)
+        vi.stubGlobal('document', {
+            querySelector: (selector: string) => selector === 'meta[name="tlc-local-exit"]' ? { content: '1' } : null
+        })
+        try {
+            expect(createWebApiClient().canExitApplication).toBe(true)
+        } finally {
+            vi.unstubAllGlobals()
+        }
+    })
+
     it('does not refetch a host mirror for focus-only metadata, but revalidates on a read-model revision', async () => {
         const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({ contractVersion: '1.0', accounts: [], opportunities: [] }))
         const raw = createWebApiClient(fetcher)

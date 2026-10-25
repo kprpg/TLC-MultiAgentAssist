@@ -48,6 +48,35 @@ Desktop, Web, VS Code, and the shared operation catalog expose the same operatio
 No content-search UI or MCEM portal connector is added. See the
 [knowledge connector guide](./Knowledge-Search-Connectors.md).
 
+### Working session pack
+
+Beside **Run MCEM Coach** (VS Code) and **Meeting capture** (Desktop, Web, Teams), the
+**Working session** control prepares decks, a Microsoft Learn document set and draft Bicep/ARM
+templates for a chosen opportunity and milestone, into `Documents\TLC\<Opportunity - Milestone>`
+(a zip download on Web and Teams). One orchestrator service, four transports, one shared UI:
+
+```text
+packages/common/contracts/working-session.ts   Strict v1.0 topic/prepare/result contracts (browser-safe)
+packages/orchestrator/working-session/
+  topic.ts                 Rule catalog + optional model topic deduction (untrusted text, schema-checked)
+  learn.ts                 Microsoft Learn MCP client, page gathering, Markdown set and index
+  decks.ts                 Local folders, public GitHub, Seismic, Microsoft 365 deck sources and ranking
+  pptx-draft.ts            Labelled DRAFT outline deck when no existing deck is found
+  iac.ts                   Bicep templates per scenario, static validator, model path with fallback
+  bicep-cli.ts             Optional Bicep -> ARM compile (Bicep CLI or az bicep)
+  sinks.ts / outputs.ts    FolderSink (no overwrite, no link escape) and ZipSink; Documents resolution
+  download-store.ts        Short-lived per-user holding area for hosted zips
+  foundry-model.ts         Strict structured-output model adapter
+  service.ts               WorkingSessionService, factory and deck configuration from the environment
+apps/shared/working-session/                   Launcher component, pure model, CSS, browser download helper
+apps/desktop/electron/main/working-session-ipc.ts   Validated IPC adapter (opens only Documents\TLC folders)
+apps/web/src/working-session.ts                Hosted resolver (zip only, per-user download)
+apps/teams/src/working-session.ts              Teams host (zip only, per-principal download)
+apps/vscode-extension/src/working-session.ts   Extension host composition (writes to Documents\TLC)
+```
+
+See the [working session runbook](./runbooks/working-session.md).
+
 ### Teams implementation additions
 
 The original proposal below is retained as historical context. The Teams development
@@ -152,6 +181,11 @@ apps/desktop/electron/main/task-agents.ts
 apps/desktop/renderer-revamp/src/preview/
                                      Static-preview-only implementations, imported only by data-client.ts
 scripts/check-import-boundaries.mjs   Import-boundary gate (baseline: scripts/import-boundary-baseline.json)
+scripts/deploy-web-appservice.ps1     Shared live/sample App Service ZIP deployment entry point
+scripts/web-sample-appservice.ps1     Sample-only slot, anonymous verification, promotion and guarded rollback helpers
+scripts/smoke-web-release.mjs         Actual staged-host and remote anonymous sample verification
+tests/fixtures/appservice-cli.mjs     Isolated stateful Azure/verification CLI double; never contacts Azure
+tests/e2e/revamp/web-release.spec.ts  Actual Node-host SQLite sample browser and restart/reset journey
 docs/architecture/Hosting-Model.md, Operational-Evidence.md
                                      Hosting constraints and executed vs planned evidence
 apps/shared/agent-stream.ts           Browser-safe agent stream accumulator and NDJSON reader (all UIs)

@@ -91,6 +91,8 @@ import type { StagePipelineReviewHost } from '../../../packages/orchestrator/sta
 import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
 import { RecordCreationError } from '../../../packages/orchestrator/record-creation/service.js'
 import { MeetingSourceError } from '../../../packages/connectors/common/meeting-source.js'
+import { workingSessionResultSchema, workingSessionTopicResponseSchema } from '../../../packages/common/contracts/working-session.js'
+import type { WorkingSessionWebHost } from './working-session.js'
 import { portfolioReadRequestSchema, portfolioIndexSchema, portfolioWorkspaceRequestSchema, portfolioWorkspaceSchema, type PortfolioReadRequest, type PortfolioIndex, type PortfolioWorkspaceRequest, type PortfolioWorkspace } from '../../../packages/common/contracts/index.js'
 import { mutationSyncRequestSchema, mutationSyncResponseSchema, type MutationSyncRequest, type MutationSyncResponse } from '../../../packages/common/contracts/cache-sync.js'
 import { MutationDispatchPreventedError } from '../../../packages/orchestrator/mutations/host.js'
@@ -149,6 +151,7 @@ export interface WebApiOptions {
     resolveSellerDashboardHost?(authentication: AuthenticatedRequest): Promise<SellerDashboardHost> | SellerDashboardHost
     resolveStagePipelineReviewHost?(authentication: AuthenticatedRequest): Promise<StagePipelineReviewHost> | StagePipelineReviewHost
     resolveVoiceHost?(authentication: AuthenticatedRequest): SharedVoiceInputHost
+    resolveWorkingSessionHost?(authentication: AuthenticatedRequest): Promise<WorkingSessionWebHost> | WorkingSessionWebHost
     createRuntime(authentication: AuthenticatedRequest): Promise<WebRuntime> | WebRuntime
     resolveWorkflowHost?(authentication: AuthenticatedRequest): Promise<WorkflowHost> | WorkflowHost
     authenticate?(request: IncomingMessage): Promise<AuthenticatedRequest> | AuthenticatedRequest
@@ -269,6 +272,30 @@ export function buildWebApiHandler(options: WebApiOptions) {
                 response.setHeader('x-tlc-file-name', fileName)
                 response.end(document)
                 return true
+            }
+
+            if (options.resolveWorkingSessionHost && url.pathname.startsWith('/api/working-session/')) {
+                const host = await options.resolveWorkingSessionHost(authentication)
+                if (request.method === 'POST' && url.pathname === '/api/working-session/topic') {
+                    sendJson(response, 200, workingSessionTopicResponseSchema.parse(await host.service.deriveTopic(await readJsonBody(request))))
+                    return true
+                }
+                if (request.method === 'POST' && url.pathname === '/api/working-session/prepare') {
+                    sendJson(response, 200, workingSessionResultSchema.parse(await host.service.prepare(await readJsonBody(request))))
+                    return true
+                }
+                const download = request.method === 'GET' ? /^\/api\/working-session\/download\/([0-9a-f-]{36})$/.exec(url.pathname) : null
+                if (download) {
+                    const stored = host.download(download[1]!)
+                    if (!stored) { sendJson(response, 404, { error: 'The download has expired. Prepare the working session again.', correlationId }); return true }
+                    response.statusCode = 200
+                    response.setHeader('content-type', 'application/zip')
+                    const archiveName = safeDocumentFileName(stored.fileName.replace(/\.zip$/i, ''), 'zip')
+                    response.setHeader('content-disposition', `attachment; filename="${archiveName.replace(/[^\x20-\x7e]/g, '-')}"; filename*=UTF-8''${encodeURIComponent(archiveName)}`)
+                    response.setHeader('x-tlc-file-name', encodeURIComponent(archiveName))
+                    response.end(stored.bytes)
+                    return true
+                }
             }
 
             const workflowMatch = /^\/api\/workflows\/(list|start|get|cancel|history)$/.exec(url.pathname)
@@ -573,10 +600,10 @@ export function buildWebApiHandler(options: WebApiOptions) {
     }
 }
 
-function safeDocumentFileName(title: string): string {
+function safeDocumentFileName(title: string, extension = 'docx'): string {
     const safeTitle = Array.from(title, (character) => character.charCodeAt(0) < 32 || '<>:"/\\|?*'.includes(character) ? '-' : character)
         .join('').replace(/[. ]+$/g, '').slice(0, 120).trim()
-    return `${safeTitle || 'TLC-agent-response'}.docx`
+    return `${safeTitle || 'TLC-agent-response'}.${extension}`
 }
 
 export function readEasyAuthAuthentication(request: IncomingMessage): AuthenticatedRequest {

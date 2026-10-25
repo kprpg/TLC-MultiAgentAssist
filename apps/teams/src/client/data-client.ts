@@ -9,6 +9,11 @@ import {
   actionApprovalSchema, actionPreviewSchema, actionReceiptSchema, collaborationVersion, teamsSessionSchema,
   type ActionPreview, type ActionReceipt
 } from '../../../../packages/common/contracts/collaboration.js'
+import {
+  workingSessionPrepareRequestSchema, workingSessionResultSchema, workingSessionTopicRequestSchema, workingSessionTopicResponseSchema,
+  type WorkingSessionPrepareRequest, type WorkingSessionResult, type WorkingSessionTopicRequest, type WorkingSessionTopicResponse
+} from '../../../../packages/common/contracts/working-session.js'
+import type { WorkingSessionClient } from '../../../shared/working-session/types.js'
 
 export class TeamsRequestError extends Error {
   constructor(readonly code: string, readonly correlationId?: string, readonly claims?: string, readonly status?: number, readonly retryAfterMs?: number) {
@@ -16,7 +21,7 @@ export class TeamsRequestError extends Error {
     this.name = 'TeamsRequestError'
   }
 }
-export class TeamsApiClient {
+export class TeamsApiClient implements WorkingSessionClient {
   private readonly disposed = new AbortController()
   private readonly portfolio = new SessionPortfolio({
     getPortfolioIndex: () => this.request('operations/getPortfolioIndex', c.portfolioIndexSchema, { contractVersion: c.portfolioReadVersion, includeHidden: true }),
@@ -98,6 +103,15 @@ export class TeamsApiClient {
     const anchor = document.createElement('a')
     anchor.href = url; anchor.download = name; anchor.click()
     setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+  deriveWorkingSessionTopic(input: WorkingSessionTopicRequest): Promise<WorkingSessionTopicResponse> {
+    return this.request('working-session/topic', workingSessionTopicResponseSchema, workingSessionTopicRequestSchema.parse(input))
+  }
+  prepareWorkingSession(input: WorkingSessionPrepareRequest): Promise<WorkingSessionResult> {
+    return this.request('working-session/prepare', workingSessionResultSchema, workingSessionPrepareRequestSchema.parse(input))
+  }
+  downloadWorkingSession(downloadId: string, fileName: string): Promise<void> {
+    return this.download(`working-session/download/${encodeURIComponent(downloadId)}`, undefined, fileName)
   }
   async session() {
     const session = await this.request('session', teamsSessionSchema)

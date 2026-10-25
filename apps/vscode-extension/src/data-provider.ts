@@ -69,7 +69,9 @@ import { buildFoundryMeetingExtractor } from './live-provider.js'
 import type { SessionPortfolio } from '../../shared/session-portfolio.js'
 import type { MutationSyncRequest, MutationSyncResponse } from '../../../packages/common/contracts/cache-sync.js'
 import type { KnowledgeSearchRequest, KnowledgeSearchResponse } from '../../../packages/common/contracts/knowledge.js'
+import type { WorkingSessionService } from '../../../packages/orchestrator/working-session/index.js'
 import { createKnowledgeSearch } from '../../../packages/orchestrator/knowledge-search.js'
+import { createExtensionWorkingSession } from './working-session.js'
 import {
     buildSampleAgentResponse,
     buildSampleEvaluation,
@@ -105,6 +107,7 @@ export interface MeetingTranscriptSource {
  */
 export interface ExtensionDataProvider {
     searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
+    readonly workingSession?: WorkingSessionService
     readonly sourceCore?: ThinSliceOrchestrator
     readonly getSourceToken?: () => Promise<string>
     readonly cacheSession?: SessionPortfolio
@@ -188,7 +191,7 @@ export function createLocalStoreDataProvider(options: { foundryCredential?: Toke
         }
     })
     const meetingExtractor = buildFoundryMeetingExtractor(process.env, foundryCredential)
-    return buildLiveDataProvider({ orchestrator, host, account: 'sample.user@example.com', meetingConnector: connector, ...(meetingExtractor ? { meetingExtractor } : {}), dispose: async () => { store.close() } }, 'sample')
+    return buildLiveDataProvider({ orchestrator, host, account: 'sample.user@example.com', meetingConnector: connector, workingSession: createExtensionWorkingSession({ mode: 'sample' }), ...(meetingExtractor ? { meetingExtractor } : {}), dispose: async () => { store.close() } }, 'sample')
 }
 
 /**
@@ -214,6 +217,7 @@ export function createSampleDataProvider(): ExtensionDataProvider {
     return {
         mode: 'sample',
         searchKnowledge: (request) => knowledge.searchKnowledge(request),
+        workingSession: createExtensionWorkingSession({ mode: 'sample' }),
         sellerDashboard: createSellerDashboardHost({ mode: 'sample', resolveUserEmail: async () => undefined }),
         stagePipelineReview: createStagePipelineReviewHost({ mode: 'sample' }),
         seReporting: createSampleSeReportingHost(),

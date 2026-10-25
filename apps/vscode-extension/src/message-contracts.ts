@@ -8,6 +8,7 @@ import { discoverySnapshotRequestSchema, portfolioReadRequestSchema, portfolioWo
 import { cacheControlRequestSchema, mutationSyncRequestSchema } from '../../../packages/common/contracts/cache-sync.js'
 import { agentTaskPromptMaxLength } from '../../../packages/common/contracts/agent-task-limits.js'
 import { knowledgeSearchRequestSchema } from '../../../packages/common/contracts/knowledge.js'
+import { workingSessionOpenFolderRequestSchema, workingSessionPrepareRequestSchema, workingSessionTopicRequestSchema } from '../../../packages/common/contracts/working-session.js'
 
 /**
  * Strict, discriminated message envelopes for the webview <-> extension-host bridge.
@@ -24,6 +25,9 @@ export const agentCapabilitySchema = z.enum([
 
 export const bridgeMethodSchema = z.enum([
     'searchKnowledge',
+    'workingSessionTopic',
+    'workingSessionPrepare',
+    'workingSessionOpenFolder',
     'cacheControl',
     'mutationSync',
     'sellerDashboard',
@@ -78,6 +82,9 @@ const scopeKindSchema = z.enum(['portfolio', 'account', 'opportunity'])
 
 export const bridgeParamSchemas = {
     searchKnowledge: knowledgeSearchRequestSchema,
+    workingSessionTopic: workingSessionTopicRequestSchema,
+    workingSessionPrepare: workingSessionPrepareRequestSchema,
+    workingSessionOpenFolder: workingSessionOpenFolderRequestSchema,
     cacheControl: cacheControlRequestSchema,
     mutationSync: mutationSyncRequestSchema,
     sellerDashboard: sellerDashboardRequestSchema,
