@@ -111,19 +111,19 @@ export interface MilestoneActivityView {
 
 export interface CreateMilestoneActivityInput {
     subject: string
-    taskCategory?: string
-    description?: string
-    due?: string
-    priority?: 'Low' | 'Normal' | 'High'
-    durationMinutes?: number
+    taskCategory?: string | undefined
+    description?: string | undefined
+    due?: string | undefined
+    priority?: 'Low' | 'Normal' | 'High' | undefined
+    durationMinutes?: number | undefined
 }
 
 export interface MilestoneUpdateInput {
-    status?: string
-    riskDetails?: string
-    targetDate?: string
-    customerCommitment?: string
-    comments?: string
+    status?: string | undefined
+    riskDetails?: string | undefined
+    targetDate?: string | undefined
+    customerCommitment?: string | undefined
+    comments?: string | undefined
 }
 
 export interface CriterionView { id: string; label: string; status: 'met' | 'partial' | 'missing'; rationale: string }

@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactElement } from 'react'
 import workflowDescriptionsJson from '../../../../config/workflow-descriptions.json' with { type: 'json' }
 import { agentCapabilities } from '../../../../packages/common/types/agent-capabilities.js'
-import { dataClient } from './data-client.js'
+import { dataClient, stagePipelineWrites } from './data-client.js'
 import { onHostMessage } from './bridge.js'
 import { formatResponseMarkdown } from './response-markdown.js'
 import { GuidanceAgentTabs } from './guidance-agent-tabs.js'
@@ -1986,7 +1986,7 @@ export function App(): ReactElement {
                 }} /> : tab === 'portfolio' ? (
                     <PortfolioPanel key={mode} sourceRevision={portfolioRevision} focus={focus} accountsExpanded={accountsExpanded} detailsExpanded={detailsExpanded} actionsExpanded={actionsExpanded} dataMode={mode} onPortfolioChanged={portfolioChanged} />
                 ) : tab === 'discover' ? <DiscoverPanel key={mode} sourceRevision={portfolioRevision} dataMode={mode} onPortfolioChanged={portfolioChanged} /> : tab === 'dashboard'
-                    ? <DashboardWorkspace invokeSellerDashboard={dataClient.invokeSellerDashboard} invokeStagePipelineReview={dataClient.invokeStagePipelineReview} stagePipelineWrites={dataClient} invokeSeReporting={dataClient.invokeSeReporting} sourceSession={dataClient.cacheSession} /> : <PlaysPanel runRequest={runRequest} />}
+                    ? <DashboardWorkspace invokeSellerDashboard={dataClient.invokeSellerDashboard} invokeStagePipelineReview={dataClient.invokeStagePipelineReview} stagePipelineWrites={stagePipelineWrites} invokeSeReporting={dataClient.invokeSeReporting} sourceSession={dataClient.cacheSession} /> : <PlaysPanel runRequest={runRequest} />}
             </main>
         </div>
     )
