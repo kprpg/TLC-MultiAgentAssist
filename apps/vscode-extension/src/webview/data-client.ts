@@ -21,6 +21,7 @@ import { discoverySnapshotSchema, discoverySnapshotVersion, portfolioIndexSchema
 import * as syncContracts from '../../../../packages/common/contracts/index.js'
 import { SessionPortfolio } from '../../../shared/session-portfolio.js'
 import { MutationSyncClient } from '../../../shared/mutation-sync.js'
+import type { StagePipelineWrites } from '../../../shared/dashboards/StageAndPipelineReview/stage-pipeline-writes.js'
 import { pollWorkflow } from '../../../shared/workflow-polling.js'
 import type {
     AccountView,
@@ -281,4 +282,10 @@ export const dataClient = {
     commitRecordCreation: (preview: RecordCreationPreview) => mutate('commitRecordCreation', { contractVersion, preview, expectedDigest: preview.digest, confirmed: true }, () => transport.commitRecordCreation(preview), syncContracts.recordCreationResultSchema.parse),
     applyMeetingChangeSet: (proposal: MeetingChangeSetProposalView, approval: MeetingChangeSetApprovalInput) =>
         mutate('applyMeetingChangeSet', { proposal, approval }, () => transport.applyMeetingChangeSet(proposal, approval), syncContracts.meetingChangeSetResultSchema.parse)
+}
+
+export const stagePipelineWrites: StagePipelineWrites = {
+    updateOpportunity: (id, update) => dataClient.updateOpportunity(id, update.comments),
+    updateMilestone: (id, milestoneId, update) => dataClient.updateMilestone(id, milestoneId, update),
+    createMilestoneActivity: (id, milestoneId, activity) => dataClient.createMilestoneActivity(id, milestoneId, activity)
 }
