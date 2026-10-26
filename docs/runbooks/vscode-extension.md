@@ -23,8 +23,10 @@ its reference overview is in the extension [README](../../apps/vscode-extension/
   no global install needed.
 
 Live mode additionally requires the Microsoft account signed into VS Code to have
-access to MSX and the configured Microsoft Foundry project. Sample mode needs none of
-this.
+access to MSX and the configured Microsoft Foundry project. Sample business data
+needs no MSX/Graph grant; SQLite sample AI uses Foundry-only sign-in by default.
+Set `tlc.aiMode=sample` for entirely offline AI. See
+[sample Foundry AI](sample-foundry-ai.md).
 
 ## One-command deploy (recommended)
 
@@ -233,8 +235,9 @@ unknown outcomes remain recoverable with the original identity.
 See [defaults, live capability restrictions and recovery](../performance/performance-optimization.md#adaptive-freshness-and-confirmed-background-writes).
 Never add `unsafe-eval` or retain hidden webviews as a caching workaround.
 
-- `tlc.mode` (`sample` | `live`) — `sample` uses sanitized fixtures and makes no network
-  calls; `live` requires a delegated Microsoft identity with MSX and Foundry access.
+- `tlc.mode` (`sample` | `live`) — `sample` keeps business records local, with Foundry
+  AI by default for SQLite (`tlc.aiMode=sample` is fully offline); `live` requires a
+  delegated Microsoft identity with MSX and Foundry access.
 - `tlc.openOnStartup` — open the workbench automatically on activation.
 - `workbench.colorCustomizations` with `editorHoverWidget.*` — set in **user settings** to
   recolor native toolbar tooltips (the Extension Development Host does not load this repo's
@@ -250,3 +253,7 @@ Never add `unsafe-eval` or retain hidden webviews as a caching workaround.
 - **`vsce` packaging error about missing files** — run `npm run ext:build` first so
   `dist/` exists, then package.
 - **Live mode shows auth errors** — confirm VS Code is signed into the authorized Microsoft account, or switch `tlc.mode` to `sample`.
+- **Sample Guidance shows a Foundry authentication fallback** — approve Microsoft
+  sign-in for **TLC Assist** and select an account with access to the configured
+  Foundry tenant, then retry Guidance. Sign-in is lazy and does not consume the
+  model timeout. See [sample Foundry AI](sample-foundry-ai.md).

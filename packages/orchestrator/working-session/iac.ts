@@ -371,6 +371,7 @@ export interface IacOptions {
   sink: ArtifactSink
   model?: StructuredModel
   compiler?: IacCompiler
+  strictModel?: boolean
 }
 
 export async function generateIac(options: IacOptions): Promise<{ files: WorkingSessionFile[]; gaps: WorkingSessionGap[]; notes: string[] }> {
@@ -399,7 +400,8 @@ export async function generateIac(options: IacOptions): Promise<{ files: Working
       bicep = candidate.bicep; parameters = Object.fromEntries(candidate.parameters.map((entry) => [entry.name, entry.value])); source = 'Model-generated template'
       notes.push(...candidate.notes)
       if (compiled?.ok) armJson = compiled.armJson
-    } catch {
+    } catch (error) {
+      if (options.strictModel) throw error
       gaps.push({ deliverable: 'iac', source: 'Model', code: 'rejected', message: 'The model-written template failed validation, so the TLC baseline template was used instead.' })
     }
   }

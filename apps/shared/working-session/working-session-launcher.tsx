@@ -6,6 +6,8 @@ import {
   type TopicDraft, type WorkingSessionMilestone, type WorkingSessionOpportunity
 } from './working-session-model.js'
 import type { WorkingSessionClient } from './types.js'
+import { InferenceNotice } from '../inference-status.js'
+import type { InferenceExecution } from '../../../packages/common/contracts/inference.js'
 
 type Step = 'choose' | 'topic' | 'running' | 'done'
 
@@ -30,9 +32,10 @@ export function WorkingSessionLauncher({ client, opportunity, milestones, onNote
   const [error, setError] = useState('')
   const [result, setResult] = useState<WorkingSessionResult | undefined>(undefined)
   const [actionNote, setActionNote] = useState('')
+  const [topicInference, setTopicInference] = useState<InferenceExecution | undefined>(undefined)
 
   useEffect(() => {
-    setOpen(false); setStep('choose'); setDraft(undefined); setResult(undefined); setError(''); setActionNote(''); setMilestoneId('')
+    setOpen(false); setStep('choose'); setDraft(undefined); setResult(undefined); setError(''); setActionNote(''); setMilestoneId(''); setTopicInference(undefined)
   }, [opportunity.id])
   useEffect(() => {
     setMilestoneId((current) => milestones.some((milestone) => milestone.id === current) ? current : milestones[0]?.id ?? '')
@@ -46,6 +49,7 @@ export function WorkingSessionLauncher({ client, opportunity, milestones, onNote
     setError(''); setStep('running')
     try {
       const response = await client.deriveWorkingSessionTopic(topicRequestFor(opportunity, milestone))
+      setTopicInference(response.inference)
       setDraft(draftFromTopic(response.topic)); setStep('topic')
     } catch (failure) {
       setError(workingSessionFailure(failure)); setStep('choose')
@@ -84,6 +88,7 @@ export function WorkingSessionLauncher({ client, opportunity, milestones, onNote
     <div className="working-session-panel" role="dialog" aria-label="Prepare working session">
       <p className="working-session-lead">Gathers decks, Microsoft Learn pages and a draft Azure template for <strong>{opportunity.name}</strong>.</p>
       {error && <p className="working-session-error" role="alert">{error}</p>}
+      <InferenceNotice execution={step === 'done' ? result?.inference : step === 'topic' ? topicInference : undefined} />
 
       {step === 'choose' && (<>
         {milestones.length === 0

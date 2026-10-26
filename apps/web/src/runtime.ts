@@ -25,6 +25,7 @@ import { hostedMutationState } from '../../../packages/connectors/common/mutatio
 import { createMutationSession } from '../../../packages/orchestrator/mutations/composition.js'
 import { MutationRuntime } from '../../../packages/orchestrator/mutations/host.js'
 import { createKnowledgeSearch } from '../../../packages/orchestrator/knowledge-search.js'
+import type { SampleInference } from '../../../packages/orchestrator/sample-inference.js'
 
 export function createWebSellerDashboardHost(mode: 'sample' | 'live'): SellerDashboardHost {
     return createSellerDashboardHost({
@@ -67,7 +68,7 @@ export function createWebStagePipelineResolver(
 
 export function createWebSeReportingResolver(
     mode: 'sample' | 'azure-cli' | 'easy-auth', foundryCredential?: TokenCredential, now: () => number = Date.now,
-    dependencies: { createHost?: typeof createSeReportingHost; fetchImplementation?: typeof fetch; environment?: NodeJS.ProcessEnv } = {}
+    dependencies: { createHost?: typeof createSeReportingHost; fetchImplementation?: typeof fetch; environment?: NodeJS.ProcessEnv; inference?: SampleInference } = {}
 ) {
     const makeHost = dependencies.createHost ?? createSeReportingHost
     const hosts = new Map<string, { host: SeReportingHost; lastUsed: number; active: number; token: { value: string } }>()
@@ -87,6 +88,7 @@ export function createWebSeReportingResolver(
             const msx = mode === 'sample' ? undefined : new LiveMsxConnector({ getAccessToken: async () => token.value }, dependencies.fetchImplementation ?? fetch, undefined, undefined, msxWriteMetadataFromEnvironment(dependencies.environment ?? process.env))
             const created = makeHost({
                 mode: mode === 'sample' ? 'sample' : 'live',
+                ...(mode === 'sample' && dependencies.inference ? { inference: dependencies.inference } : {}),
                 ...(msx ? { dataverse: msx } : {}),
                 identity: async () => ({ key: `web:${key}`, email: authentication.userEmail }),
                 ...(credential ? {

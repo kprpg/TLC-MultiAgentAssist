@@ -3,8 +3,9 @@ import { seReportRelativePath } from '../../documents/se-reporting.js'
 import { SeReportingError, type SeReportingSource } from '../../connectors/se-reporting/types.js'
 import { buildSeReports, consolidateSeReports } from './model.js'
 import { MemorySeProfileStore, SharedSeReportingHost } from './host.js'
+import type { SampleInference } from '../sample-inference.js'
 
-export function createSampleSeReportingHost() {
+export function createSampleSeReportingHost(options: { inference?: SampleInference } = {}) {
     const fixture = createSeReportingFixture()
     const reports = buildSeReports(fixture)
     const profiles = new MemorySeProfileStore()
@@ -24,6 +25,7 @@ export function createSampleSeReportingHost() {
     }
     return new SharedSeReportingHost({
         mode: 'sample', owner: async () => ({ key: fixture.owner.email, email: fixture.owner.email }), source, profiles,
+        ...(options.inference ? { inference: options.inference } : {}),
         initialRun: { id: fixture.runId, profileId: sampleSeProfile.id, reports: [...reports, consolidateSeReports(reports)], pillars: ['infra'] }
     })
 }

@@ -6,7 +6,7 @@ The hosted web app serves the revamp React renderer and a same-origin Node.js AP
 
 The host supports three data and authentication modes:
 
-- `sample`: local or deliberately anonymous hosted Web serves sanitized sample data and does not call live MSX, Graph, or Foundry services.
+- `sample`: local or deliberately anonymous hosted Web serves SQLite sample business data. AI uses real Foundry by default with explicit offline fallback; no live MSX/Graph/Dataverse reads or writes are enabled. `TLC_AI_MODE=sample` selects completely offline AI.
 - `azure-cli`: localhost acquires MSX and Foundry tokens in the Node process from the current Azure CLI sign-in.
 - `easy-auth`: Azure App Service Authentication supplies the delegated user identity and MSX token; managed identity authenticates Foundry.
 
@@ -51,6 +51,11 @@ npm run test:smoke:web-release
 The web release workflow performs these checks in isolation and publishes an Azure App Service ZIP for tags such as `web-v0.1.0`. The ZIP includes production dependencies, the built host and renderer, the MCEM guidance document, and the safe Foundry configuration example. It never includes `config/foundry.environment.json`.
 
 ## Anonymous Sample Deployment
+
+Sample business data and AI are independent. The default now uses real Foundry
+inference; [sample Foundry setup](sample-foundry-ai.md) covers its managed-identity
+permissions, 25-concurrent / 20-per-minute / 500-per-day slot quotas, and labeled
+fallback. **Existing live/Easy Auth behavior is unchanged.**
 
 **No IaC is required for this existing App Service.** Reuse the ZIP packaging and
 Azure CLI deployment wrapper. The configured target is subscription
@@ -106,7 +111,8 @@ pwsh -NoProfile -File .\scripts\deploy-web-appservice.ps1 -Mode sample -Slot sam
     -AppServicePlan '<existing-plan-name>' -ExpectedHostName '<production-hostname>'
 ```
 
-The sample workflow sets `TLC_WEB_MODE=sample`, `TLC_DATA_MODE=sample`,
+The sample workflow sets `TLC_WEB_MODE=sample`, `TLC_DATA_MODE=sample`, `TLC_AI_MODE=foundry`
+(or `-AiMode sample` for offline AI),
 `TLC_DATA_STORE=sqlite`, `TLC_DATA_STORE_PATH=:memory:`,
 `TLC_HOSTING_MODEL=single-instance`, `TLC_BACKGROUND_SYNC=0`, and `HOST=0.0.0.0`.
 It uses run-from-package, disables remote build automation, and retains the
@@ -128,6 +134,10 @@ Protected production promotion requires v2's health-route exclusions; an enabled
 v1 production policy is rejected before changes rather than weakened or migrated.
 
 Verification uses no credentials/cookies and never follows login redirects.
+Sample ZIP publishing uses asynchronous upload acceptance followed by bounded
+deployment-record reconciliation, so a large package does not depend on one
+synchronous Kudu request surviving until deployment finishes. The existing live
+deployment command is unchanged.
 It checks the sample HTML marker, sample identity, seeded accounts/opportunities,
 and SQLite-backed meeting transcripts, not just `/api/health`. A successful
 upload or public health endpoint alone is not success. Wait for the script's
@@ -293,6 +303,8 @@ Optional settings:
 | `TLC_WEB_MODE`                      | `sample`, `azure-cli`, or `easy-auth`    | `sample` locally; `easy-auth` in App Service  |
 | `TLC_DATA_STORE`                    | Sample data store (`fixture` or `sqlite`) | Fixture sample data unless `sqlite` is selected |
 | `TLC_DATA_STORE_PATH`               | File-backed Sample SQLite database       | In-memory when unset; local demo launcher supplies a path |
+| `TLC_AI_MODE`                       | Sample AI only: `foundry` or offline `sample` | Foundry for SQLite sample hosts; live mode unchanged |
+| `TLC_AI_BUDGET_PATH`                | Durable per-slot sample AI quota ledger  | `HOME\data\tlc-ai\<slot>\usage.sqlite` |
 | `TLC_WEB_STATIC_ROOT`               | Built renderer directory                 | `apps/desktop/dist/revamp`                    |
 | `TLC_FOUNDRY_ENV_BASE64`            | Base64-encoded hosted Foundry JSON       | unset                                         |
 | `TLC_FOUNDRY_ENV_FILE`              | Foundry environment JSON                 | `config/foundry.environment.json`             |

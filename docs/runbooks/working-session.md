@@ -59,7 +59,9 @@ Sources that are unavailable are listed under **Needs attention** and in the man
 - A copied deck is limited to 60 MB. Hosted zips are limited to 40 MB total (larger decks become links).
 - Not interactive while running: there is no progress stream or cancel yet; the panel shows a working state.
 - Bicep to ARM compilation needs the Bicep CLI or Azure CLI; without it the Bicep is still delivered.
-- Sample mode uses bundled sample content only and makes no network call.
+- Sample mode retains bundled sources but uses real Foundry topic/template inference
+  by default; `TLC_AI_MODE=sample` is fully offline. Fallbacks are labeled in the UI
+  and result manifest. [Sample Foundry AI](sample-foundry-ai.md) does not change live behavior.
 
 ## Security
 

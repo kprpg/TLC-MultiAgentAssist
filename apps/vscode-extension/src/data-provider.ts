@@ -65,7 +65,9 @@ import { SampleRecordCreationCatalog } from '../../../packages/connectors/local-
 import { RecordCreationService } from '../../../packages/orchestrator/record-creation/service.js'
 import { ExtensionMcemGuidanceConnector } from './mcem-guidance.js'
 import { buildLiveDataProvider, buildLiveTaskAgents } from './live-provider-core.js'
-import { buildFoundryMeetingExtractor } from './live-provider.js'
+import { configuredFoundryEnvironment } from './live-provider.js'
+import { SampleInference } from '../../../packages/orchestrator/sample-inference.js'
+import type { InferenceMode } from '../../../packages/common/contracts/inference.js'
 import type { SessionPortfolio } from '../../shared/session-portfolio.js'
 import type { MutationSyncRequest, MutationSyncResponse } from '../../../packages/common/contracts/cache-sync.js'
 import type { KnowledgeSearchRequest, KnowledgeSearchResponse } from '../../../packages/common/contracts/knowledge.js'
@@ -106,6 +108,7 @@ export interface MeetingTranscriptSource {
  * decision of sample vs live; the router never learns which mode is active.
  */
 export interface ExtensionDataProvider {
+    readonly inferenceMode?: InferenceMode
     searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
     readonly workingSession?: WorkingSessionService
     readonly sourceCore?: ThinSliceOrchestrator
@@ -174,7 +177,7 @@ function opportunityForOrThrow(opportunityId: string): Opportunity {
  * setting is `sqlite`. Pass `storePath` for file-backed records that survive
  * extension-host restarts; the no-path form remains isolated for tests.
  */
-export function createLocalStoreDataProvider(options: { foundryCredential?: TokenCredential | undefined; storePath?: string } = {}): ExtensionDataProvider {
+export function createLocalStoreDataProvider(options: { foundryCredential?: TokenCredential | undefined; storePath?: string; inference?: SampleInference } = {}): ExtensionDataProvider {
     const { foundryCredential, storePath } = options
     if (storePath !== undefined && !storePath.trim()) throw new Error('The SQLite sample store path cannot be blank.')
     if (storePath) mkdirSync(dirname(storePath), { recursive: true })
@@ -182,7 +185,22 @@ export function createLocalStoreDataProvider(options: { foundryCredential?: Toke
     const connector = new LocalStoreMsxConnector(store)
     const writer = connector.createRecordCreationWriter()
     const creation = new RecordCreationService(connector, writer, { writer })
-    const orchestrator = new ThinSliceOrchestrator(connector, new ExtensionMcemGuidanceConnector(), buildLiveTaskAgents(), undefined, creation, createKnowledgeSearch({ mode: 'sample' }))
+    const inference = options.inference ?? new SampleInference({
+        ...(foundryCredential ? {
+            credential: foundryCredential,
+            prepareCredential: async () => {
+                // Interactive sign-in must finish before the model's request and first-token timers start.
+                try {
+                    const token = await foundryCredential.getToken('https://ai.azure.com/.default')
+                    if (!token) throw new Error('No Microsoft Foundry token was granted.')
+                } catch (cause) {
+                    throw Object.assign(new Error('Microsoft Foundry sign-in was not completed. Approve access for TLC Assist and retry Guidance.', { cause }), { status: 401 })
+                }
+            }
+        } : {}),
+        loadEnvironment: async () => configuredFoundryEnvironment()
+    })
+    const orchestrator = new ThinSliceOrchestrator(connector, new ExtensionMcemGuidanceConnector(), inference.taskAgents(buildLiveTaskAgents()), undefined, creation, createKnowledgeSearch({ mode: 'sample' }))
     const host: WorkflowHost = createSampleWorkflowHost(async () => {
         const { accounts, opportunities } = await connector.getPortfolioIndex()
         return {
@@ -190,8 +208,13 @@ export function createLocalStoreDataProvider(options: { foundryCredential?: Toke
             opportunityIds: opportunities.map((candidate) => candidate.id)
         }
     })
-    const meetingExtractor = buildFoundryMeetingExtractor(process.env, foundryCredential)
-    return buildLiveDataProvider({ orchestrator, host, account: 'sample.user@example.com', meetingConnector: connector, workingSession: createExtensionWorkingSession({ mode: 'sample' }), ...(meetingExtractor ? { meetingExtractor } : {}), dispose: async () => { store.close() } }, 'sample')
+    const meetingExtractor = inference.meetingExtractor()
+    return buildLiveDataProvider({
+        orchestrator, host, inferenceMode: inference.mode, account: 'sample.user@example.com', meetingConnector: connector,
+        reportingHost: createSampleSeReportingHost({ inference }),
+        workingSession: createExtensionWorkingSession({ mode: 'sample', inference }),
+        ...(meetingExtractor ? { meetingExtractor } : {}), dispose: async () => { inference.close(); store.close() }
+    }, 'sample')
 }
 
 /**
@@ -216,6 +239,7 @@ export function createSampleDataProvider(): ExtensionDataProvider {
     })
     return {
         mode: 'sample',
+        inferenceMode: 'sample',
         searchKnowledge: (request) => knowledge.searchKnowledge(request),
         workingSession: createExtensionWorkingSession({ mode: 'sample' }),
         sellerDashboard: createSellerDashboardHost({ mode: 'sample', resolveUserEmail: async () => undefined }),

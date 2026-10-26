@@ -62,6 +62,8 @@ import {
   createBicepCliCompiler, createWorkingSessionService, deckConfigurationFromEnvironment, folderOutput, foundryStructuredModel, workingSessionModelName
 } from '../../../../packages/orchestrator/working-session/index.js'
 import { renderMarkdownDocument } from '../../../../packages/documents/markdown-document.js'
+import { SampleInference } from '../../../../packages/orchestrator/sample-inference.js'
+import { resolveSampleInferenceMode } from '../../../../packages/common/contracts/inference.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -73,6 +75,7 @@ const appIcon = resolve(desktopRoot, 'build/icon.png')
 const developmentUrl = process.env['VITE_DEV_SERVER_URL']
 const allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString()
 const dataMode = process.env['TLC_DATA_MODE'] === 'sample' ? 'sample' : 'live'
+const sampleAiMode = dataMode === 'sample' ? resolveSampleInferenceMode(process.env) : undefined
 // Concurrent Live and Sample processes must not lock the same Chromium caches.
 if (dataMode === 'sample') {
   const sampleSessionDirectory = resolve(app.getPath('userData'), 'sample-session')
@@ -83,7 +86,7 @@ const voiceHost = new SharedVoiceInputHost(new WindowsVoiceCaptureDriver(), () =
   BrowserWindow.getAllWindows().some((window) => window.isVisible() && window.isFocused())
 )
 
-const preparedEnvironment = app.isPackaged || dataMode === 'live'
+const preparedEnvironment = app.isPackaged || dataMode === 'live' || sampleAiMode === 'foundry'
   ? await prepareFoundryEnvironmentFile({
     isPackaged: app.isPackaged,
     userDataPath: app.getPath('userData'),
@@ -103,10 +106,13 @@ if (dataMode === 'live' && preparedEnvironment?.requiresConfiguration) {
     preparedEnvironment.filePath,
     'Your configuration file has been created. Set the Foundry project, agent names, tenant, client ID, and authentication mode, then reopen the application.'
   )
-} else if (dataMode === 'live' && preparedEnvironment) {
+} else if ((dataMode === 'live' || sampleAiMode === 'foundry') && preparedEnvironment) {
   try {
     runtimeEnvironment = await loadFoundryEnvironment(preparedEnvironment.filePath)
   } catch (error) {
+    if (dataMode === 'sample') {
+      console.warn('[sample-ai] configuration-unavailable; offline fallback will be labeled.')
+    } else {
     startupBlocked = true
     await openConfigurationAndExit(
       app,
@@ -115,6 +121,7 @@ if (dataMode === 'live' && preparedEnvironment?.requiresConfiguration) {
       preparedEnvironment.filePath,
       `The configuration could not be loaded. Correct it, then reopen the application.\n\n${error instanceof Error ? error.message : String(error)}`
     )
+    }
   }
 }
 
@@ -123,6 +130,10 @@ const fallbackCredential = new AzureCliCredential({ processTimeoutInMs: 30_000 }
 const credentials = authentication
   ? createRuntimeCredentials(authentication)
   : { msx: fallbackCredential, foundry: fallbackCredential }
+const sampleInference = dataMode === 'sample' ? new SampleInference({
+  credential: credentials.foundry,
+  ...(runtimeEnvironment ? { loadEnvironment: async () => runtimeEnvironment! } : {})
+}) : undefined
 const tokenProvider = new AzureCliMsxTokenProvider({
   credential: credentials.msx,
   ...(authentication
@@ -153,7 +164,8 @@ const seReportingHost = createSeReportingHost({
     if (!token) throw new Error('The reporting resource did not return a delegated token.')
     return token.token
   },
-  foundryCredential: credentials.foundry
+  foundryCredential: credentials.foundry,
+  ...(sampleInference ? { inference: sampleInference } : {})
 })
 const reportPerformance: PerformanceReporter = (event) => {
   console.info(`[performance] ${JSON.stringify(event)}`)
@@ -172,8 +184,12 @@ const liveMsxConnector = dataMode === 'sample'
 // Keep the opt-in SQLite sample store across Desktop restarts; fixture mode remains in memory.
 const localStoreMsxConnector = liveMsxConnector ? undefined : createLocalStoreMsxConnector({
   ...process.env,
+  TLC_DATA_STORE: process.env['TLC_DATA_STORE'] || (sampleAiMode === 'foundry' ? 'sqlite' : 'fixture'),
   TLC_DATA_STORE_PATH: process.env['TLC_DATA_STORE_PATH']?.trim() || resolve(app.getPath('userData'), 'sample.sqlite')
 })
+if (sampleAiMode === 'foundry' && !localStoreMsxConnector) {
+  throw new Error('Hybrid sample AI requires TLC_DATA_STORE=sqlite. Set TLC_AI_MODE=sample for offline fixtures.')
+}
 const msxConnector = liveMsxConnector ?? localStoreMsxConnector ?? new FixtureMsxConnector()
 const stagePipelineHost = liveMsxConnector
   ? createStagePipelineReviewHost({ mode: 'live', source: liveMsxConnector })
@@ -196,18 +212,19 @@ const meetingGraph = liveMsxConnector ? new GraphMeetingConnector(async (purpose
   return interactive ? token.token : assertCliTokenCanReadMeetings(token.token, purpose)
 }) : undefined
 const meetingConnector = liveMsxConnector ? new LiveMeetingCaptureConnector(liveMsxConnector, undefined, meetingGraph) : localStoreMsxConnector
-const foundryOpenAIClient = runtimeEnvironment
+const foundryOpenAIClient = dataMode === 'live' && runtimeEnvironment
   ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry)
   : undefined
 /** Foundry model-backed meeting-signal extractor when TLC_MEETING_EXTRACTOR=foundry; else the deterministic offline extractor. */
-const meetingExtractor = runtimeEnvironment && foundryOpenAIClient && (process.env['TLC_MEETING_EXTRACTOR'] ?? '').toLowerCase() === 'foundry'
+const meetingExtractor = sampleInference?.meetingExtractor() ?? (runtimeEnvironment && foundryOpenAIClient && (process.env['TLC_MEETING_EXTRACTOR'] ?? '').toLowerCase() === 'foundry'
   ? createFoundryMeetingExtractor({
     openAIClient: foundryOpenAIClient,
     model: process.env['TLC_MEETING_MODEL']?.trim() || 'gpt-6.1-sol',
     requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs
   })
-  : undefined
+  : undefined)
 const taskAgents: TaskAgentRegistry = createDesktopTaskAgents({
+  ...(sampleInference ? { inference: sampleInference } : {}),
   environment: runtimeEnvironment,
   credential: credentials.foundry,
   client: foundryOpenAIClient,
@@ -238,6 +255,7 @@ const workingSessionModelId = workingSessionModelName(process.env)
 const documentsFolder = () => process.env['TLC_DOCUMENTS_FOLDER']?.trim() || app.getPath('documents')
 const workingSession = createWorkingSessionService({
   mode: dataMode,
+  ...(sampleInference ? { inference: sampleInference } : {}),
   openOutput: async (folderName) => folderOutput(documentsFolder(), folderName),
   renderDocx: (title, markdown) => renderMarkdownDocument(title, markdown),
   knowledgeSearch: orchestrator,
@@ -340,6 +358,7 @@ async function getDataStatus(): Promise<DesktopDataStatus> {
   if (dataMode === 'sample') {
     return {
       mode: 'sample',
+      inference: { contractVersion: '1.0', mode: sampleInference!.mode },
       auth: { state: 'ready', detail: 'Automated fixture mode is active.' }
     }
   }
@@ -447,6 +466,10 @@ function registerIpc(): void {
   ipcMain.handle('tlc:get-data-status', (event) => {
     assertTrustedSender(event)
     return getDataStatus()
+  })
+  ipcMain.handle('tlc:get-inference-mode', (event) => {
+    assertTrustedSender(event)
+    return sampleInference?.mode ?? null
   })
   ipcMain.handle('tlc:list-accounts', (event, options: unknown) => {
     assertTrustedSender(event)

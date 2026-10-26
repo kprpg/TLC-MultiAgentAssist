@@ -1,6 +1,7 @@
 # Dot-sourced by deploy-web-appservice.ps1; Azure commands and ZIP publishing share its checked helpers.
 $sampleSettings = [ordered]@{
     TLC_WEB_MODE = 'sample'
+    TLC_AI_MODE = $AiMode
     TLC_DATA_MODE = 'sample'
     TLC_DATA_STORE = 'sqlite'
     TLC_DATA_STORE_PATH = ':memory:'
@@ -168,9 +169,10 @@ function Restore-SampleAuthPolicy {
 }
 
 function Set-SampleSettings {
-    param([string] $TargetSlot, [string] $ReleaseId)
+    param([string] $TargetSlot, [string] $ReleaseId, [string] $FoundryMetadata)
     $values = @($sampleSettings.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
     if ($ReleaseId) { $values += "$releaseSetting=$ReleaseId" }
+    if ($FoundryMetadata) { $values += "TLC_FOUNDRY_ENV_BASE64=$FoundryMetadata" }
     Invoke-SampleSettingsChange -Arguments (@('webapp', 'config', 'appsettings', 'set') +
         (Get-SampleTargetArguments $TargetSlot) + @('--settings') + $values + @('--output', 'none', '--only-show-errors'))
 }
@@ -256,7 +258,7 @@ function Test-SampleWeb {
     $arguments = @((Join-Path $PSScriptRoot 'smoke-web-release.mjs'))
     if ($AccessOnly) {
         $arguments += @('--access-url', $uri, $(if ($Protected) { '--protected' } else { '--public' }))
-    } else { $arguments += @('--url', $uri) }
+    } else { $arguments += @('--url', $uri, '--ai-mode', $AiMode) }
     for ($attempt = 1; $attempt -le $HealthAttempts; $attempt++) {
         & node @arguments
         if ($LASTEXITCODE -eq 0) { return }
@@ -347,9 +349,8 @@ function Invoke-SampleRollback {
         if ($Receipt[$name] -isnot [System.Collections.IDictionary]) { throw 'The rollback receipt has no verified original configuration.' }
     }
     foreach ($settings in @($Receipt['productionSettings'], $Receipt['sourceSettings'])) {
-        if ($settings.Count -ne $sampleManagedKeys.Count) { throw 'The rollback receipt contains unexpected settings.' }
-        foreach ($key in $sampleManagedKeys) {
-            if (-not $settings.Contains($key) -or ($null -ne $settings[$key] -and $settings[$key] -isnot [string])) { throw 'The rollback settings are invalid.' }
+        foreach ($key in $settings.Keys) {
+            if ($key -notin $sampleManagedKeys -or ($null -ne $settings[$key] -and $settings[$key] -isnot [string])) { throw 'The rollback settings are invalid.' }
         }
     }
     if ($Receipt['productionAuth']['enabled'] -isnot [bool]) { throw 'The original authentication policy is invalid.' }
@@ -427,6 +428,7 @@ function Invoke-SampleAppServiceWorkflow {
     if (-not (Get-Command az -ErrorAction SilentlyContinue)) { throw 'Azure CLI is required; sign in as the publisher before deployment.' }
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'Node.js is required for anonymous functional verification.' }
     $production = Assert-SampleTarget
+    $foundryMetadata = if ($Action -eq 'Deploy' -and $AiMode -eq 'foundry') { Get-FoundryEnvironmentSetting } else { $null }
     $slots = @(Invoke-AzJson -AsHashtable -Arguments (@('webapp', 'deployment', 'slot', 'list') + (Get-SampleTargetArguments) + @('--query', '[].{name:name}')))
     $exists = @($slots | Where-Object { $_['name'] -eq $Slot }).Count -gt 0
     if (-not $exists -and ($Action -ne 'Deploy' -or -not $CreateSlot)) { throw "Slot '$Slot' does not exist. Use -CreateSlot explicitly to create it; the App Service plan will not be upgraded." }
@@ -459,7 +461,7 @@ function Invoke-SampleAppServiceWorkflow {
         }
         $site = Get-SampleSite $Slot
         if ($site['serverFarmId'] -ne $production['serverFarmId']) { throw 'The slot is not on the validated App Service plan.' }
-        Set-SampleSettings -TargetSlot $Slot
+        Set-SampleSettings -TargetSlot $Slot -FoundryMetadata $foundryMetadata
         $deploymentId = Publish-AppServiceArchive -Path $path -TargetSlot $Slot -WaitForCompletion
         Set-SampleSettings -TargetSlot $Slot -ReleaseId $releaseId
         Set-SampleAuth -TargetSlot $Slot -Enabled $false
@@ -476,4 +478,7 @@ function Invoke-SampleAppServiceWorkflow {
     Save-SampleReceipt $receipt
     Write-Host "Verified sample deployment: https://$($site['defaultHostName'])"
     Write-Host "Production was not changed. Receipt: $script:sampleReceiptPath"
+    if ($AiMode -eq 'foundry') {
+        Write-Warning 'Sample business-data checks passed. Foundry inference was not invoked: separately verify the slot managed identity has agent AND model inference access, then run an explicitly authorized AI smoke. Until then, provider failures are shown as offline/sample fallback.'
+    }
 }

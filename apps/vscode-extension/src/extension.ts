@@ -132,7 +132,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // Sample data source: the in-memory fixtures, or the persistent SQLite test store when
     // `tlc.dataStore` is `sqlite` (or TLC_DATA_STORE=sqlite). Live mode is unaffected.
     const useLocalStore = (): boolean =>
-        vscode.workspace.getConfiguration('tlc').get<'fixture' | 'sqlite'>('dataStore', 'fixture') === 'sqlite'
+        vscode.workspace.getConfiguration('tlc').get<'fixture' | 'sqlite'>('dataStore', 'sqlite') === 'sqlite'
         || (process.env['TLC_DATA_STORE'] ?? '').toLowerCase() === 'sqlite'
     // Reflect the meeting-extractor settings into the environment the providers read, unless the
     // environment already pins them (e.g. an F5 launch config). `foundry` sends transcripts to a
@@ -148,7 +148,12 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     const foundryTenantId = configuredFoundryTenantId()
     const foundryCredential = foundryTenantId ? createVsCodeTokenCredential(foundryTenantId) : undefined
+    const pinnedAiMode = process.env['TLC_AI_MODE']?.trim()
+    const syncInferenceMode = () => {
+        process.env['TLC_AI_MODE'] = pinnedAiMode || vscode.workspace.getConfiguration('tlc').get<string>('aiMode', 'foundry')
+    }
     const makeSampleProvider = (): ExtensionDataProvider => {
+        syncInferenceMode()
         syncMeetingExtractionEnv()
         if (useLocalStore()) {
             try {
@@ -160,6 +165,9 @@ export function activate(context: vscode.ExtensionContext): void {
                 // Older VS Code runtimes may lack node:sqlite; make the no-write fallback explicit.
                 void vscode.window.showWarningMessage(`TLC Assist could not open the SQLite test store (${error instanceof Error ? error.message : String(error)}). Using in-memory fixtures; record creation is draft-only until SQLite is available.`)
             }
+        }
+        if (process.env['TLC_AI_MODE'] === 'foundry') {
+            void vscode.window.showWarningMessage('Fixture mode uses offline AI. Select the SQLite data store to use real Foundry inference with sample records.')
         }
         return createSampleDataProvider()
     }
@@ -446,7 +454,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 else void applyMode('live')
                 return
             }
-            if (event.affectsConfiguration('tlc.dataStore') && readMode() === 'sample') {
+            if ((event.affectsConfiguration('tlc.dataStore') || event.affectsConfiguration('tlc.aiMode')) && readMode() === 'sample') {
                 swapProvider(makeSampleProvider())
                 return
             }

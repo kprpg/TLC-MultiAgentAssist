@@ -68,6 +68,8 @@ describe('public sample App Service workflow', () => {
         })
         expect(after.auth['sample']?.enabled).toBe(false)
         expect(after.sticky).toEqual(before.sticky)
+        const upload = after.calls.find((call) => call.args.slice(0, 2).join(' ') === 'webapp deploy')
+        expect(upload?.args).toEqual(expect.arrayContaining(['--async', 'true', '--timeout', '1800000']))
         expect(JSON.parse(await readFile(fixture.receipt, 'utf8'))).toMatchObject({ version: 1, state: 'staged', deploymentId: 'deployment-1' })
         expect(await readFile(fixture.receipt, 'utf8')).not.toContain('must-not-enter-a-receipt')
         expect(after.calls.filter((call) => mutation(call) && call.args[0] !== 'rest').every((call) => call.args.includes('--slot'))).toBe(true)
@@ -79,6 +81,21 @@ describe('public sample App Service workflow', () => {
         expect((await fixture.state()).calls.filter(mutation)).toEqual([])
         await expect(readFile(fixture.receipt)).rejects.toMatchObject({ code: 'ENOENT' })
     }, powershellScriptTimeoutMs)
+
+    it('configures Foundry metadata only for the sample slot and does not claim paid inference was verified', async () => {
+        const fixture = await createFixture()
+        const before = await fixture.state()
+        const foundryPath = join(fixture.directory, 'foundry.json')
+        await writeFile(foundryPath, JSON.stringify({
+            foundry: { projectEndpoint: 'https://example.services.ai.azure.com/api/projects/demo', agents: { accountPulse: { name: 'sample-agent' } } }
+        }))
+        const result = await fixture.run('Deploy', ['-AiMode', 'foundry'], true, foundryPath)
+        const after = await fixture.state()
+        expect(after.settings['sample']).toMatchObject({ TLC_AI_MODE: 'foundry' })
+        expect(after.settings['sample']!['TLC_FOUNDRY_ENV_BASE64']).toBeTruthy()
+        expect(after.settings['production']).toEqual(before.settings['production'])
+        expect(`${result.stdout}${result.stderr}`).toContain('Foundry inference was not invoked')
+    }, 60_000)
 
     it.each([true, false])('uses classic commands for a v1 sample slot with enabled=%s', async (enabled) => {
         const fixture = await createFixture((state) => {
@@ -315,13 +332,13 @@ async function createFixture(configure?: (state: MockState) => void) {
     await writeFile(artifact, await zip.generateAsync({ type: 'nodebuffer' }))
     const state = async (): Promise<MockState> => JSON.parse(await readFile(statePath, 'utf8'))
     return {
-        receipt, state,
+        receipt, state, directory,
         update: async (change: (value: MockState) => void) => { const value = await state(); change(value); await writeFile(statePath, JSON.stringify(value)) },
-        run: (action = 'Deploy', extra: string[] = [], withSlot = true) => execute('pwsh', [
+        run: (action = 'Deploy', extra: string[] = [], withSlot = true, foundryEnvironmentPath = join(directory, 'does-not-exist.json')) => execute('pwsh', [
             '-NoProfile', '-File', script, '-Mode', 'sample', '-Action', action,
             '-SubscriptionId', subscription, '-TenantId', tenant, '-ResourceGroup', 'test-rg',
             '-WebAppName', 'test-app', '-AppServicePlan', 'test-plan', '-ExpectedHostName', 'demo.example.test',
-            '-ReceiptPath', receipt, '-FoundryEnvironmentPath', join(directory, 'does-not-exist.json'),
+            '-ReceiptPath', receipt, '-FoundryEnvironmentPath', foundryEnvironmentPath,
             '-HealthAttempts', '1', '-HealthDelaySeconds', '1', '-Confirm:$false',
             ...(withSlot ? ['-Slot', 'sample'] : []),
             ...(action === 'Deploy' ? ['-SkipBuild'] : []),

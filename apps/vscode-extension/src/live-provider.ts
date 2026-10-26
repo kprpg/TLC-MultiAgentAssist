@@ -38,6 +38,10 @@ export function configuredFoundryTenantId(): string | undefined {
     return parsed.success ? parsed.data.authentication.foundryTenantId : undefined
 }
 
+export function configuredFoundryEnvironment() {
+    return foundryEnvironmentSchema.parse(foundryEnvironmentJson)
+}
+
 /**
  * Builds a Foundry model-backed meeting-signal extractor when `TLC_MEETING_EXTRACTOR=foundry`.
  * Reads the checked-in Foundry environment and authenticates with VS Code's Microsoft provider.

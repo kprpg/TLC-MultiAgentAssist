@@ -17,15 +17,20 @@ export interface FoundryPromptAgentOptions<TContext = unknown> {
   performanceReporter?: PerformanceReporter | undefined
   /** Renders the model input. Defaults to `JSON.stringify(context)`. */
   serializeContext?: ((context: TContext) => string) | undefined
+  retryFirstToken?: boolean | undefined
+  inlineAgentReference?: boolean | undefined
 }
 
 export type FoundryOpenAIClient = ReturnType<AIProjectClient['getOpenAIClient']>
 
 export function createFoundryOpenAIClient(
   projectEndpoint: string,
-  credential: TokenCredential
+  credential: TokenCredential,
+  options?: Parameters<AIProjectClient['getOpenAIClient']>[0]
 ): FoundryOpenAIClient {
-  return new AIProjectClient(projectEndpoint, credential).getOpenAIClient()
+  const client = new AIProjectClient(projectEndpoint, credential).getOpenAIClient(options)
+  // SDK 2.5 replaces the fetch option. Its public clone API preserves auth/routing and honors it.
+  return options?.fetch ? client.withOptions(options) : client
 }
 
 export const defaultFirstTokenTimeoutMs = 60_000
@@ -66,14 +71,14 @@ export class FoundryPromptAgent<TContext> implements AgentInvoker<TContext> {
 
     try {
       const response = await this.openAIClient.responses.create(
-        { input: this.input(context), ...this.outputLimit() },
+        { input: this.input(context), ...this.outputLimit(), ...this.inlineReference() },
         {
-          body: {
+          ...(this.options.inlineAgentReference ? {} : { body: {
             agent_reference: {
               name: this.options.agentName,
               type: 'agent_reference'
             }
-          },
+          } }),
           signal: abortController.signal
         }
       )
@@ -94,7 +99,7 @@ export class FoundryPromptAgent<TContext> implements AgentInvoker<TContext> {
       try {
         return await this.streamOnce(context, handlers, attempt)
       } catch (error) {
-        if (error instanceof FirstTokenTimeoutError && attempt === 1 && !handlers.signal?.aborted) continue
+        if (error instanceof FirstTokenTimeoutError && attempt === 1 && this.options.retryFirstToken !== false && !handlers.signal?.aborted) continue
         if (isStreamingUnsupported(error) && !handlers.signal?.aborted) {
           const text = await this.invoke(context)
           handlers.onDelta(text)
@@ -107,6 +112,11 @@ export class FoundryPromptAgent<TContext> implements AgentInvoker<TContext> {
 
   private outputLimit(): { max_output_tokens?: number } {
     return this.options.maxOutputTokens === undefined ? {} : { max_output_tokens: this.options.maxOutputTokens }
+  }
+
+  private inlineReference() {
+    return this.options.inlineAgentReference
+      ? { agent_reference: { name: this.options.agentName, type: 'agent_reference' as const } } : {}
   }
 
   private async streamOnce(context: TContext, handlers: AgentStreamHandlers, attempt: number): Promise<string> {
@@ -125,9 +135,9 @@ export class FoundryPromptAgent<TContext> implements AgentInvoker<TContext> {
     let outcome: 'success' | 'failure' = 'failure'
     try {
       const events = await this.openAIClient.responses.create(
-        { input: this.input(context), stream: true, ...this.outputLimit() },
+        { input: this.input(context), stream: true, ...this.outputLimit(), ...this.inlineReference() },
         {
-          body: { agent_reference: { name: this.options.agentName, type: 'agent_reference' } },
+          ...(this.options.inlineAgentReference ? {} : { body: { agent_reference: { name: this.options.agentName, type: 'agent_reference' } } }),
           signal: controller.signal
         }
       ) as unknown as AsyncIterable<StreamEvent>

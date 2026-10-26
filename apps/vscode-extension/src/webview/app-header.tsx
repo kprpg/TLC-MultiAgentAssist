@@ -2,6 +2,7 @@ import type { ReactElement } from 'react'
 import { FeedbackButton } from '../../../shared/feedback-button.js'
 import { PortfolioLayoutControls } from './portfolio-layout-controls.js'
 import { PortfolioSearch, type PortfolioSearchTarget } from './portfolio-search.js'
+import { InferenceModeBadge } from '../../../shared/inference-status.js'
 
 export function AppHeader({
     tab,
@@ -51,7 +52,8 @@ export function AppHeader({
                 />
             )}
             <FeedbackButton onOpenIssue={onOpenIssue} />
-            <span className={`mode-badge mode-${mode}`}>{mode === 'live' ? 'Live' : 'Sample'}</span>
+            {mode === 'live' ? <span className="mode-badge mode-live">Live</span> : <InferenceModeBadge
+                label="Sample" mode={typeof document !== 'undefined' && document.getElementById('root')?.dataset['aiMode'] === 'foundry' ? 'foundry' : 'sample'} />}
         </header>
     )
 }

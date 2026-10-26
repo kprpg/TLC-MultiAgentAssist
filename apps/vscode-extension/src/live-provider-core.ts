@@ -34,6 +34,7 @@ export interface MeetingCaptureConnector {
 }
 
 export interface LiveDataProviderParts {
+    inferenceMode?: import('../../../packages/common/contracts/inference.js').InferenceMode
     reportingHost?: SeReportingHost
     stagePipelineHost?: StagePipelineReviewHost
     getSourceToken?(): Promise<string>
@@ -51,7 +52,7 @@ export interface LiveDataProviderParts {
 
 /** Assembles the provider surface from injected parts so MCEM/agent/Play wiring is unit-testable. */
 export function buildLiveDataProvider(
-    { orchestrator, host, account, dispose, meetingConnector, meetingExtractor, getSourceToken, reportingHost, stagePipelineHost, workingSession }: LiveDataProviderParts,
+    { orchestrator, host, account, dispose, meetingConnector, meetingExtractor, getSourceToken, reportingHost, stagePipelineHost, workingSession, inferenceMode }: LiveDataProviderParts,
     mode: ExtensionDataProvider['mode'] = 'live'
 ): ExtensionDataProvider {
     const requireMeeting = (): MeetingCaptureConnector => {
@@ -63,6 +64,7 @@ export function buildLiveDataProvider(
         ...(workingSession ? { workingSession } : {}),
         ...(getSourceToken ? { getSourceToken } : {}),
         mode,
+        ...(inferenceMode ? { inferenceMode } : {}),
         searchKnowledge: (request) => orchestrator.searchKnowledge(request),
         sellerDashboard: createSellerDashboardHost({ mode, resolveUserEmail: async () => account }),
         stagePipelineReview: stagePipelineHost ?? (mode === 'sample'

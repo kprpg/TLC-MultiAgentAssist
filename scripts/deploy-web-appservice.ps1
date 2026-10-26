@@ -10,6 +10,8 @@ param(
     [string] $ArtifactPath,
     [ValidateSet('easy-auth', 'sample')]
     [string] $Mode = 'easy-auth',
+    [ValidateSet('sample', 'foundry')]
+    [string] $AiMode = 'foundry',
     [ValidateSet('Deploy', 'Verify', 'Promote', 'Rollback')]
     [string] $Action = 'Deploy',
     [string] $ReceiptPath,
@@ -108,6 +110,7 @@ function Publish-AppServiceArchive {
         '--restart', 'true', '--track-status', 'false', '--only-show-errors'
     )
     if ($TargetSlot) { $arguments += @('--slot', $TargetSlot) }
+    if ($WaitForCompletion) { $arguments += @('--async', 'true', '--timeout', '1800000') }
     $before = Get-AppServiceDeployments -TargetSlot $TargetSlot | Select-Object -First 1
     $beforeId = if ($null -eq $before) { $null } else { $before.id }
     Invoke-AzureCli -Arguments $arguments | Out-Host
@@ -231,6 +234,9 @@ function Test-HealthEndpoint {
 Push-Location $repositoryRoot
 try {
     if ($Mode -eq 'sample') {
+        if (-not $PSBoundParameters.ContainsKey('AiMode') -and $env:TLC_AI_MODE -and $env:TLC_AI_MODE.Trim()) {
+            $AiMode = $env:TLC_AI_MODE.Trim().ToLowerInvariant()
+        }
         . (Join-Path $PSScriptRoot 'web-sample-appservice.ps1')
         Invoke-SampleAppServiceWorkflow
         return

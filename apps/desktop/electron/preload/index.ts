@@ -31,6 +31,7 @@ export interface TlcDesktopApi {
   invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
   exitApplication(): Promise<void>
   getDataStatus(): Promise<DesktopDataStatus>
+  getInferenceMode(): Promise<'sample' | 'foundry' | null>
   connectMcem(): Promise<AuthStatus>
   listAccounts(options?: AccountListOptions): Promise<Account[]>
   getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
@@ -93,6 +94,7 @@ const api: TlcDesktopApi = {
   invokeVoice: (request) => ipcRenderer.invoke('tlc:voice-input', request),
   exitApplication: () => ipcRenderer.invoke('tlc:exit-application'),
   getDataStatus: () => ipcRenderer.invoke('tlc:get-data-status'),
+  getInferenceMode: () => ipcRenderer.invoke('tlc:get-inference-mode'),
   connectMcem: () => ipcRenderer.invoke('tlc:connect-mcem'),
   listAccounts: (options) => ipcRenderer.invoke('tlc:list-accounts', options),
   getPortfolioIndex: (request) => ipcRenderer.invoke('tlc:portfolio-index', request),

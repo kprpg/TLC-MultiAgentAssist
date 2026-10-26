@@ -200,7 +200,7 @@
             "live"
           ],
           "default": "sample",
-          "markdownDescription": "Data mode. `sample` uses sanitized fixtures with no network calls. `live` requires a supported delegated Microsoft identity and is gated by the MCP tool policy."
+          "markdownDescription": "Business data mode. `sample` keeps business records local; AI uses Foundry by default (see `#tlc.aiMode#`). `live` requires a supported delegated Microsoft identity and is gated by the MCP tool policy."
         },
         "tlc.dataStore": {
           "type": "string",
@@ -208,8 +208,14 @@
             "fixture",
             "sqlite"
           ],
-          "default": "fixture",
+          "default": "sqlite",
           "markdownDescription": "In `sample` mode, the data source. `fixture` uses the in-memory sample data. `sqlite` uses a file-backed SQLite test store in the extension's local storage, so submitted Opportunities, Milestones, and other sample changes survive VS Code restarts. No effect in `live` mode; live Opportunity/Milestone creation remains disabled."
+        },
+        "tlc.aiMode": {
+          "type": "string",
+          "enum": ["foundry", "sample"],
+          "default": "foundry",
+          "markdownDescription": "AI provider for SQLite sample data. `foundry` uses real agents and model inference with Foundry-only sign-in and visibly labeled offline fallback. `sample` is fully offline. TLC_AI_MODE overrides this setting. Live-mode provider settings are unchanged."
         },
         "tlc.meetingExtractor": {
           "type": "string",

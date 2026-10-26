@@ -18,8 +18,10 @@ and specialized agents. Shipped as three surfaces from one codebase: a **VS Code
 1. **Contracts first.** All cross-boundary data flows through zod schemas in
    `packages/common/contracts`. Parse at every boundary, keep schemas `.strict()`, and when the wire
    shape changes bump `contractVersion` and add/adjust a test in `tests/contract`.
-2. **Sample + live parity.** Every feature must work in **sample mode** (bundled sanitized fixtures,
-   no sign-in/network — `TLC_DATA_MODE=sample`) *and* live mode. Never break sample mode.
+2. **Sample + live parity.** Sample business data stays in SQLite/bundled sanitized sources.
+   Sample AI defaults to Foundry; `TLC_AI_MODE=sample` is the explicit credential-free, offline option
+   used by default tests. Real sample inference must have visible fallback and must never enable
+   live business-source access. Preserve existing live-mode behavior unchanged.
 3. **Three-surface parity.** User-facing changes land consistently across the **VS Code webview**,
    **Desktop**, and **Web**. Desktop + Web share `apps/desktop/renderer-revamp`; the VS Code webview is
    separate (`apps/vscode-extension/src/webview`). If you touch one surface, check the others.

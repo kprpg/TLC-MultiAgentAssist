@@ -1,12 +1,12 @@
 import { createRequire } from "node:module";
 import { BrowserWindow, app, dialog, ipcMain, safeStorage, screen, shell } from "electron";
-import { AzureCliCredential, InteractiveBrowserCredential } from "@azure/identity";
+import { AzureCliCredential, InteractiveBrowserCredential, ManagedIdentityCredential } from "@azure/identity";
 import { existsSync, mkdirSync } from "node:fs";
 import { access, copyFile, lstat, mkdir, mkdtemp, open, opendir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, randomUUID } from "node:crypto";
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { z } from "zod";
+import { ZodError, z } from "zod";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { PDFParse } from "pdf-parse";
 import { AIProjectClient } from "@azure/ai-projects";
@@ -519,6 +519,35 @@ var dealTeamLeaveResultSchema = z.object({
 	onDealTeam: z.literal(false),
 	alreadyAbsent: z.boolean()
 }).strict();
+var inferenceModeSchema = z.enum(["sample", "foundry"]);
+var inferenceExecutionSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	correlationId: z.string().uuid(),
+	requested: inferenceModeSchema,
+	provider: inferenceModeSchema,
+	state: z.enum(["complete", "fallback"]),
+	reason: z.enum([
+		"configuration",
+		"authentication",
+		"quota",
+		"timeout",
+		"validation",
+		"provider"
+	]).optional()
+}).strict().refine((value) => value.state !== "fallback" || value.provider === "sample" && value.reason !== void 0, "Fallback must identify the offline provider and its reason.");
+function validateInferenceResponse(value, context) {
+	if (value.contractVersion === "1.3" !== (value.inference !== void 0)) context.addIssue({
+		code: "custom",
+		message: "Inference metadata requires the versioned inference response shape."
+	});
+}
+function inferenceLabel(execution) {
+	return execution.state === "fallback" ? `Offline/sample fallback - Foundry unavailable (${execution.reason}).` : execution.provider === "foundry" ? "Sample data / Foundry AI" : "Sample data / Offline AI";
+}
+function resolveSampleInferenceMode(environment) {
+	const value = environment["TLC_AI_MODE"]?.trim().toLowerCase();
+	return inferenceModeSchema.parse(value || "foundry");
+}
 //#endregion
 //#region packages/common/contracts/mcp.ts
 var canonicalFieldSchema = z.string().regex(/^[a-z][a-zA-Z0-9]*$/);
@@ -679,6 +708,8 @@ var meetingUnmappedSignalSchema = z.object({
 	evidence: z.array(z.string().min(1))
 }).strict();
 var meetingChangeSetProposalSchema = z.object({
+	contractVersion: z.literal("1.3").optional(),
+	inference: inferenceExecutionSchema.optional(),
 	changeSetId: z.string().min(1),
 	transcriptId: z.string().min(1),
 	opportunityId: z.string().min(1),
@@ -688,7 +719,7 @@ var meetingChangeSetProposalSchema = z.object({
 	suggestedMilestoneIds: z.array(z.string().min(1)),
 	unmappedSignals: z.array(meetingUnmappedSignalSchema),
 	proposedAt: z.string().datetime()
-}).strict();
+}).strict().superRefine(validateInferenceResponse);
 var meetingChangeSetApprovalSchema = z.object({
 	changeSetId: z.string().min(1),
 	opportunityId: z.string().min(1),
@@ -1959,10 +1990,11 @@ var workingSessionTopicSchema = z.object({
 	evidence: z.array(shortText(200)).max(8)
 }).strict();
 var workingSessionTopicResponseSchema = z.object({
-	contractVersion: z.literal("1.0"),
+	contractVersion: z.enum(["1.0", "1.3"]),
+	inference: inferenceExecutionSchema.optional(),
 	mode: z.enum(["sample", "live"]),
 	topic: workingSessionTopicSchema
-}).strict();
+}).strict().superRefine(validateInferenceResponse);
 var workingSessionDeliverablesSchema = z.object({
 	decks: z.boolean(),
 	learn: z.boolean(),
@@ -2023,14 +2055,15 @@ var workingSessionDeliverySchema = z.discriminatedUnion("kind", [z.object({
 	expiresAt: z.string().datetime()
 }).strict()]);
 var workingSessionResultSchema = z.object({
-	contractVersion: z.literal("1.0"),
+	contractVersion: z.enum(["1.0", "1.3"]),
+	inference: inferenceExecutionSchema.optional(),
 	mode: z.enum(["sample", "live"]),
 	folderName: shortText(200),
 	delivery: workingSessionDeliverySchema,
 	files: z.array(workingSessionFileSchema).max(200),
 	gaps: z.array(workingSessionGapSchema).max(50),
 	summary: shortText(1e3)
-}).strict();
+}).strict().superRefine(validateInferenceResponse);
 var workingSessionOpenFolderRequestSchema = z.object({ folderPath: shortText(1e3) }).strict();
 //#endregion
 //#region packages/common/contracts/index.ts
@@ -2072,7 +2105,11 @@ var authStatusSchema = z.object({
 });
 z.object({
 	mode: dataModeSchema,
-	auth: authStatusSchema
+	auth: authStatusSchema,
+	inference: z.object({
+		contractVersion: z.literal("1.0"),
+		mode: inferenceModeSchema
+	}).strict().optional()
 });
 var opportunitySchema = z.object({
 	id: z.string().min(1),
@@ -2326,7 +2363,8 @@ var agentTaskRequestSchema = z.object({
 	prompt: z.string().min(3).max(agentTaskPromptMaxLength)
 });
 var agentTaskResponseSchema = z.object({
-	contractVersion: z.literal("1.2"),
+	contractVersion: z.enum(["1.2", "1.3"]),
+	inference: inferenceExecutionSchema.optional(),
 	correlationId: z.string().uuid(),
 	capability: agentCapabilitySchema,
 	agentVersion: z.string().min(1),
@@ -2339,7 +2377,7 @@ var agentTaskResponseSchema = z.object({
 	]),
 	content: z.string().min(1),
 	sourceHealth: z.array(sourceHealthSchema).min(1)
-});
+}).superRefine(validateInferenceResponse);
 /**
 * Progressive agent response. `context` carries an instant deterministic draft grounded in the same
 * evidence as the model call; `delta` carries model text; `complete` always carries the full authoritative
@@ -9636,7 +9674,7 @@ CREATE TABLE creation_batch_item (
 `;
 //#endregion
 //#region packages/connectors/local-store/local-store.ts
-var requireModule$1 = createRequire(import.meta.url);
+var requireModule$2 = createRequire(import.meta.url);
 /**
 * A persistent, relational local test-data store backed by `node:sqlite` (built in; no
 * extra dependency). Applies the schema and seed, and exposes small typed query/mutation
@@ -9646,7 +9684,7 @@ var requireModule$1 = createRequire(import.meta.url);
 var LocalStore = class {
 	db;
 	constructor(options = {}) {
-		const { DatabaseSync } = requireModule$1("node:sqlite");
+		const { DatabaseSync } = requireModule$2("node:sqlite");
 		this.db = new DatabaseSync(options.path ?? ":memory:");
 		try {
 			this.db.exec("PRAGMA foreign_keys = ON");
@@ -10973,8 +11011,9 @@ var LocalPdfMcemGuidanceConnector = class {
 };
 //#endregion
 //#region packages/connectors/foundry/index.ts
-function createFoundryOpenAIClient(projectEndpoint, credential) {
-	return new AIProjectClient(projectEndpoint, credential).getOpenAIClient();
+function createFoundryOpenAIClient(projectEndpoint, credential, options) {
+	const client = new AIProjectClient(projectEndpoint, credential).getOpenAIClient(options);
+	return options?.fetch ? client.withOptions(options) : client;
 }
 var FirstTokenTimeoutError = class extends Error {
 	constructor() {
@@ -11002,12 +11041,13 @@ var FoundryPromptAgent = class {
 		try {
 			const response = await this.openAIClient.responses.create({
 				input: this.input(context),
-				...this.outputLimit()
+				...this.outputLimit(),
+				...this.inlineReference()
 			}, {
-				body: { agent_reference: {
+				...this.options.inlineAgentReference ? {} : { body: { agent_reference: {
 					name: this.options.agentName,
 					type: "agent_reference"
-				} },
+				} } },
 				signal: abortController.signal
 			});
 			if (!response.output_text?.trim()) throw new Error(`Foundry agent ${this.options.agentName} returned no text output.`);
@@ -11024,7 +11064,7 @@ var FoundryPromptAgent = class {
 			try {
 				return await this.streamOnce(context, handlers, attempt);
 			} catch (error) {
-				if (error instanceof FirstTokenTimeoutError && attempt === 1 && !handlers.signal?.aborted) continue;
+				if (error instanceof FirstTokenTimeoutError && attempt === 1 && this.options.retryFirstToken !== false && !handlers.signal?.aborted) continue;
 				if (isStreamingUnsupported(error) && !handlers.signal?.aborted) {
 					const text = await this.invoke(context);
 					handlers.onDelta(text);
@@ -11036,6 +11076,12 @@ var FoundryPromptAgent = class {
 	}
 	outputLimit() {
 		return this.options.maxOutputTokens === void 0 ? {} : { max_output_tokens: this.options.maxOutputTokens };
+	}
+	inlineReference() {
+		return this.options.inlineAgentReference ? { agent_reference: {
+			name: this.options.agentName,
+			type: "agent_reference"
+		} } : {};
 	}
 	async streamOnce(context, handlers, attempt) {
 		const controller = new AbortController();
@@ -11057,12 +11103,13 @@ var FoundryPromptAgent = class {
 			const events = await this.openAIClient.responses.create({
 				input: this.input(context),
 				stream: true,
-				...this.outputLimit()
+				...this.outputLimit(),
+				...this.inlineReference()
 			}, {
-				body: { agent_reference: {
+				...this.options.inlineAgentReference ? {} : { body: { agent_reference: {
 					name: this.options.agentName,
 					type: "agent_reference"
-				} },
+				} } },
 				signal: controller.signal
 			});
 			for await (const event of events) if (event.type === "response.output_text.delta" && event.delta) {
@@ -15565,7 +15612,7 @@ var ThinSliceOrchestrator = class {
 			}
 		};
 	}
-	buildAgentResponse(request, configuredAgent, context, content, fallback) {
+	buildAgentResponse(request, configuredAgent, context, content, fallback, inference) {
 		const { opportunityContext } = context;
 		const sourceHealth = agentSourceHealth(context);
 		const isPartial = fallback !== void 0 || sourceHealth.some((source) => [
@@ -15575,7 +15622,8 @@ var ThinSliceOrchestrator = class {
 		].includes(source.state));
 		const responseContent = addMsxOpportunityLink(content.trim(), opportunityContext.opportunity.id);
 		return {
-			contractVersion: "1.2",
+			contractVersion: inference ? "1.3" : "1.2",
+			...inference ? { inference } : {},
 			correlationId: randomUUID(),
 			capability: request.capability,
 			agentVersion: fallback === void 0 ? configuredAgent.version : `${configuredAgent.version}+${fallback}`,
@@ -15590,9 +15638,10 @@ var ThinSliceOrchestrator = class {
 		const request = agentTaskRequestSchema.parse(input);
 		return measurePerformance(`agent.task.${request.capability}`, this.performanceReporter, () => this.withFreshReadContext(async () => {
 			const { configuredAgent, context } = await this.prepareAgentTask(request);
-			const content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke(context));
+			const inferred = configuredAgent.infer ? await configuredAgent.infer(context) : void 0;
+			const content = inferred?.value ?? await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke(context));
 			if (!content?.trim()) throw new Error(`The ${request.capability} agent returned no content.`);
-			return this.buildAgentResponse(request, configuredAgent, context, content);
+			return this.buildAgentResponse(request, configuredAgent, context, inferred?.execution.state === "fallback" ? `${content}\n\n> Offline/sample fallback - Foundry unavailable (${inferred.execution.reason}).` : content, inferred?.execution.state === "fallback" ? "local-fallback" : void 0, inferred?.execution);
 		}));
 	}
 	/**
@@ -15630,15 +15679,25 @@ var ThinSliceOrchestrator = class {
 				});
 				let content;
 				let fallback;
+				let inference;
 				try {
 					content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, async () => {
-						const streamed = configuredAgent.agent.stream ? await configuredAgent.agent.stream(context, {
+						const inferred = configuredAgent.infer ? await configuredAgent.infer(context, {
 							signal,
 							onDelta: (text) => emit({
 								type: "delta",
 								text
 							})
-						}) : await configuredAgent.agent.invoke(context);
+						}) : void 0;
+						inference = inferred?.execution;
+						if (inference?.state === "fallback") fallback = "local-fallback";
+						const streamed = inferred?.value ?? (configuredAgent.agent.stream ? await configuredAgent.agent.stream(context, {
+							signal,
+							onDelta: (text) => emit({
+								type: "delta",
+								text
+							})
+						}) : await configuredAgent.agent.invoke(context));
 						if (!streamed?.trim()) throw new Error(`The ${request.capability} agent returned no content.`);
 						return streamed;
 					});
@@ -15647,9 +15706,10 @@ var ThinSliceOrchestrator = class {
 					content = `${instantDraft}\n\n> AI enhancement is unavailable (${errorMessage(error)}). This is the evidence-based draft from the local MCEM evaluation.`;
 					fallback = "local-fallback";
 				}
+				if (inference?.state === "fallback") content += `\n\n> Offline/sample fallback - Foundry unavailable (${inference.reason}).`;
 				emit({
 					type: "complete",
-					response: this.buildAgentResponse(request, configuredAgent, context, content, fallback)
+					response: this.buildAgentResponse(request, configuredAgent, context, content, fallback, inference)
 				});
 			}, signal));
 		} catch (error) {
@@ -15662,7 +15722,7 @@ function errorMessage(error) {
 }
 //#endregion
 //#region packages/orchestrator/task-agents.ts
-function createFoundryTaskAgents(environment, credential, client = createFoundryOpenAIClient(environment.foundry.projectEndpoint, credential), performanceReporter) {
+function createFoundryTaskAgents(environment, credential, client = createFoundryOpenAIClient(environment.foundry.projectEndpoint, credential), performanceReporter, options = {}) {
 	const bindings = environment.foundry.agents;
 	const agents = {
 		"account-pulse": bindings.accountPulse,
@@ -15679,6 +15739,7 @@ function createFoundryTaskAgents(environment, credential, client = createFoundry
 			credential,
 			openAIClient: client,
 			serializeContext: serializeAgentContext,
+			...options,
 			...foundryAgentTuning(environment, performanceReporter)
 		})
 	}]));
@@ -15698,6 +15759,7 @@ function foundryAgentTuning(environment, performanceReporter) {
 * input is serialized identically to every other host.
 */
 function createDesktopTaskAgents(options) {
+	if (options.inference) return options.inference.taskAgents(options.sample());
 	if (!options.environment || !options.credential) return options.sample();
 	return createFoundryTaskAgents(options.environment, options.credential, options.client, options.performanceReporter);
 }
@@ -18197,6 +18259,8 @@ var sePublishPreviewSchema = z.object({
 	}).strict())
 }).strict();
 var seReportingResponseSchema = z.discriminatedUnion("kind", [base$2.extend({
+	contractVersion: z.enum(["1.0", "1.3"]),
+	inference: inferenceExecutionSchema.optional(),
 	kind: z.literal("state"),
 	mode: z.enum(["sample", "live"]),
 	profiles: z.array(seReportingProfileSchema).max(20),
@@ -19813,6 +19877,7 @@ var SharedSeReportingHost = class {
 	}
 	async invoke(raw) {
 		const request = seReportingRequestSchema.parse(raw);
+		const inference = this.options.mode === "sample" ? this.options.inference : void 0;
 		let owner = "";
 		let locked = false;
 		try {
@@ -19915,8 +19980,7 @@ var SharedSeReportingHost = class {
 					allowUnavailable: request.allowUnavailable,
 					runId: globalThis.crypto.randomUUID()
 				});
-				if (this.options.mode === "live") {
-					if (!this.options.synthesize) throw new SeReportingError("reporting-model-unconfigured", "Configure the approved reporting narrative model before running live generation.");
+				if (this.options.mode === "live" || inference?.mode === "foundry") {
 					const scope = resolveSeScope(input);
 					const dates = seReportingDates(input.period);
 					const grounded = {
@@ -19925,9 +19989,22 @@ var SharedSeReportingHost = class {
 						tasks: scope.tasks.filter((row) => seTaskActivityDate(row, dates.start, dates.end) !== null),
 						evidence: scope.evidence.filter((row) => row.date === null || row.date >= dates.start && row.date <= dates.end)
 					};
-					const { qualifying_evidence_ids: qualifying, ...narratives } = seNarrativeSynthesisSchema.parse(await this.options.synthesize(grounded));
-					if (qualifying.some((id) => !grounded.evidence.some((row) => row.id === id && row.source !== "wiki" && row.source !== "m365_calendar" && row.date))) throw new SeReportingError("reporting-evidence-invalid", "The reporting model returned an unsupported activity-evidence identifier.");
-					input.narratives = validateSeNarratives(narratives, grounded);
+					const validate = (raw) => {
+						const { qualifying_evidence_ids: qualifying, ...narratives } = seNarrativeSynthesisSchema.parse(raw);
+						if (qualifying.some((id) => !grounded.evidence.some((row) => row.id === id && row.source !== "wiki" && row.source !== "m365_calendar" && row.date))) throw new SeReportingError("reporting-evidence-invalid", "The reporting model returned an unsupported activity-evidence identifier.");
+						return {
+							qualifying,
+							narratives: validateSeNarratives(narratives, grounded)
+						};
+					};
+					const inferred = inference?.mode === "foundry" ? await inference.run(async (context) => validate(await inference.narrativeModel(context)(grounded)), () => ({
+						narratives: input.narratives,
+						qualifying: input.evidence.filter((row) => row.qualifies).map((row) => row.id)
+					})) : void 0;
+					if (!inferred && !this.options.synthesize) throw new SeReportingError("reporting-model-unconfigured", "Configure the approved reporting narrative model before running live generation.");
+					const { qualifying, narratives } = inferred?.value ?? validate(await this.options.synthesize(grounded));
+					if (inferred) session.inference = inferred.execution;
+					input.narratives = narratives;
 					input.evidence = input.evidence.map((row) => ({
 						...row,
 						qualifies: qualifying.includes(row.id)
@@ -19944,6 +20021,7 @@ var SharedSeReportingHost = class {
 				session.access = input.access;
 				session.plan = null;
 				message = "Draft package generated. Review every report and supply your own asks (or explicitly leave them empty) before approval or publication.";
+				if (session.inference) message += ` ${inferenceLabel(session.inference)}`;
 			} else if (request.operation === "review") {
 				const run = this.requireRun(session, request.runId);
 				if (request.approve && run.reports.some((report) => report.schema_contract.test_mode)) throw new SeReportingError("test-approval-denied", "Test-contract artifacts remain drafts and cannot be approved.");
@@ -19999,7 +20077,8 @@ var SharedSeReportingHost = class {
 				message = this.options.mode === "sample" ? "Sample publication simulated. No files, source records or SharePoint reports were changed." : "The reviewed report package was published. No CRM records or shared rollups were changed.";
 			}
 			return seReportingResponseSchema.parse({
-				contractVersion: "1.0",
+				contractVersion: session.inference ? "1.3" : "1.0",
+				...session.inference ? { inference: session.inference } : {},
 				kind: "state",
 				mode: this.options.mode,
 				profiles,
@@ -20242,7 +20321,7 @@ function createSeReportingFixture() {
 }
 //#endregion
 //#region packages/orchestrator/se-reporting/sample.ts
-function createSampleSeReportingHost() {
+function createSampleSeReportingHost(options = {}) {
 	const fixture = createSeReportingFixture();
 	const reports = buildSeReports(fixture);
 	const profiles = new MemorySeProfileStore();
@@ -20283,6 +20362,7 @@ function createSampleSeReportingHost() {
 			publish: async () => []
 		},
 		profiles,
+		...options.inference ? { inference: options.inference } : {},
 		initialRun: {
 			id: fixture.runId,
 			profileId: sampleSeProfile.id,
@@ -20298,7 +20378,7 @@ function resolveSeSourcePreference(environment) {
 	return value === "auto" || value === "dataverse" ? value : "powerbi";
 }
 function createSeReportingHost(options) {
-	if (options.mode === "sample") return createSampleSeReportingHost();
+	if (options.mode === "sample") return createSampleSeReportingHost(options.inference ? { inference: options.inference } : {});
 	const environment = options.environment ?? process.env;
 	const source = new LiveSeReportingSource({
 		getToken: async (resource) => {
@@ -22063,14 +22143,14 @@ function serializeDocument(value, maxDocumentBytes = 48e3) {
 	if (!json || Buffer.byteLength(json, "utf8") > maxDocumentBytes) throw new Error("The private state document exceeds its supported size.");
 	return json;
 }
-var requireModule = createRequire(import.meta.url);
+var requireModule$1 = createRequire(import.meta.url);
 var SqliteDocumentStore = class {
 	db;
 	maxDocumentBytes;
 	constructor(path = ":memory:", options = {}) {
 		this.maxDocumentBytes = options.maxDocumentBytes ?? 48e3;
 		if (!Number.isInteger(this.maxDocumentBytes) || this.maxDocumentBytes < 1 || this.maxDocumentBytes > 72e3) throw new Error("The SQLite document storage limit is invalid.");
-		const { DatabaseSync } = requireModule("node:sqlite");
+		const { DatabaseSync } = requireModule$1("node:sqlite");
 		this.db = new DatabaseSync(path);
 		this.db.exec("PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS scoped_documents (partition TEXT NOT NULL, key TEXT NOT NULL, revision INTEGER NOT NULL, json TEXT NOT NULL, PRIMARY KEY(partition,key));");
 	}
@@ -24195,7 +24275,8 @@ async function generateIac(options) {
 		source = "Model-generated template";
 		notes.push(...candidate.notes);
 		if (compiled?.ok) armJson = compiled.armJson;
-	} catch {
+	} catch (error) {
+		if (options.strictModel) throw error;
 		gaps.push({
 			deliverable: "iac",
 			source: "Model",
@@ -24907,7 +24988,7 @@ var topicInstructions = [
 	"4. iacScenario is one sentence describing a minimal proof-of-concept deployment for the topic.",
 	"5. evidence quotes at most 8 short phrases from the input that justify the topic. Use low confidence when the text is vague."
 ].join("\n");
-async function deriveTopic(request, model) {
+async function deriveTopic(request, model, strictModel = false) {
 	const rulesResult = deriveTopicByRules(request);
 	if (!model) return rulesResult;
 	try {
@@ -24938,7 +25019,8 @@ async function deriveTopic(request, model) {
 			topic,
 			scenario: scenarioForTopic(topic)
 		};
-	} catch {
+	} catch (error) {
+		if (strictModel) throw error;
 		return rulesResult;
 	}
 }
@@ -24970,9 +25052,12 @@ var WorkingSessionService = class {
 		this.options = options;
 	}
 	async deriveTopic(input) {
-		const { topic } = await deriveTopic(workingSessionTopicRequestSchema.parse(input), this.options.mode === "live" ? this.options.model : void 0);
+		const request = workingSessionTopicRequestSchema.parse(input);
+		const inferred = this.options.mode === "sample" && this.options.inference?.mode === "foundry" ? await this.options.inference.run(async (context) => deriveTopic(request, this.options.inference.structuredModel(context), true), () => deriveTopic(request)) : void 0;
+		const { topic } = inferred?.value ?? await deriveTopic(request, this.options.mode === "live" ? this.options.model : void 0);
 		return workingSessionTopicResponseSchema.parse({
-			contractVersion: "1.0",
+			contractVersion: inferred ? "1.3" : "1.0",
+			...inferred ? { inference: inferred.execution } : {},
 			mode: this.options.mode,
 			topic
 		});
@@ -24985,6 +25070,7 @@ var WorkingSessionService = class {
 		const output = await this.options.openOutput(folderName);
 		const files = [];
 		const gaps = [];
+		let inference;
 		const maximumDeckBytes = this.options.maximumDeckBytes ?? 6e7;
 		let pagesPromise;
 		const pages = () => pagesPromise ??= gatherLearnPages(topic, this.options.learn, { now });
@@ -25027,14 +25113,29 @@ var WorkingSessionService = class {
 		}
 		if (deliverables.decks) await this.prepareDecks(request, output, files, gaps, maximumDeckBytes, pages, now);
 		if (deliverables.iac) try {
-			const iac = await generateIac({
+			const baseline = {
 				topic,
 				scenario: scenarioForTopic(topic),
 				sink: output.sink,
-				...this.options.model ? { model: this.options.model } : {},
 				...this.options.compiler ? { compiler: this.options.compiler } : {}
+			};
+			const inferred = this.options.mode === "sample" && this.options.inference?.mode === "foundry" ? await this.options.inference.run(async (context) => generateIac({
+				...baseline,
+				model: this.options.inference.structuredModel(context),
+				strictModel: true
+			}), () => generateIac(baseline)) : void 0;
+			inference = inferred?.execution;
+			const iac = inferred?.value ?? await generateIac({
+				...baseline,
+				...this.options.model ? { model: this.options.model } : {}
 			});
 			files.push(...iac.files);
+			if (inference?.state === "fallback") gaps.push({
+				deliverable: "iac",
+				source: "AI",
+				code: "unavailable",
+				message: inferenceLabel(inference)
+			});
 			gaps.push(...iac.gaps.map((gap) => this.options.mode === "sample" && gap.code === "tool-missing" ? {
 				...gap,
 				message: "Sample mode does not compile the ARM template. Run \"az bicep build --file main.bicep\" to produce it."
@@ -25063,7 +25164,8 @@ var WorkingSessionService = class {
 			bytes: readmeFile.bytes
 		});
 		const manifest = await output.sink.write("manifest.json", `${JSON.stringify({
-			contractVersion: "1.0",
+			contractVersion: inference ? "1.3" : "1.0",
+			...inference ? { inference } : {},
 			generatedAt: now.toISOString(),
 			mode: this.options.mode,
 			topic,
@@ -25078,7 +25180,8 @@ var WorkingSessionService = class {
 			bytes: manifest.bytes
 		});
 		return workingSessionResultSchema.parse({
-			contractVersion: "1.0",
+			contractVersion: inference ? "1.3" : "1.0",
+			...inference ? { inference } : {},
 			mode: this.options.mode,
 			folderName,
 			delivery: await output.finish(),
@@ -25252,6 +25355,7 @@ function createWorkingSessionService(options) {
 		openOutput: options.openOutput,
 		...options.model ? { model: options.model } : {},
 		...options.compiler ? { compiler: options.compiler } : {},
+		...sample && options.inference ? { inference: options.inference } : {},
 		...options.renderDocx ? { renderDocx: options.renderDocx } : {},
 		...options.maximumDeckBytes ? { maximumDeckBytes: options.maximumDeckBytes } : {},
 		...options.now ? { now: options.now } : {}
@@ -25440,6 +25544,314 @@ async function renderMarkdownDocument(title, markdown, generatedAt = /* @__PURE_
 	});
 }
 //#endregion
+//#region packages/connectors/foundry/sample-budget.ts
+var InferenceAdmissionError = class extends Error {
+	reason;
+	constructor(reason, message) {
+		super(message);
+		this.reason = reason;
+		this.name = "InferenceAdmissionError";
+	}
+};
+var requireModule = createRequire(import.meta.url);
+/** One writable ledger per deployment slot; deliberately separate from resettable sample records. */
+var SampleInferenceBudget = class {
+	path;
+	now;
+	limits;
+	db;
+	active = 0;
+	constructor(path, now = Date.now, limits = {
+		concurrent: 25,
+		minute: 20,
+		day: 500
+	}) {
+		this.path = path;
+		this.now = now;
+		this.limits = limits;
+	}
+	acquire() {
+		if (this.active >= this.limits.concurrent) throw new InferenceAdmissionError("quota", "Sample AI concurrency limit reached.");
+		try {
+			if (!this.db) {
+				if (!this.path.trim()) throw new Error("Missing budget path.");
+				if (this.path !== ":memory:") mkdirSync(dirname(this.path), { recursive: true });
+				const { DatabaseSync } = requireModule("node:sqlite");
+				this.db = new DatabaseSync(this.path);
+				this.db.exec("PRAGMA busy_timeout=3000; CREATE TABLE IF NOT EXISTS inference_quota (window TEXT PRIMARY KEY, count INTEGER NOT NULL)");
+			}
+			const timestamp = this.now();
+			const windows = [{
+				key: `minute:${Math.floor(timestamp / 6e4)}`,
+				maximum: this.limits.minute
+			}, {
+				key: `day:${new Date(timestamp).toISOString().slice(0, 10)}`,
+				maximum: this.limits.day
+			}];
+			this.db.exec("BEGIN IMMEDIATE");
+			try {
+				for (const window of windows) {
+					const count = this.db.prepare("SELECT count FROM inference_quota WHERE window=?").get(window.key)?.["count"] ?? 0;
+					if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) throw new Error("Invalid usage counter.");
+					if (Number(count) >= window.maximum) throw new InferenceAdmissionError("quota", "Sample AI request quota exhausted.");
+				}
+				for (const window of windows) this.db.prepare("INSERT INTO inference_quota(window,count) VALUES (?,1) ON CONFLICT(window) DO UPDATE SET count=count+1").run(window.key);
+				this.db.prepare("DELETE FROM inference_quota WHERE window NOT IN (?,?)").run(windows[0].key, windows[1].key);
+				this.db.exec("COMMIT");
+			} catch (error) {
+				this.db.exec("ROLLBACK");
+				throw error;
+			}
+		} catch (error) {
+			if (error instanceof InferenceAdmissionError) throw error;
+			throw new InferenceAdmissionError("configuration", "Sample AI usage storage is unavailable; real inference was denied.");
+		}
+		this.active++;
+		let released = false;
+		return () => {
+			if (!released) {
+				released = true;
+				this.active--;
+			}
+		};
+	}
+	close() {
+		this.db?.close();
+		this.db = void 0;
+	}
+};
+function guardedInferenceFetch(endpoint, options = {}) {
+	const project = new URL(endpoint);
+	if (project.protocol !== "https:" || project.username || project.password) throw new InferenceAdmissionError("configuration", "Sample inference requires a credential-free HTTPS project endpoint.");
+	return async (input, init) => {
+		const request = new Request(input, init);
+		const url = new URL(request.url);
+		if (url.origin !== project.origin || !url.pathname.startsWith(`${project.pathname.replace(/\/$/, "")}/`) || request.method !== "POST" || !/\/(responses|chat\/completions)$/.test(url.pathname)) throw new InferenceAdmissionError("configuration", "Only configured Foundry inference endpoints are allowed.");
+		const text = await request.text();
+		if (Buffer.byteLength(text) > 75e4) throw new InferenceAdmissionError("configuration", "The sample inference input exceeds its bounded context size.");
+		const body = JSON.parse(text);
+		if (!body || typeof body !== "object" || Array.isArray(body)) throw new InferenceAdmissionError("configuration", "Invalid inference request.");
+		const payload = {
+			...body,
+			tools: [],
+			tool_choice: "none"
+		};
+		if ("tools" in body && (!Array.isArray(body.tools) || body.tools.length)) throw new InferenceAdmissionError("configuration", "Sample inference cannot request remote tools.");
+		if (url.pathname.endsWith("/responses")) payload["max_output_tokens"] = Math.min(Number(payload["max_output_tokens"]) || 18e3, 18e3);
+		else payload["max_completion_tokens"] = Math.min(Number(payload["max_completion_tokens"]) || 8192, 8192);
+		const signal = AbortSignal.any([request.signal, AbortSignal.timeout(options.timeoutMs ?? 12e4)]);
+		signal.throwIfAborted();
+		const complete = options.admission?.acquire() ?? (() => {});
+		let released = false;
+		const release = () => {
+			if (!released) {
+				released = true;
+				complete();
+			}
+		};
+		try {
+			const response = await (options.fetcher ?? fetch)(new Request(request, {
+				body: JSON.stringify(payload),
+				signal,
+				redirect: "error"
+			}));
+			if (!response.body) {
+				release();
+				return response;
+			}
+			const reader = response.body.getReader();
+			return new Response(new ReadableStream({
+				async pull(controller) {
+					try {
+						const next = await reader.read();
+						if (next.done) {
+							release();
+							controller.close();
+						} else controller.enqueue(next.value);
+					} catch (error) {
+						release();
+						controller.error(error);
+					}
+				},
+				async cancel(reason) {
+					try {
+						await reader.cancel(reason);
+					} finally {
+						release();
+					}
+				}
+			}), {
+				status: response.status,
+				statusText: response.statusText,
+				headers: response.headers
+			});
+		} catch (error) {
+			release();
+			throw error;
+		}
+	};
+}
+//#endregion
+//#region packages/orchestrator/sample-inference.ts
+var SampleInference = class {
+	options;
+	mode;
+	environment;
+	context;
+	budget;
+	constructor(options = {}) {
+		this.options = options;
+		this.environment = options.environment ?? process.env;
+		this.mode = resolveSampleInferenceMode(this.environment);
+	}
+	async foundry() {
+		this.context ??= (async () => {
+			const environment = await (this.options.loadEnvironment?.() ?? loadFoundryEnvironmentFromEnvironment(this.environment));
+			const credential = this.options.credential ?? (this.environment["WEBSITE_SITE_NAME"] ? this.environment["AZURE_CLIENT_ID"]?.trim() ? new ManagedIdentityCredential(this.environment["AZURE_CLIENT_ID"].trim()) : new ManagedIdentityCredential() : new AzureCliCredential({
+				tenantId: environment.authentication.foundryTenantId,
+				processTimeoutInMs: 3e4
+			}));
+			let admission = this.options.admission;
+			if (this.environment["WEBSITE_SITE_NAME"] && !admission) {
+				const home = this.environment["HOME"]?.trim();
+				const slot = this.environment["WEBSITE_SLOT_NAME"]?.trim() || "production";
+				if (!home || !/^[a-zA-Z0-9-]+$/.test(slot)) throw new InferenceAdmissionError("configuration", "Sample AI needs writable, slot-specific usage storage.");
+				const path = this.environment["TLC_AI_BUDGET_PATH"]?.trim() || join(home, "data", "tlc-ai", slot, "usage.sqlite");
+				const packageRoot = resolve(home, "site", "wwwroot").toLowerCase();
+				if (!isAbsolute(path) || resolve(path).toLowerCase().startsWith(`${packageRoot}${sep}`)) throw new InferenceAdmissionError("configuration", "Hosted AI usage must persist outside the deployment package.");
+				this.budget = new SampleInferenceBudget(path);
+				admission = this.budget;
+			}
+			const client = this.options.client ?? createFoundryOpenAIClient(environment.foundry.projectEndpoint, credential, {
+				maxRetries: 0,
+				timeout: environment.foundry.requestTimeoutMs,
+				fetch: guardedInferenceFetch(environment.foundry.projectEndpoint, {
+					...admission ? { admission } : {},
+					...this.options.fetcher ? { fetcher: this.options.fetcher } : {},
+					timeoutMs: environment.foundry.requestTimeoutMs
+				})
+			});
+			return {
+				environment,
+				client,
+				agents: createFoundryTaskAgents(environment, credential, client, void 0, {
+					retryFirstToken: false,
+					inlineAgentReference: true
+				})
+			};
+		})();
+		return this.context;
+	}
+	async run(online, offline, signal) {
+		signal?.throwIfAborted();
+		const base = {
+			contractVersion: "1.0",
+			correlationId: randomUUID(),
+			requested: this.mode
+		};
+		if (this.mode === "sample") return {
+			value: await offline(),
+			execution: {
+				...base,
+				provider: "sample",
+				state: "complete"
+			}
+		};
+		try {
+			const value = await online(await this.foundry());
+			signal?.throwIfAborted();
+			return {
+				value,
+				execution: {
+					...base,
+					provider: "foundry",
+					state: "complete"
+				}
+			};
+		} catch (error) {
+			signal?.throwIfAborted();
+			const reason = inferenceFailureReason(error);
+			if (this.options.onFallback) this.options.onFallback(reason);
+			else console.warn(`[sample-ai] offline-fallback:${reason}`);
+			return {
+				value: await offline(),
+				execution: inferenceExecutionSchema.parse({
+					...base,
+					provider: "sample",
+					state: "fallback",
+					reason
+				})
+			};
+		}
+	}
+	taskAgents(offline) {
+		if (this.mode === "sample") return offline;
+		return Object.fromEntries(Object.entries(offline).map(([capability, entry]) => {
+			if (!entry) throw new Error("Missing offline agent implementation.");
+			const infer = (context, handlers) => this.run(async ({ agents }) => {
+				const configured = agents[context.request.capability];
+				if (!configured) throw new Error("The requested Foundry agent is not configured.");
+				const content = handlers && configured.agent.stream ? await configured.agent.stream(context, handlers) : await configured.agent.invoke(context);
+				if (!content?.trim()) throw new Error("The configured agent returned no content.");
+				return content;
+			}, () => formatLiveAgentGuidance(context.request.capability, context), handlers?.signal);
+			return [capability, {
+				...entry,
+				version: "active",
+				infer,
+				agent: {
+					invoke: async (context) => (await infer(context)).value,
+					stream: async (context, handlers) => (await infer(context, handlers)).value
+				}
+			}];
+		}));
+	}
+	meetingExtractor() {
+		if (this.mode === "sample") return void 0;
+		return async (context, options) => {
+			const result = await this.run(async ({ client, environment }) => createFoundryMeetingExtractor({
+				openAIClient: client,
+				model: this.modelName("TLC_MEETING_MODEL"),
+				requestTimeoutMs: environment.foundry.requestTimeoutMs
+			})(context, options), () => extractMeetingSignals(context, options));
+			return {
+				...result.value,
+				contractVersion: "1.3",
+				inference: result.execution
+			};
+		};
+	}
+	modelName(setting) {
+		const name = this.environment[setting]?.trim() || workingSessionModelName(setting === "TLC_WORKING_SESSION_MODEL" ? this.environment : {});
+		if (!name || /^(off|none|false|0)$/i.test(name)) throw new InferenceAdmissionError("configuration", "The requested Foundry deployment is disabled or unconfigured.");
+		return name;
+	}
+	structuredModel(context) {
+		return foundryStructuredModel(context.client, this.modelName("TLC_WORKING_SESSION_MODEL"), context.environment.foundry.requestTimeoutMs);
+	}
+	narrativeModel(context) {
+		return createSeNarrativeSynthesizer({
+			client: context.client,
+			model: this.modelName("TLC_SE_REPORTING_MODEL"),
+			timeoutMs: context.environment.foundry.requestTimeoutMs
+		});
+	}
+	close() {
+		this.budget?.close();
+	}
+};
+function inferenceFailureReason(error) {
+	if (error instanceof InferenceAdmissionError) return error.reason;
+	if (error instanceof Error && error.cause instanceof InferenceAdmissionError) return error.cause.reason;
+	if (error instanceof ZodError || error instanceof SyntaxError) return "validation";
+	if (error instanceof Error && /timeout|timedout|abort/i.test(error.name)) return "timeout";
+	const status = error && typeof error === "object" && "status" in error ? error.status : void 0;
+	if (status === 401 || status === 403) return "authentication";
+	if (status === 429) return "quota";
+	if (error instanceof Error && /configuration|environment|credential|authentication|login/i.test(error.name + error.message)) return "configuration";
+	return "provider";
+}
+//#endregion
 //#region apps/desktop/electron/main/index.ts
 var currentDirectory = dirname(fileURLToPath(import.meta.url));
 var desktopRoot = resolve(currentDirectory, "../..");
@@ -25449,13 +25861,14 @@ var appIcon = resolve(desktopRoot, "build/icon.png");
 var developmentUrl = process.env["VITE_DEV_SERVER_URL"];
 var allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString();
 var dataMode = process.env["TLC_DATA_MODE"] === "sample" ? "sample" : "live";
+var sampleAiMode = dataMode === "sample" ? resolveSampleInferenceMode(process.env) : void 0;
 if (dataMode === "sample") {
 	const sampleSessionDirectory = resolve(app.getPath("userData"), "sample-session");
 	mkdirSync(sampleSessionDirectory, { recursive: true });
 	app.setPath("sessionData", sampleSessionDirectory);
 }
 var voiceHost = new SharedVoiceInputHost(new WindowsVoiceCaptureDriver(), () => BrowserWindow.getAllWindows().some((window) => window.isVisible() && window.isFocused()));
-var preparedEnvironment = app.isPackaged || dataMode === "live" ? await prepareFoundryEnvironmentFile({
+var preparedEnvironment = app.isPackaged || dataMode === "live" || sampleAiMode === "foundry" ? await prepareFoundryEnvironmentFile({
 	isPackaged: app.isPackaged,
 	userDataPath: app.getPath("userData"),
 	templatePath: resolve(process.resourcesPath, "config/foundry.environment.default.json"),
@@ -25466,11 +25879,14 @@ var startupBlocked = false;
 if (dataMode === "live" && preparedEnvironment?.requiresConfiguration) {
 	startupBlocked = true;
 	await openConfigurationAndExit(app, dialog, shell, preparedEnvironment.filePath, "Your configuration file has been created. Set the Foundry project, agent names, tenant, client ID, and authentication mode, then reopen the application.");
-} else if (dataMode === "live" && preparedEnvironment) try {
+} else if ((dataMode === "live" || sampleAiMode === "foundry") && preparedEnvironment) try {
 	runtimeEnvironment = await loadFoundryEnvironment(preparedEnvironment.filePath);
 } catch (error) {
-	startupBlocked = true;
-	await openConfigurationAndExit(app, dialog, shell, preparedEnvironment.filePath, `The configuration could not be loaded. Correct it, then reopen the application.\n\n${error instanceof Error ? error.message : String(error)}`);
+	if (dataMode === "sample") console.warn("[sample-ai] configuration-unavailable; offline fallback will be labeled.");
+	else {
+		startupBlocked = true;
+		await openConfigurationAndExit(app, dialog, shell, preparedEnvironment.filePath, `The configuration could not be loaded. Correct it, then reopen the application.\n\n${error instanceof Error ? error.message : String(error)}`);
+	}
 }
 var authentication = runtimeEnvironment?.authentication;
 var fallbackCredential = new AzureCliCredential({ processTimeoutInMs: 3e4 });
@@ -25478,6 +25894,10 @@ var credentials = authentication ? createRuntimeCredentials(authentication) : {
 	msx: fallbackCredential,
 	foundry: fallbackCredential
 };
+var sampleInference = dataMode === "sample" ? new SampleInference({
+	credential: credentials.foundry,
+	...runtimeEnvironment ? { loadEnvironment: async () => runtimeEnvironment } : {}
+}) : void 0;
 var tokenProvider = new AzureCliMsxTokenProvider({
 	credential: credentials.msx,
 	...authentication ? {
@@ -25508,7 +25928,8 @@ var seReportingHost = createSeReportingHost({
 		if (!token) throw new Error("The reporting resource did not return a delegated token.");
 		return token.token;
 	},
-	foundryCredential: credentials.foundry
+	foundryCredential: credentials.foundry,
+	...sampleInference ? { inference: sampleInference } : {}
 });
 var reportPerformance = (event) => {
 	console.info(`[performance] ${JSON.stringify(event)}`);
@@ -25519,8 +25940,10 @@ var sourceToken = bindSourceToken(() => tokenProvider.getAccessToken(), "https:/
 var liveMsxConnector = dataMode === "sample" ? void 0 : new LiveMsxConnector({ getAccessToken: sourceToken }, fetch, void 0, reportPerformance, msxWriteMetadataFromEnvironment(process.env), portfolioPreferenceStore);
 var localStoreMsxConnector = liveMsxConnector ? void 0 : createLocalStoreMsxConnector({
 	...process.env,
+	TLC_DATA_STORE: process.env["TLC_DATA_STORE"] || (sampleAiMode === "foundry" ? "sqlite" : "fixture"),
 	TLC_DATA_STORE_PATH: process.env["TLC_DATA_STORE_PATH"]?.trim() || resolve(app.getPath("userData"), "sample.sqlite")
 });
+if (sampleAiMode === "foundry" && !localStoreMsxConnector) throw new Error("Hybrid sample AI requires TLC_DATA_STORE=sqlite. Set TLC_AI_MODE=sample for offline fixtures.");
 var msxConnector = liveMsxConnector ?? localStoreMsxConnector ?? new FixtureMsxConnector();
 var stagePipelineHost = liveMsxConnector ? createStagePipelineReviewHost({
 	mode: "live",
@@ -25540,14 +25963,15 @@ var meetingGraph = liveMsxConnector ? new GraphMeetingConnector(async (purpose) 
 	return interactive ? token.token : assertCliTokenCanReadMeetings(token.token, purpose);
 }) : void 0;
 var meetingConnector = liveMsxConnector ? new LiveMeetingCaptureConnector(liveMsxConnector, void 0, meetingGraph) : localStoreMsxConnector;
-var foundryOpenAIClient = runtimeEnvironment ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry) : void 0;
+var foundryOpenAIClient = dataMode === "live" && runtimeEnvironment ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry) : void 0;
 /** Foundry model-backed meeting-signal extractor when TLC_MEETING_EXTRACTOR=foundry; else the deterministic offline extractor. */
-var meetingExtractor = runtimeEnvironment && foundryOpenAIClient && (process.env["TLC_MEETING_EXTRACTOR"] ?? "").toLowerCase() === "foundry" ? createFoundryMeetingExtractor({
+var meetingExtractor = sampleInference?.meetingExtractor() ?? (runtimeEnvironment && foundryOpenAIClient && (process.env["TLC_MEETING_EXTRACTOR"] ?? "").toLowerCase() === "foundry" ? createFoundryMeetingExtractor({
 	openAIClient: foundryOpenAIClient,
 	model: process.env["TLC_MEETING_MODEL"]?.trim() || "gpt-6.1-sol",
 	requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs
-}) : void 0;
+}) : void 0);
 var orchestrator = new ThinSliceOrchestrator(msxConnector, mcemConnector, createDesktopTaskAgents({
+	...sampleInference ? { inference: sampleInference } : {},
 	environment: runtimeEnvironment,
 	credential: credentials.foundry,
 	client: foundryOpenAIClient,
@@ -25573,6 +25997,7 @@ var workingSessionModelId = workingSessionModelName(process.env);
 var documentsFolder = () => process.env["TLC_DOCUMENTS_FOLDER"]?.trim() || app.getPath("documents");
 var workingSession = createWorkingSessionService({
 	mode: dataMode,
+	...sampleInference ? { inference: sampleInference } : {},
 	openOutput: async (folderName) => folderOutput(documentsFolder(), folderName),
 	renderDocx: (title, markdown) => renderMarkdownDocument(title, markdown),
 	knowledgeSearch: orchestrator,
@@ -25683,6 +26108,10 @@ var agentStreams = /* @__PURE__ */ new Map();
 async function getDataStatus() {
 	if (dataMode === "sample") return {
 		mode: "sample",
+		inference: {
+			contractVersion: "1.0",
+			mode: sampleInference.mode
+		},
 		auth: {
 			state: "ready",
 			detail: "Automated fixture mode is active."
@@ -25792,6 +26221,10 @@ function registerIpc() {
 	ipcMain.handle("tlc:get-data-status", (event) => {
 		assertTrustedSender(event);
 		return getDataStatus();
+	});
+	ipcMain.handle("tlc:get-inference-mode", (event) => {
+		assertTrustedSender(event);
+		return sampleInference?.mode ?? null;
 	});
 	ipcMain.handle("tlc:list-accounts", (event, options) => {
 		assertTrustedSender(event);

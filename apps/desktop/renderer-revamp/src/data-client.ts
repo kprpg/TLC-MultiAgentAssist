@@ -111,8 +111,10 @@ import {
 } from '../../../../packages/common/contracts/working-session.js'
 import type { WorkingSessionClient } from '../../../shared/working-session/types.js'
 import { fetchAndSave } from '../../../shared/working-session/download.js'
+import { inferenceModeSchema, type InferenceMode } from '../../../../packages/common/contracts/inference.js'
 
 export interface RevampDataClient extends WorkingSessionClient {
+    getInferenceMode?(): Promise<InferenceMode | undefined>
     searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
     cacheSession?: SessionPortfolio
     mutationSession?: MutationSyncClient
@@ -254,6 +256,8 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
         ...(background ? { invokeMutationSync: async (request: syncContracts.MutationSyncRequest) =>
             syncContracts.mutationSyncResponseSchema.parse(await apiRequest(fetcher, '/api/mutation-sync', { method: 'POST', body: JSON.stringify(request) })) } : {}),
         mode,
+        getInferenceMode: async () => mode === 'web-sample' && typeof document !== 'undefined'
+            ? inferenceModeSchema.parse(document.querySelector<HTMLMetaElement>('meta[name="tlc-ai-mode"]')?.content || 'sample') : undefined,
         canExitApplication: typeof document !== 'undefined'
             && document.querySelector<HTMLMetaElement>('meta[name="tlc-local-exit"]')?.content === '1',
         getDataMode: async () => mode === 'web-live' ? 'live' : 'sample',
@@ -410,6 +414,7 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
 }
 
 interface DesktopBridge {
+    getInferenceMode?(): Promise<InferenceMode | null>
     searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
     deriveWorkingSessionTopic(request: WorkingSessionTopicRequest): Promise<WorkingSessionTopicResponse>
     prepareWorkingSession(request: WorkingSessionPrepareRequest): Promise<WorkingSessionResult>
@@ -811,6 +816,7 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
             }
         } : {}),
         mode: 'desktop',
+        getInferenceMode: async () => bridge.getInferenceMode ? inferenceModeSchema.nullable().parse(await bridge.getInferenceMode()) ?? undefined : undefined,
         getDataMode: async () => (await bridge.getDataStatus()).mode,
         searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(
             await bridge.searchKnowledge(knowledgeSearchRequestSchema.parse(request))),

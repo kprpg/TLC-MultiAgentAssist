@@ -157,12 +157,17 @@ To use your own Foundry project, edit `%APPDATA%\@tlc\desktop\foundry.environmen
 
 TLC Assist also runs as a browser-based app that serves the same UI, suited for hosting on Azure App Service.
 
-Run locally with bundled sample data (no sign-in or network):
+Run locally with SQLite sample business data (real Foundry AI by default; Foundry-only
+credentials are needed for inference, with visible offline fallback):
 
 ```powershell
 npm install
 npm run web:start
 ```
+
+Set `TLC_AI_MODE=sample` for completely offline sample AI. This selection does not
+change live mode. See [sample data with real Foundry AI](docs/runbooks/sample-foundry-ai.md)
+for all three surfaces, credentials, quotas and fallback behavior.
 
 Run against live local data with an Azure CLI sign-in:
 

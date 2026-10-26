@@ -281,6 +281,8 @@ export interface MeetingUnmappedSignalView {
 }
 
 export interface MeetingChangeSetProposalView {
+    inference?: import('../../../../packages/common/contracts/inference.js').InferenceExecution
+    contractVersion?: '1.3'
     changeSetId: string
     transcriptId: string
     opportunityId: string

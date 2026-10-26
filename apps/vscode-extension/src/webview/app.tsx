@@ -26,6 +26,7 @@ import { discoveryCustomers, filterDiscoveryOpportunities, sortDiscoveryOpportun
 import { filterVisibleMilestones } from '../../../shared/milestone-visibility.js'
 import { readTranscriptFile } from '../../../shared/transcript-file.js'
 import { meetingProposalToMarkdown } from '../../../shared/meeting-proposal-markdown.js'
+import { InferenceNotice } from '../../../shared/inference-status.js'
 import { MeetingPicker, useMeetingList } from '../../../shared/meeting-picker.js'
 import { WorkingSessionLauncher } from '../../../shared/working-session/working-session-launcher.js'
 import { DashboardWorkspace } from '../../../shared/dashboards/dashboard-workspace.js'
@@ -633,7 +634,7 @@ function GuidancePane({ accountId, opportunityId, opportunityName, onNote }: { a
                         <span className="eyebrow">{label}</span>
                         {!agentLoading && <ResponseActions title={`Guidance - ${opportunityName}`} markdown={agentResult.content} onNote={onNote} />}
                     </header>
-                    <AgentResponse key={agentResult.correlationId} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'}
+                    <AgentResponse key={agentResult.correlationId} inference={agentResult.inference} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'}
                         followUp={{ capability, accountId, opportunityId, invoke: invokeGuidanceAgent }} emailAction={customerEmailAction} onOpenEvidence={dataClient.openEvidence} />
                 </article>
             )}
@@ -1045,6 +1046,7 @@ function MeetingReviewModal({ proposal, opportunityName, milestones, onClose, on
                 <header className="meeting-modal-header">
                     <div>
                         <h3>Review meeting signals</h3>
+                        <InferenceNotice execution={proposal.inference} />
                         <p className="muted">{opportunityName} · {proposal.meetingType} meeting · {proposal.slots.length} proposed change{proposal.slots.length === 1 ? '' : 's'}</p>
                     </div>
                     <ResponseActions title={`Meeting signals - ${opportunityName}`} markdown={summaryMarkdown} onNote={onNote} />

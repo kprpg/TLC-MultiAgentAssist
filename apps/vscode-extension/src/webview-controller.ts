@@ -292,7 +292,7 @@ export class WorkbenchPanel {
 <title>TLC Assist</title>
 </head>
 <body>
-<div id="root" data-mode="${provider.mode}" data-cache-owner="${provider.cacheSession ? 'host' : 'client'}" data-background-sync="${provider.mutationSync ? '1' : '0'}" data-csp-nonce="${cspNonce}">Loading TLC Assist\u2026</div>
+<div id="root" data-mode="${provider.mode}" data-ai-mode="${provider.inferenceMode ?? 'sample'}" data-cache-owner="${provider.cacheSession ? 'host' : 'client'}" data-background-sync="${provider.mutationSync ? '1' : '0'}" data-csp-nonce="${cspNonce}">Loading TLC Assist\u2026</div>
 <script nonce="${cspNonce}">window.addEventListener('error',function(e){var r=document.getElementById('root');if(r)r.textContent='TLC Assist error: '+(e.message||'script failed to load');});window.addEventListener('unhandledrejection',function(e){var r=document.getElementById('root');if(r)r.textContent='TLC Assist error: '+((e.reason&&e.reason.message)||e.reason||'promise rejected');});</script>
 <script nonce="${cspNonce}" src="${scriptUri}"></script>
 </body>

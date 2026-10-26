@@ -68,7 +68,8 @@ set them via environment variables at startup.
 
 | Variable / setting | Values | Effect |
 | --- | --- | --- |
-| `TLC_MODE` / `tlc.mode` | `sample` (default) · `live` | Sanitized data with no network, or real MSX OData + Dataverse MCP. |
+| `TLC_MODE` / `tlc.mode` | `sample` (default) · `live` | Local sample business data, or real MSX OData + Dataverse MCP. |
+| `TLC_AI_MODE` / `tlc.aiMode` | `foundry` (sample default) · `sample` | Real inference over SQLite sample data, or explicit offline AI. Live-mode AI settings are unchanged. |
 | `TLC_DATA_STORE` / `tlc.dataStore` | `fixture` · `sqlite` | Sample data store (in-memory fixtures or file-backed SQLite in extension storage). Sample mode only. |
 | `TLC_DATA_STORE_PATH` | Local file path | Optional override for the SQLite file in Sample mode. Desktop and Web use separate default files. |
 | `TLC_MEETING_EXTRACTOR` / `tlc.meetingExtractor` | `rules` · `foundry` | Offline rules or a Foundry model for meeting-transcript extraction. |

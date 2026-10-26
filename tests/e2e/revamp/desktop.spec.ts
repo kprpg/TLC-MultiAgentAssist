@@ -637,6 +637,8 @@ test('opens the default desktop blade workspace through the existing IPC bridge'
         await app.evaluate(({ ipcMain }, fixtures) => {
             const { definitions, historicalRun, output } = fixtures
             ipcMain.removeHandler('tlc:get-data-status')
+            ipcMain.removeHandler('tlc:get-inference-mode')
+            ipcMain.handle('tlc:get-inference-mode', () => null)
             ipcMain.handle('tlc:get-data-status', () => ({
                 mode: 'live',
                 auth: {

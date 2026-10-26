@@ -4416,6 +4416,28 @@ var knowledgeSearchResponseSchema = discriminatedUnion("kind", [object({
 	code: knowledgeFailureCodeSchema,
 	message: string().min(1).max(1e3)
 }).strict().refine((value) => ["unauthorized", "unavailable"].includes(value.sourceHealth.state), "Unavailable results must report an unavailable or unauthorized source.")]);
+var inferenceModeSchema = _enum(["sample", "foundry"]);
+var inferenceExecutionSchema = object({
+	contractVersion: literal("1.0"),
+	correlationId: string().uuid(),
+	requested: inferenceModeSchema,
+	provider: inferenceModeSchema,
+	state: _enum(["complete", "fallback"]),
+	reason: _enum([
+		"configuration",
+		"authentication",
+		"quota",
+		"timeout",
+		"validation",
+		"provider"
+	]).optional()
+}).strict().refine((value) => value.state !== "fallback" || value.provider === "sample" && value.reason !== void 0, "Fallback must identify the offline provider and its reason.");
+function validateInferenceResponse(value, context) {
+	if (value.contractVersion === "1.3" !== (value.inference !== void 0)) context.addIssue({
+		code: "custom",
+		message: "Inference metadata requires the versioned inference response shape."
+	});
+}
 var shortText = (max) => string().trim().min(1).max(max);
 var untrustedText = (max) => string().max(max);
 var workingSessionTopicRequestSchema = object({
@@ -4443,10 +4465,11 @@ var workingSessionTopicSchema = object({
 	evidence: array(shortText(200)).max(8)
 }).strict();
 var workingSessionTopicResponseSchema = object({
-	contractVersion: literal("1.0"),
+	contractVersion: _enum(["1.0", "1.3"]),
+	inference: inferenceExecutionSchema.optional(),
 	mode: _enum(["sample", "live"]),
 	topic: workingSessionTopicSchema
-}).strict();
+}).strict().superRefine(validateInferenceResponse);
 var workingSessionDeliverablesSchema = object({
 	decks: boolean(),
 	learn: boolean(),
@@ -4507,14 +4530,15 @@ var workingSessionDeliverySchema = discriminatedUnion("kind", [object({
 	expiresAt: string().datetime()
 }).strict()]);
 var workingSessionResultSchema = object({
-	contractVersion: literal("1.0"),
+	contractVersion: _enum(["1.0", "1.3"]),
+	inference: inferenceExecutionSchema.optional(),
 	mode: _enum(["sample", "live"]),
 	folderName: shortText(200),
 	delivery: workingSessionDeliverySchema,
 	files: array(workingSessionFileSchema).max(200),
 	gaps: array(workingSessionGapSchema).max(50),
 	summary: shortText(1e3)
-}).strict();
+}).strict().superRefine(validateInferenceResponse);
 var workingSessionOpenFolderRequestSchema = object({ folderPath: shortText(1e3) }).strict();
 //#endregion
 //#region packages/common/contracts/agent-task-limits.ts
@@ -5158,6 +5182,8 @@ var meetingUnmappedSignalSchema = object({
 	evidence: array(string().min(1))
 }).strict();
 object({
+	contractVersion: literal("1.3").optional(),
+	inference: inferenceExecutionSchema.optional(),
 	changeSetId: string().min(1),
 	transcriptId: string().min(1),
 	opportunityId: string().min(1),
@@ -5167,7 +5193,7 @@ object({
 	suggestedMilestoneIds: array(string().min(1)),
 	unmappedSignals: array(meetingUnmappedSignalSchema),
 	proposedAt: string().datetime()
-}).strict();
+}).strict().superRefine(validateInferenceResponse);
 object({
 	changeSetId: string().min(1),
 	opportunityId: string().min(1),
@@ -6348,7 +6374,11 @@ object({
 		userEmail: string().email().optional(),
 		tenantName: string().min(1).optional(),
 		detail: string().min(1)
-	})
+	}),
+	inference: object({
+		contractVersion: literal("1.0"),
+		mode: inferenceModeSchema
+	}).strict().optional()
 });
 var opportunitySchema = object({
 	id: string().min(1),
@@ -6594,7 +6624,8 @@ object({
 	prompt: string().min(3).max(agentTaskPromptMaxLength)
 });
 var agentTaskResponseSchema = object({
-	contractVersion: literal("1.2"),
+	contractVersion: _enum(["1.2", "1.3"]),
+	inference: inferenceExecutionSchema.optional(),
 	correlationId: string().uuid(),
 	capability: agentCapabilitySchema,
 	agentVersion: string().min(1),
@@ -6607,7 +6638,7 @@ var agentTaskResponseSchema = object({
 	]),
 	content: string().min(1),
 	sourceHealth: array(sourceHealthSchema).min(1)
-});
+}).superRefine(validateInferenceResponse);
 /**
 * Progressive agent response. `context` carries an instant deterministic draft grounded in the same
 * evidence as the model call; `delta` carries model text; `complete` always carries the full authoritative
@@ -6717,6 +6748,7 @@ electron.contextBridge.exposeInMainWorld("tlc", {
 	invokeVoice: (request) => electron.ipcRenderer.invoke("tlc:voice-input", request),
 	exitApplication: () => electron.ipcRenderer.invoke("tlc:exit-application"),
 	getDataStatus: () => electron.ipcRenderer.invoke("tlc:get-data-status"),
+	getInferenceMode: () => electron.ipcRenderer.invoke("tlc:get-inference-mode"),
 	connectMcem: () => electron.ipcRenderer.invoke("tlc:connect-mcem"),
 	listAccounts: (options) => electron.ipcRenderer.invoke("tlc:list-accounts", options),
 	getPortfolioIndex: (request) => electron.ipcRenderer.invoke("tlc:portfolio-index", request),

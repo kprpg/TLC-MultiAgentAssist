@@ -1,4 +1,5 @@
 import type { TokenCredential } from '@azure/core-auth'
+import type { SampleInference } from '../../../packages/orchestrator/sample-inference.js'
 import { foundryEnvironmentSchema } from '../../../packages/common/configuration/foundry-environment.js'
 import foundryEnvironmentJson from '../../../config/foundry.environment.json' with { type: 'json' }
 import { createFoundryOpenAIClient } from '../../../packages/connectors/foundry/index.js'
@@ -15,6 +16,7 @@ export function createExtensionWorkingSession(options: {
     knowledgeSearch?: KnowledgeSearch
     foundryCredential?: TokenCredential | undefined
     environment?: NodeJS.ProcessEnv
+    inference?: SampleInference
 }): WorkingSessionService {
     const environment = options.environment ?? process.env
     const modelName = options.mode === 'live' ? workingSessionModelName(environment) : undefined
@@ -25,6 +27,7 @@ export function createExtensionWorkingSession(options: {
     const githubToken = environment['TLC_GITHUB_TOKEN']?.trim()
     return createWorkingSessionService({
         mode: options.mode,
+        ...(options.inference ? { inference: options.inference } : {}),
         openOutput: async (folderName) => folderOutput(await resolveDocumentsFolder(environment), folderName),
         renderDocx: (title, markdown) => renderMarkdownDocument(title, markdown),
         ...deckConfigurationFromEnvironment(environment),

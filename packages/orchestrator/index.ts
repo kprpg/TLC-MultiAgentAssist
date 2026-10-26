@@ -75,6 +75,7 @@ import type {
 import { RecordCreationService, RecordCreationError } from './record-creation/service.js'
 import { KnowledgeSearchService, type KnowledgeSearch } from './knowledge-search.js'
 import type { KnowledgeSearchRequest, KnowledgeSearchResponse } from '../common/contracts/knowledge.js'
+import { inferenceResponseVersion, type InferenceExecution, type InferenceResult } from '../common/contracts/inference.js'
 
 export interface McemAgentContext {
   request: McemRequest
@@ -110,6 +111,7 @@ export interface AgentTaskContext {
 export interface ConfiguredTaskAgent {
   version: string
   agent: AgentInvoker<AgentTaskContext>
+  infer?(context: AgentTaskContext, handlers?: AgentStreamHandlers): Promise<InferenceResult<string>>
 }
 
 export type TaskAgentRegistry = Partial<Record<AgentCapability, ConfiguredTaskAgent>>
@@ -447,14 +449,16 @@ export class ThinSliceOrchestrator {
     configuredAgent: ConfiguredTaskAgent,
     context: AgentTaskContext,
     content: string,
-    fallback?: string
+    fallback?: string,
+    inference?: InferenceExecution
   ): AgentTaskResponse {
     const { opportunityContext } = context
     const sourceHealth = agentSourceHealth(context)
     const isPartial = fallback !== undefined || sourceHealth.some((source) => ['partial', 'stale', 'unavailable'].includes(source.state))
     const responseContent = addMsxOpportunityLink(content.trim(), opportunityContext.opportunity.id)
     return {
-      contractVersion,
+      contractVersion: inference ? inferenceResponseVersion : contractVersion,
+      ...(inference ? { inference } : {}),
       correlationId: randomUUID(),
       capability: request.capability,
       agentVersion: fallback === undefined ? configuredAgent.version : `${configuredAgent.version}+${fallback}`,
@@ -470,11 +474,14 @@ export class ThinSliceOrchestrator {
     const request = agentTaskRequestSchema.parse(input)
     return measurePerformance(`agent.task.${request.capability}`, this.performanceReporter, () => this.withFreshReadContext(async () => {
       const { configuredAgent, context } = await this.prepareAgentTask(request)
-      const content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke(context))
+      const inferred = configuredAgent.infer ? await configuredAgent.infer(context) : undefined
+      const content = inferred?.value ?? await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, () => configuredAgent.agent.invoke(context))
       if (!content?.trim()) {
         throw new Error(`The ${request.capability} agent returned no content.`)
       }
-      return this.buildAgentResponse(request, configuredAgent, context, content)
+      return this.buildAgentResponse(request, configuredAgent, context,
+        inferred?.execution.state === 'fallback' ? `${content}\n\n> Offline/sample fallback - Foundry unavailable (${inferred.execution.reason}).` : content,
+        inferred?.execution.state === 'fallback' ? 'local-fallback' : undefined, inferred?.execution)
     }))
   }
 
@@ -508,11 +515,15 @@ export class ThinSliceOrchestrator {
         })
         let content: string
         let fallback: string | undefined
+        let inference: InferenceExecution | undefined
         try {
           content = await measurePerformance(`agent.invoke.${request.capability}`, this.performanceReporter, async () => {
-            const streamed = configuredAgent.agent.stream
+            const inferred = configuredAgent.infer ? await configuredAgent.infer(context, { signal, onDelta: (text) => emit({ type: 'delta', text }) }) : undefined
+            inference = inferred?.execution
+            if (inference?.state === 'fallback') fallback = 'local-fallback'
+            const streamed = inferred?.value ?? (configuredAgent.agent.stream
               ? await configuredAgent.agent.stream(context, { signal, onDelta: (text) => emit({ type: 'delta', text }) })
-              : await configuredAgent.agent.invoke(context)
+              : await configuredAgent.agent.invoke(context))
             if (!streamed?.trim()) throw new Error(`The ${request.capability} agent returned no content.`)
             return streamed
           })
@@ -521,7 +532,8 @@ export class ThinSliceOrchestrator {
           content = `${instantDraft}\n\n> AI enhancement is unavailable (${errorMessage(error)}). This is the evidence-based draft from the local MCEM evaluation.`
           fallback = 'local-fallback'
         }
-        emit({ type: 'complete', response: this.buildAgentResponse(request, configuredAgent, context, content, fallback) })
+        if (inference?.state === 'fallback') content += `\n\n> Offline/sample fallback - Foundry unavailable (${inference.reason}).`
+        emit({ type: 'complete', response: this.buildAgentResponse(request, configuredAgent, context, content, fallback, inference) })
       }, signal))
     } catch (error) {
       fail(error)
