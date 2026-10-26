@@ -37,6 +37,7 @@ import type { InitialWorkflowOutput } from '../../../../packages/orchestrator/wo
 import workflowDescriptions from '../../../../config/workflow-descriptions.json'
 import { createDataClient, stageOwner, type RevampDataClient } from './data-client.js'
 import { MeetingCaptureLauncher } from './meeting-capture.js'
+import { InferenceModeBadge } from '../../../shared/inference-status.js'
 import { WorkingSessionLauncher } from '../../../shared/working-session/working-session-launcher.js'
 import { suggestedPrompts } from './prompt-catalog.js'
 import { formatResponseMarkdown } from './response-markdown.js'
@@ -1170,7 +1171,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         onSelect={chooseSearchResult} />
       <div className="command-actions">
         <button className="dashboard-mobile-entry" aria-label="Open Dashboards" title="Dashboards" onClick={() => setWorkspaceView('dashboard')}><DataBarVertical20Regular /></button>
-        <span className="mode-badge">{modeLabel}</span>
+        <InferenceModeBadge label={modeLabel} load={client.getInferenceMode} />
         <FeedbackButton onOpenIssue={client.openEvidence} />
         <button className="profile-button" title="Signed-in user" aria-label="Signed-in user"><Person20Regular /></button>
         {client.canExitApplication !== false && <Button appearance="subtle" className="text-action" icon={<Power20Regular />} disabled={exiting} onClick={() => void exitApplication()} aria-label="Exit application" title="Exit application">
@@ -1502,7 +1503,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                 </div>
               </header>
               {shareMessage && <MessageBar intent={shareStatus === 'error' ? 'error' : 'success'}>{shareMessage}</MessageBar>}
-              <AgentResponse key={agentResult.correlationId} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'}
+              <AgentResponse key={agentResult.correlationId} inference={agentResult.inference} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'}
                 followUp={account ? { capability: agentResult.capability, accountId: account.id, opportunityId: opportunity.id, invoke: invokeAgent } : undefined}
                 emailAction={customerEmailAction} onOpenEvidence={client.openEvidence} />
             </article> : !agentLoading && <div className="empty-state compact">Choose a suggested prompt or ask a different question.</div>}
@@ -1869,7 +1870,7 @@ function WorkflowResult({
         <article><span className={`priority ${item.priority.toLowerCase()}`}>{item.priority}</span><div><strong>{item.title}</strong><p>{item.owner ?? 'Unassigned'}{item.dueDate ? ` · Due ${item.dueDate}` : ''}</p></div>{onSendGuidance && item.accountId && item.opportunityId && <Button appearance="subtle" className="text-action" icon={<Sparkle20Regular />} disabled={guidanceLoading !== null} onClick={() => onSendGuidance(item.id)}>{guidanceLoading === item.id ? 'Sending…' : `Send to ${guidanceLabel}`}</Button>}</article>
         {guidanceResult && <section className="workflow-guidance-result" aria-label={`${guidanceLabel} result for ${item.title}`}>
           <header><div><p className="eyebrow">{guidanceLabel}</p><strong>Workflow follow-up</strong></div><span>Agent {guidanceResult.agentVersion}</span></header>
-          <AgentResponse key={guidanceResult.correlationId} content={guidanceResult.content}
+          <AgentResponse key={guidanceResult.correlationId} inference={guidanceResult.inference} content={guidanceResult.content}
             followUp={item.accountId && item.opportunityId ? { capability: guidanceResult.capability, accountId: item.accountId, opportunityId: item.opportunityId, invoke: invokeAgent } : undefined}
             emailAction={emailAction} onOpenEvidence={onOpenEvidence} />
         </section>}

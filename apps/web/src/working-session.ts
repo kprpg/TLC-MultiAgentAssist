@@ -1,4 +1,5 @@
 import type { AuthenticatedRequest, WebRuntime } from './app.js'
+import type { SampleInference } from '../../../packages/orchestrator/sample-inference.js'
 import { renderMarkdownDocument } from '../../../packages/documents/markdown-document.js'
 import {
   createBicepCliCompiler, createWorkingSessionService, deckConfigurationFromEnvironment, DownloadStore, zipOutput,
@@ -14,6 +15,7 @@ export interface WebWorkingSessionOptions {
   mode: 'sample' | 'live'
   createRuntime(authentication: AuthenticatedRequest): Promise<WebRuntime> | WebRuntime
   model?: StructuredModel
+  inference?: SampleInference
   environment?: Readonly<Record<string, string | undefined>>
 }
 
@@ -33,6 +35,7 @@ export function createWebWorkingSessionResolver(options: WebWorkingSessionOption
     return {
       service: createWorkingSessionService({
         mode: options.mode, githubRepositories, ...(githubToken ? { githubToken } : {}),
+        ...(options.mode === 'sample' && options.inference ? { inference: options.inference } : {}),
         openOutput: async (folderName) => zipOutput(store, owner, folderName),
         renderDocx: (title, markdown) => renderMarkdownDocument(title, markdown),
         ...(options.mode === 'live' && options.model ? { model: options.model } : {}),

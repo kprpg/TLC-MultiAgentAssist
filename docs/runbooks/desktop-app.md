@@ -127,18 +127,23 @@ By default, accounts and opportunities come from live MSX and are scoped to acti
 
 The Foundry endpoint and four agent bindings are validated at startup. Multi-Agent Guidance invokes the configured remote Foundry agents; grounded MCEM context is assembled locally and passed through the trusted main process.
 
-To launch with sanitized fixtures instead:
+To launch with SQLite sample business data and real Foundry AI instead:
 
 ```powershell
 $env:TLC_DATA_MODE = 'sample'
 npm run desktop:start
 ```
 
+Set `TLC_AI_MODE=sample` for offline AI. Hybrid sample mode uses only the existing
+Foundry identity, not MSX/Graph grants. Configuration/model failures are visibly
+labeled offline fallback; see [sample Foundry AI](sample-foundry-ai.md).
+
 ### Authentication flow
 
 - In `azure-cli` mode, Electron asks `AzureCliCredential` for resource-specific tokens. MSX uses the active Azure CLI identity, Foundry targets `authentication.foundryTenantId`, and Graph uses Azure CLI unless an app registration is configured. Tokens stay in the Electron main process and are not exposed to the renderer.
 - In `interactive-browser` mode, Electron opens the system browser for delegated Microsoft Entra sign-in using the configured public-client app registration. MSX, Foundry, and Graph receive separate resource tokens; no client secret is stored in the app.
-- In sample mode, no Azure or Microsoft Entra authentication occurs.
+- In hybrid sample mode, only Foundry sign-in may occur when AI is requested.
+  `TLC_AI_MODE=sample` keeps sample AI fully offline without sign-in.
 
 Packaged upgrades migrate the untouched legacy shared `azure-cli` configuration to the bundled interactive-browser configuration. Customized files and explicit `TLC_FOUNDRY_ENV_FILE` overrides are preserved.
 

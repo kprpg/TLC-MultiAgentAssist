@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { inferenceExecutionSchema, inferenceResponseVersion, validateInferenceResponse } from './inference.js'
 
 /**
  * Contracts for the meeting-signal extraction → review → injection flow.
@@ -105,6 +106,8 @@ export const meetingUnmappedSignalSchema = z.object({
 }).strict()
 
 export const meetingChangeSetProposalSchema = z.object({
+    contractVersion: z.literal(inferenceResponseVersion).optional(),
+    inference: inferenceExecutionSchema.optional(),
     changeSetId: z.string().min(1),
     transcriptId: z.string().min(1),
     opportunityId: z.string().min(1),
@@ -114,7 +117,7 @@ export const meetingChangeSetProposalSchema = z.object({
     suggestedMilestoneIds: z.array(z.string().min(1)),
     unmappedSignals: z.array(meetingUnmappedSignalSchema),
     proposedAt: z.string().datetime()
-}).strict()
+}).strict().superRefine(validateInferenceResponse)
 
 export const meetingChangeSetApprovalSchema = z.object({
     changeSetId: z.string().min(1),

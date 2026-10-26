@@ -11,6 +11,7 @@ import { SeReportingError, type SeReportingResource } from '../../connectors/se-
 export { seReportingScopes } from '../../connectors/se-reporting/types.js'
 import { SharedSeReportingHost, type SeReportingHost, type SeReportingOwner } from './host.js'
 import { createSampleSeReportingHost } from './sample.js'
+import type { SampleInference } from '../sample-inference.js'
 
 export function resolveSeSourcePreference(environment: NodeJS.ProcessEnv): 'powerbi' | 'dataverse' | 'auto' {
     const value = environment['TLC_SE_SOURCE']?.trim().toLowerCase()
@@ -22,13 +23,14 @@ export function createSeReportingHost(options: {
     identity(): Promise<SeReportingOwner | undefined>
     getToken?(resource: SeReportingResource): Promise<string>
     foundryCredential?: TokenCredential
+    inference?: SampleInference
     environment?: NodeJS.ProcessEnv
     profileDirectory?: string
     fetcher?: typeof fetch
     /** Delegated MSX Dataverse access for the Dataverse-first milestone/task provider (see TLC_SE_SOURCE). */
     dataverse?: SeDataverseSource
 }): SeReportingHost {
-    if (options.mode === 'sample') return createSampleSeReportingHost()
+    if (options.mode === 'sample') return createSampleSeReportingHost(options.inference ? { inference: options.inference } : {})
     const environment = options.environment ?? process.env
     const source = new LiveSeReportingSource({
         getToken: async (resource) => {

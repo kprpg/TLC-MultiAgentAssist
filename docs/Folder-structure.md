@@ -184,6 +184,14 @@ scripts/check-import-boundaries.mjs   Import-boundary gate (baseline: scripts/im
 scripts/deploy-web-appservice.ps1     Shared live/sample App Service ZIP deployment entry point
 scripts/web-sample-appservice.ps1     Sample-only slot, anonymous verification, promotion and guarded rollback helpers
 scripts/smoke-web-release.mjs         Actual staged-host and remote anonymous sample verification
+packages/common/contracts/inference.ts
+                                     Browser-safe, independently versioned sample AI provenance and mode selection
+packages/orchestrator/sample-inference.ts
+                                     Sample-only real/offline AI composition; no live source wiring
+packages/connectors/foundry/sample-budget.ts
+                                     Persistent per-slot sample AI quotas and restricted inference transport
+apps/shared/inference-status.tsx     Shared sample AI mode and fallback presentation
+docs/runbooks/sample-foundry-ai.md   Cross-surface hybrid sample setup, credentials and limits
 tests/fixtures/appservice-cli.mjs     Isolated stateful Azure/verification CLI double; never contacts Azure
 tests/e2e/revamp/web-release.spec.ts  Actual Node-host SQLite sample browser and restart/reset journey
 docs/architecture/Hosting-Model.md, Operational-Evidence.md

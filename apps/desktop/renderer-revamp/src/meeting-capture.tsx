@@ -5,6 +5,7 @@ import { contractVersion, type Milestone, type MeetingChangeSetProposal, type Me
 import type { RevampDataClient } from './data-client.js'
 import { readTranscriptFile } from '../../../shared/transcript-file.js'
 import { meetingProposalToMarkdown } from '../../../shared/meeting-proposal-markdown.js'
+import { InferenceNotice } from '../../../shared/inference-status.js'
 import { MeetingPicker, useMeetingList } from '../../../shared/meeting-picker.js'
 
 function toggleSet(previous: ReadonlySet<string>, id: string): Set<string> {
@@ -87,6 +88,7 @@ function MeetingReviewModal({ client, proposal, opportunityName, milestones, onC
                     <DialogContent>
                         <div className="meeting-modal-subhead">
                             <p className="muted">{opportunityName} · {proposal.meetingType} meeting · {proposal.slots.length} proposed change{proposal.slots.length === 1 ? '' : 's'}</p>
+                            <InferenceNotice execution={proposal.inference} />
                             {!result && <Button appearance="subtle" size="small" icon={<ArrowDownload20Regular />} disabled={exporting} onClick={() => void exportWord()}>{exporting ? 'Exporting...' : 'Export Word'}</Button>}
                         </div>
 

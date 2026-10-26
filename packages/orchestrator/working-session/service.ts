@@ -12,6 +12,8 @@ import type { WorkingSessionOutput } from './outputs.js'
 import { sampleLearnSource } from './sample.js'
 import { buildDraftOutlineDeck } from './pptx-draft.js'
 import { deriveTopic, scenarioForTopic, type StructuredModel } from './topic.js'
+import { inferenceLabel, inferenceResponseVersion, type InferenceExecution } from '../../common/contracts/inference.js'
+import type { SampleInference } from '../sample-inference.js'
 
 export interface WorkingSessionOptions {
   mode: 'sample' | 'live'
@@ -19,6 +21,7 @@ export interface WorkingSessionOptions {
   deckSources: readonly DeckSource[]
   openOutput(folderName: string): Promise<WorkingSessionOutput>
   model?: StructuredModel
+  inference?: SampleInference
   compiler?: IacCompiler
   /** Renders Markdown as a .docx; supplied by hosts from the shared documents package. */
   renderDocx?: (title: string, markdown: string) => Promise<Uint8Array>
@@ -36,8 +39,16 @@ export class WorkingSessionService {
 
   async deriveTopic(input: unknown): Promise<WorkingSessionTopicResponse> {
     const request = workingSessionTopicRequestSchema.parse(input)
-    const { topic } = await deriveTopic(request, this.options.mode === 'live' ? this.options.model : undefined)
-    return workingSessionTopicResponseSchema.parse({ contractVersion: workingSessionContractVersion, mode: this.options.mode, topic })
+    const inferred = this.options.mode === 'sample' && this.options.inference?.mode === 'foundry'
+      ? await this.options.inference.run(
+        async (context) => deriveTopic(request, this.options.inference!.structuredModel(context), true),
+        () => deriveTopic(request))
+      : undefined
+    const { topic } = inferred?.value ?? await deriveTopic(request, this.options.mode === 'live' ? this.options.model : undefined)
+    return workingSessionTopicResponseSchema.parse({
+      contractVersion: inferred ? inferenceResponseVersion : workingSessionContractVersion,
+      ...(inferred ? { inference: inferred.execution } : {}), mode: this.options.mode, topic
+    })
   }
 
   async prepare(input: unknown): Promise<WorkingSessionResult> {
@@ -48,6 +59,7 @@ export class WorkingSessionService {
     const output = await this.options.openOutput(folderName)
     const files: WorkingSessionFile[] = []
     const gaps: WorkingSessionGap[] = []
+    let inference: InferenceExecution | undefined
     const maximumDeckBytes = this.options.maximumDeckBytes ?? 60_000_000
 
     let pagesPromise: Promise<LearnPage[]> | undefined
@@ -76,8 +88,16 @@ export class WorkingSessionService {
 
     if (deliverables.iac) {
       try {
-        const iac = await generateIac({ topic, scenario: scenarioForTopic(topic), sink: output.sink, ...(this.options.model ? { model: this.options.model } : {}), ...(this.options.compiler ? { compiler: this.options.compiler } : {}) })
+        const baseline = { topic, scenario: scenarioForTopic(topic), sink: output.sink, ...(this.options.compiler ? { compiler: this.options.compiler } : {}) }
+        const inferred = this.options.mode === 'sample' && this.options.inference?.mode === 'foundry'
+          ? await this.options.inference.run(
+            async (context) => generateIac({ ...baseline, model: this.options.inference!.structuredModel(context), strictModel: true }),
+            () => generateIac(baseline))
+          : undefined
+        inference = inferred?.execution
+        const iac = inferred?.value ?? await generateIac({ ...baseline, ...(this.options.model ? { model: this.options.model } : {}) })
         files.push(...iac.files)
+        if (inference?.state === 'fallback') gaps.push({ deliverable: 'iac', source: 'AI', code: 'unavailable', message: inferenceLabel(inference) })
         gaps.push(...iac.gaps.map((gap) => this.options.mode === 'sample' && gap.code === 'tool-missing'
           ? { ...gap, message: 'Sample mode does not compile the ARM template. Run "az bicep build --file main.bicep" to produce it.' } : gap))
       } catch { gaps.push({ deliverable: 'iac', source: 'Templates', code: 'unavailable', message: 'The deployment templates could not be created.' }) }
@@ -89,11 +109,11 @@ export class WorkingSessionService {
     const readme = this.readme(request.opportunityName, request.milestoneName, topic.topic, now, files, gaps)
     const readmeFile = await output.sink.write('README.md', readme)
     files.push({ path: readmeFile.path, kind: 'manifest', title: 'About this folder', sourceLabel: 'TLC Assist', bytes: readmeFile.bytes })
-    const manifest = await output.sink.write('manifest.json', `${JSON.stringify({ contractVersion: workingSessionContractVersion, generatedAt: now.toISOString(), mode: this.options.mode, topic, files, gaps }, null, 2)}\n`)
+    const manifest = await output.sink.write('manifest.json', `${JSON.stringify({ contractVersion: inference ? inferenceResponseVersion : workingSessionContractVersion, ...(inference ? { inference } : {}), generatedAt: now.toISOString(), mode: this.options.mode, topic, files, gaps }, null, 2)}\n`)
     files.push({ path: manifest.path, kind: 'manifest', title: 'Manifest', sourceLabel: 'TLC Assist', bytes: manifest.bytes })
 
     return workingSessionResultSchema.parse({
-      contractVersion: workingSessionContractVersion, mode: this.options.mode, folderName,
+      contractVersion: inference ? inferenceResponseVersion : workingSessionContractVersion, ...(inference ? { inference } : {}), mode: this.options.mode, folderName,
       delivery: await output.finish(), files, gaps, summary
     })
   }
@@ -164,6 +184,7 @@ export interface WorkingSessionFactoryOptions {
   mode: 'sample' | 'live'
   openOutput(folderName: string): Promise<WorkingSessionOutput>
   model?: StructuredModel
+  inference?: SampleInference
   compiler?: IacCompiler
   renderDocx?: WorkingSessionOptions['renderDocx']
   fetcher?: typeof fetch
@@ -203,6 +224,7 @@ export function createWorkingSessionService(options: WorkingSessionFactoryOption
     mode: options.mode, learn: sample ? sampleLearnSource : new LearnMcpClient(fetcher), deckSources,
     openOutput: options.openOutput,
     ...(options.model ? { model: options.model } : {}), ...(options.compiler ? { compiler: options.compiler } : {}),
+    ...(sample && options.inference ? { inference: options.inference } : {}),
     ...(options.renderDocx ? { renderDocx: options.renderDocx } : {}),
     ...(options.maximumDeckBytes ? { maximumDeckBytes: options.maximumDeckBytes } : {}),
     ...(options.now ? { now: options.now } : {})

@@ -3,9 +3,11 @@
 TLC Assist brings the TLC MultiAgent Assist account-team operations and opportunity
 guidance experience into VS Code as a third trusted host over the shared product core.
 
-It defaults to **sample mode** with sanitized fixtures and makes no network calls. Live
-mode uses delegated Dataverse/MSX access while keeping access tokens in the extension
-host.
+It defaults to **SQLite sample business data with real Foundry AI**. Only inference
+uses the network; missing Foundry access produces a labeled offline fallback. Select
+`tlc.aiMode=sample` (or `TLC_AI_MODE=sample`) for completely offline AI. Live mode
+continues to use its existing delegated Dataverse/MSX access and keeps tokens in the
+extension host. See [sample Foundry setup](../../docs/runbooks/sample-foundry-ai.md).
 
 ## Features (sample mode)
 

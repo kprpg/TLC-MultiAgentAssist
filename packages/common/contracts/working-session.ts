@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { inferenceExecutionSchema, inferenceResponseVersion, validateInferenceResponse } from './inference.js'
 
 export const workingSessionContractVersion = '1.0' as const
 
@@ -28,10 +29,11 @@ export const workingSessionTopicSchema = z.object({
 }).strict()
 
 export const workingSessionTopicResponseSchema = z.object({
-  contractVersion: z.literal(workingSessionContractVersion),
+  contractVersion: z.enum([workingSessionContractVersion, inferenceResponseVersion]),
+  inference: inferenceExecutionSchema.optional(),
   mode: z.enum(['sample', 'live']),
   topic: workingSessionTopicSchema
-}).strict()
+}).strict().superRefine(validateInferenceResponse)
 
 export const workingSessionDeliverablesSchema = z.object({
   decks: z.boolean(),
@@ -83,14 +85,15 @@ export const workingSessionDeliverySchema = z.discriminatedUnion('kind', [
 ])
 
 export const workingSessionResultSchema = z.object({
-  contractVersion: z.literal(workingSessionContractVersion),
+  contractVersion: z.enum([workingSessionContractVersion, inferenceResponseVersion]),
+  inference: inferenceExecutionSchema.optional(),
   mode: z.enum(['sample', 'live']),
   folderName: shortText(200),
   delivery: workingSessionDeliverySchema,
   files: z.array(workingSessionFileSchema).max(200),
   gaps: z.array(workingSessionGapSchema).max(50),
   summary: shortText(1000)
-}).strict()
+}).strict().superRefine(validateInferenceResponse)
 
 export const workingSessionOpenFolderRequestSchema = z.object({ folderPath: shortText(1000) }).strict()
 

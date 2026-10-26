@@ -9,6 +9,8 @@ import { useAgentRun, type AgentInvoke } from './use-agent-run.js'
 import { CustomerEmailActions } from './customer-email-actions.js'
 import { locateCustomerEmail, type CustomerEmailAction } from './customer-email.js'
 import './agent-response.css'
+import { InferenceNotice } from './inference-status.js'
+import type { InferenceExecution } from '../../packages/common/contracts/inference.js'
 
 export interface AgentFollowUpContext {
     capability: AgentCapability
@@ -18,6 +20,7 @@ export interface AgentFollowUpContext {
 }
 
 interface AgentResponseProps {
+    inference?: InferenceExecution | undefined
     content: string
     busy?: boolean
     followUp?: AgentFollowUpContext | undefined
@@ -27,7 +30,7 @@ interface AgentResponseProps {
     onOpenEvidence: (url: string) => void | Promise<void>
 }
 
-export function AgentResponse({ content, busy = false, followUp, emailAction, emailDraftRequested = false, urlTransform, onOpenEvidence }: AgentResponseProps) {
+export function AgentResponse({ content, busy = false, followUp, emailAction, emailDraftRequested = false, urlTransform, onOpenEvidence, inference }: AgentResponseProps) {
     const [linkError, setLinkError] = useState('')
     const formatted = useMemo(() => formatResponseMarkdown(content), [content])
     const email = useMemo(() => busy ? undefined : locateCustomerEmail(content, emailDraftRequested), [content, busy, emailDraftRequested])
@@ -42,6 +45,7 @@ export function AgentResponse({ content, busy = false, followUp, emailAction, em
         }}>{value}</Markdown>
     </div>
     return <>
+        <InferenceNotice execution={inference} />
         {email && <CustomerEmailActions key={content} draft={email.draft} emailAction={emailAction} />}
         {markdown(formatted)}
         {linkError && <p role="alert">{linkError}</p>}
@@ -88,7 +92,7 @@ function AgentFollowUps({ content, busy = false, followUp, emailAction, urlTrans
         {error && <p role="alert">{error}</p>}
         {agentResult && <article className="agent-follow-up-response" aria-label="Agent follow-up response">
             <header><strong>Follow-up</strong><span>{selected}</span></header>
-            <AgentResponse key={agentResult.correlationId} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'} followUp={followUp} emailAction={emailAction} emailDraftRequested={/\be[-\u2010-\u2015]?mail\b/i.test(selected)} urlTransform={urlTransform} onOpenEvidence={onOpenEvidence} />
+            <AgentResponse key={agentResult.correlationId} inference={agentResult.inference} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'} followUp={followUp} emailAction={emailAction} emailDraftRequested={/\be[-\u2010-\u2015]?mail\b/i.test(selected)} urlTransform={urlTransform} onOpenEvidence={onOpenEvidence} />
         </article>}
     </section>
 }

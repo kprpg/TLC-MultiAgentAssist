@@ -113,7 +113,7 @@ const topicInstructions = [
   '5. evidence quotes at most 8 short phrases from the input that justify the topic. Use low confidence when the text is vague.'
 ].join('\n')
 
-export async function deriveTopic(request: WorkingSessionTopicRequest, model?: StructuredModel): Promise<{ topic: WorkingSessionTopic; scenario: IacScenario }> {
+export async function deriveTopic(request: WorkingSessionTopicRequest, model?: StructuredModel, strictModel = false): Promise<{ topic: WorkingSessionTopic; scenario: IacScenario }> {
   const rulesResult = deriveTopicByRules(request)
   if (!model) return rulesResult
   try {
@@ -134,7 +134,8 @@ export async function deriveTopic(request: WorkingSessionTopicRequest, model?: S
       evidence: parsed.evidence.map((value) => clip(value, 200)).filter(Boolean).slice(0, 8)
     })
     return { topic, scenario: scenarioForTopic(topic) }
-  } catch {
+  } catch (error) {
+    if (strictModel) throw error
     return rulesResult
   }
 }

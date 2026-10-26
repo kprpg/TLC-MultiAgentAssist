@@ -25,6 +25,7 @@ import type { MeetingAcquisitionRequest } from './collaboration/meeting-acquisit
 import type { PerformanceReporter } from '../common/telemetry/performance.js'
 import { bindSourceToken } from './mutations/core-adapter.js'
 import { createKnowledgeSearch, type KnowledgeSearch } from './knowledge-search.js'
+import type { SampleInference } from './sample-inference.js'
 
 type MeetingConnector = Pick<LiveMeetingCaptureConnector, 'proposeMeetingChangeSet' | 'applyMeetingChangeSet'>
 export interface ApplicationServices {
@@ -66,7 +67,7 @@ function assemble(msx: MsxConnector, guidance: McemGuidanceConnector, agents: Ta
   }
 }
 
-export async function createSampleApplicationServices(options: { dataPath?: string; workingDirectory?: string } = {}): Promise<ApplicationServices> {
+export async function createSampleApplicationServices(options: { dataPath?: string; workingDirectory?: string; inference?: SampleInference } = {}): Promise<ApplicationServices> {
   const store = new LocalStore(options.dataPath ? { path: options.dataPath } : {})
   const msx = new LocalStoreMsxConnector(store)
   const writer = msx.createRecordCreationWriter()
@@ -76,8 +77,10 @@ export async function createSampleApplicationServices(options: { dataPath?: stri
   })
   return assemble(
     msx, new LocalPdfMcemGuidanceConnector(resolve(options.workingDirectory ?? process.cwd(), 'docs/knowledge/MCEM Overview.pdf')),
-    createSampleTaskAgents(), new RecordCreationService(msx, writer, { writer }), msx, workflows,
-    createSellerDashboardHost({ mode: 'sample', resolveUserEmail: async () => undefined }), createSampleSeReportingHost(),
+    options.inference?.taskAgents(createSampleTaskAgents()) ?? createSampleTaskAgents(), new RecordCreationService(msx, writer, { writer }),
+    { proposeMeetingChangeSet: (request) => msx.proposeMeetingChangeSet(request, options.inference?.meetingExtractor()),
+      applyMeetingChangeSet: (request) => msx.applyMeetingChangeSet(request) }, workflows,
+    createSellerDashboardHost({ mode: 'sample', resolveUserEmail: async () => undefined }), createSampleSeReportingHost(options.inference ? { inference: options.inference } : {}),
     createStagePipelineReviewHost({ mode: 'sample' }),
     createKnowledgeSearch({ mode: 'sample' }), {
       listTranscriptSources: (opportunityId) => msx.listMeetingTranscripts(opportunityId),

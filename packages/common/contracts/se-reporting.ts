@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { inferenceExecutionSchema, inferenceResponseVersion } from './inference.js'
 
 export const seReportingContractVersion = '1.0' as const
 const text = z.string().max(4000)
@@ -241,6 +242,8 @@ export const sePublishPreviewSchema = z.object({
 }).strict()
 export const seReportingResponseSchema = z.discriminatedUnion('kind', [
     base.extend({
+        contractVersion: z.enum([seReportingContractVersion, inferenceResponseVersion]),
+        inference: inferenceExecutionSchema.optional(),
         kind: z.literal('state'), mode: z.enum(['sample', 'live']),
         profiles: z.array(seReportingProfileSchema).max(20), access: z.array(seAccessSchema),
         scope: z.object({ profileId: id, manager: id, reporter: id, pillars: z.array(id), primary: z.number().int().nonnegative(), secondary: z.number().int().nonnegative() }).strict().nullable(),

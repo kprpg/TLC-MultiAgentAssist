@@ -4,6 +4,8 @@ import {
 } from '../../common/contracts/se-reporting.js'
 import { SeReportingError, type SeProfileStore, type SePublishFile, type SeReportingSource } from '../../connectors/se-reporting/types.js'
 import { buildSeReports, consolidateSeReports, resolveSeScope, seReportingDates, seTaskActivityDate, validateSeNarratives } from './model.js'
+import { inferenceLabel, inferenceResponseVersion, type InferenceExecution } from '../../common/contracts/inference.js'
+import type { SampleInference } from '../sample-inference.js'
 
 export interface SeReportingOwner { key: string; email?: string; objectId?: string }
 
@@ -18,6 +20,7 @@ export class MemorySeProfileStore implements SeProfileStore {
     }
 }
 interface Session {
+    inference?: InferenceExecution
     run: SeReportingRun | null
     access: SeAccess[]
     scope: Extract<SeReportingResponse, { kind: 'state' }>['scope']
@@ -35,10 +38,12 @@ export class SharedSeReportingHost implements SeReportingHost {
         now?: () => Date
         initialRun?: SeReportingRun
         synthesize?(input: SeReportingInput): Promise<unknown>
+        inference?: SampleInference
         onError?(code: string): void
     }) { }
     async invoke(raw: unknown): Promise<SeReportingResponse> {
         const request = seReportingRequestSchema.parse(raw)
+        const inference = this.options.mode === 'sample' ? this.options.inference : undefined
         let owner = ''
         let locked = false
         try {
@@ -100,19 +105,29 @@ export class SharedSeReportingHost implements SeReportingHost {
                 const input = await this.options.source.collect(profile, inspection, {
                     period: request.period, pillar: request.pillar, allowUnavailable: request.allowUnavailable, runId: globalThis.crypto.randomUUID()
                 })
-                if (this.options.mode === 'live') {
-                    if (!this.options.synthesize) throw new SeReportingError('reporting-model-unconfigured', 'Configure the approved reporting narrative model before running live generation.')
+                if (this.options.mode === 'live' || inference?.mode === 'foundry') {
                     const scope = resolveSeScope(input)
                     const dates = seReportingDates(input.period)
                     const grounded = { ...input, ...scope,
                         tasks: scope.tasks.filter((row) => seTaskActivityDate(row, dates.start, dates.end) !== null),
                         evidence: scope.evidence.filter((row) => row.date === null || row.date >= dates.start && row.date <= dates.end)
                     }
-                    const { qualifying_evidence_ids: qualifying, ...narratives } = seNarrativeSynthesisSchema.parse(await this.options.synthesize(grounded))
-                    if (qualifying.some((id) => !grounded.evidence.some((row) => row.id === id && row.source !== 'wiki' && row.source !== 'm365_calendar' && row.date))) {
-                        throw new SeReportingError('reporting-evidence-invalid', 'The reporting model returned an unsupported activity-evidence identifier.')
+                    const validate = (raw: unknown) => {
+                        const { qualifying_evidence_ids: qualifying, ...narratives } = seNarrativeSynthesisSchema.parse(raw)
+                        if (qualifying.some((id) => !grounded.evidence.some((row) => row.id === id && row.source !== 'wiki' && row.source !== 'm365_calendar' && row.date))) {
+                            throw new SeReportingError('reporting-evidence-invalid', 'The reporting model returned an unsupported activity-evidence identifier.')
+                        }
+                        return { qualifying, narratives: validateSeNarratives(narratives, grounded) }
                     }
-                    input.narratives = validateSeNarratives(narratives, grounded)
+                    const inferred = inference?.mode === 'foundry'
+                        ? await inference.run(
+                            async (context) => validate(await inference.narrativeModel(context)(grounded)),
+                            () => ({ narratives: input.narratives, qualifying: input.evidence.filter((row) => row.qualifies).map((row) => row.id) }))
+                        : undefined
+                    if (!inferred && !this.options.synthesize) throw new SeReportingError('reporting-model-unconfigured', 'Configure the approved reporting narrative model before running live generation.')
+                    const { qualifying, narratives } = inferred?.value ?? validate(await this.options.synthesize!(grounded))
+                    if (inferred) session.inference = inferred.execution
+                    input.narratives = narratives
                     input.evidence = input.evidence.map((row) => ({ ...row, qualifies: qualifying.includes(row.id) }))
                 }
                 const reports = buildSeReports(input)
@@ -123,6 +138,7 @@ export class SharedSeReportingHost implements SeReportingHost {
                 session.access = input.access
                 session.plan = null
                 message = 'Draft package generated. Review every report and supply your own asks (or explicitly leave them empty) before approval or publication.'
+                if (session.inference) message += ` ${inferenceLabel(session.inference)}`
             } else if (request.operation === 'review') {
                 const run = this.requireRun(session, request.runId)
                 if (request.approve && run.reports.some((report) => report.schema_contract.test_mode)) throw new SeReportingError('test-approval-denied', 'Test-contract artifacts remain drafts and cannot be approved.')
@@ -167,7 +183,8 @@ export class SharedSeReportingHost implements SeReportingHost {
                 message = this.options.mode === 'sample' ? 'Sample publication simulated. No files, source records or SharePoint reports were changed.' : 'The reviewed report package was published. No CRM records or shared rollups were changed.'
             }
             return seReportingResponseSchema.parse({
-                contractVersion: '1.0', kind: 'state', mode: this.options.mode, profiles, run: session.run,
+                contractVersion: session.inference ? inferenceResponseVersion : '1.0',
+                ...(session.inference ? { inference: session.inference } : {}), kind: 'state', mode: this.options.mode, profiles, run: session.run,
                 access: session.access, scope: session.scope, published, message,
                 publishPreview: session.plan ? { token: session.plan.token, expiresAt: new Date(session.plan.expires).toISOString(),
                     files: session.plan.files.map(({ etag: _etag, ...file }) => { void _etag; return file }) } : null

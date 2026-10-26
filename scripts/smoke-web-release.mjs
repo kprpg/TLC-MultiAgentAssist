@@ -13,7 +13,7 @@ export async function verifyWebAccess(baseUrl, { protectedAccess = false, fetchF
   }
 }
 
-export async function verifyAnonymousSample(baseUrl, { sqlite = true, fetchFn = fetch } = {}) {
+export async function verifyAnonymousSample(baseUrl, { sqlite = true, fetchFn = fetch, aiMode } = {}) {
   async function request(path, init = {}) {
     const response = await fetchFn(new URL(path, baseUrl), {
       ...init, redirect: 'manual', credentials: 'omit', signal: AbortSignal.timeout(20_000)
@@ -28,6 +28,9 @@ export async function verifyAnonymousSample(baseUrl, { sqlite = true, fetchFn = 
   if (!html.includes('<div id="root">') || !html.includes('<meta name="tlc-data-mode" content="sample" />')
       || !html.includes('<meta name="tlc-local-exit" content="0" />')) {
     throw new Error('The hosted page is not the sample application with local shutdown disabled.')
+  }
+  if (aiMode && !html.includes(`<meta name="tlc-ai-mode" content="${aiMode}" />`)) {
+    throw new Error('The hosted sample AI mode does not match the requested configuration.')
   }
   const identity = await (await request('/api/me')).json()
   if (identity.email !== 'sample.user@example.com') throw new Error('The API is not using the sample identity.')
@@ -52,23 +55,25 @@ export async function verifyAnonymousSample(baseUrl, { sqlite = true, fetchFn = 
 }
 
 export async function smokeWebRelease(packageRoot = resolve('release-web/package'), {
-  sqlite = process.env.TLC_DATA_STORE === 'sqlite', entryPoint = 'server.js', onReady
+  sqlite = process.env.TLC_DATA_STORE === 'sqlite', entryPoint = 'server.js', onReady, environment = {}, nodeArguments = []
 } = {}) {
 const port = await findAvailablePort()
-const child = spawn(process.execPath, [entryPoint], {
+const child = spawn(process.execPath, [...nodeArguments, entryPoint], {
   cwd: packageRoot,
   env: {
     ...process.env,
     HOST: '127.0.0.1',
     PORT: String(port),
     TLC_WEB_MODE: 'sample',
+    TLC_AI_MODE: 'sample',
     TLC_DATA_MODE: 'sample',
     TLC_DATA_STORE: sqlite ? 'sqlite' : 'fixture',
     TLC_DATA_STORE_PATH: ':memory:',
     TLC_HOSTING_MODEL: 'single-instance',
     TLC_BACKGROUND_SYNC: '0',
     TLC_WEB_STATIC_ROOT: resolve(packageRoot, 'apps/desktop/dist/revamp'),
-    WEBSITE_SITE_NAME: 'tlc-web-release-smoke'
+    WEBSITE_SITE_NAME: 'tlc-web-release-smoke',
+    ...environment
   },
   stdio: ['ignore', 'pipe', 'pipe']
 })
@@ -143,7 +148,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       throw new Error('Remote sample verification requires a root HTTPS URL without credentials, query or fragment.')
     }
     if (process.argv[2] === '--url') {
-      await verifyAnonymousSample(process.argv[3])
+      const aiMode = process.argv[4] === '--ai-mode' ? process.argv[5] : undefined
+      if (aiMode && !['foundry', 'sample'].includes(aiMode)) throw new Error('AI mode must be foundry or sample.')
+      await verifyAnonymousSample(process.argv[3], { aiMode })
       console.info('Anonymous SQLite sample verification passed.')
     } else {
       if (!['--protected', '--public'].includes(process.argv[4])) throw new Error('Access verification requires --protected or --public.')

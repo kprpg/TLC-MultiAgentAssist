@@ -90,7 +90,8 @@ describe('App Service deployment script', () => {
         ], {
             env: {
                 ...process.env,
-                PATH: [temporaryDirectory, process.env.PATH ?? ''].filter(Boolean).join(delimiter)
+                PATH: [temporaryDirectory, process.env.PATH ?? ''].filter(Boolean).join(delimiter),
+                TLC_AI_MODE: 'invalid-but-unused-by-live-deployment'
             }
         })
 
@@ -99,6 +100,7 @@ describe('App Service deployment script', () => {
         expect(azArguments).toContain('--settings TLC_FOUNDRY_ENV_BASE64=')
         expect(azArguments).toContain('WEBSITE_RUN_FROM_PACKAGE=1')
         expect(azArguments).toContain('--track-status false')
+        expect(azArguments).not.toContain('--async')
     }, powershellScriptTimeoutMs)
 
     it('reconciles an Azure CLI failure when App Service accepted the deployment', async () => {

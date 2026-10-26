@@ -4,6 +4,6 @@
     "editorHoverWidget.foreground": "#B3DDFF",
     "editorHoverWidget.border": "#2F9BC1"
   },
-  "tlc.mode": "live",
+  "tlc.mode": "sample",
   "tlc.dataStore": "sqlite"
 }
