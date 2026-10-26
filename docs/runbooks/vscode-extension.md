@@ -253,6 +253,17 @@ Never add `unsafe-eval` or retain hidden webviews as a caching workaround.
 - **`vsce` packaging error about missing files** — run `npm run ext:build` first so
   `dist/` exists, then package.
 - **Live mode shows auth errors** — confirm VS Code is signed into the authorized Microsoft account, or switch `tlc.mode` to `sample`.
+- **Repeated browser sign-in / live data stops refreshing** — select **TLC: Use Live
+  Data** once to reconnect. Live MSX refreshes reuse the selected account silently;
+  a missing session reports that reconnection is required instead of reopening the
+  browser. Cancelled or failed live switches do not persist a new live-mode setting.
+  Concurrent requests for the same resource share one authentication attempt.
+  Foundry, reporting, knowledge search and Teams meetings can require separate
+  resource-specific consent; signing into a corporate account alone does not grant
+  MSX access or access to the configured Foundry project. If reconnecting still
+  fails, collect the first error/AADSTS code from **View > Output > TLC Assist**
+  and the **Microsoft Authentication** output channel, plus the installed VSIX
+  release tag and VS Code version. Do not share tokens or credentials.
 - **Sample Guidance shows a Foundry authentication fallback** — approve Microsoft
   sign-in for **TLC Assist** and select an account with access to the configured
   Foundry tenant, then retry Guidance. Sign-in is lazy and does not consume the

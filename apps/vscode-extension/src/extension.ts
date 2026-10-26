@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { createLocalStoreDataProvider, createSampleDataProvider, type ExtensionDataProvider } from './data-provider.js'
 import { configuredFoundryTenantId, createLiveDataProvider } from './live-provider.js'
 import { WorkbenchPanel } from './webview-controller.js'
-import { acquireDelegatedToken, createVsCodeTokenCredential } from './authentication.js'
+import { acquireDelegatedToken, acquireMicrosoftSession, createDelegatedTokenProvider, createVsCodeTokenCredential } from './authentication.js'
 import { ConnectionTreeProvider, PlaysTreeProvider, PortfolioTreeProvider, type PortfolioNode } from './tree/trees.js'
 import { McpHttpClient } from '../../../packages/connectors/mcp/index.js'
 import { createRemoveCustomerAction } from './customer-removal.js'
@@ -357,15 +357,14 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     // Async because live mode acquires a delegated token before building the provider.
-    const applyMode = async (target: 'sample' | 'live'): Promise<void> => {
+    const applyMode = async (target: 'sample' | 'live'): Promise<boolean> => {
         if (target === 'sample') {
             if (provider.mode !== 'sample') swapProvider(makeSampleProvider())
-            return
+            return true
         }
         try {
             const resource = dynamicsResource()
-            const { account } = await acquireDelegatedToken(resource, true)
-            const tokenProvider = async (): Promise<string> => (await acquireDelegatedToken(resource, true)).token
+            const { account, getToken: tokenProvider } = await createDelegatedTokenProvider(resource)
             syncMeetingExtractionEnv()
             swapProvider(createLiveDataProvider(tokenProvider, account, (info) => {
                 output.appendLine(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? 'required' : 'optional'} failed: ${info.message}`)
@@ -379,7 +378,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 if (granted.account.toLowerCase() !== account.toLowerCase()) throw new Error('The reporting source account must match the TLC account.')
                 return granted.token
             }, async () => {
-                const session = await vscode.authentication.getSession('microsoft', [...seismicGraphScopes], { createIfNone: true })
+                const session = await acquireMicrosoftSession(seismicGraphScopes, true)
                 if (!session || session.account.label.toLowerCase() !== account.toLowerCase()) {
                     throw new Error('The Seismic Graph session must match the TLC account.')
                 }
@@ -388,7 +387,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 const purposeScopes = (value: MeetingTokenPurpose) => [...meetingScopesFor(value)]
                 let session: vscode.AuthenticationSession | undefined
                 try {
-                    session = await vscode.authentication.getSession('microsoft', purposeScopes(purpose), { createIfNone: true })
+                    session = await acquireMicrosoftSession(purposeScopes(purpose), true)
                 } catch (error) { throw meetingSignInFailure(error) }
                 if (!session || session.account.label.toLowerCase() !== account.toLowerCase()) {
                     throw meetingSignInFailure(`the Microsoft account used for Teams meetings (${session?.account.label ?? 'none'}) is not the TLC account`)
@@ -396,16 +395,18 @@ export function activate(context: vscode.ExtensionContext): void {
                 return session.accessToken
             }))
             void vscode.window.showInformationMessage(`TLC Assist is now using live data for ${account} (MSX OData + Dataverse MCP).`)
+            return true
         } catch (error) {
             const detail = error instanceof Error ? error.message : String(error)
             if (provider.mode !== 'sample') swapProvider(makeSampleProvider())
             void vscode.window.showErrorMessage(`TLC Assist could not switch to live data: ${detail}. Staying on sample data.`)
+            return false
         }
     }
 
     // Switch immediately (with feedback) and persist the choice; the listener stays idempotent.
     const setMode = async (mode: 'sample' | 'live'): Promise<void> => {
-        await applyMode(mode)
+        if (!(await applyMode(mode))) return
         const target = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0
             ? vscode.ConfigurationTarget.Workspace
             : vscode.ConfigurationTarget.Global

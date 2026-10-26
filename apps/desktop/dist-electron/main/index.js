@@ -25739,7 +25739,10 @@ var SampleInference = class {
 					inlineAgentReference: true
 				})
 			};
-		})();
+		})().catch((error) => {
+			this.context = void 0;
+			throw error;
+		});
 		return this.context;
 	}
 	async run(online, offline, signal) {
@@ -25758,7 +25761,11 @@ var SampleInference = class {
 			}
 		};
 		try {
-			const value = await online(await this.foundry());
+			const context = await this.foundry();
+			signal?.throwIfAborted();
+			await this.options.prepareCredential?.();
+			signal?.throwIfAborted();
+			const value = await online(context);
 			signal?.throwIfAborted();
 			return {
 				value,
