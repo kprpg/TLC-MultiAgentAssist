@@ -63,6 +63,27 @@ Sources that are unavailable are listed under **Needs attention** and in the man
   by default; `TLC_AI_MODE=sample` is fully offline. Fallbacks are labeled in the UI
   and result manifest. [Sample Foundry AI](sample-foundry-ai.md) does not change live behavior.
 
+## Session-only result retention
+
+You can switch opportunities or views while topic deduction or preparation continues.
+Reopening **Working session** for the original opportunity restores its pending state or
+latest result, including the original milestone and confirmed preparation settings.
+Closing and reopening an unchanged panel preserves its current edits. Restoring a result
+does not run another search, inference call or preparation.
+
+Desktop, Web, VS Code and the shared Teams launcher use the same presentation-state owner.
+It retains up to 20 completed operation results, shared with Meeting Capture where available,
+using least-recently-used eviction; active operations are never evicted. Failures are retained
+for their originating scope rather than appearing in another opportunity. Existing admission
+limits, per-call timeouts and write approvals are unchanged.
+
+This is not durable background-job storage. Refresh, app restart, webview recreation and
+private-session/data-mode/access resets clear the cache. Eviction removes only UI state,
+not output files. Hosted output availability is unchanged: at most two archives per user,
+each expiring after 15 minutes. A retained result can therefore refer to an expired or
+displaced download; the UI reports that failure explicitly and **Prepare again** remains a
+user action. No automatic regeneration, cancellation or retry is added.
+
 ## Security
 
 Only `learn.microsoft.com` pages and allowlisted GitHub repositories are fetched, over HTTPS, with size and

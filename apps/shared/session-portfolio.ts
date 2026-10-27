@@ -1,6 +1,7 @@
 import * as c from '../../packages/common/contracts/index.js'
 import type { SeDomainId } from '../../packages/common/configuration/se-domains.js'
 import { SessionCache, type SessionCacheOptions, type SessionCacheValue } from './session-cache.js'
+import { OperationResultSession } from './operation-result-session.js'
 
 export interface SessionPortfolioSource {
   getPortfolioIndex(): Promise<c.PortfolioIndex>
@@ -18,6 +19,7 @@ export class SessionPortfolio {
   private readonly portfolio: SessionCacheValue<c.PortfolioIndex>
   private readonly discovery: SessionCacheValue<c.DiscoverySnapshot>
   readonly cache: SessionCache
+  readonly operationResults = new OperationResultSession()
   private refreshRequested = false
   private readonly draftFields = new Map<string, unknown>()
   private draftBytes = 0
@@ -41,6 +43,7 @@ export class SessionPortfolio {
     this.cache.subscribe(() => {
       if (generation === this.cache.generation) return
       generation = this.cache.generation
+      this.operationResults.clear()
       this.resetDrafts(); this.capturedVisibleAccounts.clear()
     })
   }
@@ -53,7 +56,7 @@ export class SessionPortfolio {
     this.cache.setActiveKeys(this.discovery.loaded && keys.includes('portfolio')
       ? [...new Set([...keys.filter((key) => key !== 'portfolio'), 'discovery'])] : keys)
   }
-  dispose(): void { this.cache.dispose() }
+  dispose(): void { this.cache.dispose(); this.operationResults.dispose() }
   readDataset<T>(key: string, load: () => Promise<T>, options: { reference?: boolean } = {}): Promise<T> {
     return this.cache.value<T>(key, options.reference).read(load)
   }

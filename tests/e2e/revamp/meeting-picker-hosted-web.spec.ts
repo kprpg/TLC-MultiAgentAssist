@@ -10,6 +10,7 @@ import { LiveMeetingCaptureConnector, type LiveMeetingTranscriptSource } from '.
 import { GraphMeetingError } from '../../../packages/connectors/graph/meetings.js'
 import { parseTranscriptContent } from '../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
+import { deferredSignal } from './operation-result-fixtures.js'
 
 test.use({ locale: 'en-US', timezoneId: 'UTC' })
 
@@ -137,4 +138,69 @@ test('says so plainly when the chosen meeting has no transcript yet, without ope
     await expect(page.getByText(/Paste \/ upload with a transcript you are authorized to provide/).first()).toBeVisible()
     await expect(page.getByRole('dialog', { name: 'Review meeting signals' })).toHaveCount(0)
     await expect(panel.getByRole('button', { name: 'Extract & Review' })).toBeEnabled()
+})
+
+test('@operation-retention retains a Web proposal without opening a review in another view', async ({ page }) => {
+    const arrived = deferredSignal()
+    const release = deferredSignal()
+    let acquisitions = 0
+    const base = await hostedWeb({
+        listRecentMeetings: async () => [arc],
+        acquireRecentTranscript: async () => {
+            acquisitions++
+            arrived.resolve()
+            await release.promise
+            return parseTranscriptContent(spokenLine, { id: 'retained-web-transcript', source: 'teams', meetingType: 'customer' })
+        }
+    })
+
+    const panel = await openLauncher(page, base)
+    const response = page.waitForResponse((value) => value.request().method() === 'POST' && value.url().endsWith('/meeting-change-set'))
+    try {
+        await panel.getByRole('button', { name: 'Extract & Review' }).click()
+        await arrived.promise
+        await page.getByRole('button', { name: 'Discover', exact: true }).click()
+        await expect(panel).toHaveCount(0)
+        release.resolve()
+        await (await response).finished()
+        await expect(page.getByRole('dialog', { name: 'Review meeting signals' })).toHaveCount(0)
+        await page.getByRole('button', { name: 'Portfolio', exact: true }).click()
+        await page.getByRole('button', { name: 'Meeting capture', exact: true }).click()
+        await page.getByRole('button', { name: 'Review last result', exact: true }).click()
+        await expect(page.getByRole('dialog', { name: 'Review meeting signals' })).toBeVisible()
+        expect(acquisitions).toBe(1)
+    } finally {
+        release.resolve()
+    }
+})
+
+test('@operation-retention isolates a late Web proposal from the newly selected opportunity', async ({ page }) => {
+    const arrived = deferredSignal()
+    const release = deferredSignal()
+    const base = await hostedWeb({
+        listRecentMeetings: async () => [arc],
+        acquireRecentTranscript: async () => {
+            arrived.resolve()
+            await release.promise
+            return parseTranscriptContent(spokenLine, { id: 'scoped-transcript', source: 'teams', meetingType: 'customer' })
+        }
+    })
+    const panel = await openLauncher(page, base)
+    const response = page.waitForResponse((value) => value.request().method() === 'POST' && value.url().endsWith('/meeting-change-set'))
+    try {
+        await panel.getByRole('button', { name: 'Extract & Review' }).click()
+        await arrived.promise
+        const blade = page.getByRole('region', { name: 'Opportunities blade' })
+        await blade.getByRole('button', { name: /^Cloud security readiness/ }).click()
+        await page.getByRole('button', { name: 'Meeting capture', exact: true }).click()
+        await expect(panel.getByRole('button', { name: 'Extract & Review' })).toBeEnabled()
+        release.resolve()
+        await (await response).finished()
+        await expect(page.getByRole('dialog', { name: 'Review meeting signals' })).toHaveCount(0)
+        await expect(panel.getByRole('button', { name: 'Review last result' })).toHaveCount(0)
+        await panel.getByRole('button', { name: 'Close', exact: true }).click()
+        await blade.getByRole('button', { name: /^Grid operations modernization/ }).click()
+        await page.getByRole('button', { name: 'Meeting capture', exact: true }).click()
+        await expect(panel.getByRole('button', { name: 'Review last result' })).toBeVisible()
+    } finally { release.resolve() }
 })

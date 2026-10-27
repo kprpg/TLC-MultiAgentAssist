@@ -129,6 +129,9 @@ apps/shared/customer-email-actions.tsx
                                      Copy and human-reviewed unsent draft actions shared by all four surfaces
 apps/shared/session-portfolio.ts     Memory-only, mode/session-scoped Portfolio/Discovery snapshots
                                      Shared lazy detail caching, local filtering and confirmed-write updates
+apps/shared/operation-result-session.ts
+                                     UI-session ownership of existing async calls; 20 completed results, scope isolation and private reset
+apps/shared/use-operation-result.ts  Shared reactive result subscription and Meeting Capture review/restore behavior
 apps/shared/workflow-polling.ts      Workflow-definition deadline plus bounded transport grace across UI transports
 apps/shared/workflow-progress.tsx    Shared incomplete/partial/terminal Play result announcements
 apps/shared/session-cache.ts         Bounded reactive datasets, active-interest freshness and safe read retries

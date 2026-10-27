@@ -8,8 +8,11 @@ import {
 import type { WorkingSessionClient } from './types.js'
 import { InferenceNotice } from '../inference-status.js'
 import type { InferenceExecution } from '../../../packages/common/contracts/inference.js'
+import type { SessionOperation } from '../operation-result-session.js'
+import { useOperationResult } from '../use-operation-result.js'
 
 type Step = 'choose' | 'topic' | 'running' | 'done'
+const workingKinds = ['working-session-topic', 'working-session-prepare'] as const
 
 /**
  * One launcher for Desktop, Web, the VS Code webview and Teams. It only presents and dispatches: topic deduction,
@@ -33,52 +36,94 @@ export function WorkingSessionLauncher({ client, opportunity, milestones, onNote
   const [result, setResult] = useState<WorkingSessionResult | undefined>(undefined)
   const [actionNote, setActionNote] = useState('')
   const [topicInference, setTopicInference] = useState<InferenceExecution | undefined>(undefined)
+  const session = client.cacheSession?.operationResults
+  const scope = { opportunityId: opportunity.id, ...(milestoneId ? { milestoneId } : {}) }
+  const { operation, generation, captureCurrent } = useOperationResult(session, scope, workingKinds)
+  const displayed = useRef<SessionOperation | undefined>(undefined)
 
   useEffect(() => {
     setOpen(false); setStep('choose'); setDraft(undefined); setResult(undefined); setError(''); setActionNote(''); setMilestoneId(''); setTopicInference(undefined)
-  }, [opportunity.id])
+    displayed.current = undefined
+  }, [opportunity.id, session, generation])
   useEffect(() => {
     setMilestoneId((current) => milestones.some((milestone) => milestone.id === current) ? current : milestones[0]?.id ?? '')
   }, [milestones])
+  useEffect(() => {
+    displayed.current = undefined
+    setStep('choose'); setDraft(undefined); setResult(undefined); setError(''); setActionNote(''); setTopicInference(undefined)
+  }, [opportunity.id, milestoneId])
+
+  useEffect(() => {
+    if (!open || !operation || operation === displayed.current || operation.kind === 'meeting-extract') return
+    displayed.current = operation
+    setError(''); setActionNote(''); setResult(undefined)
+    if (operation.kind === 'working-session-prepare') {
+      setDraft(draftFromTopic(operation.input.topic))
+      setDeliverables(operation.input.deliverables)
+    }
+    if (operation.status === 'pending') setStep('running')
+    else if (operation.status === 'failed') {
+      setError(workingSessionFailure(operation.error))
+      setStep(operation.kind === 'working-session-prepare' ? 'topic' : 'choose')
+    } else if (operation.kind === 'working-session-topic') {
+      setTopicInference(operation.result.inference)
+      setDraft(draftFromTopic(operation.result.topic)); setStep('topic')
+    } else {
+      setResult(operation.result); setStep('done')
+    }
+  }, [open, operation])
 
   const milestone = milestones.find((item) => item.id === milestoneId)
   const chosen = Object.values(deliverables).some(Boolean)
 
-  const suggest = useCallback(async () => {
+  const suggest = useCallback(() => {
     if (!milestone) return
-    setError(''); setStep('running')
+    if (!session) { setError('Operation session is unavailable. Reload the application.'); return }
     try {
-      const response = await client.deriveWorkingSessionTopic(topicRequestFor(opportunity, milestone))
-      setTopicInference(response.inference)
-      setDraft(draftFromTopic(response.topic)); setStep('topic')
+      const request = topicRequestFor(opportunity, milestone)
+      session.startTopic(request, () => client.deriveWorkingSessionTopic(request))
     } catch (failure) {
-      setError(workingSessionFailure(failure)); setStep('choose')
+      setError(workingSessionFailure(failure))
     }
-  }, [client, opportunity, milestone])
+  }, [client, opportunity, milestone, session])
 
-  const prepare = useCallback(async () => {
+  const prepare = useCallback(() => {
     if (!milestone || !draft) return
     const checked = topicFromDraft(draft)
     if ('error' in checked) { setError(checked.error); return }
-    setError(''); setStep('running')
+    if (!session) { setError('Operation session is unavailable. Reload the application.'); return }
     try {
-      setResult(await client.prepareWorkingSession(prepareRequestFor(opportunity, milestone, checked.topic, deliverables))); setStep('done')
+      const request = prepareRequestFor(opportunity, milestone, checked.topic, deliverables)
+      session.startPreparation({ opportunityId: opportunity.id, milestoneId: milestone.id }, request, () => client.prepareWorkingSession(request))
     } catch (failure) {
-      setError(workingSessionFailure(failure)); setStep('topic')
+      setError(workingSessionFailure(failure))
     }
-  }, [client, opportunity, milestone, draft, deliverables])
+  }, [client, opportunity, milestone, draft, deliverables, session])
 
   const openOutput = useCallback(async () => {
     if (!result) return
+    const isCurrent = captureCurrent()
     setActionNote('')
     try {
       if (result.delivery.kind === 'folder') await client.openWorkingSessionFolder?.(result.delivery.folderPath)
       else await client.downloadWorkingSession?.(result.delivery.downloadId, result.delivery.fileName)
     } catch (failure) {
+      if (!isCurrent()) return
       const message = workingSessionFailure(failure)
       setActionNote(message); onNote?.(message)
     }
-  }, [client, result, onNote])
+  }, [client, result, onNote, captureCurrent])
+
+  const toggle = () => {
+    if (!open) {
+      const retained = session?.getLatestForOpportunity(opportunity.id, workingKinds)
+      if (retained) {
+        session?.touch(retained.requestId)
+        if (retained.scope.milestoneId && milestones.some((item) => item.id === retained.scope.milestoneId)) setMilestoneId(retained.scope.milestoneId)
+      }
+    }
+    setOpen((value) => !value)
+  }
 
   const anchor = useRef<HTMLDivElement>(null)
   const edit = (field: keyof TopicDraft) => (event: { target: { value: string } }) => setDraft((current) => current ? { ...current, [field]: event.target.value } : current)
@@ -160,7 +205,7 @@ export function WorkingSessionLauncher({ client, opportunity, milestones, onNote
   return (
     <div className="working-session-launcher" ref={anchor}>
       <button type="button" className={`secondary working-session-button${compact ? ' working-session-compact' : ''}`} aria-expanded={open} aria-haspopup="dialog" aria-label="Prepare working session"
-        title="Prepare working session: decks, Microsoft Learn pages and Bicep/ARM templates for this milestone" onClick={() => setOpen((value) => !value)}>
+        title="Prepare working session: decks, Microsoft Learn pages and Bicep/ARM templates for this milestone" onClick={toggle}>
         {compact
           ? <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 4.5A1.5 1.5 0 0 1 4.5 3h3.38a1.5 1.5 0 0 1 1.06.44L10.5 5h5A1.5 1.5 0 0 1 17 6.5V8h-1V6.5a.5.5 0 0 0-.5-.5h-5.2L8.23 4.44A.5.5 0 0 0 7.88 4H4.5a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5H9v1H4.5A1.5 1.5 0 0 1 3 13.5v-9Zm12 6v2h2v1h-2v2h-1v-2h-2v-1h2v-2h1Z" /></svg>
           : label}

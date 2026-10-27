@@ -7,6 +7,7 @@ import { readTranscriptFile } from '../../../shared/transcript-file.js'
 import { meetingProposalToMarkdown } from '../../../shared/meeting-proposal-markdown.js'
 import { InferenceNotice } from '../../../shared/inference-status.js'
 import { MeetingPicker, useMeetingList } from '../../../shared/meeting-picker.js'
+import { useMeetingOperation } from '../../../shared/use-operation-result.js'
 
 function toggleSet(previous: ReadonlySet<string>, id: string): Set<string> {
     const next = new Set(previous)
@@ -23,7 +24,7 @@ async function readFileIntoContent(event: ChangeEvent<HTMLInputElement>, setCont
 }
 
 /** Modal approval panel: per-row toggle, milestone multi-select, required reason, all-or-none submit. */
-function MeetingReviewModal({ client, proposal, opportunityName, milestones, onClose, onApplied, onNote }: {
+function MeetingReviewModal({ client, proposal, opportunityName, milestones, onClose, onApplied, onNote, onSubmitStart }: {
     client: RevampDataClient
     proposal: MeetingChangeSetProposal
     opportunityName: string
@@ -31,6 +32,7 @@ function MeetingReviewModal({ client, proposal, opportunityName, milestones, onC
     onClose: () => void
     onApplied: () => void
     onNote: (message: string) => void
+    onSubmitStart: () => { isCurrent(): boolean }
 }): ReactElement {
     const [checkedSlots, setCheckedSlots] = useState<Set<string>>(() => new Set(proposal.slots.filter((slot) => slot.checkedByDefault && !slot.blocked).map((slot) => slot.slotId)))
     const [checkedNewMilestones, setCheckedNewMilestones] = useState<Set<string>>(() => new Set(proposal.newMilestones.filter((milestone) => milestone.checkedByDefault).map((milestone) => milestone.tempId)))
@@ -44,6 +46,7 @@ function MeetingReviewModal({ client, proposal, opportunityName, milestones, onC
     const canSubmit = approvedCount > 0 && reason.trim().length >= 3 && !busy
 
     const submit = useCallback(async () => {
+        const { isCurrent } = onSubmitStart()
         setBusy(true)
         try {
             const applied = await client.applyMeetingChangeSet(proposal, {
@@ -54,14 +57,15 @@ function MeetingReviewModal({ client, proposal, opportunityName, milestones, onC
                 selectedMilestoneIds: [...selectedMilestones],
                 reason: reason.trim()
             })
+            if (!isCurrent()) return
             setResult(applied)
             onNote(applied.state === 'applied' ? 'Meeting signals injected.' : 'Change set rolled back (a record changed since review).')
         } catch (error) {
-            onNote((error as Error).message)
+            if (isCurrent()) onNote((error as Error).message)
         } finally {
-            setBusy(false)
+            if (isCurrent()) setBusy(false)
         }
-    }, [client, proposal, checkedSlots, checkedNewMilestones, selectedMilestones, reason, onNote])
+    }, [client, proposal, checkedSlots, checkedNewMilestones, selectedMilestones, reason, onNote, onSubmitStart])
 
     async function exportWord() {
         setExporting(true)
@@ -186,17 +190,16 @@ export function MeetingCaptureLauncher({ client, opportunityId, opportunityName,
     onApplied: () => void
     onNote: (message: string) => void
 }): ReactElement {
-    const [open, setOpen] = useState(false)
     const [transcriptId, setTranscriptId] = useState('')
     const [tab, setTab] = useState<'pick' | 'paste'>('pick')
     const [pasteContent, setPasteContent] = useState('')
     const [meetingType, setMeetingType] = useState<MeetingType>('customer')
-    const [busy, setBusy] = useState(false)
-    const [proposal, setProposal] = useState<MeetingChangeSetProposal | undefined>(undefined)
+    const operation = useMeetingOperation(client, opportunityId, opportunityName, onNote)
+    const { open, busy, proposal } = operation
     const panelRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
-        setOpen(false); setProposal(undefined); setPasteContent(''); setTranscriptId(''); setTab('pick')
+        setPasteContent(''); setTranscriptId(''); setTab('pick')
     }, [opportunityId])
     const meetings = useMeetingList<MeetingTranscriptSummary>(
         () => client.listMeetingTranscripts(opportunityId), open && tab === 'pick', `${opportunityId}`,
@@ -206,31 +209,17 @@ export function MeetingCaptureLauncher({ client, opportunityId, opportunityName,
     useEffect(() => {
         if (!open) return
         function dismissOutside(event: PointerEvent) {
-            if (event.target instanceof Node && !panelRef.current?.contains(event.target)) setOpen(false)
+            if (event.target instanceof Node && !panelRef.current?.contains(event.target)) operation.close()
         }
         document.addEventListener('pointerdown', dismissOutside)
         return () => document.removeEventListener('pointerdown', dismissOutside)
-    }, [open])
+    }, [open, operation.close])
 
     const canExtract = tab === 'paste' ? pasteContent.trim().length > 10 : meetings.items.some((item) => item.id === transcriptId)
 
-    const extract = useCallback(async () => {
-        setBusy(true)
-        try {
-            const next = tab === 'paste'
-                ? await client.proposeMeetingFromRaw(opportunityId, pasteContent, meetingType)
-                : await client.proposeMeetingFromTranscript(opportunityId, transcriptId)
-            setProposal(next)
-        } catch (error) {
-            onNote((error as Error).message)
-        } finally {
-            setBusy(false)
-        }
-    }, [client, tab, opportunityId, pasteContent, meetingType, transcriptId, onNote])
-
     return (
         <div className="meeting-launcher" ref={panelRef}>
-            <Button appearance="subtle" className="meeting-launch-button" icon={<Mic20Regular />} aria-expanded={open} onClick={() => setOpen((value) => !value)}>Meeting capture</Button>
+            <Button appearance="subtle" className="meeting-launch-button" icon={<Mic20Regular />} aria-expanded={open} onClick={operation.toggle}>Meeting capture</Button>
             {open && (
                 <div className="meeting-launcher-panel">
                     <div className="meeting-launcher-tabs">
@@ -250,9 +239,12 @@ export function MeetingCaptureLauncher({ client, opportunityId, opportunityName,
                             <textarea rows={4} placeholder="Paste a Teams transcript (WebVTT) or 'Speaker: text' lines..." value={pasteContent} onChange={(event) => setPasteContent(event.target.value)} />
                         </div>
                     )}
+                    {operation.error && <p className="error" role="alert">{operation.error}</p>}
                     <div className="actions">
-                        <Button appearance="secondary" onClick={() => setOpen(false)}>Close</Button>
-                        <Button appearance="primary" disabled={busy || !canExtract} onClick={() => void extract()}>{busy ? 'Extracting...' : 'Extract & Review'}</Button>
+                        <Button appearance="secondary" onClick={operation.close}>Close</Button>
+                        {operation.canRestore && <Button appearance="secondary" onClick={operation.restore}>Review last result</Button>}
+                        <Button appearance="primary" disabled={busy || !canExtract} onClick={() => operation.extract(tab === 'paste'
+                            ? { kind: 'raw', content: pasteContent, meetingType } : { kind: 'transcript', transcriptId })}>{busy ? 'Extracting...' : 'Extract & Review'}</Button>
                     </div>
                 </div>
             )}
@@ -263,9 +255,10 @@ export function MeetingCaptureLauncher({ client, opportunityId, opportunityName,
                     proposal={proposal}
                     opportunityName={opportunityName}
                     milestones={milestones}
-                    onClose={() => setProposal(undefined)}
-                    onApplied={() => { setProposal(undefined); setOpen(false); onApplied() }}
+                    onClose={operation.dismissReview}
+                    onApplied={() => { operation.dismissReview(); operation.close(); onApplied() }}
                     onNote={onNote}
+                    onSubmitStart={operation.beginSubmit}
                 />
             )}
         </div>
