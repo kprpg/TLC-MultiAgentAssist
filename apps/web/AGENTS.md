@@ -11,7 +11,9 @@ host/API/auth shell. Inherits the root AGENTS.md.
   **Never** read a local Azure CLI token in this mode.
 - **azure-cli** (local live): `AzureCliCredential` for the MSX scope; **must bind to loopback**
   (`assertLoopbackHost`); corp id derived from token claims with the `@microsoft.com` domain check.
-- **sample**: fixed sample identity + `FixtureMsxConnector`; no network.
+- **sample**: fixed sample identity + SQLite by default, with real Foundry inference and labeled
+  offline fallback; `TLC_AI_MODE=sample` keeps AI offline. Never construct live MSX/Graph sources.
+  Hosted Foundry uses managed identity and the shared per-slot sample quotas; visitor auth stays off.
 
 ## API & runtime rules
 - All `/api/*` requests/responses go through `packages/common` zod schemas; enforce the body cap

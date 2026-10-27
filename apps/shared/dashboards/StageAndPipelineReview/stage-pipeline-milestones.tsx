@@ -35,12 +35,13 @@ function OpenMilestone({ row, parent }: { row: StagePipelineMilestone; parent: S
     </div>
 }
 
-export function MilestonesTab({ scopeRows, filters, onFilters, asOf, opportunities }: {
+export function MilestonesTab({ scopeRows, filters, onFilters, asOf, opportunities, actions }: {
     scopeRows: readonly StagePipelineMilestone[]
     filters: MilestoneFilters
     onFilters(next: MilestoneFilters): void
     asOf: string
     opportunities: ReadonlyMap<string, StagePipelineOpportunity>
+    actions?: { onUpdate(row: StagePipelineMilestone): void; onTask(row: StagePipelineMilestone): void }
 }): ReactElement {
     const rows = useMemo(() => filterMilestoneRows(scopeRows, filters, asOf), [scopeRows, filters, asOf])
     const kpis = milestoneKpis(rows, asOf)
@@ -65,7 +66,16 @@ export function MilestonesTab({ scopeRows, filters, onFilters, asOf, opportuniti
         { key: 'date', label: 'Milestone date', value: (row) => row.date, render: (row) => row.date ? isMilestonePastDue(row, asOf) ? <Pill tone="bad">{row.date}</Pill> : row.date : '—' },
         { key: 'comment', label: 'Milestone comment', value: (row) => row.comment, render: (row) => <CommentCell text={row.comment} /> },
         { key: 'owner', label: 'Owner', value: (row) => row.owner },
-        { key: 'open', label: 'Open in MSX', value: () => null, render: (row) => <OpenMilestone row={row} parent={opportunities.get(row.opportunityId)} /> }
+        { key: 'open', label: 'Open in MSX', value: () => null, render: (row) => <OpenMilestone row={row} parent={opportunities.get(row.opportunityId)} /> },
+        ...(actions ? [{
+            key: 'write', label: 'Actions', value: () => null,
+            render: (row: StagePipelineMilestone) => opportunities.get(row.opportunityId)?.editable
+                ? <span className="sprv-row-actions">
+                    <button type="button" aria-label={`Update milestone ${row.name}`} title="Update milestone" onClick={() => actions.onUpdate(row)}>✎</button>
+                    <button type="button" aria-label={`Create task for ${row.name}`} title="Create task" onClick={() => actions.onTask(row)}>＋</button>
+                </span>
+                : <span className="sprv-muted">read-only</span>
+        } satisfies ReviewColumn<StagePipelineMilestone>] : [])
     ]
     return <>
         <p className="sprv-muted">Milestones under the opportunities in the current scope (the top filters, scope and slicers apply). ACR = Est. change in monthly usage. Pick Milestone or Opportunity on a row, then click ↗ to open it in MSX.</p>

@@ -2,6 +2,7 @@ import { expect, test, _electron as electron, type Page } from '@playwright/test
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { expectHorizontalPaneScroll, expectPaneResizing } from '../pane-resizing.js'
 
 async function expectBoundedScrollablePanes(page: Page): Promise<void> {
     await page.setViewportSize({ width: 1366, height: 600 })
@@ -11,6 +12,11 @@ async function expectBoundedScrollablePanes(page: Page): Promise<void> {
     await opportunities.getByRole('button', { name: /^Grid operations modernization / }).click()
     const milestones = opportunities.getByRole('region', { name: 'Grid operations modernization milestones' })
     await expect(milestones).toContainText('Customer outcome validation')
+    await expectPaneResizing(page, page.getByRole('separator', { name: 'Resize Accounts blade', exact: true }), accounts)
+    await expectPaneResizing(page, page.getByRole('separator', { name: 'Resize Opportunities blade', exact: true }), opportunities)
+    await expectPaneResizing(page, page.getByRole('separator', { name: 'Resize Next best actions blade', exact: true }), page.getByRole('complementary', { name: 'Next best actions blade' }), true)
+    await expectHorizontalPaneScroll(opportunities.locator('.opportunity-table-wrap'))
+    await expectHorizontalPaneScroll(milestones)
 
     // Stress the layout with rendered canonical rows, without introducing a second sample dataset.
     await milestones.locator('tbody').evaluate((body) => {

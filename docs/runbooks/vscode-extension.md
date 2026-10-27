@@ -23,8 +23,10 @@ its reference overview is in the extension [README](../../apps/vscode-extension/
   no global install needed.
 
 Live mode additionally requires the Microsoft account signed into VS Code to have
-access to MSX and the configured Microsoft Foundry project. Sample mode needs none of
-this.
+access to MSX and the configured Microsoft Foundry project. Sample business data
+needs no MSX/Graph grant; SQLite sample AI uses Foundry-only sign-in by default.
+Set `tlc.aiMode=sample` for entirely offline AI. See
+[sample Foundry AI](sample-foundry-ai.md).
 
 ## One-command deploy (recommended)
 
@@ -204,6 +206,11 @@ up" confusion:
 Guidance:
 
 - To iterate quickly with breakpoints, keep using **F5**.
+- For a quieter Debug Console, select **Run TLC Assist Extension (isolated)**. Its
+  `--disable-extensions` argument disables other installed extensions only in the
+  development-host window, while TLC and built-in Microsoft authentication remain
+  available. It does not change TLC settings, storage, your normal editor, or the existing
+  integration-testing profiles. Remaining Node warnings are not suppressed.
 - To use the extension in your everyday editor without the debugger, use
   `npm run ext:reinstall:insiders`.
 - Avoid running both at once for the same editor: if the Extension Development Host and an
@@ -228,8 +235,9 @@ unknown outcomes remain recoverable with the original identity.
 See [defaults, live capability restrictions and recovery](../performance/performance-optimization.md#adaptive-freshness-and-confirmed-background-writes).
 Never add `unsafe-eval` or retain hidden webviews as a caching workaround.
 
-- `tlc.mode` (`sample` | `live`) — `sample` uses sanitized fixtures and makes no network
-  calls; `live` requires a delegated Microsoft identity with MSX and Foundry access.
+- `tlc.mode` (`sample` | `live`) — `sample` keeps business records local, with Foundry
+  AI by default for SQLite (`tlc.aiMode=sample` is fully offline); `live` requires a
+  delegated Microsoft identity with MSX and Foundry access.
 - `tlc.openOnStartup` — open the workbench automatically on activation.
 - `workbench.colorCustomizations` with `editorHoverWidget.*` — set in **user settings** to
   recolor native toolbar tooltips (the Extension Development Host does not load this repo's
@@ -245,3 +253,18 @@ Never add `unsafe-eval` or retain hidden webviews as a caching workaround.
 - **`vsce` packaging error about missing files** — run `npm run ext:build` first so
   `dist/` exists, then package.
 - **Live mode shows auth errors** — confirm VS Code is signed into the authorized Microsoft account, or switch `tlc.mode` to `sample`.
+- **Repeated browser sign-in / live data stops refreshing** — select **TLC: Use Live
+  Data** once to reconnect. Live MSX refreshes reuse the selected account silently;
+  a missing session reports that reconnection is required instead of reopening the
+  browser. Cancelled or failed live switches do not persist a new live-mode setting.
+  Concurrent requests for the same resource share one authentication attempt.
+  Foundry, reporting, knowledge search and Teams meetings can require separate
+  resource-specific consent; signing into a corporate account alone does not grant
+  MSX access or access to the configured Foundry project. If reconnecting still
+  fails, collect the first error/AADSTS code from **View > Output > TLC Assist**
+  and the **Microsoft Authentication** output channel, plus the installed VSIX
+  release tag and VS Code version. Do not share tokens or credentials.
+- **Sample Guidance shows a Foundry authentication fallback** — approve Microsoft
+  sign-in for **TLC Assist** and select an account with access to the configured
+  Foundry tenant, then retry Guidance. Sign-in is lazy and does not consume the
+  model timeout. See [sample Foundry AI](sample-foundry-ai.md).

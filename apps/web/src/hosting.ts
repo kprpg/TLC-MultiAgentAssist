@@ -2,8 +2,9 @@ import { readFile, stat } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { extname, resolve, sep } from 'node:path'
 import { voiceWorkerCsp, voiceWorkerFile } from '../../../scripts/voice-worker-assets.mjs'
+import type { InferenceMode } from '../../../packages/common/contracts/inference.js'
 
-export function buildStaticHandler(staticRoot: string, dataMode: 'live' | 'sample' = 'live', backgroundSync = false) {
+export function buildStaticHandler(staticRoot: string, dataMode: 'live' | 'sample' = 'live', backgroundSync = false, localExit = false, inferenceMode?: InferenceMode) {
     const resolvedRoot = resolve(staticRoot)
     return async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
         if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -30,7 +31,7 @@ export function buildStaticHandler(staticRoot: string, dataMode: 'live' | 'sampl
         if (filePath.endsWith('index.html')) {
             content = Buffer.from(content.toString('utf8').replace(
                 '</head>',
-                `    <meta name="tlc-data-mode" content="${dataMode}" />\n${backgroundSync ? '    <meta name="tlc-background-sync" content="1" />\n' : ''}  </head>`
+                `    <meta name="tlc-data-mode" content="${dataMode}" />\n    <meta name="tlc-ai-mode" content="${inferenceMode ?? 'sample'}" />\n    <meta name="tlc-local-exit" content="${localExit ? '1' : '0'}" />\n${backgroundSync ? '    <meta name="tlc-background-sync" content="1" />\n' : ''}  </head>`
             ))
             response.setHeader('cache-control', 'no-store')
         } else {

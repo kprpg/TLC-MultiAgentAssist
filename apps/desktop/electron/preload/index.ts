@@ -3,8 +3,13 @@ import type { Account, AccountCandidate, AccountListOptions, AccountSearchReques
 import type { WorkflowHostOperation } from '../../../../packages/orchestrator/workflows/index.js'
 import type { VoiceRequest, VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 import type { SellerDashboardRequest, SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
+import type { StagePipelineRequest, StagePipelineResponse } from '../../../../packages/common/contracts/stage-pipeline-review.js'
 import type { SeReportingRequest, SeReportingResponse } from '../../../../packages/common/contracts/se-reporting.js'
 import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest, type KnowledgeSearchResponse } from '../../../../packages/common/contracts/knowledge.js'
+import {
+  workingSessionOpenFolderRequestSchema, workingSessionPrepareRequestSchema, workingSessionResultSchema, workingSessionTopicRequestSchema, workingSessionTopicResponseSchema,
+  type WorkingSessionPrepareRequest, type WorkingSessionResult, type WorkingSessionTopicRequest, type WorkingSessionTopicResponse
+} from '../../../../packages/common/contracts/working-session.js'
 import type { DiscoverySnapshot, DiscoverySnapshotRequest, PortfolioReadRequest, PortfolioIndex, PortfolioWorkspaceRequest, PortfolioWorkspace } from '../../../../packages/common/contracts/index.js'
 import { agentTaskStreamEventSchema } from '../../../../packages/common/contracts/index.js'
 import {
@@ -14,14 +19,19 @@ import {
 
 export interface TlcDesktopApi {
   searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
+  deriveWorkingSessionTopic(request: WorkingSessionTopicRequest): Promise<WorkingSessionTopicResponse>
+  prepareWorkingSession(request: WorkingSessionPrepareRequest): Promise<WorkingSessionResult>
+  openWorkingSessionFolder(folderPath: string): Promise<void>
   invokeMutationSync(request: MutationSyncRequest): Promise<MutationSyncResponse>
   cacheControl(request: CacheControlRequest): Promise<CacheControlResponse>
   onCacheChanged(listener: (state: CacheReadState) => void): () => void
   invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
+  invokeStagePipelineReview(request: StagePipelineRequest): Promise<StagePipelineResponse>
   invokeSeReporting(request: SeReportingRequest): Promise<SeReportingResponse>
   invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
   exitApplication(): Promise<void>
   getDataStatus(): Promise<DesktopDataStatus>
+  getInferenceMode(): Promise<'sample' | 'foundry' | null>
   connectMcem(): Promise<AuthStatus>
   listAccounts(options?: AccountListOptions): Promise<Account[]>
   getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
@@ -64,6 +74,13 @@ export interface TlcDesktopApi {
 const api: TlcDesktopApi = {
   searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(
     await ipcRenderer.invoke('tlc:search-knowledge', knowledgeSearchRequestSchema.parse(request))),
+  deriveWorkingSessionTopic: async (request) => workingSessionTopicResponseSchema.parse(
+    await ipcRenderer.invoke('tlc:working-session-topic', workingSessionTopicRequestSchema.parse(request))),
+  prepareWorkingSession: async (request) => workingSessionResultSchema.parse(
+    await ipcRenderer.invoke('tlc:working-session-prepare', workingSessionPrepareRequestSchema.parse(request))),
+  openWorkingSessionFolder: async (folderPath) => {
+    await ipcRenderer.invoke('tlc:working-session-open', workingSessionOpenFolderRequestSchema.parse({ folderPath }))
+  },
   invokeMutationSync: async (request) => mutationSyncResponseSchema.parse(await ipcRenderer.invoke('tlc:mutation-sync', request)),
   cacheControl: async (request) => cacheControlResponseSchema.parse(await ipcRenderer.invoke('tlc:cache-control', request)),
   onCacheChanged: (listener) => {
@@ -72,10 +89,12 @@ const api: TlcDesktopApi = {
     return () => { ipcRenderer.removeListener('tlc:cache-changed', changed) }
   },
   invokeSellerDashboard: (request) => ipcRenderer.invoke('tlc:seller-dashboard', request),
+  invokeStagePipelineReview: (request) => ipcRenderer.invoke('tlc:stage-pipeline-review', request),
   invokeSeReporting: (request) => ipcRenderer.invoke('tlc:se-reporting', request),
   invokeVoice: (request) => ipcRenderer.invoke('tlc:voice-input', request),
   exitApplication: () => ipcRenderer.invoke('tlc:exit-application'),
   getDataStatus: () => ipcRenderer.invoke('tlc:get-data-status'),
+  getInferenceMode: () => ipcRenderer.invoke('tlc:get-inference-mode'),
   connectMcem: () => ipcRenderer.invoke('tlc:connect-mcem'),
   listAccounts: (options) => ipcRenderer.invoke('tlc:list-accounts', options),
   getPortfolioIndex: (request) => ipcRenderer.invoke('tlc:portfolio-index', request),

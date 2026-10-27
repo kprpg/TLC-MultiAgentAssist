@@ -1,0 +1,30 @@
+.working-session-launcher { position: relative; display: inline-block; }
+.working-session-button { white-space: nowrap; }
+.working-session-compact {
+  display: inline-flex; align-items: center; justify-content: center; width: 32px; min-width: 32px; height: 32px; padding: 0;
+  background: transparent; border: 0; border-radius: 4px; cursor: pointer;
+  color: var(--vscode-textLink-foreground, var(--colorBrandForeground1, #0f6cbd));
+}
+.working-session-compact:hover { background: var(--colorSubtleBackgroundHover, rgb(127 127 127 / 18%)); }
+.working-session-compact:focus-visible { outline: 2px solid var(--colorStrokeFocus2, currentColor); outline-offset: -2px; }
+.working-session-actions { display: inline-flex; align-items: center; gap: 6px; }
+.working-session-panel {
+  position: fixed; right: 16px; top: 72px; z-index: 1000; width: 400px; max-width: calc(100vw - 32px); max-height: calc(100vh - 96px); overflow: auto;
+  display: flex; flex-direction: column; gap: 8px; padding: 12px; text-align: left; font-size: 12px;
+  color: var(--vscode-foreground, var(--colorNeutralForeground1, inherit));
+  background: var(--vscode-editorWidget-background, var(--cp-surface, var(--colorNeutralBackground1, #fff)));
+  border: 1px solid var(--vscode-widget-border, var(--cp-border-strong, var(--colorNeutralStroke1, #d1d1d1)));
+  border-radius: 6px; box-shadow: 0 4px 16px rgb(0 0 0 / 30%);
+}
+.working-session-panel .actions { display: flex; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+.working-session-lead, .working-session-panel p, .working-session-panel h5 { margin: 0; }
+.working-session-muted { opacity: .8; }
+.working-session-error { color: var(--vscode-errorForeground, var(--cp-danger, var(--colorPaletteRedForeground1, #b10e1c))); }
+.working-session-field { display: flex; flex-direction: column; gap: 4px; }
+.working-session-field input, .working-session-field select, .working-session-field textarea { width: 100%; box-sizing: border-box; font: inherit; }
+.working-session-deliverables { display: grid; gap: 4px; margin: 0; padding: 6px 8px; border: 1px solid var(--vscode-widget-border, var(--cp-border, var(--colorNeutralStroke2, #e0e0e0))); }
+.working-session-deliverables label { display: flex; align-items: center; gap: 6px; }
+.working-session-group ul { margin: 4px 0 0; padding-left: 18px; }
+.working-session-group h5 { font-size: 12px; }
+.working-session-gaps { border-left: 3px solid var(--vscode-editorWarning-foreground, var(--colorPaletteDarkOrangeForeground1, #8a3700)); padding-left: 8px; }
+.working-session-advanced summary { cursor: pointer; margin-bottom: 4px; }

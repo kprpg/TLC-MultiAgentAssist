@@ -145,7 +145,7 @@ export function filterOpportunityViews(
         if (filters.focusOnly && !marks.focus.has(row.id)) return false
         if (filters.hideReviewed && marks.reviewed.has(row.id)) return false
         if (query) {
-            const haystack = [row.name, row.customer, row.contact, row.partner ?? '', row.notes, row.number].join('\n').toLowerCase()
+            const haystack = [row.name, row.customer, row.contact, row.partner ?? '', row.notes, row.number, row.owner].join('\n').toLowerCase()
             if (!haystack.includes(query)) return false
         }
         return true
@@ -253,45 +253,55 @@ export function milestoneStatusCounts(rows: readonly StagePipelineMilestone[]): 
 export interface AcrPoint {
     month: string
     label: string
-    actual: number
-    baseline: number
+    actual: number | null
+    baseline: number | null
     committed: number
     uncommitted: number
     stage1: number
-    target: number
+    target: number | null
     total: number
     lastActual: boolean
 }
 
 const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-export function acrSeries(acr: StagePipelineAcr, customer: string): { points: AcrPoint[]; accounts: number } {
+export function pollDue(input: { hidden: boolean; busy: boolean; loadedAt: number | null; now: number; intervalMs: number }): boolean {
+    return !input.hidden && !input.busy && input.loadedAt !== null && input.now - input.loadedAt >= input.intervalMs
+}
+
+export function acrConnected(source: StagePipelineAcr['source']): boolean {
+    return source === 'sample' || source === 'mint' || source === 'semantic-model'
+}
+
+export function acrSeries(acr: StagePipelineAcr, customer: string): { points: AcrPoint[]; accounts: number; connected: boolean } {
+    const connected = acrConnected(acr.source)
     const accounts = acr.accounts.filter((account) => !customer || account.customer === customer)
     const first = acr.accounts[0]
     const points = (first?.months ?? []).map((month, index) => {
         const sum = (key: 'actual' | 'baseline' | 'committed' | 'uncommitted' | 'stage1' | 'target') =>
             accounts.reduce((total, account) => total + (account.months[index]?.[key] ?? 0), 0)
+        const measured = (key: 'actual' | 'baseline' | 'target') => connected ? sum(key) : null
         const year = Number(month.month.slice(0, 4))
         const monthNumber = Number(month.month.slice(5, 7))
         const values = {
-            actual: sum('actual'), baseline: sum('baseline'), committed: sum('committed'),
-            uncommitted: sum('uncommitted'), stage1: sum('stage1'), target: sum('target')
+            actual: measured('actual'), baseline: measured('baseline'), committed: sum('committed'),
+            uncommitted: sum('uncommitted'), stage1: sum('stage1'), target: measured('target')
         }
         return {
             month: month.month,
             label: `FY${String((monthNumber >= 7 ? year + 1 : year) % 100).padStart(2, '0')}-${monthNames[monthNumber - 1] ?? ''}`,
             ...values,
-            total: values.actual + values.baseline + values.committed + values.uncommitted + values.stage1,
+            total: (values.actual ?? 0) + (values.baseline ?? 0) + values.committed + values.uncommitted + values.stage1,
             lastActual: month.month === acr.lastActualMonth
         }
     })
-    return { points, accounts: accounts.length }
+    return { points, accounts: accounts.length, connected }
 }
 
 export function acrCoverage(points: readonly AcrPoint[]) {
     const last = points.at(-1)
-    if (!last || last.target <= 0) return null
-    const base = last.actual + last.baseline
+    if (!last || last.target === null || last.target <= 0) return null
+    const base = (last.actual ?? 0) + (last.baseline ?? 0)
     const withCommitted = base + last.committed
     const withUncommitted = withCommitted + last.uncommitted
     const all = withUncommitted + last.stage1
@@ -327,10 +337,11 @@ export function toCsv(headers: readonly string[], rows: ReadonlyArray<ReadonlyAr
     return [headers, ...rows].map((line) => line.map(csvCell).join(',')).join('\r\n')
 }
 
-export function opportunityCsv(views: readonly OpportunityView[]): string {
+export function opportunityCsv(views: readonly OpportunityView[], options: { includeOwner?: boolean } = {}): string {
+    const owner = options.includeOwner === true
     return toCsv(
-        ['Customer', 'Opportunity', 'Number', 'Stage', 'Forecast', 'Close', 'Days to close', 'Consumed', 'Idle days', 'Partner', 'Competitor', 'Threat'],
-        views.map(({ row, consumed, daysToClose }) => [row.customer, row.name, row.number, row.stage, row.forecast, row.closeDate, daysToClose, consumed, row.idleDays, row.partner, row.competitor.name, row.competitor.threat])
+        ['Customer', ...(owner ? ['Owner'] : []), 'Opportunity', 'Number', 'Stage', 'Forecast', 'Close', 'Days to close', 'Consumed', 'Idle days', 'Partner', 'Competitor', 'Threat'],
+        views.map(({ row, consumed, daysToClose }) => [row.customer, ...(owner ? [row.owner] : []), row.name, row.number, row.stage, row.forecast, row.closeDate, daysToClose, consumed, row.idleDays, row.partner, row.competitor.name, row.competitor.threat])
     )
 }
 

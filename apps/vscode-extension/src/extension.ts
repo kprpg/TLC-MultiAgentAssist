@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs'
 import { createLocalStoreDataProvider, createSampleDataProvider, type ExtensionDataProvider } from './data-provider.js'
 import { configuredFoundryTenantId, createLiveDataProvider } from './live-provider.js'
 import { WorkbenchPanel } from './webview-controller.js'
-import { acquireDelegatedToken, createVsCodeTokenCredential } from './authentication.js'
+import { acquireDelegatedToken, acquireMicrosoftSession, createDelegatedTokenProvider, createVsCodeTokenCredential } from './authentication.js'
 import { ConnectionTreeProvider, PlaysTreeProvider, PortfolioTreeProvider, type PortfolioNode } from './tree/trees.js'
 import { McpHttpClient } from '../../../packages/connectors/mcp/index.js'
 import { createRemoveCustomerAction } from './customer-removal.js'
@@ -14,6 +14,8 @@ import { createMutationSession } from '../../../packages/orchestrator/mutations/
 import { MutationSyncClient } from '../../shared/mutation-sync.js'
 import { accountSchema } from '../../../packages/common/contracts/index.js'
 import { seismicGraphScopes } from '../../../packages/common/configuration/knowledge-sources.js'
+import { meetingScopesFor, type MeetingTokenPurpose } from '../../../packages/common/configuration/meeting-sources.js'
+import { meetingSignInFailure } from '../../../packages/connectors/common/meeting-source.js'
 
 let disposeCurrentProvider: (() => Promise<void>) | undefined
 
@@ -130,7 +132,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // Sample data source: the in-memory fixtures, or the persistent SQLite test store when
     // `tlc.dataStore` is `sqlite` (or TLC_DATA_STORE=sqlite). Live mode is unaffected.
     const useLocalStore = (): boolean =>
-        vscode.workspace.getConfiguration('tlc').get<'fixture' | 'sqlite'>('dataStore', 'fixture') === 'sqlite'
+        vscode.workspace.getConfiguration('tlc').get<'fixture' | 'sqlite'>('dataStore', 'sqlite') === 'sqlite'
         || (process.env['TLC_DATA_STORE'] ?? '').toLowerCase() === 'sqlite'
     // Reflect the meeting-extractor settings into the environment the providers read, unless the
     // environment already pins them (e.g. an F5 launch config). `foundry` sends transcripts to a
@@ -146,7 +148,12 @@ export function activate(context: vscode.ExtensionContext): void {
     }
     const foundryTenantId = configuredFoundryTenantId()
     const foundryCredential = foundryTenantId ? createVsCodeTokenCredential(foundryTenantId) : undefined
+    const pinnedAiMode = process.env['TLC_AI_MODE']?.trim()
+    const syncInferenceMode = () => {
+        process.env['TLC_AI_MODE'] = pinnedAiMode || vscode.workspace.getConfiguration('tlc').get<string>('aiMode', 'foundry')
+    }
     const makeSampleProvider = (): ExtensionDataProvider => {
+        syncInferenceMode()
         syncMeetingExtractionEnv()
         if (useLocalStore()) {
             try {
@@ -158,6 +165,9 @@ export function activate(context: vscode.ExtensionContext): void {
                 // Older VS Code runtimes may lack node:sqlite; make the no-write fallback explicit.
                 void vscode.window.showWarningMessage(`TLC Assist could not open the SQLite test store (${error instanceof Error ? error.message : String(error)}). Using in-memory fixtures; record creation is draft-only until SQLite is available.`)
             }
+        }
+        if (process.env['TLC_AI_MODE'] === 'foundry') {
+            void vscode.window.showWarningMessage('Fixture mode uses offline AI. Select the SQLite data store to use real Foundry inference with sample records.')
         }
         return createSampleDataProvider()
     }
@@ -347,15 +357,14 @@ export function activate(context: vscode.ExtensionContext): void {
     }
 
     // Async because live mode acquires a delegated token before building the provider.
-    const applyMode = async (target: 'sample' | 'live'): Promise<void> => {
+    const applyMode = async (target: 'sample' | 'live'): Promise<boolean> => {
         if (target === 'sample') {
             if (provider.mode !== 'sample') swapProvider(makeSampleProvider())
-            return
+            return true
         }
         try {
             const resource = dynamicsResource()
-            const { account } = await acquireDelegatedToken(resource, true)
-            const tokenProvider = async (): Promise<string> => (await acquireDelegatedToken(resource, true)).token
+            const { account, getToken: tokenProvider } = await createDelegatedTokenProvider(resource)
             syncMeetingExtractionEnv()
             swapProvider(createLiveDataProvider(tokenProvider, account, (info) => {
                 output.appendLine(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? 'required' : 'optional'} failed: ${info.message}`)
@@ -369,23 +378,35 @@ export function activate(context: vscode.ExtensionContext): void {
                 if (granted.account.toLowerCase() !== account.toLowerCase()) throw new Error('The reporting source account must match the TLC account.')
                 return granted.token
             }, async () => {
-                const session = await vscode.authentication.getSession('microsoft', [...seismicGraphScopes], { createIfNone: true })
+                const session = await acquireMicrosoftSession(seismicGraphScopes, true)
                 if (!session || session.account.label.toLowerCase() !== account.toLowerCase()) {
                     throw new Error('The Seismic Graph session must match the TLC account.')
                 }
                 return session.accessToken
+            }, async (purpose: MeetingTokenPurpose) => {
+                const purposeScopes = (value: MeetingTokenPurpose) => [...meetingScopesFor(value)]
+                let session: vscode.AuthenticationSession | undefined
+                try {
+                    session = await acquireMicrosoftSession(purposeScopes(purpose), true)
+                } catch (error) { throw meetingSignInFailure(error) }
+                if (!session || session.account.label.toLowerCase() !== account.toLowerCase()) {
+                    throw meetingSignInFailure(`the Microsoft account used for Teams meetings (${session?.account.label ?? 'none'}) is not the TLC account`)
+                }
+                return session.accessToken
             }))
             void vscode.window.showInformationMessage(`TLC Assist is now using live data for ${account} (MSX OData + Dataverse MCP).`)
+            return true
         } catch (error) {
             const detail = error instanceof Error ? error.message : String(error)
             if (provider.mode !== 'sample') swapProvider(makeSampleProvider())
             void vscode.window.showErrorMessage(`TLC Assist could not switch to live data: ${detail}. Staying on sample data.`)
+            return false
         }
     }
 
     // Switch immediately (with feedback) and persist the choice; the listener stays idempotent.
     const setMode = async (mode: 'sample' | 'live'): Promise<void> => {
-        await applyMode(mode)
+        if (!(await applyMode(mode))) return
         const target = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0
             ? vscode.ConfigurationTarget.Workspace
             : vscode.ConfigurationTarget.Global
@@ -434,7 +455,7 @@ export function activate(context: vscode.ExtensionContext): void {
                 else void applyMode('live')
                 return
             }
-            if (event.affectsConfiguration('tlc.dataStore') && readMode() === 'sample') {
+            if ((event.affectsConfiguration('tlc.dataStore') || event.affectsConfiguration('tlc.aiMode')) && readMode() === 'sample') {
                 swapProvider(makeSampleProvider())
                 return
             }

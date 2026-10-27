@@ -97,6 +97,11 @@ The TLC Assist view is organized into these tabs:
 - **Discover** — browse Solution Engineer domains and join or leave opportunity Deal Teams.
 - **Portfolio** — your accounts, opportunities, milestones, MSX evidence, and the four guidance agents, with **Email** and **Word** export on every agent response.
 - **Plays** — the operational Plays catalog in the left rail (ordered by workflow number) and the Operational Queue of results. Each queue item can be dispatched to an agent — for example **Send to Pursuit** or **Send to Risk & Play** — and the returned response can be exported with **Email** or **Word**, just like Portfolio guidance.
+  Live results appear as pages arrive, with an explicit incomplete/loading message.
+  Wait for the run to finish before sending an item to an agent. A partial result
+  (including the 100-row live read limit) is not complete portfolio coverage.
+  Plays allow up to 60 seconds for execution; a failure or cancellation never
+  marks already displayed partial rows as completed.
 - **Seller Dashboard** — a separate, read-only four-section performance report with fixed official attainment, account gaps, pipeline hygiene, consumption and U2C evidence. It adds no financial export/sharing controls; unavailable live sources remain unknown. See the [Seller Dashboard guide](SELLER-DASHBOARD.md) for filters, methodology and protected local-live setup.
 - **Stage and Pipeline Review** — a second Dashboards tab: consumption opportunities by stage with scope toggles, filters, alert cards, an ACR Actuals and Outlook chart and a milestone view. Read-only and currently sample-data only; see the [Stage and Pipeline Review guide](STAGE-PIPELINE-REVIEW.md).
 - **SE Reporting Dashboard** — a sibling under **Dashboards** for manager-scoped monthly pod reports: live-contract/profile setup, verified assignments, draft generation, reporter-owned asks, and reviewed JSON/HTML output. It does not change Seller Dashboard or CRM records. See the [SE Reporting Dashboard guide](SE-REPORTING-DASHBOARD.md).
@@ -168,6 +173,23 @@ $env:TLC_DATA_MODE = 'sample'
 ```
 
 Sample mode loads bundled sanitized data and opens the workspace directly without displaying a login dialog.
+
+## Resize Portfolio panes and scroll wide content
+
+In VS Code, Desktop, Web, and Teams, drag the **three-dot grip** between visible
+Portfolio panes to change their widths. A blue vertical line appears on hover,
+keyboard focus, and while dragging. Focus a divider and use **Left/Right Arrow**
+to adjust it, **Shift+Arrow** for larger steps, or **Home/End** for its limits.
+Double-click the divider to restore its default width.
+
+Existing show/hide controls still work, and Teams keeps unsent drafts when a pane
+is hidden. Dividers disappear when the layout stacks on a narrow screen.
+Desktop/Web retain their existing saved blade widths; VS Code and Teams keep
+widths for the current mounted Portfolio workspace.
+
+Wide tables and pane content have a **horizontal scrollbar at the bottom** when
+needed. Drag the scrollbar to reach off-screen columns; this scrolls content
+without changing pane height or selected records.
 
 ## New Opportunity and Milestone creation
 
@@ -342,10 +364,16 @@ The workspace is organized into vertical *blades*:
 | **Next best actions rail** (right) | Role-based prioritized next steps derived from the opportunity's stage, exit-criteria evidence, and milestone health (status and customer commitment). |
 
 Use the collapse arrows in the blade headers to make room for the center workbench.
+Desktop, Web, the VS Code webview, and Teams provide the square-corner
+**Maximize Guidance pane** control at the top right of the opportunity workbench.
+It temporarily hides the surrounding panes; **Restore Guidance pane** brings them
+back with their previous widths and visibility settings. The selected opportunity,
+Guidance responses, and unsent questions stay in place. The control also works with
+the Overview/MSX and MCEM stage tabs.
+
 In Desktop and Web, the Guidance toolbar stays visible while its content scrolls.
-**Maximize Guidance pane** temporarily hides the surrounding blades; **Restore Guidance pane**
-brings them back with their previous widths and collapse states. **Collapse Guidance pane**
-reduces the workbench to a narrow strip; use **Expand Guidance pane** to reopen it.
+**Collapse Guidance pane** reduces the workbench to a narrow strip; use
+**Expand Guidance pane** to reopen it.
 
 The Desktop window opens within the display's usable work area, leaving the operating-system
 taskbar accessible. Desktop and Web keep the workspace within the current viewport; scroll
@@ -624,7 +652,7 @@ Every agent response follows the same contract:
 - Explicit assumptions and cautions — anything the agent could not confirm from the current evidence.
 - Citations to the underlying MSX/MCEM evidence items.
 
-Desktop, Web, and the VS Code webview display section headings, bold field labels,
+Desktop, Web, Teams, and the VS Code webview display section headings, bold field labels,
 lists, and tables consistently, including numbered or plain-text section labels.
 When a response ends with an offer such as "Would you like me to convert this into
 an email?", **Suggested follow-ups** provides a clickable button. Selecting it sends
@@ -637,6 +665,26 @@ opportunity.
 For a feedback question that needs your input, choose **Reply to feedback**, enter
 your answer or requested adjustment, and select **Send reply to agent**. No answer is
 chosen on your behalf; your reply is sent with the preceding response as context.
+
+Completed customer-email drafts with a **Subject:** line also have their own **E-mail**
+and **Copy** buttons at the top right of the response, above the draft text, including
+drafts returned by a follow-up. The buttons appear only at the top, not below the draft:
+
+- Email-draft follow-ups retain these actions even when the reply uses a different
+  heading, such as **Follow-up for the sponsor**, or presents the email in a blockquote.
+- **Copy** puts the email subject and plain-text body on the clipboard, ready to paste
+  into your mail client.
+- **E-mail** prepares an **unsent** draft using that email's subject and body, not the
+  original guidance response. VS Code asks for recipients through its existing native
+  prompt. Desktop, Web, and Teams show recipient and subject fields; select
+  **Prepare unsent draft** to open it on Desktop or download the `.eml` on Web/Teams.
+
+Later internal assumptions, source summaries, and suggested-follow-up sections are not
+included in the extracted email. They remain visible in the response: review them,
+verify customer-facing facts and recipients, and edit the draft before sending.
+These buttons are unavailable while that response is still streaming. Clipboard or
+draft-preparation failures are shown explicitly; nothing is sent automatically or
+saved to browser storage.
 
 Follow-ups require an explicit click; they never send an email or update MSX.
 Buttons are disabled while a response is being generated. Use **Cancel follow-up**
@@ -689,6 +737,16 @@ of **Follow-up > Proposed meeting changes**. The export includes the proposed fi
 new milestones and other signals, plus the evidence attribution and a reminder that the
 suggestions have not been applied. Downloading a document or email draft does not approve
 or apply any MSX changes.
+
+**Keeping results while navigating.** Meeting Capture extraction and Working Session work
+continue when you switch opportunities or views. Reopen the original launcher to recover
+its pending state or latest result; Meeting Capture offers **Review last result** rather
+than opening a review in another opportunity. Restoring does not run the operation again.
+The UI remembers up to 20 completed results in memory and never evicts active work.
+Refresh, restart, webview recreation and private-session/data-mode/access resets clear
+this memory. A meeting proposal is no longer offered as a retained review once explicit
+**Submit** begins. Generated files and hosted download expiry are unchanged; see
+[Working Session retention and output limits](../runbooks/working-session.md#session-only-result-retention).
 
 ---
 

@@ -29,7 +29,7 @@ import {
   Warning20Filled
 } from '@fluentui/react-icons'
 import type { Account, AgentCapability, AgentTaskResponse, CustomerCommitment, DiscoverableOpportunity, McemResponse, Milestone, MilestoneActivity, MilestoneStatus, MilestoneUpdate, Opportunity, ScopeRef, SeDomainId, TaskCategory, WorkflowDefinition, WorkflowRun } from '../../../../packages/common/index.js'
-import { contractVersion, taskCategorySchema, workflowContractVersion } from '../../../../packages/common/contracts/index.js'
+import { contractVersion, emailComposeRequestSchema, taskCategorySchema, workflowContractVersion } from '../../../../packages/common/contracts/index.js'
 import { seDomainList } from '../../../../packages/common/configuration/se-domains.js'
 import { addMsxOpportunityLink } from '../../../../packages/common/sharing/opportunity-link.js'
 import { agentCapabilities } from '../../../../packages/common/types/agent-capabilities.js'
@@ -37,6 +37,8 @@ import type { InitialWorkflowOutput } from '../../../../packages/orchestrator/wo
 import workflowDescriptions from '../../../../config/workflow-descriptions.json'
 import { createDataClient, stageOwner, type RevampDataClient } from './data-client.js'
 import { MeetingCaptureLauncher } from './meeting-capture.js'
+import { InferenceModeBadge } from '../../../shared/inference-status.js'
+import { WorkingSessionLauncher } from '../../../shared/working-session/working-session-launcher.js'
 import { suggestedPrompts } from './prompt-catalog.js'
 import { formatResponseMarkdown } from './response-markdown.js'
 import { sortOpportunities, type OpportunitySort, type SortDirection } from './opportunity-sort.js'
@@ -61,7 +63,11 @@ import { WorkbenchPane } from './workbench-pane.js'
 import { SourceSyncStatus } from '../../../shared/sync-status.js'
 import { usePresentationSession } from '../../../shared/presentation-hooks.js'
 import { useAgentRun, type AgentInvoke } from '../../../shared/use-agent-run.js'
+import { pollWorkflow } from '../../../shared/workflow-polling.js'
+import { WorkflowProgress } from '../../../shared/workflow-progress.js'
 import { AgentResponse } from '../../../shared/agent-response.js'
+import { PaneResizeHandle } from '../../../shared/pane-resize-handle.js'
+import type { CustomerEmailAction } from '../../../shared/customer-email.js'
 
 type Shell = 'desktop' | 'web'
 type WorkspaceView = 'accounts' | 'workflows' | 'discover' | 'dashboard' | 'new'
@@ -150,51 +156,16 @@ function loadBladeWidths(): BladeWidths {
 }
 
 function BladeResizeHandle({ blade, label, edge, width, onResize }: { blade: Blade; label: string; edge: 'start' | 'end'; width: number; onResize(width: number): void }) {
-  const drag = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null)
   const limits = bladeWidthLimits[blade]
-
-  function resize(nextWidth: number) {
-    onResize(Math.min(limits.max, Math.max(limits.min, nextWidth)))
-  }
-
-  function finishResize(event: React.PointerEvent<HTMLDivElement>) {
-    if (drag.current?.pointerId !== event.pointerId) return
-    drag.current = null
-    document.body.classList.remove('resizing-blade')
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
-  }
-
-  return <div
-    className={`blade-resize-handle ${edge}`}
-    role="separator"
-    aria-label={`Resize ${label}`}
-    aria-orientation="vertical"
-    aria-valuemin={limits.min}
-    aria-valuemax={limits.max}
-    aria-valuenow={Math.round(width)}
-    tabIndex={0}
-    title={`Drag to resize ${label}. Double-click to reset.`}
-    onDoubleClick={() => resize(defaultBladeWidths[blade])}
-    onKeyDown={(event) => {
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-      event.preventDefault()
-      const dividerDelta = event.key === 'ArrowRight' ? 10 : -10
-      resize(width + (edge === 'end' ? dividerDelta : -dividerDelta))
-    }}
-    onPointerDown={(event) => {
-      if (event.button !== 0) return
-      drag.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: width }
-      event.currentTarget.setPointerCapture(event.pointerId)
-      document.body.classList.add('resizing-blade')
-      event.preventDefault()
-    }}
-    onPointerMove={(event) => {
-      if (drag.current?.pointerId !== event.pointerId) return
-      const dividerDelta = event.clientX - drag.current.startX
-      resize(drag.current.startWidth + (edge === 'end' ? dividerDelta : -dividerDelta))
-    }}
-    onPointerUp={finishResize}
-    onPointerCancel={finishResize}
+  return <PaneResizeHandle
+    className="blade-resize-handle"
+    label={label}
+    edge={edge}
+    width={width}
+    minWidth={limits.min}
+    maxWidth={limits.max}
+    defaultWidth={defaultBladeWidths[blade]}
+    onResize={onResize}
   />
 }
 
@@ -216,6 +187,15 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
   const invokeAgent: AgentInvoke = (agentCapability, accountId, opportunityId, prompt, onProgress, signal) => client.runAgentTaskStream
       ? client.runAgentTaskStream(agentCapability, accountId, opportunityId, prompt, onProgress, signal)
       : client.runAgentTask(agentCapability, accountId, opportunityId, prompt)
+  const customerEmailAction: CustomerEmailAction = {
+    kind: 'recipients',
+    compose: async (draft, recipients) => {
+      await client.openEmailCompose(emailComposeRequestSchema.parse({
+        contractVersion, recipients, subject: draft.subject, responseTitle: draft.subject, responseMarkdown: draft.markdown
+      }))
+      return client.mode === 'desktop' ? 'opened' : 'downloaded'
+    }
+  }
   const { agentResult, setAgentResult, agentLoading, setAgentLoading, agentPhase, runAgent, cancelAgent } = useAgentRun(invokeAgent)
   const [emailDialogOpen, setEmailDialogOpen] = useState(false)
   const [emailRecipients, setEmailRecipients] = useState('')
@@ -396,18 +376,18 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
     if (!scope) return
     setWorkflowError('')
     try {
-      let run = await client.startWorkflow({ contractVersion: workflowContractVersion, workflowId: definition.id, scope, input: workflowInput(definition.id) })
-      let output: InitialWorkflowOutput | undefined
+      const run = await client.startWorkflow({ contractVersion: workflowContractVersion, workflowId: definition.id, scope, input: workflowInput(definition.id) })
       setActiveWorkflowRun(run)
-      while (run.status === 'queued' || run.status === 'running') {
-        await new Promise((resolve) => window.setTimeout(resolve, 150))
-        const view = await client.getWorkflowRun(run.runId)
-        run = view.run
-        output = view.output
-        setActiveWorkflowRun(run)
-      }
       setSelectedWorkflowRun(run)
-      setSelectedWorkflowOutput(output ?? null)
+      setSelectedWorkflowOutput(null)
+      const view = await pollWorkflow(() => client.getWorkflowRun(run.runId), definition.sla.timeoutMs,
+        (update) => {
+          setActiveWorkflowRun(update.run)
+          setSelectedWorkflowRun(update.run)
+          setSelectedWorkflowOutput(update.output ?? null)
+        })
+      setSelectedWorkflowRun(view.run)
+      setSelectedWorkflowOutput(view.output ?? null)
       setWorkflowRuns(await client.listWorkflowRuns(scope, 12))
     } catch (cause) {
       setWorkflowError(cause instanceof Error ? cause.message : 'The workflow could not be run.')
@@ -1191,12 +1171,12 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         onSelect={chooseSearchResult} />
       <div className="command-actions">
         <button className="dashboard-mobile-entry" aria-label="Open Dashboards" title="Dashboards" onClick={() => setWorkspaceView('dashboard')}><DataBarVertical20Regular /></button>
-        <span className="mode-badge">{modeLabel}</span>
+        <InferenceModeBadge label={modeLabel} load={client.getInferenceMode} />
         <FeedbackButton onOpenIssue={client.openEvidence} />
         <button className="profile-button" title="Signed-in user" aria-label="Signed-in user"><Person20Regular /></button>
-        <Button appearance="subtle" className="text-action" icon={<Power20Regular />} disabled={exiting} onClick={() => void exitApplication()} aria-label="Exit application" title="Exit application">
+        {client.canExitApplication !== false && <Button appearance="subtle" className="text-action" icon={<Power20Regular />} disabled={exiting} onClick={() => void exitApplication()} aria-label="Exit application" title="Exit application">
           <span className="exit-label">{exiting ? 'Exiting' : 'Exit'}</span>
-        </Button>
+        </Button>}
       </div>
     </header>
     <SourceSyncStatus client={client} showReads={['accounts', 'discover', 'new'].includes(workspaceView)} />
@@ -1236,7 +1216,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           ...refreshedOpportunities
         ])
       }} />}
-      {workspaceView === 'dashboard' && <DashboardWorkspace invokeSellerDashboard={client.invokeSellerDashboard} invokeSeReporting={client.invokeSeReporting} sourceSession={client.cacheSession} />}
+      {workspaceView === 'dashboard' && <DashboardWorkspace invokeSellerDashboard={client.invokeSellerDashboard} invokeStagePipelineReview={client.invokeStagePipelineReview} stagePipelineWrites={client} invokeSeReporting={client.invokeSeReporting} sourceSession={client.cacheSession} />}
 
       {workspaceView === 'accounts' && <>
       <section className={`blade account-blade ${collapsed.has('accounts') ? 'collapsed' : ''} ${mobileBlade === 'accounts' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('accounts') ? undefined : bladeWidths.accounts }} aria-label="Accounts blade">
@@ -1244,7 +1224,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           <AddCustomerButton client={client} onAdded={customerAdded} className="icon-button"><Add20Regular /></AddCustomerButton>
           <RemoveCustomerButton client={client} onRemoved={customerRemoved} className="icon-button"><Subtract20Regular /></RemoveCustomerButton>
         </>} onRefresh={() => void refreshAccounts('', true)} onToggle={() => toggleBlade('accounts')} />
-        {!collapsed.has('accounts') && <div className="blade-body">
+        {!collapsed.has('accounts') && <div className="blade-body pane-scroll">
           {!opportunity && error && <MessageBar intent="error" role="alert">{error}</MessageBar>}
           <p className="blade-intro">Choose an account to open its active opportunities.</p>
           <div className="account-list">
@@ -1291,6 +1271,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       {account && <section className={`blade opportunity-blade ${collapsed.has('opportunities') ? 'collapsed' : ''} ${opportunitiesFillAvailableSpace ? 'fill-available-space' : ''} ${mobileBlade === 'opportunities' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('opportunities') || opportunitiesFillAvailableSpace ? undefined : bladeWidths.opportunities }} aria-label="Opportunities blade">
         <BladeHeader title="Opportunities" subtitle={account.name} collapsed={collapsed.has('opportunities')} refreshing={loading} actions={<>
           {opportunity && <MeetingCaptureLauncher client={client} opportunityId={opportunity.id} opportunityName={opportunity.name} milestones={milestones} onApplied={() => void refreshOpportunityContext()} onNote={setError} />}
+          {opportunity && <WorkingSessionLauncher compact client={client} opportunity={opportunity} milestones={milestones} onNote={setError} />}
           <Menu checkedValues={{ opportunitySort: [opportunitySort] }} positioning="below-end">
             <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button" icon={<ArrowSort20Regular />} aria-label="Sort opportunities" title={`Sort opportunities by ${opportunitySort === 'closeDate' ? 'Close Date' : opportunitySort === 'stage' ? 'Stage' : 'Value'} (${opportunitySortDirection})`} /></MenuTrigger>
             <MenuPopover><MenuList aria-label="Sort opportunities by">
@@ -1302,7 +1283,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         </>} onRefresh={() => void refreshOpportunities()} onToggle={() => toggleBlade('opportunities')} onClose={closeOpportunities} />
         {!collapsed.has('opportunities') && <div className="blade-body opportunity-table-shell" aria-label={`${account.name} opportunities and milestones`}>
           {!loading && sortedOpportunities.length === 0 && <MessageBar intent="info">This account is in your account list but has no opportunities where you are currently a Deal Team member. Use Discovery to add yourself.</MessageBar>}
-          <div className="opportunity-table-wrap">
+          <div className="opportunity-table-wrap pane-scroll">
             <table className="record-table opportunity-record-table" aria-label={`${account.name} opportunities`}>
               <thead>
                 <tr>
@@ -1352,7 +1333,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
             <div className="record-editor-actions"><Button disabled={savingEdit} onClick={() => setOpportunityCommentsOpen(false)}>Cancel</Button><Button appearance="primary" disabled={savingEdit} onClick={() => void saveOpportunityComments()}>{savingEdit ? 'Saving...' : 'Save'}</Button></div>
           </div>}
 
-          {opportunity && expandedOpportunityId === opportunity.id && <div ref={milestonePanelRef} id={`opportunity-milestones-${opportunity.id}`} className="milestone-table-wrap" role="region" aria-label={`${opportunity.name} milestones`}>
+          {opportunity && expandedOpportunityId === opportunity.id && <div ref={milestonePanelRef} id={`opportunity-milestones-${opportunity.id}`} className="milestone-table-wrap pane-scroll" role="region" aria-label={`${opportunity.name} milestones`}>
             <div className="milestone-tree-header">
               <span>Milestones</span>
               <div className="milestone-tree-actions">
@@ -1522,9 +1503,9 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
                 </div>
               </header>
               {shareMessage && <MessageBar intent={shareStatus === 'error' ? 'error' : 'success'}>{shareMessage}</MessageBar>}
-              <AgentResponse key={agentResult.correlationId} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'}
+              <AgentResponse key={agentResult.correlationId} inference={agentResult.inference} content={agentResult.content} busy={agentLoading || agentResult.agentVersion === 'streaming'}
                 followUp={account ? { capability: agentResult.capability, accountId: account.id, opportunityId: opportunity.id, invoke: invokeAgent } : undefined}
-                onOpenEvidence={client.openEvidence} />
+                emailAction={customerEmailAction} onOpenEvidence={client.openEvidence} />
             </article> : !agentLoading && <div className="empty-state compact">Choose a suggested prompt or ask a different question.</div>}
           </div>}
           {!loading && centerTab === 'stages' && <div className="mcem-board-shell">
@@ -1630,7 +1611,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       {opportunity && actionsOpen && <aside className={`blade action-blade ${collapsed.has('actions') ? 'collapsed' : ''} ${mobileBlade === 'actions' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('actions') ? undefined : bladeWidths.actions }} aria-label="Next best actions blade">
         {!collapsed.has('actions') && <BladeResizeHandle blade="actions" label="Next best actions blade" edge="start" width={bladeWidths.actions} onResize={(width) => resizeBlade('actions', width)} />}
         <BladeHeader title="Next best actions" subtitle="Role based" collapsed={collapsed.has('actions')} refreshing={loading} onRefresh={() => void refreshOpportunityContext()} onToggle={() => toggleBlade('actions')} onClose={() => { setActionsOpen(false); setMobileBlade('center') }} />
-        {!collapsed.has('actions') && <div className="blade-body action-list">
+        {!collapsed.has('actions') && <div className="blade-body action-list pane-scroll">
           {result?.recommendations.map((item, index) => <article key={item.id} className="action-item">
             <div className="action-meta"><span>{index + 1}</span><b>{item.ownerRole}</b></div>
             <h3>{item.action}</h3><p>{item.rationale}</p><small>{item.confidence} confidence · {item.evidenceIds.length} citations</small>
@@ -1664,11 +1645,11 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
 
         <div className="workflow-workspace">
         <div className="workflow-main">
-        {activeWorkflowRun && <div className={`workflow-run-state ${activeWorkflowRun.state ?? activeWorkflowRun.status}`} role="status">
-          <div><strong>{activeWorkflowRun.workflowId}</strong><span>{activeWorkflowRun.state ?? activeWorkflowRun.status}</span></div>
-          <p>{activeWorkflowRun.state === 'complete' && 'Workflow completed with all required sources.'}{activeWorkflowRun.state === 'partial' && 'Workflow completed with partial source coverage.'}{activeWorkflowRun.state === 'unauthorized' && 'Your delegated access does not include a required source or scope.'}{activeWorkflowRun.status === 'cancelled' && 'Workflow run cancelled.'}{(activeWorkflowRun.status === 'queued' || activeWorkflowRun.status === 'running') && 'Workflow is running against the selected scope.'}</p>
+        {activeWorkflowRun && <WorkflowProgress run={activeWorkflowRun}
+          itemCount={selectedWorkflowRun?.runId === activeWorkflowRun.runId ? selectedWorkflowOutput?.queueItems.length : undefined}
+          sourceHealth={selectedWorkflowRun?.runId === activeWorkflowRun.runId ? selectedWorkflowOutput?.sourceHealth : undefined}>
           {(activeWorkflowRun.status === 'queued' || activeWorkflowRun.status === 'running') && <Button onClick={() => void cancelWorkflow()}>Cancel run</Button>}
-        </div>}
+        </WorkflowProgress>}
         {workflowError && <MessageBar intent="error">{workflowError}</MessageBar>}
         {workflowLoading && <Spinner label="Loading workflow definitions" />}
         {!workflowLoading && filteredWorkflowDefinitions.length === 0 && <div className="empty-state compact">No workflows match this scope and filter set.</div>}
@@ -1680,8 +1661,9 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           guidanceLabel={agentCapabilities.find(({ id }) => id === workflowGuidanceCapability(selectedWorkflowOutput.workflowId))?.label ?? 'Guidance'}
           guidanceResults={workflowGuidanceResults}
           invokeAgent={invokeAgent}
+          emailAction={customerEmailAction}
           onOpenEvidence={client.openEvidence}
-          onSendGuidance={sendWorkflowToGuidance}
+          onSendGuidance={selectedWorkflowRun?.status === 'completed' ? sendWorkflowToGuidance : undefined}
         />}
 
         <div className="workflow-grid">
@@ -1860,6 +1842,7 @@ function WorkflowResult({
   guidanceLabel,
   guidanceResults,
   invokeAgent,
+  emailAction,
   onOpenEvidence,
   onSendGuidance
 }: {
@@ -1869,6 +1852,7 @@ function WorkflowResult({
   guidanceLabel: string
   guidanceResults: Readonly<Record<string, AgentTaskResponse>>
   invokeAgent: AgentInvoke
+  emailAction: CustomerEmailAction
   onOpenEvidence: (url: string) => void | Promise<void>
   onSendGuidance?: (queueItemId: string) => void
 }) {
@@ -1886,9 +1870,9 @@ function WorkflowResult({
         <article><span className={`priority ${item.priority.toLowerCase()}`}>{item.priority}</span><div><strong>{item.title}</strong><p>{item.owner ?? 'Unassigned'}{item.dueDate ? ` · Due ${item.dueDate}` : ''}</p></div>{onSendGuidance && item.accountId && item.opportunityId && <Button appearance="subtle" className="text-action" icon={<Sparkle20Regular />} disabled={guidanceLoading !== null} onClick={() => onSendGuidance(item.id)}>{guidanceLoading === item.id ? 'Sending…' : `Send to ${guidanceLabel}`}</Button>}</article>
         {guidanceResult && <section className="workflow-guidance-result" aria-label={`${guidanceLabel} result for ${item.title}`}>
           <header><div><p className="eyebrow">{guidanceLabel}</p><strong>Workflow follow-up</strong></div><span>Agent {guidanceResult.agentVersion}</span></header>
-          <AgentResponse key={guidanceResult.correlationId} content={guidanceResult.content}
+          <AgentResponse key={guidanceResult.correlationId} inference={guidanceResult.inference} content={guidanceResult.content}
             followUp={item.accountId && item.opportunityId ? { capability: guidanceResult.capability, accountId: item.accountId, opportunityId: item.opportunityId, invoke: invokeAgent } : undefined}
-            onOpenEvidence={onOpenEvidence} />
+            emailAction={emailAction} onOpenEvidence={onOpenEvidence} />
         </section>}
       </Fragment>
     })}</section>

@@ -2,9 +2,12 @@ import { createServer, type Server } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildWebApiHandler, type WebRuntime } from '../../../apps/web/src/app.js'
 import { createWorkflowIpcHandlers, workflowIpcChannels } from '../../../apps/desktop/electron/main/workflow-ipc.js'
+import { routeBridgeMessage } from '../../../apps/vscode-extension/src/host-router.js'
+import { createSampleDataProvider } from '../../../apps/vscode-extension/src/data-provider.js'
 import type { WorkflowDefinition } from '../../../packages/common/index.js'
 import {
     SharedWorkflowHost,
+    InitialWorkflowResultAssembler,
     WorkflowRegistry,
     WorkflowRuntime,
     type WorkflowConnectorExecutor
@@ -127,6 +130,71 @@ describe('workflow trusted-host parity', () => {
         await Promise.resolve()
         const cancelRequest = { contractVersion, runId }
         expect(await post(baseUrl, 'cancel', cancelRequest)).toEqual(ipc[workflowIpcChannels.cancel]!(cancelRequest))
+    })
+
+    it('returns the same validated first-page result over IPC, HTTP and the VS Code bridge', async () => {
+        const registry = new WorkflowRegistry([definition])
+        const runtime = new WorkflowRuntime(registry, {
+            execute: async (_step, context) => {
+                context.onProgress?.({
+                    state: 'partial', data: [{ id: 'opp-1', accountId: 'account-1', name: 'Visible opportunity', closeDate: '2026-08-01' }],
+                    rowCount: 1, truncated: true,
+                    lineage: { connector: 'dataverse-mcp', operation: 'read_query', toolCallId: 'call-1' },
+                    sourceHealth: { source: 'dataverse-mcp', state: 'partial', detail: 'More pages are loading.', checkedAt: '2026-10-24T10:00:00.000Z' }
+                })
+                return new Promise((_resolve, reject) => context.signal.addEventListener('abort', () => reject(context.signal.reason), { once: true }))
+            }
+        }, { resultAssembler: new InitialWorkflowResultAssembler() })
+        const host = new SharedWorkflowHost(registry, runtime)
+        const ipc = createWorkflowIpcHandlers(host)
+        const provider = {
+            ...createSampleDataProvider(),
+            getWorkflowRun: async (runId: string) => host.get({ contractVersion, runId })
+        }
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => runtimeStub(), resolveWorkflowHost: () => host }))
+        const queued = host.start({ contractVersion, workflowId: 'WF-001', scope: { kind: 'portfolio' }, input: { asOf: '2026-10-24' } })
+        try {
+            await vi.waitFor(() => expect(runtime.get(queued.runId)?.resultRef).toBeDefined())
+            const request = { contractVersion, runId: queued.runId }
+            const desktopView = ipc[workflowIpcChannels.get]!(request)
+            expect(await post(baseUrl, 'get', request)).toEqual(desktopView)
+            const bridge = await routeBridgeMessage(provider, {
+                kind: 'request', id: 'progress', method: 'getWorkflowRun', params: { runId: queued.runId }
+            })
+            expect(bridge).toMatchObject({ ok: true, result: desktopView })
+            expect(desktopView).toMatchObject({
+                run: { status: 'running' },
+                output: { queueItems: [expect.objectContaining({ opportunityId: 'opp-1' })], sourceHealth: [expect.objectContaining({ state: 'partial' })] }
+            })
+        } finally {
+            runtime.cancel(queued.runId)
+            await provider.dispose()
+        }
+    })
+
+    it('reports workflow overload as an explicit retryable outcome without losing the admitted run', async () => {
+        const registry = new WorkflowRegistry([definition])
+        const execute = vi.fn<WorkflowConnectorExecutor['execute']>(() => new Promise(() => undefined))
+        let counter = 0
+        const runtime = new WorkflowRuntime(registry, { execute }, {
+            maxActiveRuns: 1, createId: () => `${String(++counter).padStart(8, '0')}-0000-4000-8000-000000000000`
+        })
+        const host = new SharedWorkflowHost(registry, runtime)
+        const ipc = createWorkflowIpcHandlers(host)
+        const baseUrl = await listen(buildWebApiHandler({ createRuntime: () => runtimeStub(), resolveWorkflowHost: () => host }))
+        const startRequest = { contractVersion, workflowId: 'WF-001', scope: { kind: 'portfolio' as const } }
+
+        const admitted = await post(baseUrl, 'start', startRequest) as { runId: string }
+        const rejected = await fetch(`${baseUrl}/api/workflows/start`, {
+            method: 'POST', headers: authenticationHeaders, body: JSON.stringify(startRequest)
+        })
+        expect(rejected.status).toBe(429)
+        expect(rejected.headers.get('retry-after')).toBe('5')
+        expect(await rejected.json()).toMatchObject({ error: expect.stringContaining('Too many workflow runs are active'), code: 'capacity_exceeded' })
+        expect(() => ipc[workflowIpcChannels.start]!(startRequest)).toThrowError(expect.objectContaining({ code: 'capacity_exceeded' }))
+
+        expect(await post(baseUrl, 'get', { contractVersion, runId: admitted.runId })).toMatchObject({ run: { runId: admitted.runId } })
+        expect(runtime.list()).toHaveLength(1)
     })
 
     async function post(baseUrl: string, operation: string, body: unknown): Promise<unknown> {

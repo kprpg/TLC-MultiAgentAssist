@@ -1,0 +1,44 @@
+.guidance-pane-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 40px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--cp-border, var(--vscode-panel-border, var(--colorNeutralStroke2, #d1d1d1)));
+    background: var(--cp-surface, var(--vscode-editorWidget-background, var(--colorNeutralBackground1, #ffffff)));
+}
+
+.guidance-pane-frame .guidance-pane-toggle {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    padding: 4px;
+    border: 0;
+    border-radius: 4px;
+    color: var(--cp-accent, var(--vscode-textLink-foreground, var(--colorBrandForeground1, #0078d4)));
+    background: transparent;
+    cursor: pointer;
+}
+
+.guidance-pane-frame .guidance-pane-toggle:hover {
+    background: var(--cp-surface-soft, var(--vscode-toolbar-hoverBackground, var(--colorNeutralBackground1Hover, #f0f0f0)));
+}
+
+.guidance-pane-frame .guidance-pane-toggle:focus-visible {
+    outline: 2px solid var(--cp-accent, var(--vscode-focusBorder, var(--colorStrokeFocus2, #0078d4)));
+    outline-offset: 2px;
+}
+
+.resizable-split:has(.guidance-pane-frame.guidance-maximized) {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.resizable-split:has(.guidance-pane-frame.guidance-maximized) > .pane-resize-handle,
+.resizable-split:has(.guidance-pane-frame.guidance-maximized) > .resizable-split-cell:not(:has(.guidance-pane-frame.guidance-maximized)) {
+    display: none;
+}

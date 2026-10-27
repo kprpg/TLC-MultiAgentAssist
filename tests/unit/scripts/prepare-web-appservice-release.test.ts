@@ -7,6 +7,7 @@ import {
     createAppServiceZip,
     createLinuxCanvasInstallArgs,
     createProductionInstallArgs,
+    createProductionInstallEnvironment,
     resolveNpmInvocation
 } from '../../../scripts/prepare-web-appservice-release.mjs'
 
@@ -17,6 +18,13 @@ afterEach(async () => {
 })
 
 describe('App Service release package', () => {
+    it('removes only npm-run inherited allow-scripts flags from isolated script-free installs', () => {
+        const environment = { PATH: 'test-path', npm_config_allow_scripts: '@vscode/vsce-sign', NPM_CONFIG_ALLOW_SCRIPTS: 'other', npm_config_ignore_scripts: 'true' }
+        expect(createProductionInstallEnvironment(environment)).toEqual({ PATH: 'test-path', npm_config_ignore_scripts: 'true' })
+        expect(environment.npm_config_allow_scripts).toBe('@vscode/vsce-sign')
+        expect(createProductionInstallArgs('release')).toContain('--ignore-scripts')
+    })
+
     it('installs production dependencies for local smoke validation', () => {
         expect(createProductionInstallArgs('C:\\release')).toEqual([
             'install',

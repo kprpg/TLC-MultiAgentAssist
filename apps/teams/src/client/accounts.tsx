@@ -14,6 +14,7 @@ import type { TeamsApiClient, ReviewAction } from './data-client.js'
 import { useResponsiveDisclosure } from './use-responsive-disclosure.js'
 import { OpportunityCommentsEditor } from './record-actions.js'
 import { usePresentationSession } from '../../../shared/presentation-hooks.js'
+import { ResizableSplit } from '../../../shared/resizable-split.js'
 
 export interface WorkingSelection { account: c.Account; opportunity: c.Opportunity }
 type AccountWorkspace = 'portfolio' | 'discovery' | 'new'
@@ -171,9 +172,12 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
         <button type="button" onClick={() => changeScope(() => { client.refreshSources(); setRevision((value) => value + 1) })}>Refresh sources</button></div>
       {loading && <p role="status">Loading portfolio accounts, opportunities and milestones...</p>}
       {error && <button type="button" onClick={() => { client.refreshSources(); setRevision((value) => value + 1) }}>Retry Portfolio</button>}
-      <div className={`portfolio-workbench${panes.accountsExpanded ? '' : ' accounts-collapsed'}${panes.detailsExpanded ? '' : ' details-collapsed'}${panes.actionsExpanded ? '' : ' actions-collapsed'}`}>
+      <ResizableSplit className={`portfolio-workbench${panes.accountsExpanded ? '' : ' accounts-collapsed'}${panes.detailsExpanded ? '' : ' details-collapsed'}${panes.actionsExpanded ? '' : ' actions-collapsed'}`}
+        label="Accounts panel" controls="portfolio-accounts-panel" defaultRatio={1 / 4} minFirst={230}
+        minSecond={panes.detailsExpanded && panes.actionsExpanded && selection ? 576 : 320}
+        firstVisible={panes.accountsExpanded} secondVisible={panes.detailsExpanded || panes.actionsExpanded}>
         <details className="portfolio-scope-disclosure" ref={scopeDisclosure} open hidden={!panes.accountsExpanded}><summary className="pane-disclosure-toggle">Account and opportunity scope</summary>
-        <section id="portfolio-accounts-panel" className="pane portfolio-scope" hidden={!panes.accountsExpanded} aria-label="Accounts and opportunities">
+        <section id="portfolio-accounts-panel" className="pane portfolio-scope pane-scroll" hidden={!panes.accountsExpanded} aria-label="Accounts and opportunities">
           <div className="section-heading"><h2>Accounts</h2>{!boundAccountId && <AddCustomerButton client={searchClient} dataMode={mode} onAdded={(account) => { setAccountId(account.id); setRequestedAccountId(account.id); setRevision((value) => value + 1) }} />}</div>
           <label className="field">Customer account<select aria-label="Customer account" value={accountId} disabled={Boolean(boundAccountId)} onChange={(event) => {
             const nextAccountId = event.target.value
@@ -191,7 +195,7 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
             <button type="button" onClick={() => setDirection((current) => current === 'ascending' ? 'descending' : 'ascending')}>{direction === 'ascending' ? 'Asc' : 'Desc'}</button></div>
           <label className="field compact-opportunity-picker">Opportunity<select aria-label="Opportunity" value={selection?.opportunity.id ?? ''} disabled={Boolean(boundOpportunityId)} onChange={(event) => selectOpportunity(event.target.value)}>
             <option value="">Choose an opportunity</option>{opportunities.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-          <div className="record-table-wrap" role="region" aria-label="Opportunity list" tabIndex={0}><table className="portfolio-records"><thead><tr><th>Opportunity name</th><th>Intent</th><th>Stage</th><th>Comments</th></tr></thead>
+          <div className="record-table-wrap pane-scroll" role="region" aria-label="Opportunity list" tabIndex={0}><table className="portfolio-records"><thead><tr><th>Opportunity name</th><th>Intent</th><th>Stage</th><th>Comments</th></tr></thead>
             <tbody>{sortOpportunities(opportunities, sort, direction).map((item) => <tr key={item.id} className={item.id === selection?.opportunity.id ? 'selected-row' : ''}>
               <td><button type="button" className="record-link" title={item.name} onClick={() => selectOpportunity(item.id)}>{item.name}</button><small>{sellerMoney(item.value, true, item.currency)}</small></td>
               <td>{formatOpportunityIntent(item.opportunityIntent)}</td><td>Stage {item.recordedStage}</td>
@@ -209,7 +213,7 @@ export function AccountsWorkspace({ client, mode, selection, onSelect, review, p
           onAction={action} onMeeting={onMeeting} onDraftChange={markDraft} />
           : <section className="pane"><h2>{loading ? 'Loading your selected workspace' : 'Select an opportunity'}</h2>
             {!loading && !error && <p>An account may be visible without any eligible Portfolio opportunities.</p>}</section>}
-      </div>
+      </ResizableSplit>
     </div>
     <DiscoveryWorkspace client={client} mode={mode} active={active && tab === 'discovery'} searchClient={searchClient} onAction={mutate}
       {...(boundAccountId ? { boundAccountId } : {})} />

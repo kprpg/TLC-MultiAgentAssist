@@ -14,11 +14,13 @@ afterEach(() => {
 describe('VS Code local-store provider credentials', () => {
     const credential: TokenCredential = { getToken: vi.fn(async () => null) }
 
-    it.each([undefined, credential])('accepts and forwards credential %s', async (foundryCredential) => {
+    it.each([undefined, credential])('keeps offline data usable without acquiring credential %s', async (foundryCredential) => {
         const provider = createLocalStoreDataProvider({ foundryCredential })
         try {
-            expect(buildFoundryMeetingExtractor).toHaveBeenCalledWith(process.env, foundryCredential)
+            expect(buildFoundryMeetingExtractor).not.toHaveBeenCalled()
             expect(provider.mode).toBe('sample')
+            expect(provider.inferenceMode).toBe('sample')
+            expect(credential.getToken).not.toHaveBeenCalled()
             expect((await provider.listAccounts()).length).toBeGreaterThan(0)
         } finally {
             await provider.dispose()
@@ -28,7 +30,7 @@ describe('VS Code local-store provider credentials', () => {
     it('keeps credentials optional for offline sample use', async () => {
         const provider = createLocalStoreDataProvider()
         try {
-            expect(buildFoundryMeetingExtractor).toHaveBeenCalledWith(process.env, undefined)
+            expect(buildFoundryMeetingExtractor).not.toHaveBeenCalled()
             expect(provider.mode).toBe('sample')
             expect((await provider.listAccounts()).length).toBeGreaterThan(0)
         } finally {

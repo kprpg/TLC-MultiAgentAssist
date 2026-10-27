@@ -11,6 +11,7 @@ import { useWorkspaceNavigation } from './use-workspace-navigation.js'
 import { teamsSurface } from './workspace-navigation.js'
 import { sellerDashboardResponseSchema } from '../../../../packages/common/contracts/seller-dashboard.js'
 import type { SellerDashboardRequest } from '../../../../packages/common/contracts/seller-dashboard.js'
+import { stagePipelineResponseSchema, type StagePipelineRequest } from '../../../../packages/common/contracts/stage-pipeline-review.js'
 import { seReportingResponseSchema, type SeReportingRequest } from '../../../../packages/common/contracts/se-reporting.js'
 import { PortfolioLayoutControls } from '../../../shared/portfolio-layout-controls.js'
 import { PortfolioSearch } from './portfolio-search.js'
@@ -226,6 +227,10 @@ export function TeamsApp() {
     if (!client) throw new Error('Sign in before opening Dashboards.')
     return client.operation('sellerDashboard', input, sellerDashboardResponseSchema)
   }, [client])
+  const invokeStagePipelineReview = useCallback((input: StagePipelineRequest) => {
+    if (!client) throw new Error('Sign in before opening Dashboards.')
+    return client.operation('stagePipelineReview', input, stagePipelineResponseSchema)
+  }, [client])
   const invokeSeReporting = useCallback(async (input: SeReportingRequest) => {
     if (!client) throw new Error('Sign in before opening Dashboards.')
     if (input.operation === 'publish') {
@@ -298,7 +303,7 @@ export function TeamsApp() {
         {...(linkedRunId ? { initialRunId: linkedRunId } : {})} {...(bindingId && preferredAccountId ? {
         scope: selection ? { kind: 'opportunity' as const, accountId: selection.account.id, opportunityId: selection.opportunity.id } : { kind: 'account' as const, accountId: preferredAccountId }
       } : {})} />}
-      {workspaceAllowed && view === 'dashboard' && !bindingId && <DashboardWorkspace invokeSellerDashboard={invokeDashboard} invokeSeReporting={invokeSeReporting} />}
+      {workspaceAllowed && view === 'dashboard' && !bindingId && <DashboardWorkspace invokeSellerDashboard={invokeDashboard} invokeStagePipelineReview={invokeStagePipelineReview} invokeSeReporting={invokeSeReporting} />}
       {workspaceAllowed && view === 'meetings' && <MeetingsWorkspace client={client} mode={session.mode} selection={selection} reviewPreview={reviewPreview} compact={hostSurface === 'panel'}
         graphAvailable={!('authentication' in authentication.configuration && authentication.configuration.authentication === 'local-azure-cli')} />}
       {workspaceAllowed && view === 'activity' && <ActivityWorkspace client={client} onDisconnect={() => {

@@ -3778,6 +3778,9 @@ var ZodURL = /*@__PURE__*/ $constructor("ZodURL", (inst, def) => {
 	$ZodURL.init(inst, def);
 	ZodStringFormat.init(inst, def);
 });
+function url(params) {
+	return /* @__PURE__ */ _url(ZodURL, params);
+}
 var ZodEmoji = /*@__PURE__*/ $constructor("ZodEmoji", (inst, def) => {
 	$ZodEmoji.init(inst, def);
 	ZodStringFormat.init(inst, def);
@@ -4317,6 +4320,226 @@ function refine(fn, _params = {}) {
 function superRefine(fn, params) {
 	return /* @__PURE__ */ _superRefine(fn, params);
 }
+var knowledgeSourceIdSchema = _enum([
+	"mcem",
+	"seismic-m365",
+	"seismic-mcp"
+]);
+var knowledgeFileTypeSchema = _enum([
+	"ppt",
+	"pptx",
+	"pdf",
+	"doc",
+	"docx",
+	"xls",
+	"xlsx",
+	"html"
+]);
+var knowledgeSearchFiltersSchema = object({ fileTypes: array(knowledgeFileTypeSchema).min(1).max(8).optional() }).strict();
+var knowledgeSearchRequestSchema = object({
+	contractVersion: literal("1.0"),
+	query: string().trim().min(1).max(500),
+	source: knowledgeSourceIdSchema,
+	filters: knowledgeSearchFiltersSchema.optional(),
+	limit: number().int().min(1).max(50).optional(),
+	offset: number().int().min(0).max(1e4).optional()
+}).strict();
+var httpsEvidenceUrl = url().max(4096).refine((value) => {
+	const url = new URL(value);
+	return url.protocol === "https:" && !url.username && !url.password;
+}, "Knowledge evidence must use an HTTPS URL without credentials.");
+var knowledgeHitSchema = object({
+	id: string().min(1).max(500),
+	evidenceId: string().min(1).max(1e3),
+	source: knowledgeSourceIdSchema,
+	title: string().trim().min(1).max(1e3),
+	url: httpsEvidenceUrl,
+	snippet: string().max(4e3).optional(),
+	fileType: knowledgeFileTypeSchema.optional(),
+	lastModifiedAt: datetime({ offset: true }).optional(),
+	connectionId: string().min(1).max(32).optional(),
+	untrusted: literal(true)
+}).strict();
+var knowledgeFailureCodeSchema = _enum([
+	"source-not-configured",
+	"mcp-not-configured",
+	"graph-not-configured",
+	"graph-auth-not-configured",
+	"graph-sign-in-required",
+	"graph-permission-denied",
+	"graph-throttled",
+	"graph-request-failed",
+	"graph-transport-failed",
+	"graph-response-invalid",
+	"graph-response-too-large"
+]);
+var sourceHealth = object({
+	state: _enum([
+		"sample",
+		"live",
+		"partial",
+		"unauthorized",
+		"unavailable"
+	]),
+	detail: string().min(1).max(1e3),
+	checkedAt: datetime()
+}).strict();
+var common = {
+	contractVersion: literal("1.0"),
+	source: knowledgeSourceIdSchema,
+	mode: _enum(["sample", "live"]),
+	sourceHealth
+};
+var knowledgeSearchResponseSchema = discriminatedUnion("kind", [object({
+	...common,
+	kind: literal("results"),
+	hits: array(knowledgeHitSchema).max(50),
+	hasMore: boolean(),
+	nextOffset: number().int().min(1).max(1e4).optional(),
+	warnings: array(_enum(["invalid-source-items", "unverified-file-types"])).max(2)
+}).strict().superRefine((value, context) => {
+	if (value.hasMore !== (value.nextOffset !== void 0)) context.addIssue({
+		code: "custom",
+		message: "A continuation offset is required exactly when more results are available."
+	});
+	if (value.sourceHealth.state !== value.mode && value.sourceHealth.state !== "partial") context.addIssue({
+		code: "custom",
+		message: "Results require an available source."
+	});
+	if (value.hits.some((hit) => hit.source !== value.source)) context.addIssue({
+		code: "custom",
+		message: "Knowledge hits must come from the requested source."
+	});
+}), object({
+	...common,
+	kind: literal("unavailable"),
+	code: knowledgeFailureCodeSchema,
+	message: string().min(1).max(1e3)
+}).strict().refine((value) => ["unauthorized", "unavailable"].includes(value.sourceHealth.state), "Unavailable results must report an unavailable or unauthorized source.")]);
+var inferenceModeSchema = _enum(["sample", "foundry"]);
+var inferenceExecutionSchema = object({
+	contractVersion: literal("1.0"),
+	correlationId: string().uuid(),
+	requested: inferenceModeSchema,
+	provider: inferenceModeSchema,
+	state: _enum(["complete", "fallback"]),
+	reason: _enum([
+		"configuration",
+		"authentication",
+		"quota",
+		"timeout",
+		"validation",
+		"provider"
+	]).optional()
+}).strict().refine((value) => value.state !== "fallback" || value.provider === "sample" && value.reason !== void 0, "Fallback must identify the offline provider and its reason.");
+function validateInferenceResponse(value, context) {
+	if (value.contractVersion === "1.3" !== (value.inference !== void 0)) context.addIssue({
+		code: "custom",
+		message: "Inference metadata requires the versioned inference response shape."
+	});
+}
+var shortText = (max) => string().trim().min(1).max(max);
+var untrustedText = (max) => string().max(max);
+var workingSessionTopicRequestSchema = object({
+	contractVersion: literal("1.0"),
+	opportunityId: shortText(200),
+	opportunityName: shortText(300),
+	opportunityComments: untrustedText(4e3).optional(),
+	milestoneId: shortText(200).optional(),
+	milestoneName: shortText(300),
+	milestoneComments: untrustedText(4e3).optional()
+}).strict();
+var workingSessionTopicSchema = object({
+	topic: shortText(200),
+	domain: shortText(100),
+	azureServices: array(shortText(80)).max(8),
+	deckQueries: array(shortText(120)).min(1).max(5),
+	learnQueries: array(shortText(120)).min(1).max(5),
+	iacScenario: shortText(300),
+	confidence: _enum([
+		"low",
+		"medium",
+		"high"
+	]),
+	basis: _enum(["model", "rules"]),
+	evidence: array(shortText(200)).max(8)
+}).strict();
+var workingSessionTopicResponseSchema = object({
+	contractVersion: _enum(["1.0", "1.3"]),
+	inference: inferenceExecutionSchema.optional(),
+	mode: _enum(["sample", "live"]),
+	topic: workingSessionTopicSchema
+}).strict().superRefine(validateInferenceResponse);
+var workingSessionDeliverablesSchema = object({
+	decks: boolean(),
+	learn: boolean(),
+	iac: boolean()
+}).strict().refine((value) => value.decks || value.learn || value.iac, "Choose at least one deliverable.");
+var workingSessionPrepareRequestSchema = object({
+	contractVersion: literal("1.0"),
+	opportunityId: shortText(200),
+	opportunityName: shortText(300),
+	milestoneName: shortText(300),
+	topic: workingSessionTopicSchema,
+	deliverables: workingSessionDeliverablesSchema
+}).strict();
+var relativeFilePath = string().min(1).max(260).refine((value) => !/^([a-zA-Z]:|[\\/])/.test(value) && !value.split(/[\\/]/).some((part) => part === ".." || part === "" || part === "."), "File paths must be relative and stay inside the working-session folder.");
+var httpsUrl = url().max(4096).refine((value) => {
+	const url = new URL(value);
+	return url.protocol === "https:" && !url.username && !url.password;
+}, "Source links must use HTTPS without credentials.");
+var workingSessionFileSchema = object({
+	path: relativeFilePath,
+	kind: _enum([
+		"deck",
+		"learn",
+		"iac",
+		"manifest"
+	]),
+	title: shortText(300),
+	sourceLabel: shortText(200),
+	sourceUrl: httpsUrl.optional(),
+	bytes: number().int().min(0)
+}).strict();
+var workingSessionGapCodeSchema = _enum([
+	"not-configured",
+	"needs-consent",
+	"not-available-here",
+	"nothing-found",
+	"unavailable",
+	"tool-missing",
+	"rejected"
+]);
+var workingSessionGapSchema = object({
+	deliverable: _enum([
+		"decks",
+		"learn",
+		"iac"
+	]),
+	source: shortText(120),
+	code: workingSessionGapCodeSchema,
+	message: shortText(600)
+}).strict();
+var workingSessionDeliverySchema = discriminatedUnion("kind", [object({
+	kind: literal("folder"),
+	folderPath: shortText(1e3)
+}).strict(), object({
+	kind: literal("download"),
+	downloadId: string().uuid(),
+	fileName: shortText(200),
+	expiresAt: string().datetime()
+}).strict()]);
+var workingSessionResultSchema = object({
+	contractVersion: _enum(["1.0", "1.3"]),
+	inference: inferenceExecutionSchema.optional(),
+	mode: _enum(["sample", "live"]),
+	folderName: shortText(200),
+	delivery: workingSessionDeliverySchema,
+	files: array(workingSessionFileSchema).max(200),
+	gaps: array(workingSessionGapSchema).max(50),
+	summary: shortText(1e3)
+}).strict().superRefine(validateInferenceResponse);
+var workingSessionOpenFolderRequestSchema = object({ folderPath: shortText(1e3) }).strict();
 //#endregion
 //#region packages/common/contracts/agent-task-limits.ts
 var agentTaskPromptMaxLength = 64e3;
@@ -4902,7 +5125,8 @@ object({
 	source: meetingSourceSchema,
 	opportunityId: string().min(1).optional(),
 	opportunityName: string().min(1).optional(),
-	segmentCount: number().int().nonnegative()
+	/** Absent for calendar candidates, whose transcript is only fetched after the user chooses Extract. */
+	segmentCount: number().int().nonnegative().optional()
 }).strict();
 var meetingTranscriptSegmentSchema = object({
 	segmentId: string().min(1),
@@ -4958,6 +5182,8 @@ var meetingUnmappedSignalSchema = object({
 	evidence: array(string().min(1))
 }).strict();
 object({
+	contractVersion: literal("1.3").optional(),
+	inference: inferenceExecutionSchema.optional(),
 	changeSetId: string().min(1),
 	transcriptId: string().min(1),
 	opportunityId: string().min(1),
@@ -4967,7 +5193,7 @@ object({
 	suggestedMilestoneIds: array(string().min(1)),
 	unmappedSignals: array(meetingUnmappedSignalSchema),
 	proposedAt: string().datetime()
-}).strict();
+}).strict().superRefine(validateInferenceResponse);
 object({
 	changeSetId: string().min(1),
 	opportunityId: string().min(1),
@@ -5527,11 +5753,32 @@ var stagePipelineThreatSchema = _enum([
 	"Medium",
 	"High"
 ]);
+var stagePipelineViewScopeSchema = _enum([
+	"mine",
+	"reports",
+	"both"
+]);
+var stagePipelineSourceNames = [
+	"opportunities",
+	"milestones",
+	"macc",
+	"acr",
+	"hierarchy"
+];
+var stagePipelineAcrSources = [
+	"sample",
+	"mint",
+	"semantic-model",
+	"derived-pipeline-only",
+	"unavailable"
+];
 var stagePipelineOpportunitySchema = object({
 	id: identifier$1,
 	number: name,
 	customer: name,
 	name,
+	owner: string().max(200),
+	editable: boolean(),
 	notes: text,
 	contact: text,
 	scope: stagePipelineScopeSchema,
@@ -5571,24 +5818,51 @@ var stagePipelineMilestoneSchema = object({
 	comment: text,
 	owner: text
 }).strict();
+var acrMonthSchema = object({
+	month,
+	actual: nonnegative.nullable(),
+	baseline: nonnegative.nullable(),
+	committed: nonnegative,
+	uncommitted: nonnegative,
+	stage1: nonnegative,
+	target: nonnegative.nullable()
+}).strict();
 var stagePipelineAcrSchema = object({
-	syncedAt: date,
-	lastActualMonth: month,
+	source: _enum(stagePipelineAcrSources),
+	syncedAt: date.nullable(),
+	lastActualMonth: month.nullable(),
 	accounts: array(object({
 		customer: name,
-		months: array(object({
-			month,
-			actual: nonnegative,
-			baseline: nonnegative,
-			committed: nonnegative,
-			uncommitted: nonnegative,
-			stage1: nonnegative,
-			target: nonnegative
-		}).strict()).length(12)
+		months: array(acrMonthSchema).length(12)
 	}).strict()).max(500)
+}).strict().superRefine((acr, context) => {
+	const connected = acr.source === "sample" || acr.source === "mint" || acr.source === "semantic-model";
+	const measured = acr.accounts.flatMap((account) => account.months).flatMap((row) => [
+		row.actual,
+		row.baseline,
+		row.target
+	]);
+	if (!(connected ? acr.syncedAt !== null && acr.lastActualMonth !== null && measured.every((value) => value !== null) : acr.syncedAt === null && acr.lastActualMonth === null && measured.every((value) => value === null))) context.addIssue({
+		code: "custom",
+		message: connected ? "A connected ACR source must provide actuals, baseline, target and sync dates." : "An unconnected ACR source must not report actuals, baseline, target or sync dates."
+	});
+});
+var stagePipelineSourceHealthSchema = object({
+	source: _enum(stagePipelineSourceNames),
+	state: _enum([
+		"complete",
+		"partial",
+		"unavailable"
+	]),
+	detail: text,
+	count: count.optional()
+}).strict();
+var stagePipelineReportSchema = object({
+	id: identifier$1,
+	displayName: name
 }).strict();
 var stagePipelineSnapshotSchema = object({
-	contractVersion: literal("1.0"),
+	contractVersion: literal("1.1"),
 	kind: literal("snapshot"),
 	mode: _enum(["sample", "live"]),
 	state: _enum(["fresh", "stale"]),
@@ -5597,10 +5871,28 @@ var stagePipelineSnapshotSchema = object({
 	owner: string().max(200),
 	asOf: date,
 	fiscalYear: number().int().min(2e3).max(2100),
+	scope: stagePipelineViewScopeSchema,
+	reports: array(stagePipelineReportSchema).max(50),
+	sources: array(stagePipelineSourceHealthSchema).max(10),
 	opportunities: array(stagePipelineOpportunitySchema).max(5e3),
 	milestones: array(stagePipelineMilestoneSchema).max(25e3),
 	acr: stagePipelineAcrSchema
 }).strict().superRefine((value, context) => {
+	if (value.scope === "mine" && value.reports.length > 0) context.addIssue({
+		code: "custom",
+		path: ["reports"],
+		message: "The seller portfolio scope has no direct reports."
+	});
+	if (new Set(value.reports.map((row) => row.id)).size !== value.reports.length) context.addIssue({
+		code: "custom",
+		path: ["reports"],
+		message: "Report ids must be unique."
+	});
+	if (new Set(value.sources.map((row) => row.source)).size !== value.sources.length) context.addIssue({
+		code: "custom",
+		path: ["sources"],
+		message: "Each source may be reported once."
+	});
 	const ids = /* @__PURE__ */ new Set();
 	for (const [index, row] of value.opportunities.entries()) {
 		if (ids.has(row.id)) context.addIssue({
@@ -5638,19 +5930,29 @@ var stagePipelineSnapshotSchema = object({
 	}
 });
 var stagePipelineUnavailableSchema = object({
-	contractVersion: literal("1.0"),
+	contractVersion: literal("1.1"),
 	kind: literal("unavailable"),
 	code: _enum([
 		"source-unavailable",
 		"unauthorized",
+		"forbidden",
+		"throttled",
 		"invalid-snapshot"
 	]),
 	message: text
 }).strict();
 object({
-	contractVersion: literal("1.0"),
-	operation: literal("get")
-}).strict();
+	contractVersion: literal("1.1"),
+	operation: _enum(["get", "refresh"]),
+	scope: stagePipelineViewScopeSchema.default("mine"),
+	reportIds: array(identifier$1).max(50).optional()
+}).strict().superRefine((value, context) => {
+	if (value.reportIds && value.scope === "mine") context.addIssue({
+		code: "custom",
+		path: ["reportIds"],
+		message: "Direct reports can only be selected for a reports scope."
+	});
+});
 union([stagePipelineSnapshotSchema, stagePipelineUnavailableSchema]);
 //#endregion
 //#region packages/common/contracts/record-creation.ts
@@ -6072,7 +6374,11 @@ object({
 		userEmail: string().email().optional(),
 		tenantName: string().min(1).optional(),
 		detail: string().min(1)
-	})
+	}),
+	inference: object({
+		contractVersion: literal("1.0"),
+		mode: inferenceModeSchema
+	}).strict().optional()
 });
 var opportunitySchema = object({
 	id: string().min(1),
@@ -6318,7 +6624,8 @@ object({
 	prompt: string().min(3).max(agentTaskPromptMaxLength)
 });
 var agentTaskResponseSchema = object({
-	contractVersion: literal("1.2"),
+	contractVersion: _enum(["1.2", "1.3"]),
+	inference: inferenceExecutionSchema.optional(),
 	correlationId: string().uuid(),
 	capability: agentCapabilitySchema,
 	agentVersion: string().min(1),
@@ -6331,7 +6638,7 @@ var agentTaskResponseSchema = object({
 	]),
 	content: string().min(1),
 	sourceHealth: array(sourceHealthSchema).min(1)
-});
+}).superRefine(validateInferenceResponse);
 /**
 * Progressive agent response. `context` carries an instant deterministic draft grounded in the same
 * evidence as the model call; `delta` carries model text; `complete` always carries the full authoritative
@@ -6418,6 +6725,12 @@ object({
 //#endregion
 //#region apps/desktop/electron/preload/index.ts
 electron.contextBridge.exposeInMainWorld("tlc", {
+	searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(await electron.ipcRenderer.invoke("tlc:search-knowledge", knowledgeSearchRequestSchema.parse(request))),
+	deriveWorkingSessionTopic: async (request) => workingSessionTopicResponseSchema.parse(await electron.ipcRenderer.invoke("tlc:working-session-topic", workingSessionTopicRequestSchema.parse(request))),
+	prepareWorkingSession: async (request) => workingSessionResultSchema.parse(await electron.ipcRenderer.invoke("tlc:working-session-prepare", workingSessionPrepareRequestSchema.parse(request))),
+	openWorkingSessionFolder: async (folderPath) => {
+		await electron.ipcRenderer.invoke("tlc:working-session-open", workingSessionOpenFolderRequestSchema.parse({ folderPath }));
+	},
 	invokeMutationSync: async (request) => mutationSyncResponseSchema.parse(await electron.ipcRenderer.invoke("tlc:mutation-sync", request)),
 	cacheControl: async (request) => cacheControlResponseSchema.parse(await electron.ipcRenderer.invoke("tlc:cache-control", request)),
 	onCacheChanged: (listener) => {
@@ -6430,10 +6743,12 @@ electron.contextBridge.exposeInMainWorld("tlc", {
 		};
 	},
 	invokeSellerDashboard: (request) => electron.ipcRenderer.invoke("tlc:seller-dashboard", request),
+	invokeStagePipelineReview: (request) => electron.ipcRenderer.invoke("tlc:stage-pipeline-review", request),
 	invokeSeReporting: (request) => electron.ipcRenderer.invoke("tlc:se-reporting", request),
 	invokeVoice: (request) => electron.ipcRenderer.invoke("tlc:voice-input", request),
 	exitApplication: () => electron.ipcRenderer.invoke("tlc:exit-application"),
 	getDataStatus: () => electron.ipcRenderer.invoke("tlc:get-data-status"),
+	getInferenceMode: () => electron.ipcRenderer.invoke("tlc:get-inference-mode"),
 	connectMcem: () => electron.ipcRenderer.invoke("tlc:connect-mcem"),
 	listAccounts: (options) => electron.ipcRenderer.invoke("tlc:list-accounts", options),
 	getPortfolioIndex: (request) => electron.ipcRenderer.invoke("tlc:portfolio-index", request),

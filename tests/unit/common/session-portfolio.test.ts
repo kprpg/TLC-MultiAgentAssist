@@ -26,6 +26,30 @@ function fixture() {
 }
 
 describe('session-local Portfolio and Discovery snapshots', () => {
+  it('owns background operation results across view subscriptions and clears them with private data', async () => {
+    const { session } = fixture()
+    session.operationResults.startTopic({
+      contractVersion: '1.0', opportunityId: 'opportunity', opportunityName: 'Sanitized', milestoneName: 'Milestone'
+    }, async () => ({
+      contractVersion: '1.0', mode: 'sample', topic: {
+        topic: 'Azure Arc', domain: 'Hybrid', azureServices: ['Azure Arc'], deckQueries: ['Arc'], learnQueries: ['Arc'],
+        iacScenario: 'Arc POC', confidence: 'high', basis: 'rules', evidence: ['Sanitized title']
+      }
+    }))
+    await vi.waitFor(() => expect(session.operationResults.completedCount()).toBe(1))
+    session.cache.clear()
+    expect(session.operationResults.completedCount()).toBe(0)
+    session.dispose()
+  })
+
+  it('disposes background result ownership with its source session', () => {
+    const { session } = fixture()
+    session.dispose()
+    expect(() => session.operationResults.startTopic({
+      contractVersion: '1.0', opportunityId: 'opportunity', opportunityName: 'Sanitized', milestoneName: 'Milestone'
+    }, async () => { throw new Error('Must not dispatch') })).toThrow(/closed|disposed/i)
+  })
+
   it('validates the derived Portfolio on Discovery refresh without a second index scan or losing a confirmed join', async () => {
     const { session, source } = fixture()
     await session.getDiscoverySnapshot()

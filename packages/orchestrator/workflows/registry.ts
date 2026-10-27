@@ -37,7 +37,7 @@ export class WorkflowRegistry {
 }
 
 export class WorkflowRegistryError extends Error {
-    constructor(readonly code: 'duplicate_workflow' | 'workflow_not_found', message: string) {
+    constructor(readonly code: 'duplicate_workflow' | 'workflow_not_found' | 'invalid_registration', message: string) {
         super(message)
         this.name = 'WorkflowRegistryError'
     }

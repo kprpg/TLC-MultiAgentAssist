@@ -8,6 +8,14 @@ param(
     [string] $ExpectedHostName = 'tlc-frfwf5g4g8edhcc0.westus3-01.azurewebsites.net',
     [string] $Slot,
     [string] $ArtifactPath,
+    [ValidateSet('easy-auth', 'sample')]
+    [string] $Mode = 'easy-auth',
+    [ValidateSet('sample', 'foundry')]
+    [string] $AiMode = 'foundry',
+    [ValidateSet('Deploy', 'Verify', 'Promote', 'Rollback')]
+    [string] $Action = 'Deploy',
+    [string] $ReceiptPath,
+    [switch] $CreateSlot,
     [string] $FoundryEnvironmentPath = 'config/foundry.environment.json',
     [switch] $SkipBuild,
     [switch] $PackageOnly,
@@ -22,58 +30,104 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 
+function Invoke-AzureCli {
+    param([Parameter(Mandatory)] [string[]] $Arguments)
+    $command = Get-Command az -ErrorAction Stop
+    $python = Join-Path (Split-Path -Parent $command.Source) '..\python.exe'
+    if ($IsWindows -and $command.Source.EndsWith('.cmd') -and (Test-Path -LiteralPath $python -PathType Leaf)) {
+        # Avoid cmd.exe reinterpreting JSON, pipes and other characters in Azure CLI arguments.
+        & $python -IBm azure.cli @Arguments
+    }
+    else { & $command.Source @Arguments }
+    $global:LASTEXITCODE = $LASTEXITCODE
+}
+
 function Invoke-CheckedCommand {
     param(
         [Parameter(Mandatory)] [string] $Command,
         [Parameter(Mandatory)] [string[]] $Arguments
     )
 
-    & $Command @Arguments
+    if ($Command -eq 'az') { Invoke-AzureCli -Arguments $Arguments }
+    else { & $Command @Arguments }
     if ($LASTEXITCODE -ne 0) {
         throw "Command failed with exit code ${LASTEXITCODE}: $Command $($Arguments -join ' ')"
     }
 }
 
 function Invoke-AzJson {
-    param([Parameter(Mandatory)] [string[]] $Arguments)
+    param([Parameter(Mandatory)] [string[]] $Arguments, [switch] $AsHashtable)
 
-    $output = & az @Arguments --only-show-errors --output json
+    $output = Invoke-AzureCli -Arguments ($Arguments + @('--only-show-errors', '--output', 'json'))
     if ($LASTEXITCODE -ne 0) {
         throw "Azure CLI command failed with exit code ${LASTEXITCODE}: az $($Arguments -join ' ')"
     }
-    return ($output -join [Environment]::NewLine) | ConvertFrom-Json
+    return ($output -join [Environment]::NewLine) | ConvertFrom-Json -AsHashtable:$AsHashtable
 }
 
 function Get-AppServiceDeployments {
+    param([string] $TargetSlot = $Slot)
     $arguments = @(
         'webapp', 'log', 'deployment', 'list',
         '--subscription', $SubscriptionId,
         '--resource-group', $ResourceGroup,
         '--name', $WebAppName
     )
-    if ($Slot) { $arguments += @('--slot', $Slot) }
+    if ($TargetSlot) { $arguments += @('--slot', $TargetSlot) }
     return @(Invoke-AzJson -Arguments $arguments)
 }
 
 function Wait-AppServiceDeployment {
     param(
         [Parameter(Mandatory)] [string] $DeploymentId,
-        [Parameter(Mandatory)] [int] $CommandExitCode
+        [Parameter(Mandatory)] [int] $CommandExitCode,
+        [string] $TargetSlot = $Slot
     )
 
     for ($attempt = 1; $attempt -le 60; $attempt++) {
-        $deployment = Get-AppServiceDeployments | Where-Object { $_.id -eq $DeploymentId } | Select-Object -First 1
-        if ($deployment.status -eq 4) {
-            Write-Warning "Azure CLI exited with code $CommandExitCode, but App Service completed accepted deployment '$DeploymentId'."
+        $deployment = Get-AppServiceDeployments -TargetSlot $TargetSlot | Where-Object { $_.id -eq $DeploymentId } | Select-Object -First 1
+        if ($null -ne $deployment -and $deployment.status -eq 4) {
+            if ($CommandExitCode -ne 0) {
+                Write-Warning "Azure CLI exited with code $CommandExitCode, but App Service completed accepted deployment '$DeploymentId'."
+            }
             return
         }
-        if ($deployment.status -eq 3) {
+        if ($null -ne $deployment -and $deployment.status -eq 3) {
             throw "App Service deployment '$DeploymentId' failed after Azure CLI exited with code ${CommandExitCode}: $($deployment.status_text)"
         }
         Start-Sleep -Seconds 10
     }
 
     throw "App Service deployment '$DeploymentId' did not reach a terminal state after Azure CLI exited with code $CommandExitCode."
+}
+
+function Publish-AppServiceArchive {
+    param([Parameter(Mandatory)] [string] $Path, [string] $TargetSlot = $Slot, [switch] $WaitForCompletion)
+    $arguments = @(
+        'webapp', 'deploy', '--subscription', $SubscriptionId,
+        '--resource-group', $ResourceGroup, '--name', $WebAppName,
+        '--src-path', $Path, '--type', 'zip', '--clean', 'true',
+        '--restart', 'true', '--track-status', 'false', '--only-show-errors'
+    )
+    if ($TargetSlot) { $arguments += @('--slot', $TargetSlot) }
+    if ($WaitForCompletion) { $arguments += @('--async', 'true', '--timeout', '1800000') }
+    $before = Get-AppServiceDeployments -TargetSlot $TargetSlot | Select-Object -First 1
+    $beforeId = if ($null -eq $before) { $null } else { $before.id }
+    Invoke-AzureCli -Arguments $arguments | Out-Host
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0 -or $WaitForCompletion) {
+        $after = $null
+        for ($attempt = 1; $attempt -le $(if ($WaitForCompletion) { 60 } else { 1 }); $attempt++) {
+            $after = Get-AppServiceDeployments -TargetSlot $TargetSlot | Select-Object -First 1
+            if ($null -ne $after -and $after.id -and $after.id -ne $beforeId) { break }
+            if ($WaitForCompletion -and $attempt -lt 60) { Start-Sleep -Seconds 10 }
+        }
+        if ($null -eq $after -or -not $after.id -or $after.id -eq $beforeId) {
+            throw "Azure CLI deployment failed with exit code $exitCode and App Service did not accept a new deployment."
+        }
+        Wait-AppServiceDeployment -DeploymentId $after.id -CommandExitCode $exitCode -TargetSlot $TargetSlot
+        if ($WaitForCompletion) { return [string] $after.id }
+    }
 }
 
 function Resolve-ArtifactPath {
@@ -89,7 +143,10 @@ function Resolve-ArtifactPath {
 }
 
 function Test-AppServiceArchive {
-    param([Parameter(Mandatory)] [string] $Path)
+    param(
+        [Parameter(Mandatory)] [string] $Path,
+        [string[]] $RequiredEntries = @('package.json', 'server.js')
+    )
 
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "App Service package was not found: $Path"
@@ -106,7 +163,7 @@ function Test-AppServiceArchive {
             foreach ($entry in $archive.Entries) {
                 [void] $entryNames.Add($entry.FullName.Replace('\', '/'))
             }
-            foreach ($requiredEntry in @('package.json', 'server.js')) {
+            foreach ($requiredEntry in $RequiredEntries) {
                 if (-not $entryNames.Contains($requiredEntry)) {
                     throw "App Service package is missing required root entry '$requiredEntry': $Path"
                 }
@@ -176,6 +233,17 @@ function Test-HealthEndpoint {
 
 Push-Location $repositoryRoot
 try {
+    if ($Mode -eq 'sample') {
+        if (-not $PSBoundParameters.ContainsKey('AiMode') -and $env:TLC_AI_MODE -and $env:TLC_AI_MODE.Trim()) {
+            $AiMode = $env:TLC_AI_MODE.Trim().ToLowerInvariant()
+        }
+        . (Join-Path $PSScriptRoot 'web-sample-appservice.ps1')
+        Invoke-SampleAppServiceWorkflow
+        return
+    }
+    if ($Action -ne 'Deploy' -or $CreateSlot -or $ReceiptPath) {
+        throw 'Promotion, rollback, receipts and slot creation require -Mode sample.'
+    }
     $resolvedArtifactPath = Resolve-ArtifactPath
     if (-not $SkipBuild) {
         if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
@@ -235,20 +303,6 @@ try {
         return
     }
 
-    $deployArguments = @(
-        'webapp', 'deploy',
-        '--subscription', $SubscriptionId,
-        '--resource-group', $ResourceGroup,
-        '--name', $WebAppName,
-        '--src-path', $resolvedArtifactPath,
-        '--type', 'zip',
-        '--clean', 'true',
-        '--restart', 'true',
-        '--track-status', 'false',
-        '--only-show-errors'
-    )
-    if ($Slot) { $deployArguments += @('--slot', $Slot) }
-
     Write-Host "Deploying package to $targetName..."
     $settingsArguments = @(
         'webapp', 'config', 'appsettings', 'set',
@@ -257,22 +311,13 @@ try {
         '--name', $WebAppName,
         '--settings',
         "TLC_FOUNDRY_ENV_BASE64=$foundryEnvironmentSetting",
+        'TLC_HOSTING_MODEL=single-instance',
         'WEBSITE_RUN_FROM_PACKAGE=1',
         '--output', 'none'
     )
     if ($Slot) { $settingsArguments += @('--slot', $Slot) }
     Invoke-CheckedCommand -Command 'az' -Arguments $settingsArguments
-    $deploymentBefore = Get-AppServiceDeployments | Select-Object -First 1
-    $deploymentBeforeId = if ($null -eq $deploymentBefore) { $null } else { $deploymentBefore.id }
-    & az @deployArguments
-    $deployExitCode = $LASTEXITCODE
-    if ($deployExitCode -ne 0) {
-        $deploymentAfter = Get-AppServiceDeployments | Select-Object -First 1
-        if ($null -eq $deploymentAfter -or -not $deploymentAfter.id -or $deploymentAfter.id -eq $deploymentBeforeId) {
-            throw "Azure CLI deployment failed with exit code $deployExitCode and App Service did not accept a new deployment."
-        }
-        Wait-AppServiceDeployment -DeploymentId $deploymentAfter.id -CommandExitCode $deployExitCode
-    }
+    Publish-AppServiceArchive -Path $resolvedArtifactPath
 
     if (-not $SkipHealthCheck) {
         Test-HealthEndpoint -HostName $app.defaultHostName

@@ -477,6 +477,17 @@ The following sequence is proposed only. Each item should be scoped and approved
 | **5. Tighten UI and dependency boundaries** | Extract concentrated feature logic, isolate preview implementations, and automate import-boundary checks | Focused UI tests remain green and forbidden dependencies fail validation |
 | **6. Add behavioral and operational evidence** | Agent evaluations, version provenance, concurrency tests, and deployment checks | Grounding, access isolation, failures, latency, and resource consumption are measured |
 
+### Implementation status
+
+| Step | Status | Done | Not done |
+| --- | --- | --- | --- |
+| 1 | Partial | Desktop and VS Code now build agents through the shared `createFoundryTaskAgents` (`apps/desktop/electron/main/task-agents.ts`); parity test `agent-composition-parity.test.ts` | Moving every host route onto the shared operation registry |
+| 2 | Done | Terminal-only history retention, separate `maxActiveRuns` admission (429), scope pruning tied to retained runs | None |
+| 3 | Done (single-instance) | Declared and enforced via `TLC_HOSTING_MODEL`; idle-only host eviction; restart/other-instance behavior tested; see [Hosting-Model.md](./Hosting-Model.md) | Shared workflow state / multi-replica support |
+| 4 | Done for the workflow seam | `composeWorkflows` + `WorkflowRegistration` with schema-validated output and additive `extensionOutput` | Guidance handoff is not covered by the seam |
+| 5 | Partial | `npm run check:boundaries` gate with a shrink-only baseline; VS Code webview off Desktop shims; preview evaluation/reporting isolated under `renderer-revamp/src/preview` | Decomposing the oversized `App.tsx` / VS Code `app.tsx` roots; extracting the rest of the preview client |
+| 6 | Partial | Golden-scenario evaluator and orchestrated run (deterministic), 25-user concurrency/isolation test; see [Operational-Evidence.md](./Operational-Evidence.md) | Live Foundry evaluation run, agent version provenance, deployed checks, load targets |
+
 Preserve throughout:
 
 - Existing versioned contracts and intended behavior.

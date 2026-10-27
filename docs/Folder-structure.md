@@ -48,6 +48,35 @@ Desktop, Web, VS Code, and the shared operation catalog expose the same operatio
 No content-search UI or MCEM portal connector is added. See the
 [knowledge connector guide](./Knowledge-Search-Connectors.md).
 
+### Working session pack
+
+Beside **Run MCEM Coach** (VS Code) and **Meeting capture** (Desktop, Web, Teams), the
+**Working session** control prepares decks, a Microsoft Learn document set and draft Bicep/ARM
+templates for a chosen opportunity and milestone, into `Documents\TLC\<Opportunity - Milestone>`
+(a zip download on Web and Teams). One orchestrator service, four transports, one shared UI:
+
+```text
+packages/common/contracts/working-session.ts   Strict v1.0 topic/prepare/result contracts (browser-safe)
+packages/orchestrator/working-session/
+  topic.ts                 Rule catalog + optional model topic deduction (untrusted text, schema-checked)
+  learn.ts                 Microsoft Learn MCP client, page gathering, Markdown set and index
+  decks.ts                 Local folders, public GitHub, Seismic, Microsoft 365 deck sources and ranking
+  pptx-draft.ts            Labelled DRAFT outline deck when no existing deck is found
+  iac.ts                   Bicep templates per scenario, static validator, model path with fallback
+  bicep-cli.ts             Optional Bicep -> ARM compile (Bicep CLI or az bicep)
+  sinks.ts / outputs.ts    FolderSink (no overwrite, no link escape) and ZipSink; Documents resolution
+  download-store.ts        Short-lived per-user holding area for hosted zips
+  foundry-model.ts         Strict structured-output model adapter
+  service.ts               WorkingSessionService, factory and deck configuration from the environment
+apps/shared/working-session/                   Launcher component, pure model, CSS, browser download helper
+apps/desktop/electron/main/working-session-ipc.ts   Validated IPC adapter (opens only Documents\TLC folders)
+apps/web/src/working-session.ts                Hosted resolver (zip only, per-user download)
+apps/teams/src/working-session.ts              Teams host (zip only, per-principal download)
+apps/vscode-extension/src/working-session.ts   Extension host composition (writes to Documents\TLC)
+```
+
+See the [working session runbook](./runbooks/working-session.md).
+
 ### Teams implementation additions
 
 The original proposal below is retained as historical context. The Teams development
@@ -90,8 +119,21 @@ apps/teams/.env.cli.example          Safe existing-user CLI configuration, not t
 apps/shared/                         Browser-safe prompt/Markdown and existing UI reuse
 apps/shared/transcript-file.ts       Shared UTF-8 VTT/text reader for Desktop/Web, VS Code and Teams
                                      Shared Portfolio controls, sorting and Next Best Actions
+apps/shared/pane-resize-handle.tsx   Accessible shared three-dot width divider for all four surfaces
+apps/shared/resizable-split.tsx      Responsive two-region Portfolio sizing without unmounting hidden drafts
+apps/shared/pane-resizing.css        Blue hover/drag divider lines and native horizontal pane scrollbars
+apps/shared/guidance-pane.tsx        Shared Guidance maximize/restore control and VS Code/Teams pane frame
+apps/shared/guidance-pane.css        Temporary full-width split layout without unmounting neighboring panes
+apps/shared/customer-email.ts        Browser-safe customer-email extraction excluding later internal sections
+apps/shared/customer-email-actions.tsx
+                                     Copy and human-reviewed unsent draft actions shared by all four surfaces
 apps/shared/session-portfolio.ts     Memory-only, mode/session-scoped Portfolio/Discovery snapshots
                                      Shared lazy detail caching, local filtering and confirmed-write updates
+apps/shared/operation-result-session.ts
+                                     UI-session ownership of existing async calls; 20 completed results, scope isolation and private reset
+apps/shared/use-operation-result.ts  Shared reactive result subscription and Meeting Capture review/restore behavior
+apps/shared/workflow-polling.ts      Workflow-definition deadline plus bounded transport grace across UI transports
+apps/shared/workflow-progress.tsx    Shared incomplete/partial/terminal Play result announcements
 apps/shared/session-cache.ts         Bounded reactive datasets, active-interest freshness and safe read retries
 apps/shared/presentation-owner.ts    Host-owned cache composition and confirmed canonical patches
 apps/shared/presentation-hooks.ts    Visible-interest subscriptions and original editor-field capture
@@ -101,6 +143,11 @@ apps/vscode-extension/src/presentation-provider.ts
                                      One provider cache for native trees and recreated webviews
 apps/shared/meeting-proposal-markdown.ts
                                      Shared browser-safe meeting proposal export format across surfaces
+apps/shared/meeting-picker.tsx       Shared "Teams meeting" dropdown, lazy list hook and date/time labels (VS Code, Desktop/Web, Teams)
+packages/common/configuration/meeting-sources.ts
+                                     Delegated Graph scopes and window/limit for the recent-meeting list
+packages/connectors/common/meeting-source.ts
+                                     User-safe MeetingSourceError and messages shared by every UI
 apps/shared/mcem-stages.ts           Browser-safe stage names and accountable role metadata
 apps/shared/mcem-stage-board.tsx     Shared Desktop/Web/Teams stage columns and presentation
 apps/shared/mcem-stage-board.css     Shared stage headers, cards, selection and gate styling
@@ -126,6 +173,32 @@ packages/orchestrator/agent-evidence.ts
                                      Bounded evidence pack (comment history, notes, activities, milestone detail) and model-input serialization
 packages/connectors/msx/evidence.ts  Pure helpers for MSX comment-history parsing and rich-text cleanup
 packages/orchestrator/prewarm.ts      Best-effort Foundry token and MCEM guidance pre-warm
+packages/orchestrator/workflows/registration.ts
+                                     Approved workflow registration seam (schema-validated extension output)
+packages/orchestrator/evaluation/golden-scenarios.ts
+                                     Metadata-only golden-scenario evaluator (not-evaluated is never a pass)
+packages/common/configuration/hosting-model.ts
+                                     Declared single-instance hosting model and startup guard
+apps/desktop/electron/main/task-agents.ts
+                                     Desktop task-agent composition over the shared factory
+apps/desktop/renderer-revamp/src/preview/
+                                     Static-preview-only implementations, imported only by data-client.ts
+scripts/check-import-boundaries.mjs   Import-boundary gate (baseline: scripts/import-boundary-baseline.json)
+scripts/deploy-web-appservice.ps1     Shared live/sample App Service ZIP deployment entry point
+scripts/web-sample-appservice.ps1     Sample-only slot, anonymous verification, promotion and guarded rollback helpers
+scripts/smoke-web-release.mjs         Actual staged-host and remote anonymous sample verification
+packages/common/contracts/inference.ts
+                                     Browser-safe, independently versioned sample AI provenance and mode selection
+packages/orchestrator/sample-inference.ts
+                                     Sample-only real/offline AI composition; no live source wiring
+packages/connectors/foundry/sample-budget.ts
+                                     Persistent per-slot sample AI quotas and restricted inference transport
+apps/shared/inference-status.tsx     Shared sample AI mode and fallback presentation
+docs/runbooks/sample-foundry-ai.md   Cross-surface hybrid sample setup, credentials and limits
+tests/fixtures/appservice-cli.mjs     Isolated stateful Azure/verification CLI double; never contacts Azure
+tests/e2e/revamp/web-release.spec.ts  Actual Node-host SQLite sample browser and restart/reset journey
+docs/architecture/Hosting-Model.md, Operational-Evidence.md
+                                     Hosting constraints and executed vs planned evidence
 apps/shared/agent-stream.ts           Browser-safe agent stream accumulator and NDJSON reader (all UIs)
                                      Desktop IPC acknowledges the validated terminal event before removing its listener
 apps/shared/use-agent-run.ts          Shared React hook: instant draft, streamed text, final response, cancel
@@ -335,6 +408,10 @@ apps/shared/dashboards/
     stage-pipeline-parts.tsx           KPI/pill/row-action/CSV-download primitives
     stage-pipeline-table.tsx           sortable table
     stage-pipeline-storage.ts          browser-only Focus/Reviewed marks
+    stage-pipeline-scope.tsx           portfolio scope (mine/reports/both), direct-report picker, source-health notice
+    stage-pipeline-writes.ts           comment/milestone edit review, sample-mode write simulation
+    stage-pipeline-write-dialog.tsx    reviewed write dialog (forecast comment, milestone update, task)
+    stage-pipeline-dispatch.ts         routes reviewed actions to the existing MSX write operations
     stage-pipeline-review.css
   soltionEngineerDashboard/
     se-reporting-dashboard.tsx
@@ -393,7 +470,8 @@ Meeting capture's Desktop/Web launcher and review modal live in the focused
 `apps/desktop/renderer-revamp/src/meeting-capture.tsx` (shared by Desktop and Web,
 not `apps/shared`, since it depends on the renderer-revamp `RevampDataClient` and
 Fluent UI already used throughout `App.tsx`). The VS Code webview keeps its own
-equivalent component. Both call the same shared connectors/extractor
+equivalent component. The "Teams meeting" dropdown inside both launchers (and in
+the Teams client) is the one shared `apps/shared/meeting-picker.tsx`. Both call the same shared connectors/extractor
 (`packages/connectors/msx/live-meeting.ts`, `packages/connectors/local-store`,
 `packages/agents/meeting-signal-extractor`) through host-specific transports:
 Electron IPC (`apps/desktop/electron/main/index.ts`), the webview bridge

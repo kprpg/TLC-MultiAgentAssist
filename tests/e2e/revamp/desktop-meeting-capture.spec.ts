@@ -51,6 +51,8 @@ test('captures meeting signals from a seeded Teams transcript and applies the ap
         await expect(dialog.getByText(/Purchase timeline: This Year/)).toBeVisible()
         await dialog.getByRole('button', { name: 'Done' }).click()
         await expect(dialog).toHaveCount(0)
+        await launcher.click()
+        await expect(window.getByRole('button', { name: 'Review last result', exact: true })).toHaveCount(0)
     } finally {
         await app.close().catch(() => undefined)
         await rm(userDataDirectory, { recursive: true, force: true })

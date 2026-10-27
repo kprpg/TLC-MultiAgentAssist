@@ -19,6 +19,7 @@ import {
 import { discoverySnapshotSchema, portfolioIndexSchema, portfolioWorkspaceSchema } from '../../../packages/common/contracts/index.js'
 import { cacheControlResponseSchema, mutationSyncResponseSchema } from '../../../packages/common/contracts/cache-sync.js'
 import { knowledgeSearchResponseSchema } from '../../../packages/common/contracts/knowledge.js'
+import { workingSessionResultSchema, workingSessionTopicResponseSchema } from '../../../packages/common/contracts/working-session.js'
 
 function extractId(raw: unknown): string {
     if (raw && typeof raw === 'object' && 'id' in raw) {
@@ -120,6 +121,11 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
                 const params = parseBridgeParams('sellerDashboard', parsed.data.params)
                 if (!provider.sellerDashboard) throw new Error('The Seller Dashboard host is unavailable.')
                 return successResponse(id, await provider.sellerDashboard.invoke(params))
+            }
+            case 'stagePipelineReview': {
+                const params = parseBridgeParams('stagePipelineReview', parsed.data.params)
+                if (!provider.stagePipelineReview) throw new Error('The Stage and Pipeline Review host is unavailable.')
+                return successResponse(id, await provider.stagePipelineReview.invoke(params))
             }
             case 'seReporting': {
                 const params = parseBridgeParams('seReporting', parsed.data.params)
@@ -290,6 +296,16 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
                 return errorResponse(id, 'exportContent must be handled by the extension host.', 'host_only')
             case 'composeEmail':
                 return errorResponse(id, 'composeEmail must be handled by the extension host.', 'host_only')
+            case 'workingSessionOpenFolder':
+                return errorResponse(id, 'workingSessionOpenFolder must be handled by the extension host.', 'host_only')
+            case 'workingSessionTopic': {
+                if (!provider.workingSession) throw new Error('Preparing a working session is not available on this connection.')
+                return successResponse(id, workingSessionTopicResponseSchema.parse(await provider.workingSession.deriveTopic(parseBridgeParams('workingSessionTopic', parsed.data.params))))
+            }
+            case 'workingSessionPrepare': {
+                if (!provider.workingSession) throw new Error('Preparing a working session is not available on this connection.')
+                return successResponse(id, workingSessionResultSchema.parse(await provider.workingSession.prepare(parseBridgeParams('workingSessionPrepare', parsed.data.params))))
+            }
             default:
                 return errorResponse(id, 'The requested method is not supported.', 'unknown_method')
         }

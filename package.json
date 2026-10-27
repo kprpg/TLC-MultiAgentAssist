@@ -13,10 +13,13 @@
   ],
   "scripts": {
     "check:structure": "node scripts/check-structure.mjs",
+    "check:boundaries": "node scripts/check-import-boundaries.mjs",
     "preflight": "node scripts/preflight.mjs",
     "typecheck": "tsc --build --pretty false",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:regression:plays": "vitest run --maxWorkers=2 tests/unit/orchestrator/workflow tests/unit/orchestrator/live-play-host.test.ts tests/unit/orchestrator/sample-workflow-host.test.ts tests/unit/connectors/dataverse tests/unit/connectors/mcp-client-pool.test.ts tests/unit/shared/workflow tests/unit/hosts/workflow-transport-parity.test.ts tests/unit/vscode-extension/live-play-composition.test.ts tests/unit/vscode-extension/sample-provider.test.ts tests/unit/desktop/workflow-host-startup.test.ts tests/contract/dataverse-plays.test.ts tests/integration/plays-performance.test.ts",
+    "test:smoke:plays": "npm run desktop:build && npm run ext:build && playwright test --config playwright.revamp.config.ts web.spec.ts plays-progress.spec.ts --grep \"workflow|first[- ]page\" --reporter=line",
     "build": "npm run typecheck",
     "desktop:icon": "node scripts/generate-desktop-icon.mjs",
     "desktop:build": "npm run desktop:icon && npm run voice:model && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.main.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.preload.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.config.ts && node node_modules/vite/bin/vite.js build --config apps/desktop/vite.revamp.config.ts",
@@ -35,7 +38,9 @@
     "web:build": "npm run ui:revamp:build && npm --workspace @tlc/web run build",
     "web:package": "npm run web:build && node scripts/package-web-release.mjs",
     "web:release": "npm run web:build && node scripts/prepare-web-appservice-release.mjs",
+    "web:release:sample": "cross-env TLC_DATA_STORE=sqlite TLC_DATA_STORE_PATH=:memory: npm run web:release",
     "web:deploy": "pwsh -NoProfile -File scripts/deploy-web-appservice.ps1",
+    "web:deploy:sample": "pwsh -NoProfile -File scripts/deploy-web-appservice.ps1 -Mode sample -Slot sample",
     "test:smoke:web-release": "node scripts/smoke-web-release.mjs",
     "start": "node apps/web/dist/server.js",
     "web:start": "npm run web:build && cross-env TLC_WEB_MODE=sample node apps/web/dist/server.js",
@@ -55,12 +60,12 @@
     "desktop:revamp:package": "npm run desktop:package",
     "desktop:legacy:start": "npm run desktop:build && cross-env TLC_UI_MODE=legacy node node_modules/electron/cli.js apps/desktop",
     "desktop:dev": "concurrently -k \"node node_modules/vite/bin/vite.js --config apps/desktop/vite.revamp.config.ts\" \"wait-on tcp:5174 && node node_modules/vite/bin/vite.js build --watch --config apps/desktop/vite.main.config.ts\" \"wait-on tcp:5174 && node node_modules/vite/bin/vite.js build --watch --config apps/desktop/vite.preload.config.ts\" \"wait-on tcp:5174 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5174 node node_modules/electron/cli.js apps/desktop\"",
-    "test:smoke:desktop": "npm run desktop:build && playwright test tests/e2e/desktop/preview.spec.ts --reporter=line",
+    "test:smoke:desktop": "npm run desktop:build && cross-env TLC_AI_MODE=sample playwright test tests/e2e/desktop/preview.spec.ts --reporter=line",
     "test:smoke:revamp:desktop": "npm run desktop:build && playwright test tests/e2e/revamp/desktop.spec.ts --config playwright.revamp.config.ts --reporter=line",
     "test:smoke:revamp": "npm run desktop:build && npm --workspace tlc-assist-vscode run build && playwright test tests/e2e/revamp --config playwright.revamp.config.ts --reporter=line",
     "test:smoke:live": "npm run desktop:build && cross-env TLC_RUN_LIVE_SMOKE=1 playwright test tests/e2e/desktop/live.spec.ts --reporter=line",
     "validate:major": "npm run typecheck && npm test && npm run test:smoke:desktop",
-    "phase0:check": "npm run check:structure && npm run preflight && npm run lint && npm run typecheck && npm run test"
+    "phase0:check": "npm run check:structure && npm run check:boundaries && npm run preflight && npm run lint && npm run typecheck && npm run test"
   },
   "engines": {
     "node": ">=22.12.0",

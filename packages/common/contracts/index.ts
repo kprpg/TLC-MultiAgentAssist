@@ -4,6 +4,7 @@ import { seDomainSchema } from '../configuration/se-domains.js'
 import { contractVersion } from './version.js'
 import { accountSchema } from './portfolio.js'
 import { agentTaskPromptMaxLength } from './agent-task-limits.js'
+import { inferenceExecutionSchema, inferenceModeSchema, inferenceResponseVersion, validateInferenceResponse } from './inference.js'
 
 export { contractVersion } from './version.js'
 export { agentTaskPromptMaxLength } from './agent-task-limits.js'
@@ -17,6 +18,8 @@ export * from './stage-pipeline-review.js'
 export * from './record-creation.js'
 export * from './cache-sync.js'
 export * from './knowledge.js'
+export * from './working-session.js'
+export * from './inference.js'
 
 export const dataModeSchema = z.enum(['sample', 'live'])
 export const sourceStateSchema = z.enum([
@@ -45,7 +48,8 @@ export const authStatusSchema = z.object({
 
 export const desktopDataStatusSchema = z.object({
   mode: dataModeSchema,
-  auth: authStatusSchema
+  auth: authStatusSchema,
+  inference: z.object({ contractVersion: z.literal('1.0'), mode: inferenceModeSchema }).strict().optional()
 })
 
 export const opportunitySchema = z.object({
@@ -294,7 +298,8 @@ export const agentTaskRequestSchema = z.object({
 })
 
 export const agentTaskResponseSchema = z.object({
-  contractVersion: z.literal(contractVersion),
+  contractVersion: z.enum([contractVersion, inferenceResponseVersion]),
+  inference: inferenceExecutionSchema.optional(),
   correlationId: z.string().uuid(),
   capability: agentCapabilitySchema,
   agentVersion: z.string().min(1),
@@ -303,7 +308,7 @@ export const agentTaskResponseSchema = z.object({
   state: z.enum(['complete', 'partial', 'unauthorized']),
   content: z.string().min(1),
   sourceHealth: z.array(sourceHealthSchema).min(1)
-})
+}).superRefine(validateInferenceResponse)
 
 export const agentTaskStreamVersion = '1.0' as const
 

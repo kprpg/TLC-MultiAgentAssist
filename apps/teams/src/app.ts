@@ -36,6 +36,7 @@ import { createMutationSession } from '../../../packages/orchestrator/mutations/
 import { MutationDispatchPreventedError, MutationRuntime } from '../../../packages/orchestrator/mutations/host.js'
 import { MutationJournalError } from '../../../packages/orchestrator/mutations/journal.js'
 import { sourceHttpFailure } from '../../../packages/common/source-failure.js'
+import type { TeamsWorkingSessionHost } from './working-session.js'
 
 export interface TeamsHandlerOptions {
   backgroundSync?: boolean
@@ -52,6 +53,7 @@ export interface TeamsHandlerOptions {
   authenticate?(assertion: string): Promise<ExecutionPrincipal>
   localConnection?: { pairing: LocalPairingAuthority; status(): NativeConnectionStatus; refreshIdentity(): Promise<void> }
   launch?: TeamsLaunchMonitor
+  workingSession?: TeamsWorkingSessionHost
   onError?(event: { correlationId: string; code: string; method: string; category: string }): void
 }
 export class TeamsHttpError extends Error {
@@ -234,7 +236,8 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
           !local.status().resources.some((resource) => resource.resource === 'mcp' && resource.state === 'connected')) {
         throw new TeamsHttpError(409, 'mcp_connection_required')
       }
-      if (isCliConfiguration(options.configuration) && ['/api/teams/meetings/resolve', '/api/teams/meetings/acquire'].includes(url.pathname)) {
+      if (isCliConfiguration(options.configuration) && (['/api/teams/meetings/resolve', '/api/teams/meetings/acquire'].includes(url.pathname)
+        || url.pathname === '/api/teams/meetings/sources' && principal.mode !== 'sample')) {
         throw new TeamsHttpError(409, 'graph_unavailable_in_cli_profile')
       }
       const services = await options.resolveServices(principal, assertion)
@@ -337,6 +340,20 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         json(200, await publications.readShared(principal, decodeURIComponent(url.pathname.slice('/api/teams/shared/'.length)), { stage: principal.mode === 'live' }))
         return true
       }
+      if (request.method === 'GET' && url.pathname.startsWith('/api/teams/working-session/download/')) {
+        if (!options.workingSession) throw new TeamsHttpError(404, 'working_session_not_configured')
+        const id = decodeURIComponent(url.pathname.slice('/api/teams/working-session/download/'.length))
+        if (!/^[0-9a-f-]{36}$/.test(id)) throw new TeamsHttpError(404, 'download_not_found')
+        const stored = options.workingSession.download(principal, id)
+        if (!stored) throw new TeamsHttpError(404, 'download_expired')
+        assertCurrentCaller()
+        response.statusCode = 200
+        response.setHeader('content-type', 'application/zip')
+        const archiveName = Array.from(stored.fileName, (character) => character.charCodeAt(0) < 32 || '\\/:*?"<>|'.includes(character) ? '-' : character).join('')
+        response.setHeader('content-disposition', `attachment; filename="TLC-working-session.zip"; filename*=UTF-8''${encodeURIComponent(archiveName)}`)
+        response.end(stored.bytes)
+        return true
+      }
       if (request.method !== 'POST') throw new TeamsHttpError(404, 'route_not_found')
       const body = await readBody(request)
       if (url.pathname === '/api/teams/mutation-sync') {
@@ -423,6 +440,21 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
           clearInterval(heartbeat)
           response.end()
         }
+      } else if (url.pathname === '/api/teams/working-session/topic' || url.pathname === '/api/teams/working-session/prepare') {
+        if (!options.workingSession) throw new TeamsHttpError(404, 'working_session_not_configured')
+        const reference = z.object({ opportunityId: z.string().min(1).max(200) }).passthrough().parse(body)
+        await services.orchestrator.getOpportunitySnapshot(reference.opportunityId)
+        const session = options.workingSession.service(principal, services)
+        if (url.pathname.endsWith('/prepare')) {
+          await new UserRequestBudget(options.store).consume(principal, 'agent', principal.mode === 'sample' ? 60 : 4)
+          const result = await withTeamsPerformanceContext(correlationId, () => session.prepare(body))
+          assertCurrentCaller()
+          json(200, result)
+        } else {
+          const result = await withTeamsPerformanceContext(correlationId, () => session.deriveTopic(body))
+          assertCurrentCaller()
+          json(200, result)
+        }
       } else if (url.pathname.startsWith('/api/teams/operations/')) {
         const name = decodeURIComponent(url.pathname.slice('/api/teams/operations/'.length))
         if (!operations.names().includes(name)) throw new TeamsHttpError(404, 'unknown_operation')
@@ -450,13 +482,20 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
         const input = z.object({ bindingId: z.string().min(1).max(200) }).strict().parse(body)
         json(200, await actions.prepare(principal, 'publishSummary', await publications.prepareInput(principal, input.bindingId)))
       } else if (url.pathname === '/api/teams/meetings/resolve') {
-        const input = z.object({ joinUrl: z.url() }).strict().parse(body)
-        json(200, { meetingId: await services.resolveMeeting(input.joinUrl) })
+        const input = z.union([
+          z.object({ joinUrl: z.url() }).strict(),
+          z.object({ handle: z.string().regex(/^gm_[A-Za-z0-9_-]{32}$/) }).strict()
+        ]).parse(body)
+        json(200, 'handle' in input ? await services.resolveRecentMeeting(input.handle) : { meetingId: await services.resolveMeeting(input.joinUrl) })
       } else if (url.pathname === '/api/teams/meetings/sources') {
         const input = z.object({ opportunityId: z.string().min(1).max(200) }).strict().parse(body)
-        if (principal.mode !== 'sample') throw new TeamsHttpError(400, 'live_meeting_binding_required')
         await services.orchestrator.getOpportunitySnapshot(input.opportunityId)
-        json(200, await services.listTranscriptSources(input.opportunityId))
+        if (principal.mode === 'sample') {
+          json(200, await services.listTranscriptSources(input.opportunityId))
+        } else {
+          await lifecycle.assertActive(principal)
+          json(200, await services.listRecentMeetings())
+        }
       } else if (url.pathname === '/api/teams/meetings/manual') {
         const result = await acquisition.ingest(principal, body)
         await notifications.enqueueAcquisition(principal, result)
@@ -511,11 +550,11 @@ export function createTeamsHandler(options: TeamsHandlerOptions) {
       if (readCancellation.signal.aborted && response.destroyed) return true
       const status = error instanceof GraphMeetingError ? error.state === 'denied' || error.state === 'admin-blocked' ? 403 : error.state === 'auth-required' ? 409 : error.state === 'unsupported' ? 400 : 503
         : error instanceof ManualTranscriptError ? 400
-        : error instanceof NativeConnectionError ? error.code === 'native_source_denied' ? 403 : error.code === 'native_resource_unavailable' ? 409 : 401 : error instanceof LocalPairingError ? error.status : error instanceof CollaborationAdmissionError || error instanceof ActionReviewStaleError ? 409 : error instanceof WorkflowScopeAuthorizationError ? 403 : error instanceof RequestQuotaError ? 429 : error instanceof TeamsAuthorizationError ? 401 : error instanceof TeamsHttpError ? error.status
+        : error instanceof NativeConnectionError ? error.code === 'native_source_denied' ? 403 : error.code === 'native_resource_unavailable' ? 409 : 401 : error instanceof LocalPairingError ? error.status : error instanceof CollaborationAdmissionError || error instanceof ActionReviewStaleError ? 409 : error instanceof WorkflowScopeAuthorizationError ? 403 : error instanceof WorkflowRuntimeError && error.code === 'capacity_exceeded' ? 429 : error instanceof RequestQuotaError ? 429 : error instanceof TeamsAuthorizationError ? 401 : error instanceof TeamsHttpError ? error.status
         : error instanceof ZodError || error instanceof SyntaxError || error instanceof URIError ? 400 : 500
       const code = error instanceof GraphMeetingError ? error.code === 'invalid_meeting_link' ? 'graph_invalid_meeting_link' : `graph_${error.state.replaceAll('-', '_')}`
         : error instanceof ManualTranscriptError ? error.code
-        : error instanceof NativeConnectionError || error instanceof LocalPairingError ? error.code : error instanceof CollaborationAdmissionError ? error.code : error instanceof ActionReviewStaleError ? 'action_review_stale' : error instanceof WorkflowScopeAuthorizationError ? 'workflow_source_scope_changed' : error instanceof RequestQuotaError ? 'user_quota_exhausted' : error instanceof TeamsAuthorizationError ? error.code : error instanceof TeamsHttpError ? error.code : status === 400 ? 'invalid_request' : 'operation_failed'
+        : error instanceof NativeConnectionError || error instanceof LocalPairingError ? error.code : error instanceof CollaborationAdmissionError ? error.code : error instanceof ActionReviewStaleError ? 'action_review_stale' : error instanceof WorkflowScopeAuthorizationError ? 'workflow_source_scope_changed' : error instanceof WorkflowRuntimeError && error.code === 'capacity_exceeded' ? 'workflow_capacity_exceeded' : error instanceof RequestQuotaError ? 'user_quota_exhausted' : error instanceof TeamsAuthorizationError ? error.code : error instanceof TeamsHttpError ? error.code : status === 400 ? 'invalid_request' : 'operation_failed'
       const method = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method ?? '') ? request.method! : 'OTHER'
       const candidate = url.pathname.split('/')[3] ?? ''
       const category = ['session', 'config', 'local', 'operations', 'actions', 'activity', 'contexts', 'meetings', 'publications', 'shared', 'documents', 'graph', 'references', 'lifecycle'].includes(candidate) ? candidate : 'unknown'

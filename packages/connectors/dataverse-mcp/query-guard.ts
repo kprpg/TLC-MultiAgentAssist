@@ -22,6 +22,31 @@ const dealTeamOpportunityColumn: Readonly<Record<string, string>> = {
     activitypointer: 'regardingobjectid'
 }
 
+export function resolveOpportunityProjection(
+    entityMap: DataverseEntityMap,
+    query: GuardedQueryRequest
+): Array<{ canonical: 'accountId' | 'opportunityName'; column: string }> {
+    if (query.expand.length === 0) return []
+    const entity = entityMap.entities.find((candidate) => candidate.canonical === query.entity)
+    const expansion = query.expand[0]
+    if (query.expand.length !== 1 || expansion?.relationship !== 'opportunity' ||
+        !entity || !['msp_engagementmilestone', 'activitypointer'].includes(entity.logicalName)) {
+        throw new DataverseQueryGuardError('relationship_denied', 'Only milestone/activity parent opportunity projection is allowlisted.')
+    }
+    const opportunity = entityMap.entities.find((candidate) => candidate.canonical === 'opportunity' && candidate.logicalName === 'opportunity')
+    if (!opportunity) throw new DataverseQueryGuardError('relationship_denied', 'The parent opportunity is not allowlisted.')
+    return expansion.select.map((field) => {
+        if (field !== 'accountId' && field !== 'name') {
+            throw new DataverseQueryGuardError('field_denied', 'The parent opportunity field is not allowlisted for projection.')
+        }
+        const attribute = opportunity.attributes.find((candidate) => candidate.canonical === field)
+        if (!attribute || attribute.sensitivity === 'restricted') {
+            throw new DataverseQueryGuardError('field_denied', 'The parent opportunity field is not allowlisted.')
+        }
+        return { canonical: field === 'name' ? 'opportunityName' : 'accountId', column: toSqlColumn(attribute.logicalName) }
+    })
+}
+
 export type DataverseReadQueryArguments = {
     entitySetName: string
     select: string[]
@@ -90,7 +115,7 @@ export function translateDataverseQuery(
         filter: query.filter.map((filter) => ({
             field: resolveAttribute(filter.field).logicalName,
             operator: normalizeOperator(filter.operator),
-            value: filter.value
+            value: choiceFilterValue(resolveAttribute(filter.field), filter)
         })),
         orderBy: query.orderBy.map((order) => ({
             field: resolveAttribute(order.field).logicalName,
@@ -134,6 +159,25 @@ function sqlValue(
     if (operator === 'contains') return sqlScalar(`%${value}%`)
     if (operator === 'startswith') return sqlScalar(`${value}%`)
     return sqlScalar(value)
+}
+
+function choiceFilterValue(
+    attribute: DataverseAttributeMapping,
+    filter: GuardedQueryRequest['filter'][number]
+): GuardedQueryRequest['filter'][number]['value'] {
+    const choices = attribute.optionSet
+    if (!choices) return filter.value
+    if (!['eq', 'ne', 'in'].includes(filter.operator)) {
+        throw new DataverseQueryGuardError('field_denied', 'Choice filters support only equality and membership operations.')
+    }
+    const resolve = (value: string | number | boolean): number => {
+        const code = typeof value === 'string' && Object.hasOwn(choices, value) ? choices[value] : value
+        if (typeof code !== 'number' || !Object.values(choices).includes(code)) {
+            throw new DataverseQueryGuardError('field_denied', 'The choice filter value is not in the configured option set.')
+        }
+        return code
+    }
+    return Array.isArray(filter.value) ? filter.value.map(resolve) : resolve(filter.value)
 }
 
 function renderSqlScopePredicate(template: string, scope: DataverseDelegatedScope): string {
@@ -181,47 +225,55 @@ export function renderDataverseSql(
     if (!entity) {
         throw new DataverseQueryGuardError('entity_denied', 'Dataverse entity is not allowlisted.')
     }
-    if (query.expand.length > 0) {
-        throw new DataverseQueryGuardError('relationship_denied', 'Dataverse relationship expansion is not allowlisted by the semantic map.')
-    }
+    const projection = resolveOpportunityProjection(entityMap, query)
 
     const attributes = new Map(entity.attributes.map((attribute) => [attribute.canonical, attribute]))
-    const column = (canonical: string): string => {
+    const attribute = (canonical: string): DataverseAttributeMapping => {
         const attribute = attributes.get(canonical)
         if (!attribute) throw new DataverseQueryGuardError('field_denied', 'Dataverse field is not allowlisted.')
-        return toSqlColumn(attribute.logicalName)
+        return attribute
     }
+    const column = (canonical: string): string => toSqlColumn(attribute(canonical).logicalName)
 
     const top = Math.min(query.top, maximumRows)
     const dealTeamColumn = dealTeamOpportunityColumn[toSqlColumn(entity.logicalName)]
     const useJoinScope = options.enforceScope !== false && Boolean(delegatedScope.currentUserId) && Boolean(dealTeamColumn)
-    const qualify = (sqlColumn: string): string => (useJoinScope ? `m.${sqlColumn}` : sqlColumn)
+    const excludedAccountIds = options.enforceScope === false ? [] : [...new Set(delegatedScope.excludedAccountIds ?? [])]
+    if (excludedAccountIds.some((accountId) => !isSafeIdentifier(accountId))) {
+        throw new DataverseQueryGuardError('scope_required', 'An excluded TLC account id is invalid.')
+    }
+    const excludeAccounts = Boolean(dealTeamColumn) && excludedAccountIds.length > 0
+    const useAlias = useJoinScope || projection.length > 0 || (excludeAccounts && entity.logicalName !== 'opportunity')
+    const qualify = (sqlColumn: string): string => (useAlias ? `m.${sqlColumn}` : sqlColumn)
 
-    const selectColumns = query.select.map((canonical) => qualify(column(canonical)))
-    const whereClauses = query.filter.map((filter) => `${qualify(column(filter.field))} ${sqlOperator(filter.operator)} ${sqlValue(filter.operator, filter.value)}`)
+    const selectColumns = [
+        ...query.select.map((canonical) => qualify(column(canonical))),
+        ...projection.map((field) => `scopeop.${field.column} AS ${field.canonical}`)
+    ]
+    const whereClauses = query.filter.map((filter) =>
+        `${qualify(column(filter.field))} ${sqlOperator(filter.operator)} ${sqlValue(filter.operator, choiceFilterValue(attribute(filter.field), filter))}`)
     if (useJoinScope) {
         const userId = delegatedScope.currentUserId as string
         if (!isSafeIdentifier(userId)) {
             throw new DataverseQueryGuardError('scope_required', 'The delegated user id is missing or invalid.')
         }
         whereClauses.unshift(`dt.msp_dealteamuserid = '${userId}'`, 'dt.statecode = 0')
-        const excludedAccountIds = [...new Set(delegatedScope.excludedAccountIds ?? [])]
-        if (excludedAccountIds.some((accountId) => !isSafeIdentifier(accountId))) {
-            throw new DataverseQueryGuardError('scope_required', 'An excluded TLC account id is invalid.')
-        }
-        if (excludedAccountIds.length > 0) {
-            const ids = excludedAccountIds.map((accountId) => `'${accountId}'`).join(', ')
-            whereClauses.push(`${toSqlColumn(entity.logicalName) === 'opportunity' ? 'm' : 'scopeop'}.parentaccountid NOT IN (${ids})`)
-        }
     } else if (options.enforceScope !== false && entity.userScopePredicate !== undefined) {
         whereClauses.push(renderSqlScopePredicate(entity.userScopePredicate, delegatedScope))
+    }
+    if (excludeAccounts) {
+        const ids = excludedAccountIds.map((accountId) => `'${accountId}'`).join(', ')
+        const accountColumn = entity.logicalName === 'opportunity' ? qualify('parentaccountid') : 'scopeop.parentaccountid'
+        whereClauses.push(`${accountColumn} NOT IN (${ids})`)
     }
     const orderBy = query.orderBy.map((order) => `${qualify(column(order.field))} ${order.direction.toUpperCase()}`)
 
     let sql = `SELECT TOP ${top} ${selectColumns.join(', ')} FROM ${toSqlColumn(entity.logicalName)}`
-    if (useJoinScope) sql += ` m JOIN msp_dealteam dt ON m.${dealTeamColumn} = dt.msp_parentopportunityid`
-    if (useJoinScope && (delegatedScope.excludedAccountIds?.length ?? 0) > 0 && toSqlColumn(entity.logicalName) !== 'opportunity') {
-        sql += ` JOIN opportunity scopeop ON m.${dealTeamColumn} = scopeop.opportunityid`
+    if (useAlias) sql += ' m'
+    if (useJoinScope) sql += ` JOIN msp_dealteam dt ON m.${dealTeamColumn} = dt.msp_parentopportunityid`
+    const excludesParent = excludeAccounts && entity.logicalName !== 'opportunity'
+    if (projection.length > 0 || excludesParent) {
+        sql += ` ${excludesParent ? 'JOIN' : 'LEFT JOIN'} opportunity scopeop ON m.${dealTeamColumn} = scopeop.opportunityid`
     }
     if (whereClauses.length > 0) sql += ` WHERE ${whereClauses.join(' AND ')}`
     if (orderBy.length > 0) sql += ` ORDER BY ${orderBy.join(', ')}`

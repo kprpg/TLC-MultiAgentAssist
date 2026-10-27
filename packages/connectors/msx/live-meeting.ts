@@ -3,6 +3,7 @@ import {
   meetingChangeSetProposalSchema,
   meetingChangeSetResultSchema,
   meetingTranscriptSchema,
+  meetingTranscriptSummarySchema,
   type MeetingChangeSetApproval,
   type MeetingChangeSetProposal,
   type MeetingChangeSetResult,
@@ -14,6 +15,8 @@ import {
   type MilestoneUpdate
 } from '../../common/index.js'
 import type { MsxConnector } from '../common/index.js'
+import { meetingSourceError } from '../common/meeting-source.js'
+import { toMeetingSourceError } from '../graph/meetings.js'
 import {
   extractMeetingSignals,
   MEETING_FIELD_DICTIONARY,
@@ -23,6 +26,12 @@ import {
 } from '../../agents/meeting-signal-extractor/src/index.js'
 
 const MAX_COMMENTS = 30_000
+
+/** The Teams calendar/transcript source a host injects once it holds delegated Graph access. */
+export interface LiveMeetingTranscriptSource {
+  listRecentMeetings(): Promise<Array<{ handle: string; subject: string; startsAt: string; meetingType: MeetingTranscriptSummary['meetingType'] }>>
+  acquireRecentTranscript(handle: string, opportunityId: string): Promise<MeetingTranscript | undefined>
+}
 
 /** Pluggable extractor (deterministic by default, or a Foundry model-backed one). */
 export type MeetingExtractorFn = (ctx: MeetingExtractionContext, options: { changeSetId: string }) => MeetingChangeSetProposal | Promise<MeetingChangeSetProposal>
@@ -53,15 +62,39 @@ function datePrefix(when: Date): string {
  * MSX has no cross-entity transaction, so apply uses validate-all -> apply -> compensate.
  */
 export class LiveMeetingCaptureConnector {
-  constructor(private readonly msx: MsxConnector, private readonly now: () => Date = () => new Date()) {}
+  constructor(
+    private readonly msx: MsxConnector,
+    private readonly now: () => Date = () => new Date(),
+    private readonly meetings?: LiveMeetingTranscriptSource
+  ) {}
 
-  /** Graph-based transcript discovery is a later step; the live path uses paste/upload today. */
+  /** Recent Teams meetings from the signed-in user's calendar; transcripts are fetched only when one is chosen. */
   async listMeetingTranscripts(): Promise<MeetingTranscriptSummary[]> {
-    return []
+    const meetings = this.requireMeetings()
+    try {
+      return (await meetings.listRecentMeetings()).map((meeting) => meetingTranscriptSummarySchema.parse({
+        id: meeting.handle, subject: meeting.subject, occurredAt: meeting.startsAt,
+        meetingType: meeting.meetingType, source: 'teams'
+      }))
+    } catch (error) { throw toMeetingSourceError(error) }
   }
 
+  /** Full transcripts are not previewed; a chosen meeting is acquired during Extract & Review. */
   async getMeetingTranscript(): Promise<MeetingTranscript | undefined> {
     return undefined
+  }
+
+  private requireMeetings(): LiveMeetingTranscriptSource {
+    if (!this.meetings) throw meetingSourceError('not-configured')
+    return this.meetings
+  }
+
+  private async loadMeetingTranscript(handle: string, opportunityId: string): Promise<MeetingTranscript> {
+    const meetings = this.requireMeetings()
+    let transcript: MeetingTranscript | undefined
+    try { transcript = await meetings.acquireRecentTranscript(handle, opportunityId) } catch (error) { throw toMeetingSourceError(error) }
+    if (!transcript) throw meetingSourceError('no-transcript')
+    return transcript
   }
 
   private buildOpportunitySnapshot(name: string, id: string, value: number | undefined, comments: string | undefined): ExtractorOpportunitySnapshot {
@@ -101,10 +134,11 @@ export class LiveMeetingCaptureConnector {
   }
 
   async proposeMeetingChangeSet(request: LiveMeetingCaptureRequest, extractor?: MeetingExtractorFn): Promise<MeetingChangeSetProposal> {
-    if (!request.transcript) {
-      throw new Error('Live meeting capture needs a pasted or uploaded transcript (Graph acquisition is not wired yet).')
+    if (!request.transcript && !request.transcriptId) {
+      throw new Error('Choose a Teams meeting, or paste or upload a transcript.')
     }
-    const transcript = meetingTranscriptSchema.parse(request.transcript)
+    const transcript = meetingTranscriptSchema.parse(request.transcript
+      ?? await this.loadMeetingTranscript(request.transcriptId!, request.opportunityId))
     const context = await this.msx.getOpportunityContext(request.opportunityId)
     const milestones = await this.msx.listMilestones(request.opportunityId)
     const opportunity = this.buildOpportunitySnapshot(

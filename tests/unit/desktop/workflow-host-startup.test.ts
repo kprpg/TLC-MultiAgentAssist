@@ -29,4 +29,15 @@ describe('desktop workflow host startup', () => {
         expect(hostInitialization).toBeGreaterThan(-1)
         expect(ipcRegistration).toBeGreaterThan(hostInitialization)
     })
+
+    it('reads Play exclusions from the shared preference store, not the full portfolio', async () => {
+        const source = await readFile(resolve('apps/desktop/electron/main/index.ts'), 'utf8')
+        const start = source.indexOf('resolveExcludedAccountIds:')
+        const end = source.indexOf('onStepError:', start)
+        const resolver = source.slice(start, end)
+
+        expect(start).toBeGreaterThan(-1)
+        expect(resolver).toContain('portfolioPreferenceStore.read(await liveMsxConnector.getCurrentUserId())')
+        expect(resolver).not.toContain('listAccounts')
+    })
 })

@@ -4,6 +4,8 @@ import {
     type SeAccess, type SeEvidence, type SeReportingInput, type SeReportingProfile
 } from '../../common/contracts/se-reporting.js'
 import { readBoundedText } from '../common/http-response.js'
+import { GraphSeEvidenceConnector, SeEvidenceCollector } from '../graph/se-evidence.js'
+import { DataverseSeReader, evaluateParity, type SeDataverseSource } from './dataverse.js'
 import { parseSeLiveContract } from './contract.js'
 import { SeReportingError, type SeReportingInspection, type SeReportingResource } from './types.js'
 import { seReportingDates } from '../../common/se-reporting-period.js'
@@ -17,7 +19,20 @@ const date = (value: unknown): string | null => value === null || value === unde
 const daxDate = (value: string) => `DATE(${value.split('-').map(Number).join(',')})`
 const recordSchema = z.record(z.string(), z.unknown())
 
+type MsxRead = {
+    milestones: SeReportingInput['milestones']
+    tasks: SeReportingInput['tasks']
+    gaps: string[]
+    coverage: SeReportingInput['eventDateCoverage']
+    access: SeAccess[]
+}
+
 export interface SeReportingLiveOptions {
+    /** Delegated MSX Dataverse access; used according to sourcePreference. */
+    dataverse?: SeDataverseSource
+    /** 'powerbi' (default), 'dataverse', or 'auto' (Dataverse only when its inventories match Power BI). */
+    sourcePreference?: 'powerbi' | 'dataverse' | 'auto'
+    riskField?: string
     getToken(resource: SeReportingResource): Promise<string>
     expectedEmail(): Promise<string | undefined>
     expectedObjectId?(): Promise<string | undefined>
@@ -182,52 +197,39 @@ export class LiveSeReportingReader {
             }
             try {
                 await probe()
-                access.push({ source, state: 'available', detail: 'Delegated source probe succeeded.' })
+                access.push({ source, state: 'available', detail: source === 'msx' ? `Delegated source probe succeeded.${await this.hierarchyNote(inspection)}` : 'Delegated source probe succeeded.' })
             } catch (error) {
                 access.push({ source, state: 'unavailable', detail: error instanceof SeReportingError ? error.message : 'The reporting source probe failed validation.' })
             }
         }
         return access
     }
+    /** Counts-only sanity check of the Dynamics hierarchy against the assignment-derived manager; never changes scope. */
+    private async hierarchyNote(inspection: SeReportingInspection): Promise<string> {
+        if (!this.options.dataverse) return ''
+        try {
+            const reports = await new DataverseSeReader(this.options.dataverse).readDirectReports(inspection.contract.manager.system_user_id)
+            const member = reports.some((row) => lower(row.id) === lower(inspection.owner.system_user_id))
+            return member
+                ? ` Dataverse hierarchy: the reporter is a direct report of the contract manager (${reports.length} direct reports).`
+                : ` Dataverse hierarchy: the reporter is not a direct report of the contract manager (${reports.length} direct reports); assignments from the semantic model remain authoritative.`
+        } catch {
+            return ' Dataverse hierarchy could not be read.'
+        }
+    }
     async collect(profile: SeReportingProfile, inspection: SeReportingInspection, options: { period: string; pillar: string; allowUnavailable: string[]; runId: string }): Promise<SeReportingInput> {
         const now = (this.options.now ?? (() => new Date()))()
         const dates = seReportingDates(options.period)
         if (dates.end > now.toISOString().slice(0, 10)) throw new SeReportingError('incomplete-reporting-month', 'Choose a completed reporting month. A future month-end cannot be represented as a full-month report.')
-        const ownFilter = `LOWER(PodMilestones[Pod Member ID]) = ${quote(lower(inspection.owner.system_user_id))}`
-        const sample = (await this.api.query(profile.semanticModelId, `EVALUATE TOPN(1, FILTER(PodMilestones, ${ownFilter}), PodMilestones[Milestone ID])`))[0]
-        const column = (name: string) => sample && name in sample ? `PodMilestones[${name}]` : 'BLANK()'
-        const rows = await this.api.query(profile.semanticModelId, `EVALUATE SELECTCOLUMNS(FILTER(PodMilestones, ${ownFilter}), "id", [Milestone ID], "reporterId", [Pod Member ID], "accountId", RELATED(opportunity[customerid]), "opportunityId", [Opportunity ID], "name", [Milestone], "category", [Category], "status", [Status], "commitment", [Commitment Recommendation], "monthlyAcr", [Monthly ACR], "date", [Milestone Date], "committedOn", ${column('Committed On')}, "completedOn", ${column('Completed On')}, "createdOn", ${column('Created On')}, "blocker", [Risk / Blocker Details])`)
-        const milestones = rows.map((row) => seMilestoneSchema.parse({
-            ...row, category: row['category'] ?? '', commitment: row['commitment'] ?? '', blocker: row['blocker'] ?? '',
-            date: date(row['date']), committedOn: date(row['committedOn']), completedOn: date(row['completedOn']), createdOn: date(row['createdOn'])
-        }))
-        const taskOwner = `LOWER(task[ownerid]) = ${quote(lower(inspection.owner.system_user_id))}`
-        const taskSample = (await this.api.query(profile.semanticModelId, `EVALUATE TOPN(1, FILTER(task, ${taskOwner}))`))[0]
-        const actualStart = taskSample && 'actualstart' in taskSample ? 'task[actualstart]' : 'BLANK()'
-        const endExclusive = new Date(`${dates.end}T00:00:00Z`)
-        endExclusive.setUTCDate(endExclusive.getUTCDate() + 1)
-        const nextDay = daxDate(endExclusive.toISOString().slice(0, 10))
-        const taskRows = await this.api.query(profile.semanticModelId, `EVALUATE SELECTCOLUMNS(FILTER(task, ${taskOwner} && ((task[actualend] >= ${daxDate(dates.fiscal.start)} && task[actualend] < ${nextDay}) || (${actualStart} >= ${daxDate(dates.start)} && ${actualStart} < ${nextDay}))), "id", [activityid], "ownerId", [ownerid], "milestoneId", [regardingobjectid], "milestoneName", [regardingobjectidname], "accountId", VAR TargetMilestone = task[regardingobjectid] VAR ParentOpportunity = CALCULATE(SELECTEDVALUE(PodMilestones[Opportunity ID]), FILTER(ALL(PodMilestones), LOWER(PodMilestones[Milestone ID]) = LOWER(TargetMilestone))) RETURN LOOKUPVALUE(opportunity[customerid], opportunity[opportunityid], ParentOpportunity), "subject", [subject], "categoryCode", [msp_taskcategory], "state", [statecode], "actualEnd", [actualend], "activityDate", ${actualStart})`)
-        const tasks: SeReportingInput['tasks'] = []
-        const mappingGaps = [...inspection.mappingGaps]
-        for (const row of taskRows) {
-            if (privateContent(String(row['subject'] ?? ''))) continue
-            if (typeof row['accountId'] !== 'string' || !row['accountId']) {
-                mappingGaps.push('A task with an unresolved milestone/opportunity/account path was excluded.')
-                continue
-            }
-            tasks.push(seTaskSchema.parse({
-                ...row, subject: row['subject'] ?? '', milestoneName: row['milestoneName'] ?? '',
-                categoryCode: row['categoryCode'] === null ? '' : String(row['categoryCode']),
-                actualEnd: date(row['actualEnd']), activityDate: date(row['activityDate'])
-            }))
-        }
+        const msx = await this.readMsx(profile, inspection, dates)
+        const { milestones, tasks } = msx
+        const mappingGaps = [...inspection.mappingGaps, ...msx.gaps]
         const input: SeReportingInput = {
             mode: 'live',
             runId: options.runId, profileId: profile.id, ...inspection,
             period: options.period, pillar: options.pillar, asOf: now.toISOString().slice(0, 10), generatedAt: now.toISOString(),
-            eventDateCoverage: { committed: Boolean(sample && 'Committed On' in sample), completed: Boolean(sample && 'Completed On' in sample), created: Boolean(sample && 'Created On' in sample) },
-            milestones, tasks, mappingGaps, evidence: [], access: [...inspection.access, { source: 'msx', state: 'available', detail: 'Complete reporter-scoped milestone and task inventories read.' }],
+            eventDateCoverage: msx.coverage,
+            milestones, tasks, mappingGaps, evidence: [], access: [...inspection.access, ...msx.access],
             narratives: { customer_updates: [], priority_initiatives: [], account_notes: [], partners: [], technical_themes: [], cross_pillar_dependencies: [], next_month_priorities: [], leadership_decisions: [], scrum_rollup_bullets: [], follow_up_required: [] }
         }
         for (const source of ['m365_calendar', 'm365_email', 'm365_teams', 'm365_files', 'wiki'] as const) {
@@ -247,60 +249,103 @@ export class LiveSeReportingReader {
         if (missing.length) throw new SeReportingError('degraded-approval-required', 'Some enabled sources are unavailable. Explicitly approve each missing source, disable it in the profile, or stop. No draft was generated.', input.access)
         return input
     }
-    private async readEvidence(source: SeEvidence['source'], profile: SeReportingProfile, inspection: SeReportingInspection, start: string, end: string): Promise<SeEvidence[]> {
-        const accounts = inspection.assignments.filter((row) => inspection.contract.allowedAtus.includes(row.atu))
-        const output: SeEvidence[] = []
-        const nextDay = new Date(`${end}T00:00:00Z`); nextDay.setUTCDate(nextDay.getUTCDate() + 1)
-        const matches = (body: string) => [...new Map(accounts.filter((row) => {
-            const name = row.accountName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-            return new RegExp(`(?:^|[^\\p{L}\\p{N}])${name}(?:$|[^\\p{L}\\p{N}])`, 'iu').test(body)
-        }).map((row) => [lower(row.accountId), row])).values()]
-        const add = (id: string, body: string, occurred: unknown, reference: string) => {
-            const occurredOn = date(occurred)
-            if (!occurredOn || occurredOn < start || occurredOn > end || privateContent(body)) return
-            const plain = body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-            for (const account of matches(plain)) output.push(seEvidenceSchema.parse({
-                id: `${source}:${id}:${account.accountId}`, accountId: account.accountId, source,
-                date: occurredOn, summary: plain, reference, qualifies: source !== 'm365_calendar'
+    private async readMsx(profile: SeReportingProfile, inspection: SeReportingInspection, dates: ReturnType<typeof seReportingDates>): Promise<MsxRead> {
+        const preference = this.options.dataverse ? this.options.sourcePreference ?? 'powerbi' : 'powerbi'
+        if (preference === 'powerbi') return this.readPowerBiMsx(profile, inspection, dates)
+        if (preference === 'dataverse') return this.readDataverseMsx(inspection, dates)
+        let dataverse: MsxRead
+        try {
+            dataverse = await this.readDataverseMsx(inspection, dates)
+        } catch {
+            const fallback = await this.readPowerBiMsx(profile, inspection, dates)
+            return { ...fallback, access: [{ source: 'msx', state: 'available', detail: 'Dataverse was unavailable; the Power BI inventories were used.' }] }
+        }
+        const powerBi = await this.readPowerBiMsx(profile, inspection, dates)
+        const parity = evaluateParity({
+            milestones: [dataverse.milestones.map((row) => row.id), powerBi.milestones.map((row) => row.id)],
+            tasks: [dataverse.tasks.map((row) => row.id), powerBi.tasks.map((row) => row.id)]
+        })
+        return parity.ok
+            ? { ...dataverse, access: [{ source: 'msx', state: 'available', detail: `Complete reporter-scoped inventories read from Dataverse. ${parity.detail}` }] }
+            : { ...powerBi, access: [{ source: 'msx', state: 'available', detail: `Dataverse parity was not met, so the Power BI inventories were used. ${parity.detail}` }] }
+    }
+
+    private async readDataverseMsx(inspection: SeReportingInspection, dates: ReturnType<typeof seReportingDates>): Promise<MsxRead> {
+        const reader = new DataverseSeReader(this.options.dataverse!, this.options.riskField ? { riskField: this.options.riskField } : {})
+        const reporterId = inspection.owner.system_user_id
+        const endExclusive = new Date(`${dates.end}T00:00:00Z`)
+        endExclusive.setUTCDate(endExclusive.getUTCDate() + 1)
+        const [milestones, tasks] = await Promise.all([
+            reader.readMilestones(reporterId),
+            reader.readTasks(reporterId, { fiscalStart: dates.fiscal.start, start: dates.start, endExclusive: endExclusive.toISOString().slice(0, 10) })
+        ])
+        return {
+            milestones: milestones.milestones, tasks: tasks.tasks, gaps: [...new Set([...milestones.gaps, ...tasks.gaps])],
+            coverage: { committed: true, completed: true, created: true },
+            access: [{ source: 'msx', state: 'available', detail: 'Complete reporter-scoped milestone and task inventories read from Dataverse.' }]
+        }
+    }
+
+    private async readPowerBiMsx(profile: SeReportingProfile, inspection: SeReportingInspection, dates: ReturnType<typeof seReportingDates>): Promise<MsxRead> {
+        const ownFilter = `LOWER(PodMilestones[Pod Member ID]) = ${quote(lower(inspection.owner.system_user_id))}`
+        const sample = (await this.api.query(profile.semanticModelId, `EVALUATE TOPN(1, FILTER(PodMilestones, ${ownFilter}), PodMilestones[Milestone ID])`))[0]
+        const column = (name: string) => sample && name in sample ? `PodMilestones[${name}]` : 'BLANK()'
+        const rows = await this.api.query(profile.semanticModelId, `EVALUATE SELECTCOLUMNS(FILTER(PodMilestones, ${ownFilter}), "id", [Milestone ID], "reporterId", [Pod Member ID], "accountId", RELATED(opportunity[customerid]), "opportunityId", [Opportunity ID], "name", [Milestone], "category", [Category], "status", [Status], "commitment", [Commitment Recommendation], "monthlyAcr", [Monthly ACR], "date", [Milestone Date], "committedOn", ${column('Committed On')}, "completedOn", ${column('Completed On')}, "createdOn", ${column('Created On')}, "blocker", [Risk / Blocker Details])`)
+        const milestones = rows.map((row) => seMilestoneSchema.parse({
+            ...row, category: row['category'] ?? '', commitment: row['commitment'] ?? '', blocker: row['blocker'] ?? '',
+            date: date(row['date']), committedOn: date(row['committedOn']), completedOn: date(row['completedOn']), createdOn: date(row['createdOn'])
+        }))
+        const taskOwner = `LOWER(task[ownerid]) = ${quote(lower(inspection.owner.system_user_id))}`
+        const taskSample = (await this.api.query(profile.semanticModelId, `EVALUATE TOPN(1, FILTER(task, ${taskOwner}))`))[0]
+        const actualStart = taskSample && 'actualstart' in taskSample ? 'task[actualstart]' : 'BLANK()'
+        const endExclusive = new Date(`${dates.end}T00:00:00Z`)
+        endExclusive.setUTCDate(endExclusive.getUTCDate() + 1)
+        const nextDay = daxDate(endExclusive.toISOString().slice(0, 10))
+        const taskRows = await this.api.query(profile.semanticModelId, `EVALUATE SELECTCOLUMNS(FILTER(task, ${taskOwner} && ((task[actualend] >= ${daxDate(dates.fiscal.start)} && task[actualend] < ${nextDay}) || (${actualStart} >= ${daxDate(dates.start)} && ${actualStart} < ${nextDay}))), "id", [activityid], "ownerId", [ownerid], "milestoneId", [regardingobjectid], "milestoneName", [regardingobjectidname], "accountId", VAR TargetMilestone = task[regardingobjectid] VAR ParentOpportunity = CALCULATE(SELECTEDVALUE(PodMilestones[Opportunity ID]), FILTER(ALL(PodMilestones), LOWER(PodMilestones[Milestone ID]) = LOWER(TargetMilestone))) RETURN LOOKUPVALUE(opportunity[customerid], opportunity[opportunityid], ParentOpportunity), "subject", [subject], "categoryCode", [msp_taskcategory], "state", [statecode], "actualEnd", [actualend], "activityDate", ${actualStart})`)
+        const tasks: SeReportingInput['tasks'] = []
+        const gaps: string[] = []
+        for (const row of taskRows) {
+            if (privateContent(String(row['subject'] ?? ''))) continue
+            if (typeof row['accountId'] !== 'string' || !row['accountId']) {
+                gaps.push('A task with an unresolved milestone/opportunity/account path was excluded.')
+                continue
+            }
+            tasks.push(seTaskSchema.parse({
+                ...row, subject: row['subject'] ?? '', milestoneName: row['milestoneName'] ?? '',
+                categoryCode: row['categoryCode'] === null ? '' : String(row['categoryCode']),
+                actualEnd: date(row['actualEnd']), activityDate: date(row['activityDate'])
             }))
         }
-        if (source === 'm365_calendar') {
-            await this.api.pages(`${graphRoot}/me/calendarView?startDateTime=${start}T00:00:00Z&endDateTime=${nextDay.toISOString()}&$select=id,subject,start,end&$top=100`)
-        } else if (source === 'm365_email') {
-            const filter = encodeURIComponent(`receivedDateTime ge ${start}T00:00:00Z and receivedDateTime lt ${nextDay.toISOString()}`)
-            const rows = await this.api.pages(`${graphRoot}/me/messages?$filter=${filter}&$select=id,subject,receivedDateTime,body,webLink&$expand=attachments($select=id,name,contentType,size)&$top=100`)
-            for (const raw of rows) {
-                const row = z.object({ id: z.string(), subject: z.string().nullable(), receivedDateTime: z.string(), body: z.object({ content: z.string() }), webLink: z.url() }).parse(raw)
-                add(row.id, `${row.subject ?? ''}\n${row.body.content}`, row.receivedDateTime, row.webLink)
-            }
-        } else if (source === 'm365_teams') {
-            const chats = await this.api.pages(`${graphRoot}/me/chats?$select=id&$top=50`, 20)
-            for (const chat of chats) {
-                const chatId = z.string().parse(chat['id'])
-                const messages = await this.api.pages(`${graphRoot}/chats/${encodeURIComponent(chatId)}/messages?$top=50`, 200)
-                for (const raw of messages) {
-                    const row = z.object({ id: z.string(), createdDateTime: z.string(), body: z.object({ content: z.string() }) }).parse(raw)
-                    add(row.id, row.body.content, row.createdDateTime, `https://teams.microsoft.com/l/chat/${encodeURIComponent(chatId)}/conversations?messageId=${encodeURIComponent(row.id)}`)
-                }
-            }
-        } else if (source === 'wiki') {
+        return {
+            milestones, tasks, gaps: [...new Set(gaps)],
+            coverage: { committed: Boolean(sample && 'Committed On' in sample), completed: Boolean(sample && 'Completed On' in sample), created: Boolean(sample && 'Created On' in sample) },
+            access: [{ source: 'msx', state: 'available', detail: 'Complete reporter-scoped milestone and task inventories read.' }]
+        }
+    }
+    private async readEvidence(source: SeEvidence['source'], profile: SeReportingProfile, inspection: SeReportingInspection, start: string, end: string): Promise<SeEvidence[]> {
+        const accounts = inspection.assignments.filter((row) => inspection.contract.allowedAtus.includes(row.atu))
+        if (source === 'm365_calendar' || source === 'm365_email' || source === 'm365_teams') {
+            return new GraphSeEvidenceConnector(this.api, accounts).read(source, start, end)
+        }
+        const collector = new SeEvidenceCollector(accounts, source, start, end)
+        if (source === 'wiki') {
             if (!profile.wikiUrl) throw new SeReportingError('wiki-unconfigured', 'No optional wiki location was configured.')
             const item = await this.api.share(profile.wikiUrl)
             if (!/\.(md|txt)$/i.test(item.name)) throw new SeReportingError('wiki-format-unsupported', 'The optional wiki connector supports an explicitly configured UTF-8 Markdown or text file.')
             const body = await this.api.file(item.parentReference.driveId, item.id, new URL(profile.wikiUrl).hostname)
             if (privateContent(body)) return []
-            for (const account of matches(body)) output.push(seEvidenceSchema.parse({ id: `wiki:${item.id}:${account.accountId}`, accountId: account.accountId, source,
+            for (const account of collector.matches(body)) collector.output.push(seEvidenceSchema.parse({ id: `wiki:${item.id}:${account.accountId}`, accountId: account.accountId, source,
                 date: null, summary: body, reference: item.webUrl, qualifies: false }))
         } else {
             const rows = await this.api.pages(`${graphRoot}/me/drive/recent?$select=id,name,webUrl,lastModifiedDateTime,parentReference&$top=100`, 200)
             for (const raw of rows) {
                 const item = z.object({ id: z.string(), name: z.string(), webUrl: z.url(), lastModifiedDateTime: z.string(), parentReference: z.object({ driveId: z.string() }) }).parse(raw)
-                if (item.lastModifiedDateTime.slice(0, 10) < start || item.lastModifiedDateTime.slice(0, 10) > end || !matches(item.name).length) continue
+                if (item.lastModifiedDateTime.slice(0, 10) < start || item.lastModifiedDateTime.slice(0, 10) > end || !collector.matches(item.name).length) continue
                 if (!/\.(md|txt)$/i.test(item.name)) throw new SeReportingError('file-content-unsupported', 'A matching supporting file requires an approved document-text connector. Metadata alone was not treated as outcome evidence.')
                 const body = await this.api.file(item.parentReference.driveId, item.id, new URL(item.webUrl).hostname)
-                add(item.id, `${item.name}\n${body}`, item.lastModifiedDateTime, item.webUrl)
+                collector.add(item.id, `${item.name}\n${body}`, item.lastModifiedDateTime, item.webUrl)
             }
         }
-        return output
+        return collector.output
     }
 }

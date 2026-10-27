@@ -2,11 +2,13 @@ import { z } from 'zod'
 import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibilitySchema, createMilestoneActivityRequestSchema, meetingChangeSetApprovalSchema, meetingChangeSetProposalSchema, meetingTypeSchema, milestoneUpdateSchema, opportunityUpdateSchema, recordCreationCatalogRequestSchema, recordCreationPreviewRequestSchema, recordCreationCommitRequestSchema, scopeRefSchema, seDomainSchema } from '../../../packages/common/index.js'
 import { voiceRequestSchema } from '../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema } from '../../../packages/common/contracts/seller-dashboard.js'
+import { stagePipelineRequestSchema } from '../../../packages/common/contracts/stage-pipeline-review.js'
 import { seReportingRequestSchema } from '../../../packages/common/contracts/se-reporting.js'
 import { discoverySnapshotRequestSchema, portfolioReadRequestSchema, portfolioWorkspaceRequestSchema, agentTaskStreamEventSchema } from '../../../packages/common/contracts/index.js'
 import { cacheControlRequestSchema, mutationSyncRequestSchema } from '../../../packages/common/contracts/cache-sync.js'
 import { agentTaskPromptMaxLength } from '../../../packages/common/contracts/agent-task-limits.js'
 import { knowledgeSearchRequestSchema } from '../../../packages/common/contracts/knowledge.js'
+import { workingSessionOpenFolderRequestSchema, workingSessionPrepareRequestSchema, workingSessionTopicRequestSchema } from '../../../packages/common/contracts/working-session.js'
 
 /**
  * Strict, discriminated message envelopes for the webview <-> extension-host bridge.
@@ -23,9 +25,13 @@ export const agentCapabilitySchema = z.enum([
 
 export const bridgeMethodSchema = z.enum([
     'searchKnowledge',
+    'workingSessionTopic',
+    'workingSessionPrepare',
+    'workingSessionOpenFolder',
     'cacheControl',
     'mutationSync',
     'sellerDashboard',
+    'stagePipelineReview',
     'seReporting',
     'voiceInput',
     'getCurrentUserEmail',
@@ -76,9 +82,13 @@ const scopeKindSchema = z.enum(['portfolio', 'account', 'opportunity'])
 
 export const bridgeParamSchemas = {
     searchKnowledge: knowledgeSearchRequestSchema,
+    workingSessionTopic: workingSessionTopicRequestSchema,
+    workingSessionPrepare: workingSessionPrepareRequestSchema,
+    workingSessionOpenFolder: workingSessionOpenFolderRequestSchema,
     cacheControl: cacheControlRequestSchema,
     mutationSync: mutationSyncRequestSchema,
     sellerDashboard: sellerDashboardRequestSchema,
+    stagePipelineReview: stagePipelineRequestSchema,
     seReporting: seReportingRequestSchema,
     voiceInput: voiceRequestSchema,
     getCurrentUserEmail: z.void().optional(),

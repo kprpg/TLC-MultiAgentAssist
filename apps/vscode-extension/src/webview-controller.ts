@@ -1,12 +1,15 @@
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { stat } from 'node:fs/promises'
+import { join, resolve, sep } from 'node:path'
 import * as vscode from 'vscode'
+import { workingSessionOpenFolderRequestSchema } from '../../../packages/common/contracts/working-session.js'
+import { resolveDocumentsFolder } from '../../../packages/orchestrator/working-session/index.js'
 import { createAgentStreamRouter, routeBridgeMessage } from './host-router.js'
 import { exportBlockedReason, sanitizeFileName } from './export-document.js'
 import { hostEventSchema, type HostEvent } from './message-contracts.js'
 import { contractVersion } from '../../../packages/common/index.js'
-import { createResponseDocumentBuffer } from '../../desktop/electron/main/response-document.js'
-import { createOutlookDraftMessage } from '../../desktop/electron/main/outlook-compose.js'
+import { createResponseDocumentBuffer } from '../../../packages/documents/response-document.js'
+import { createOutlookDraftMessage } from '../../../packages/documents/outlook-compose.js'
 import type { ExtensionDataProvider } from './data-provider.js'
 import { SharedVoiceInputHost } from '../../../packages/orchestrator/voice-input.js'
 import { WindowsVoiceCaptureDriver } from '../../../packages/connectors/common/windows-voice.js'
@@ -142,6 +145,18 @@ export class WorkbenchPanel {
             await this.handleComposeEmail(message)
             return
         }
+        if (message && typeof message === 'object' && (message as { method?: unknown }).method === 'workingSessionOpenFolder') {
+            await this.handleOpenWorkingSessionFolder(message)
+            return
+        }
+        if (message && typeof message === 'object' && (message as { method?: unknown }).method === 'workingSessionPrepare') {
+            const blocked = exportBlockedReason(vscode.workspace.isTrusted)
+            if (blocked) {
+                const id = (message as { id?: unknown }).id
+                void this.panel.webview.postMessage({ kind: 'response', id: typeof id === 'string' ? id : 'unknown', ok: false, error: { message: 'Preparing a working session writes files to your Documents folder, which requires a trusted workspace.', code: 'workspace_untrusted' } })
+                return
+            }
+        }
         this.getProvider().setCacheSuspended?.('webview', !this.panel.visible || !this.panel.active || !vscode.window.state.focused)
         const response = await routeBridgeMessage(this.getProvider(), message)
         void this.panel.webview.postMessage(response)
@@ -202,6 +217,23 @@ export class WorkbenchPanel {
         return vscode.workspace.workspaceFolders?.[0]?.uri ?? this.extensionUri
     }
 
+    private async handleOpenWorkingSessionFolder(message: unknown): Promise<void> {
+        const id = (message as { id?: unknown }).id
+        const responseId = typeof id === 'string' ? id : 'unknown'
+        try {
+            const { folderPath } = workingSessionOpenFolderRequestSchema.parse((message as { params?: unknown }).params)
+            const root = resolve(await resolveDocumentsFolder(), 'TLC')
+            const target = resolve(folderPath)
+            if (!target.toLowerCase().startsWith(root.toLowerCase() + sep)) throw new Error('Only working-session folders under Documents\\TLC can be opened.')
+            if (!(await stat(target).catch(() => undefined))?.isDirectory()) throw new Error('The working-session folder was not found.')
+            await vscode.env.openExternal(vscode.Uri.file(target))
+            void this.panel.webview.postMessage({ kind: 'response', id: responseId, ok: true, result: null })
+        } catch (error) {
+            const detail = error instanceof Error ? error.message : 'The working-session folder could not be opened.'
+            void this.panel.webview.postMessage({ kind: 'response', id: responseId, ok: false, error: { message: detail.slice(0, 300), code: 'open_folder_failed' } })
+        }
+    }
+
     private async handleComposeEmail(message: unknown): Promise<void> {
         const id = (message as { id?: unknown }).id
         const responseId = typeof id === 'string' ? id : 'unknown'
@@ -260,7 +292,7 @@ export class WorkbenchPanel {
 <title>TLC Assist</title>
 </head>
 <body>
-<div id="root" data-mode="${provider.mode}" data-cache-owner="${provider.cacheSession ? 'host' : 'client'}" data-background-sync="${provider.mutationSync ? '1' : '0'}" data-csp-nonce="${cspNonce}">Loading TLC Assist\u2026</div>
+<div id="root" data-mode="${provider.mode}" data-ai-mode="${provider.inferenceMode ?? 'sample'}" data-cache-owner="${provider.cacheSession ? 'host' : 'client'}" data-background-sync="${provider.mutationSync ? '1' : '0'}" data-csp-nonce="${cspNonce}">Loading TLC Assist\u2026</div>
 <script nonce="${cspNonce}">window.addEventListener('error',function(e){var r=document.getElementById('root');if(r)r.textContent='TLC Assist error: '+(e.message||'script failed to load');});window.addEventListener('unhandledrejection',function(e){var r=document.getElementById('root');if(r)r.textContent='TLC Assist error: '+((e.reason&&e.reason.message)||e.reason||'promise rejected');});</script>
 <script nonce="${cspNonce}" src="${scriptUri}"></script>
 </body>

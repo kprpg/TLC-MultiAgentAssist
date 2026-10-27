@@ -1,0 +1,119 @@
+.resizable-split {
+    display: grid;
+    grid-template-columns: var(--pane-columns);
+    min-width: 0;
+    gap: 0;
+    align-items: start;
+}
+
+.resizable-split.single-column {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.resizable-split[hidden] {
+    display: none;
+}
+
+.resizable-split-cell {
+    display: contents;
+}
+
+.resizable-split-cell[hidden] {
+    display: none;
+}
+
+.pane-resize-handle {
+    --pane-resize-accent: var(--vscode-focusBorder, #007fd4);
+    position: relative;
+    z-index: 5;
+    display: grid;
+    align-self: stretch;
+    place-items: center;
+    width: 16px;
+    min-height: 64px;
+    cursor: col-resize;
+    touch-action: none;
+    outline: 0;
+}
+
+.pane-resize-handle::after {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 3px;
+    transform: translateX(-50%);
+    background: transparent;
+    content: '';
+}
+
+.pane-resize-grip {
+    z-index: 1;
+    display: grid;
+    gap: 3px;
+    pointer-events: none;
+}
+
+.pane-resize-grip > span {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: var(--vscode-descriptionForeground, var(--cp-text-muted, var(--colorNeutralForeground3, #8a8a8a)));
+}
+
+.pane-resize-handle:hover::after,
+.pane-resize-handle:focus-visible::after,
+.pane-resize-handle.is-dragging::after,
+.pane-resize-handle:hover .pane-resize-grip > span,
+.pane-resize-handle:focus-visible .pane-resize-grip > span,
+.pane-resize-handle.is-dragging .pane-resize-grip > span {
+    background: var(--pane-resize-accent);
+}
+
+body.resizing-pane,
+body.resizing-pane * {
+    cursor: col-resize !important;
+    user-select: none !important;
+}
+
+.pane-scroll {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-color: var(--vscode-scrollbarSlider-background, var(--cp-text-muted, #88888880)) transparent;
+}
+
+.pane-scroll:hover {
+    scrollbar-color: var(--vscode-focusBorder, #007fd4) transparent;
+}
+
+.pane-scroll::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+}
+
+.pane-scroll::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 6px;
+    background: var(--vscode-scrollbarSlider-background, var(--cp-text-muted, #88888880));
+    background-clip: padding-box;
+}
+
+.pane-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: var(--vscode-focusBorder, #007fd4);
+}
+
+@media (forced-colors: active) {
+    .pane-resize-grip > span {
+        background: CanvasText;
+    }
+
+    .pane-resize-handle:hover::after,
+    .pane-resize-handle:focus-visible::after,
+    .pane-resize-handle.is-dragging::after {
+        background: Highlight;
+    }
+
+    .pane-scroll {
+        scrollbar-color: auto;
+    }
+}

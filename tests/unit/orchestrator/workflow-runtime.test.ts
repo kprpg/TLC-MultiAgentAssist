@@ -3,6 +3,7 @@ import {
     WorkflowRegistry,
     WorkflowRuntime,
     WorkflowRuntimeError,
+    initialWorkflowDefinitions,
     type WorkflowConnectorExecutor,
     type WorkflowConnectorResult
 } from '../../../packages/orchestrator/workflows/index.js'
@@ -145,6 +146,48 @@ describe('workflow runtime', () => {
         }
     })
 
+    it('allows a live Play to finish after the former 12-second deadline', async () => {
+        vi.useFakeTimers()
+        try {
+            const execute = vi.fn<WorkflowConnectorExecutor['execute']>(() => new Promise((resolve) => {
+                setTimeout(() => resolve({ state: 'complete', data: [], rowCount: 0, truncated: false }), 20_000)
+            }))
+            const engine = new WorkflowRuntime(new WorkflowRegistry(initialWorkflowDefinitions), { execute })
+            const started = engine.start({ workflowId: 'WF-004', scope })
+
+            await vi.advanceTimersByTimeAsync(12_000)
+            expect(engine.get(started.runId)?.status).toBe('running')
+            await vi.advanceTimersByTimeAsync(8_000)
+
+            expect((await engine.wait(started.runId)).status).toBe('completed')
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
+    it('aborts a stalled live Play at the advertised 60-second deadline', async () => {
+        vi.useFakeTimers()
+        try {
+            let signal: AbortSignal | undefined
+            const execute: WorkflowConnectorExecutor['execute'] = (_step, context) => {
+                signal = context.signal
+                return new Promise(() => undefined)
+            }
+            const engine = new WorkflowRuntime(new WorkflowRegistry(initialWorkflowDefinitions), { execute })
+            const started = engine.start({ workflowId: 'WF-004', scope })
+
+            await vi.advanceTimersByTimeAsync(59_999)
+            expect(engine.get(started.runId)?.status).toBe('running')
+            expect(signal?.aborted).toBe(false)
+            await vi.advanceTimersByTimeAsync(1)
+
+            expect((await engine.wait(started.runId)).status).toBe('failed')
+            expect(signal?.aborted).toBe(true)
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
     it('publishes a first-stage result while composite enrichment is still running', async () => {
         let releaseEnrichment!: (result: WorkflowConnectorResult) => void
         const enrichment = new Promise<WorkflowConnectorResult>((resolve) => { releaseEnrichment = resolve })
@@ -257,5 +300,68 @@ describe('workflow runtime', () => {
         expect(engine.get(first.runId)).toBeUndefined()
         expect(engine.getResult(first.resultRef!)).toBeUndefined()
         expect(engine.get(second.runId)?.status).toBe('completed')
+    })
+
+    describe('overload handling', () => {
+        const uuid = (index: number) => `${String(index).padStart(8, '0')}-0000-4000-8000-000000000000`
+        function overloadEngine(options: { historyCapacity?: number; maxActiveRuns?: number } = {}) {
+            const gates: Array<(value: WorkflowConnectorResult) => void> = []
+            const execute = vi.fn<WorkflowConnectorExecutor['execute']>().mockImplementation(() => new Promise<WorkflowConnectorResult>((resolve) => { gates.push(resolve) }))
+            let counter = 0
+            const engine = new WorkflowRuntime(new WorkflowRegistry([definition([
+                { connector: 'msx-mcp', operation: 'list_pipeline', required: true }
+            ])]), { execute }, { createId: () => uuid(++counter), ...options })
+            const release = (index: number) => gates[index]!({ state: 'complete', data: [], rowCount: 0, truncated: false })
+            return { engine, execute, release, gates }
+        }
+
+        it('does not strand the first run when history capacity is one and a second run overlaps it', async () => {
+            const { engine, release, gates } = overloadEngine({ historyCapacity: 1 })
+            const first = engine.start({ workflowId: 'WF-001', scope })
+            await vi.waitFor(() => expect(gates).toHaveLength(1))
+            const second = engine.start({ workflowId: 'WF-001', scope })
+            await vi.waitFor(() => expect(gates).toHaveLength(2))
+
+            const firstCompletion = engine.wait(first.runId)
+            expect(engine.get(first.runId)?.status).toBe('running')
+            release(1)
+            expect((await engine.wait(second.runId)).status).toBe('completed')
+            expect(engine.get(first.runId)?.status).toBe('running')
+
+            release(0)
+            const completed = await firstCompletion
+            expect(completed).toMatchObject({ runId: first.runId, status: 'completed' })
+            expect(engine.getResult(completed.resultRef!)).toBeDefined()
+            expect(engine.get(first.runId)?.status).toBe('completed')
+        })
+
+        it('returns an explicit overload error instead of dropping admitted work, then recovers', async () => {
+            const { engine, release, gates } = overloadEngine({ historyCapacity: 1, maxActiveRuns: 1 })
+            const first = engine.start({ workflowId: 'WF-001', scope })
+            await vi.waitFor(() => expect(gates).toHaveLength(1))
+
+            expect(() => engine.start({ workflowId: 'WF-001', scope })).toThrowError(expect.objectContaining({
+                name: 'WorkflowRuntimeError', code: 'capacity_exceeded'
+            }))
+            expect(engine.list().map(({ runId }) => runId)).toEqual([first.runId])
+
+            release(0)
+            expect((await engine.wait(first.runId)).status).toBe('completed')
+            const next = engine.start({ workflowId: 'WF-001', scope })
+            expect(next.status).toBe('queued')
+        })
+
+        it('frees admission capacity when an active run is cancelled', async () => {
+            const { engine, gates } = overloadEngine({ maxActiveRuns: 1 })
+            const first = engine.start({ workflowId: 'WF-001', scope })
+            await vi.waitFor(() => expect(gates).toHaveLength(1))
+            expect(() => engine.start({ workflowId: 'WF-001', scope })).toThrow(WorkflowRuntimeError)
+            expect(engine.cancel(first.runId).status).toBe('cancelled')
+            expect(() => engine.start({ workflowId: 'WF-001', scope })).not.toThrow()
+        })
+
+        it('rejects invalid admission limits', () => {
+            for (const maxActiveRuns of [0, -1, 1.5]) expect(() => overloadEngine({ maxActiveRuns })).toThrow()
+        })
     })
 })

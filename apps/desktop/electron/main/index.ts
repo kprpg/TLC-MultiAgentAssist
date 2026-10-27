@@ -16,13 +16,13 @@ import { createLocalStoreMsxConnector } from '../../../../packages/connectors/lo
 import { SampleRecordCreationCatalog } from '../../../../packages/connectors/local-store/sample-record-creation-catalog.js'
 import { JsonFilePortfolioPreferenceStore } from '../../../../packages/connectors/common/index.js'
 import { LocalPdfMcemGuidanceConnector } from '../../../../packages/connectors/sharepoint/index.js'
-import { createFoundryOpenAIClient, FoundryPromptAgent } from '../../../../packages/connectors/foundry/index.js'
+import { createFoundryOpenAIClient } from '../../../../packages/connectors/foundry/index.js'
 import { createFoundryMeetingExtractor } from '../../../../packages/agents/meeting-signal-extractor/src/foundry-extractor.js'
 import { parseTranscriptContent } from '../../../../packages/agents/meeting-signal-extractor/src/transcript-parse.js'
 import { ThinSliceOrchestrator, prewarmAgentDependencies, type AgentTaskContext, type TaskAgentRegistry } from '../../../../packages/orchestrator/index.js'
-import { foundryAgentTuning } from '../../../../packages/orchestrator/task-agents.js'
 import { RecordCreationService } from '../../../../packages/orchestrator/record-creation/service.js'
 import { createLivePlayWorkflowHost, createSampleWorkflowHost } from '../../../../packages/orchestrator/workflows/index.js'
+import { createDesktopTaskAgents } from './task-agents.js'
 import { AzureCliMsxTokenProvider } from './azure-cli-token-provider.js'
 import { prepareFoundryEnvironmentFile } from './packaged-configuration.js'
 import { createRuntimeCredentials } from './runtime-credentials.js'
@@ -40,6 +40,8 @@ import { createSellerDashboardHost } from '../../../../packages/orchestrator/sel
 import { createSeReportingHost, seReportingScopes } from '../../../../packages/orchestrator/se-reporting/composition.js'
 import { createSeReportingIpcHandler, seReportingIpcChannel } from './se-reporting-ipc.js'
 import { createSellerDashboardIpcHandler, sellerDashboardIpcChannel } from './seller-dashboard-ipc.js'
+import { createStagePipelineIpcHandler, stagePipelineIpcChannel } from './stage-pipeline-ipc.js'
+import { createStagePipelineReviewHost } from '../../../../packages/orchestrator/stage-pipeline-review.js'
 import { desktopWindowBounds } from './window-bounds.js'
 import { createMutationSyncIpcHandler, createPortfolioIpcHandlers } from './portfolio-ipc.js'
 import { createPresentationOwner } from '../../../shared/presentation-owner.js'
@@ -49,7 +51,19 @@ import { bindSourceToken } from '../../../../packages/orchestrator/mutations/cor
 import { cacheControlRequestSchema, cacheControlResponseSchema } from '../../../../packages/common/contracts/cache-sync.js'
 import { createKnowledgeSearch } from '../../../../packages/orchestrator/knowledge-search.js'
 import { seismicGraphDefaultScope, seismicGraphScopes } from '../../../../packages/common/configuration/knowledge-sources.js'
+import { meetingGraphDefaultScope, meetingScopesFor } from '../../../../packages/common/configuration/meeting-sources.js'
+import { assertCliTokenCanReadMeetings, meetingSignInFailure } from '../../../../packages/connectors/common/meeting-source.js'
+import { GraphMeetingConnector } from '../../../../packages/connectors/graph/meetings.js'
 import { createKnowledgeSearchIpcHandler, knowledgeSearchIpcChannel } from './knowledge-ipc.js'
+import {
+  createWorkingSessionIpcHandlers, workingSessionOpenIpcChannel, workingSessionPrepareIpcChannel, workingSessionTopicIpcChannel
+} from './working-session-ipc.js'
+import {
+  createBicepCliCompiler, createWorkingSessionService, deckConfigurationFromEnvironment, folderOutput, foundryStructuredModel, workingSessionModelName
+} from '../../../../packages/orchestrator/working-session/index.js'
+import { renderMarkdownDocument } from '../../../../packages/documents/markdown-document.js'
+import { SampleInference } from '../../../../packages/orchestrator/sample-inference.js'
+import { resolveSampleInferenceMode } from '../../../../packages/common/contracts/inference.js'
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url))
 const desktopRoot = resolve(currentDirectory, '../..')
@@ -61,6 +75,7 @@ const appIcon = resolve(desktopRoot, 'build/icon.png')
 const developmentUrl = process.env['VITE_DEV_SERVER_URL']
 const allowedRendererUrl = developmentUrl ?? pathToFileURL(rendererFile).toString()
 const dataMode = process.env['TLC_DATA_MODE'] === 'sample' ? 'sample' : 'live'
+const sampleAiMode = dataMode === 'sample' ? resolveSampleInferenceMode(process.env) : undefined
 // Concurrent Live and Sample processes must not lock the same Chromium caches.
 if (dataMode === 'sample') {
   const sampleSessionDirectory = resolve(app.getPath('userData'), 'sample-session')
@@ -71,7 +86,7 @@ const voiceHost = new SharedVoiceInputHost(new WindowsVoiceCaptureDriver(), () =
   BrowserWindow.getAllWindows().some((window) => window.isVisible() && window.isFocused())
 )
 
-const preparedEnvironment = app.isPackaged || dataMode === 'live'
+const preparedEnvironment = app.isPackaged || dataMode === 'live' || sampleAiMode === 'foundry'
   ? await prepareFoundryEnvironmentFile({
     isPackaged: app.isPackaged,
     userDataPath: app.getPath('userData'),
@@ -91,10 +106,13 @@ if (dataMode === 'live' && preparedEnvironment?.requiresConfiguration) {
     preparedEnvironment.filePath,
     'Your configuration file has been created. Set the Foundry project, agent names, tenant, client ID, and authentication mode, then reopen the application.'
   )
-} else if (dataMode === 'live' && preparedEnvironment) {
+} else if ((dataMode === 'live' || sampleAiMode === 'foundry') && preparedEnvironment) {
   try {
     runtimeEnvironment = await loadFoundryEnvironment(preparedEnvironment.filePath)
   } catch (error) {
+    if (dataMode === 'sample') {
+      console.warn('[sample-ai] configuration-unavailable; offline fallback will be labeled.')
+    } else {
     startupBlocked = true
     await openConfigurationAndExit(
       app,
@@ -103,6 +121,7 @@ if (dataMode === 'live' && preparedEnvironment?.requiresConfiguration) {
       preparedEnvironment.filePath,
       `The configuration could not be loaded. Correct it, then reopen the application.\n\n${error instanceof Error ? error.message : String(error)}`
     )
+    }
   }
 }
 
@@ -111,6 +130,10 @@ const fallbackCredential = new AzureCliCredential({ processTimeoutInMs: 30_000 }
 const credentials = authentication
   ? createRuntimeCredentials(authentication)
   : { msx: fallbackCredential, foundry: fallbackCredential }
+const sampleInference = dataMode === 'sample' ? new SampleInference({
+  credential: credentials.foundry,
+  ...(runtimeEnvironment ? { loadEnvironment: async () => runtimeEnvironment! } : {})
+}) : undefined
 const tokenProvider = new AzureCliMsxTokenProvider({
   credential: credentials.msx,
   ...(authentication
@@ -127,6 +150,11 @@ const sellerDashboardHost = createSellerDashboardHost({
 })
 const seReportingHost = createSeReportingHost({
   mode: dataMode,
+  // The live MSX connector is created below; it is only dereferenced when a report is generated.
+  dataverse: {
+    readRows: (entitySet, parameters) => liveMsxConnector!.readRows(entitySet, parameters),
+    listMilestoneTeamMilestoneIds: (userId) => liveMsxConnector!.listMilestoneTeamMilestoneIds(userId)
+  },
   identity: async () => {
     const email = (await tokenProvider.getAuthStatus()).userEmail
     return email ? { key: email, email } : undefined
@@ -136,7 +164,8 @@ const seReportingHost = createSeReportingHost({
     if (!token) throw new Error('The reporting resource did not return a delegated token.')
     return token.token
   },
-  foundryCredential: credentials.foundry
+  foundryCredential: credentials.foundry,
+  ...(sampleInference ? { inference: sampleInference } : {})
 })
 const reportPerformance: PerformanceReporter = (event) => {
   console.info(`[performance] ${JSON.stringify(event)}`)
@@ -155,56 +184,58 @@ const liveMsxConnector = dataMode === 'sample'
 // Keep the opt-in SQLite sample store across Desktop restarts; fixture mode remains in memory.
 const localStoreMsxConnector = liveMsxConnector ? undefined : createLocalStoreMsxConnector({
   ...process.env,
+  TLC_DATA_STORE: process.env['TLC_DATA_STORE'] || (sampleAiMode === 'foundry' ? 'sqlite' : 'fixture'),
   TLC_DATA_STORE_PATH: process.env['TLC_DATA_STORE_PATH']?.trim() || resolve(app.getPath('userData'), 'sample.sqlite')
 })
+if (sampleAiMode === 'foundry' && !localStoreMsxConnector) {
+  throw new Error('Hybrid sample AI requires TLC_DATA_STORE=sqlite. Set TLC_AI_MODE=sample for offline fixtures.')
+}
 const msxConnector = liveMsxConnector ?? localStoreMsxConnector ?? new FixtureMsxConnector()
+const stagePipelineHost = liveMsxConnector
+  ? createStagePipelineReviewHost({ mode: 'live', source: liveMsxConnector })
+  : createStagePipelineReviewHost({ mode: 'sample' })
 const creationWriter = localStoreMsxConnector?.createRecordCreationWriter()
 const recordCreation = new RecordCreationService(
   msxConnector,
   creationWriter ?? liveMsxConnector ?? new SampleRecordCreationCatalog(msxConnector),
   creationWriter ? { writer: creationWriter } : {}
 )
-// Meeting capture: absent for the in-memory fixture; the SQLite test store implements it directly,
-// live wraps the delegated MSX connection (Graph transcript acquisition is not wired yet - paste/upload only).
-const meetingConnector = liveMsxConnector ? new LiveMeetingCaptureConnector(liveMsxConnector) : localStoreMsxConnector
-const foundryOpenAIClient = runtimeEnvironment
+// Meeting capture: absent for the in-memory fixture; the SQLite test store implements it directly. Live wraps the
+// delegated MSX connection and lists/reads Teams meetings with a separate delegated Graph token.
+const meetingGraph = liveMsxConnector ? new GraphMeetingConnector(async (purpose) => {
+  const interactive = authentication?.mode === 'interactive-browser'
+  let token: Awaited<ReturnType<typeof credentials.msx.getToken>>
+  try { token = await credentials.msx.getToken(interactive ? [...meetingScopesFor(purpose)] : meetingGraphDefaultScope) } catch (error) {
+    throw meetingSignInFailure(error)
+  }
+  if (!token) throw meetingSignInFailure('A delegated Microsoft Graph token was not returned.')
+  return interactive ? token.token : assertCliTokenCanReadMeetings(token.token, purpose)
+}) : undefined
+const meetingConnector = liveMsxConnector ? new LiveMeetingCaptureConnector(liveMsxConnector, undefined, meetingGraph) : localStoreMsxConnector
+const foundryOpenAIClient = dataMode === 'live' && runtimeEnvironment
   ? createFoundryOpenAIClient(runtimeEnvironment.foundry.projectEndpoint, credentials.foundry)
   : undefined
 /** Foundry model-backed meeting-signal extractor when TLC_MEETING_EXTRACTOR=foundry; else the deterministic offline extractor. */
-const meetingExtractor = runtimeEnvironment && foundryOpenAIClient && (process.env['TLC_MEETING_EXTRACTOR'] ?? '').toLowerCase() === 'foundry'
+const meetingExtractor = sampleInference?.meetingExtractor() ?? (runtimeEnvironment && foundryOpenAIClient && (process.env['TLC_MEETING_EXTRACTOR'] ?? '').toLowerCase() === 'foundry'
   ? createFoundryMeetingExtractor({
     openAIClient: foundryOpenAIClient,
     model: process.env['TLC_MEETING_MODEL']?.trim() || 'gpt-6.1-sol',
     requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs
   })
-  : undefined
-const taskAgents: TaskAgentRegistry = Object.fromEntries(
-  (['account-pulse', 'mcem-coach', 'pursuit-executive', 'risk-solution-play'] as const).map((capability) => {
-    if (!runtimeEnvironment) {
-      return [capability, {
-        version: 'sample-v2',
-        agent: { invoke: async (context: AgentTaskContext) => buildSampleAgentResponse(capability, context) }
-      }]
-    }
-    const binding = {
-      'account-pulse': runtimeEnvironment.foundry.agents.accountPulse,
-      'mcem-coach': runtimeEnvironment.foundry.agents.mcemCoach,
-      'pursuit-executive': runtimeEnvironment.foundry.agents.pursuitExecutive,
-      'risk-solution-play': runtimeEnvironment.foundry.agents.riskSolutionPlay
-    }[capability]
-    return [capability, {
-      version: 'active',
-      agent: new FoundryPromptAgent<AgentTaskContext>({
-        projectEndpoint: runtimeEnvironment.foundry.projectEndpoint,
-        agentName: binding.name,
-        requestTimeoutMs: runtimeEnvironment.foundry.requestTimeoutMs,
-        credential: credentials.foundry,
-        openAIClient: foundryOpenAIClient,
-        ...foundryAgentTuning(runtimeEnvironment, reportPerformance)
-      })
-    }]
-  })
-) as TaskAgentRegistry
+  : undefined)
+const taskAgents: TaskAgentRegistry = createDesktopTaskAgents({
+  ...(sampleInference ? { inference: sampleInference } : {}),
+  environment: runtimeEnvironment,
+  credential: credentials.foundry,
+  client: foundryOpenAIClient,
+  performanceReporter: reportPerformance,
+  sample: () => Object.fromEntries(
+    (['account-pulse', 'mcem-coach', 'pursuit-executive', 'risk-solution-play'] as const).map((capability) => [capability, {
+      version: 'sample-v2',
+      agent: { invoke: async (context: AgentTaskContext) => buildSampleAgentResponse(capability, context) }
+    }])
+  ) as TaskAgentRegistry
+})
 const orchestrator = new ThinSliceOrchestrator(
   msxConnector,
   mcemConnector,
@@ -220,6 +251,19 @@ const orchestrator = new ThinSliceOrchestrator(
     }
   })
 )
+const workingSessionModelId = workingSessionModelName(process.env)
+const documentsFolder = () => process.env['TLC_DOCUMENTS_FOLDER']?.trim() || app.getPath('documents')
+const workingSession = createWorkingSessionService({
+  mode: dataMode,
+  ...(sampleInference ? { inference: sampleInference } : {}),
+  openOutput: async (folderName) => folderOutput(documentsFolder(), folderName),
+  renderDocx: (title, markdown) => renderMarkdownDocument(title, markdown),
+  knowledgeSearch: orchestrator,
+  ...deckConfigurationFromEnvironment(process.env),
+  ...(process.env['TLC_GITHUB_TOKEN']?.trim() ? { githubToken: process.env['TLC_GITHUB_TOKEN'].trim() } : {}),
+  ...(dataMode === 'live' ? { compiler: createBicepCliCompiler() } : {}),
+  ...(dataMode === 'live' && foundryOpenAIClient && workingSessionModelId ? { model: foundryStructuredModel(foundryOpenAIClient, workingSessionModelId) } : {})
+})
 const presentation = createPresentationOwner(orchestrator)
 const clearSourceSession = () => presentation.session.clear()
 const backgroundEnabled = process.env['TLC_BACKGROUND_SYNC'] === '1'
@@ -282,6 +326,7 @@ const configuredWorkflowHost = dataMode === 'sample' ? undefined : createLivePla
   registry: mcpRegistry,
   policy: mcpPolicy,
   entityMap: dataverseEntityMap,
+  ...(reportPerformance ? { performanceReporter: reportPerformance } : {}),
   getAccessToken: async (server: McpServer) => {
     const token = await credentials.msx.getToken(server.authentication.scopes)
     if (!token) throw new Error('A delegated MCP access token is unavailable.')
@@ -292,10 +337,8 @@ const configuredWorkflowHost = dataMode === 'sample' ? undefined : createLivePla
     return liveMsxConnector.getCurrentUserId()
   },
   resolveExcludedAccountIds: async () => {
-    if (!liveMsxConnector) return []
-    return (await liveMsxConnector.listAccounts({ includeHidden: true }))
-      .filter((account) => account.visibility === 'hidden')
-      .map((account) => account.id)
+    if (!liveMsxConnector) throw new Error('Live Plays require the live MSX connection.')
+    return (await portfolioPreferenceStore.read(await liveMsxConnector.getCurrentUserId())).hiddenAccountIds
   },
   onStepError: (info) => {
     console.error(`[play ${info.workflowId}] ${info.connector}/${info.operation} ${info.required ? 'required' : 'optional'} step failed: ${info.message}`)
@@ -315,6 +358,7 @@ async function getDataStatus(): Promise<DesktopDataStatus> {
   if (dataMode === 'sample') {
     return {
       mode: 'sample',
+      inference: { contractVersion: '1.0', mode: sampleInference!.mode },
       auth: { state: 'ready', detail: 'Automated fixture mode is active.' }
     }
   }
@@ -365,6 +409,21 @@ function registerIpc(): void {
   const invokeSellerDashboard = createSellerDashboardIpcHandler(sellerDashboardHost)
   const invokeSeReporting = createSeReportingIpcHandler(seReportingHost)
   const searchKnowledge = createKnowledgeSearchIpcHandler(orchestrator)
+  const workingSessionHandlers = createWorkingSessionIpcHandlers(workingSession, {
+    documentsFolder, openPath: (path) => shell.openPath(path)
+  })
+  ipcMain.handle(workingSessionTopicIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return workingSessionHandlers.topic(request)
+  })
+  ipcMain.handle(workingSessionPrepareIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return workingSessionHandlers.prepare(request)
+  })
+  ipcMain.handle(workingSessionOpenIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return workingSessionHandlers.open(request)
+  })
   ipcMain.handle(knowledgeSearchIpcChannel, (event, request: unknown) => {
     assertTrustedSender(event)
     return searchKnowledge(request)
@@ -376,6 +435,11 @@ function registerIpc(): void {
   ipcMain.handle(sellerDashboardIpcChannel, (event, request: unknown) => {
     assertTrustedSender(event)
     return invokeSellerDashboard(request)
+  })
+  const invokeStagePipeline = createStagePipelineIpcHandler(stagePipelineHost)
+  ipcMain.handle(stagePipelineIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return invokeStagePipeline(request)
   })
   const invokeVoice = createVoiceIpcHandler(voiceHost)
   ipcMain.handle(voiceIpcChannel, (event, request: unknown) => {
@@ -402,6 +466,10 @@ function registerIpc(): void {
   ipcMain.handle('tlc:get-data-status', (event) => {
     assertTrustedSender(event)
     return getDataStatus()
+  })
+  ipcMain.handle('tlc:get-inference-mode', (event) => {
+    assertTrustedSender(event)
+    return sampleInference?.mode ?? null
   })
   ipcMain.handle('tlc:list-accounts', (event, options: unknown) => {
     assertTrustedSender(event)

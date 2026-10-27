@@ -80,18 +80,19 @@ import type { SeDomainId } from '../../../../packages/common/configuration/se-do
 import {
     workflowRunViewSchema,
     type WorkflowRunView
-} from '../../../../packages/orchestrator/workflows/view-contracts.js'
+} from '../../../../packages/common/contracts/workflow-output.js'
 import type { StartWorkflowHostRequest, WorkflowHostOperation } from '../../../../packages/orchestrator/workflows/host.js'
-import { milestoneRecommendations, summarizeMilestones } from '../../../../packages/agents/mcem-coach/src/milestone-signals.js'
+import { buildPreviewEvaluation } from './preview/preview-evaluation.js'
 import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest, type VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema, type SellerDashboardRequest, type SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
 import { createSampleSellerDashboard } from '../../../../packages/common/fixtures/seller-dashboard.js'
+import { stagePipelineRequestSchema, stagePipelineResponseSchema, type StagePipelineRequest, type StagePipelineResponse } from '../../../../packages/common/contracts/stage-pipeline-review.js'
+import { createSampleStagePipelineReview } from '../../../../packages/common/fixtures/stage-pipeline-review.js'
 import { seReportingRequestSchema, seReportingResponseSchema, type SeReportingRequest, type SeReportingResponse } from '../../../../packages/common/contracts/se-reporting.js'
-import { createSampleSeReportingHost } from '../../../../packages/orchestrator/se-reporting/sample.js'
+import { createPreviewSeReportingHost } from './preview/preview-reporting.js'
 import {
     additionalSampleAccounts,
     additionalSampleMilestones,
-    additionalSampleObservationsByOpportunity,
     additionalSampleOpportunities
 } from '../../../../packages/common/fixtures/additional-sample-portfolio.js'
 import { withSampleOpportunityIntents } from '../../../../packages/common/fixtures/sample-opportunity-intent.js'
@@ -104,8 +105,16 @@ import { MutationSyncClient, type MutationInvoker } from '../../../shared/mutati
 import * as syncContracts from '../../../../packages/common/contracts/index.js'
 import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest, type KnowledgeSearchResponse } from '../../../../packages/common/contracts/knowledge.js'
 import { sampleKnowledgeSearchResponse } from '../../../../packages/common/fixtures/knowledge.js'
+import {
+  workingSessionPrepareRequestSchema, workingSessionResultSchema, workingSessionTopicRequestSchema, workingSessionTopicResponseSchema,
+  type WorkingSessionPrepareRequest, type WorkingSessionResult, type WorkingSessionTopicRequest, type WorkingSessionTopicResponse
+} from '../../../../packages/common/contracts/working-session.js'
+import type { WorkingSessionClient } from '../../../shared/working-session/types.js'
+import { fetchAndSave } from '../../../shared/working-session/download.js'
+import { inferenceModeSchema, type InferenceMode } from '../../../../packages/common/contracts/inference.js'
 
-export interface RevampDataClient {
+export interface RevampDataClient extends WorkingSessionClient {
+    getInferenceMode?(): Promise<InferenceMode | undefined>
     searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
     cacheSession?: SessionPortfolio
     mutationSession?: MutationSyncClient
@@ -115,9 +124,11 @@ export interface RevampDataClient {
     refreshSources?(opportunityId?: string): void
     getDataMode(): Promise<'sample' | 'live'>
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
+    invokeStagePipelineReview(request: StagePipelineRequest): Promise<StagePipelineResponse>
     invokeSeReporting(request: SeReportingRequest): Promise<SeReportingResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     readonly mode: 'desktop' | 'web-live' | 'web-sample'
+    readonly canExitApplication?: boolean
     exitApplication(): Promise<void>
     getCurrentUserEmail(): Promise<string | undefined>
     listAccounts(options?: AccountListOptions): Promise<Account[]>
@@ -245,12 +256,26 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
         ...(background ? { invokeMutationSync: async (request: syncContracts.MutationSyncRequest) =>
             syncContracts.mutationSyncResponseSchema.parse(await apiRequest(fetcher, '/api/mutation-sync', { method: 'POST', body: JSON.stringify(request) })) } : {}),
         mode,
+        getInferenceMode: async () => mode === 'web-sample' && typeof document !== 'undefined'
+            ? inferenceModeSchema.parse(document.querySelector<HTMLMetaElement>('meta[name="tlc-ai-mode"]')?.content || 'sample') : undefined,
+        canExitApplication: typeof document !== 'undefined'
+            && document.querySelector<HTMLMetaElement>('meta[name="tlc-local-exit"]')?.content === '1',
         getDataMode: async () => mode === 'web-live' ? 'live' : 'sample',
         searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(await apiRequest(fetcher, '/api/knowledge/search', {
             method: 'POST', body: JSON.stringify(knowledgeSearchRequestSchema.parse(request))
         })),
+        deriveWorkingSessionTopic: async (request) => workingSessionTopicResponseSchema.parse(await apiRequest(fetcher, '/api/working-session/topic', {
+            method: 'POST', body: JSON.stringify(workingSessionTopicRequestSchema.parse(request))
+        })),
+        prepareWorkingSession: async (request) => workingSessionResultSchema.parse(await apiRequest(fetcher, '/api/working-session/prepare', {
+            method: 'POST', body: JSON.stringify(workingSessionPrepareRequestSchema.parse(request))
+        })),
+        downloadWorkingSession: (downloadId, fileName) => fetchAndSave(fetcher, `/api/working-session/download/${encodeURIComponent(downloadId)}`, fileName),
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(await apiRequest(fetcher, '/api/seller-dashboard', {
             method: 'POST', body: JSON.stringify(sellerDashboardRequestSchema.parse(request))
+        })),
+        invokeStagePipelineReview: async (request) => stagePipelineResponseSchema.parse(await apiRequest(fetcher, '/api/stage-pipeline-review', {
+            method: 'POST', body: JSON.stringify(stagePipelineRequestSchema.parse(request))
         })),
         invokeSeReporting: async (request) => seReportingResponseSchema.parse(await apiRequest(fetcher, '/api/se-reporting', {
             method: 'POST', body: JSON.stringify(seReportingRequestSchema.parse(request))
@@ -389,7 +414,11 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
 }
 
 interface DesktopBridge {
+    getInferenceMode?(): Promise<InferenceMode | null>
     searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
+    deriveWorkingSessionTopic(request: WorkingSessionTopicRequest): Promise<WorkingSessionTopicResponse>
+    prepareWorkingSession(request: WorkingSessionPrepareRequest): Promise<WorkingSessionResult>
+    openWorkingSessionFolder(folderPath: string): Promise<void>
     invokeMutationSync?: MutationInvoker
     onCacheChanged?(listener: (state: syncContracts.CacheReadState) => void): () => void
     cacheControl?(request: syncContracts.CacheControlRequest): Promise<syncContracts.CacheControlResponse>
@@ -397,6 +426,7 @@ interface DesktopBridge {
     getPortfolioIndex(request: PortfolioReadRequest): Promise<PortfolioIndex>
     getPortfolioWorkspace(request: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace>
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
+    invokeStagePipelineReview(request: StagePipelineRequest): Promise<StagePipelineResponse>
     invokeSeReporting(request: SeReportingRequest): Promise<SeReportingResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     exitApplication(): Promise<void>
@@ -536,73 +566,10 @@ const milestoneActivities: MilestoneActivity[] = [{
     taskCategory: 'Architecture Design Session', due: opportunities[0]?.closeDate, owner: 'Account team', createdBy: 'Account team'
 }]
 let webSampleActivitySequence = 0
-const criteriaLabels = ['Customer outcome', 'Decision team', 'Technical validation', 'Business case', 'Next committed step']
-const criteriaIds = ['customer-outcome', 'decision-team', 'technical-validation', 'business-case', 'next-step'] as const
 const roleByStage = ['Account Executive', 'Specialist / SSP', 'Solution Engineer', 'Cloud Solution Architect', 'CSAM']
 
-function buildWebEvaluation(opportunity: Opportunity, opportunityMilestones: readonly Milestone[] = []): McemResponse {
-    const readyToAdvance = opportunity.name.includes('ready to advance')
-    const sharedObservations = additionalSampleObservationsByOpportunity[opportunity.id]
-    const evidenceBasedStage = readyToAdvance ? Math.min(5, opportunity.recordedStage + 1) : Math.max(1, opportunity.recordedStage - 1)
-    const generatedAt = new Date().toISOString()
-    const evidenceIds = [`web-msx-${opportunity.id}`, `web-mcem-stage-${opportunity.recordedStage}`]
-    const milestoneSummary = summarizeMilestones(opportunityMilestones)
-    const milestoneRecs = milestoneRecommendations(milestoneSummary, evidenceIds)
-    const baseSummary = readyToAdvance
-        ? `Completed Stage ${opportunity.recordedStage} exit criteria support progression to Stage ${evidenceBasedStage}.`
-        : `The opportunity is recorded at Stage ${opportunity.recordedStage}; current sample evidence supports Stage ${evidenceBasedStage}.`
-    const baseRecommendations: McemResponse['recommendations'] = readyToAdvance ? [{
-        id: 'advance-stage',
-        action: `Confirm progression to Stage ${evidenceBasedStage} with the customer and update MSX.`,
-        ownerRole: roleByStage[opportunity.recordedStage - 1] ?? 'Account Executive',
-        rationale: 'All current-stage exit criteria are represented in this sanitized sample.',
-        evidenceIds,
-        assumption: false,
-        confidence: 'high'
-    }] : [
-        { id: 'validate-technical', action: 'Schedule a customer validation session for the open technical criterion.', ownerRole: 'Solution Engineer', rationale: 'Technical validation remains partial in sample evidence.', evidenceIds, assumption: false, confidence: 'high' },
-        { id: 'confirm-business-case', action: 'Confirm the quantified business case and economic buyer.', ownerRole: 'Specialist / SSP', rationale: 'The business case is not yet supported in sample evidence.', evidenceIds, assumption: false, confidence: 'medium' }
-    ]
-    return {
-        contractVersion,
-        correlationId: '10000000-0000-4000-8000-000000000001',
-        capability: 'mcem-coach',
-        agentVersion: 'web-sample-v1',
-        generatedAt,
-        mode: 'sample',
-        state: readyToAdvance ? 'complete' : 'partial',
-        summary: milestoneSummary.headline ? `${baseSummary} ${milestoneSummary.headline}` : baseSummary,
-        recordedStage: opportunity.recordedStage,
-        evidenceBasedStage,
-        criteria: criteriaLabels.map((label, index) => {
-            const observation = sharedObservations?.find((item) => item.criterionId === criteriaIds[index])
-            return {
-                id: criteriaIds[index] ?? `criterion-${index + 1}`,
-                label,
-                status: observation?.status ?? (readyToAdvance || index < 2 ? 'met' : index === 2 ? 'partial' : 'missing'),
-                rationale: observation?.detail ?? (readyToAdvance
-                    ? `${label} evidence is documented and customer validated.`
-                    : index < 2 ? `${label} evidence is documented.` : `${label} requires customer confirmation.`),
-                evidenceIds
-            }
-        }),
-        recommendations: [...baseRecommendations, ...milestoneRecs],
-        missingData: sharedObservations
-            ? sharedObservations.filter((observation) => observation.status !== 'met').map((observation) => observation.detail)
-            : readyToAdvance ? [] : ['Validated business case', 'Customer-confirmed next step'],
-        evidence: [
-            { id: evidenceIds[0]!, source: 'msx', recordId: opportunity.id, title: 'Sanitized MSX opportunity snapshot', retrievedAt: generatedAt, accessContext: 'sample', quality: 'observed', excerpt: 'Static web preview data; no live MSX request was made.' },
-            { id: evidenceIds[1]!, source: 'mcem', recordId: `stage-${opportunity.recordedStage}`, title: `MCEM Stage ${opportunity.recordedStage} guidance`, retrievedAt: generatedAt, accessContext: 'sample', quality: 'authoritative', excerpt: 'Versioned stage criteria used for the sample evaluation.' }
-        ],
-        sourceHealth: [
-            { source: 'msx', state: 'sample', detail: 'Sanitized static sample.', checkedAt: generatedAt },
-            { source: 'mcem', state: 'sample', detail: 'Bundled sample guidance.', checkedAt: generatedAt }
-        ]
-    }
-}
-
 function webClient(): RevampDataClient {
-    const seReporting = createSampleSeReportingHost()
+    const seReporting = createPreviewSeReportingHost()
     const unavailable = (): never => {
         throw new Error('Record creation needs the hosted Web app or Desktop. The standalone preview does not save records.')
     }
@@ -610,9 +577,15 @@ function webClient(): RevampDataClient {
         mode: 'web-sample',
         getDataMode: async () => 'sample',
         searchKnowledge: async (request) => sampleKnowledgeSearchResponse(request),
+        deriveWorkingSessionTopic: async () => unavailable(),
+        prepareWorkingSession: async () => unavailable(),
         invokeSellerDashboard: async (request) => {
             sellerDashboardRequestSchema.parse(request)
             return createSampleSellerDashboard()
+        },
+        invokeStagePipelineReview: async (request) => {
+            const input = stagePipelineRequestSchema.parse(request)
+            return createSampleStagePipelineReview({ scope: input.scope, ...(input.reportIds ? { reportIds: input.reportIds } : {}) })
         },
         invokeSeReporting: (request) => seReporting.invoke(request),
         exitApplication: async () => { await apiRequest(fetch, '/api/exit', { method: 'POST' }) },
@@ -787,7 +760,7 @@ function webClient(): RevampDataClient {
             if (!opportunity) throw new Error('Unknown sample opportunity.')
             if (Math.abs(targetStage - opportunity.recordedStage) !== 1) throw new Error('MCEM stage changes must move to an adjacent stage.')
             const previousStage = opportunity.recordedStage
-            const evaluation = buildWebEvaluation(opportunity, milestones.filter((item) => item.opportunityId === opportunity.id))
+            const evaluation = buildPreviewEvaluation(opportunity, milestones.filter((item) => item.opportunityId === opportunity.id), roleByStage)
             const advancing = targetStage > previousStage
             const hasGaps = evaluation.criteria.some((criterion) => criterion.status !== 'met')
             if ((!advancing || hasGaps) && !reason?.trim()) throw new Error(advancing ? 'An exception reason is required.' : 'A recycle reason is required.')
@@ -800,7 +773,7 @@ function webClient(): RevampDataClient {
         runMcemCoach: async (_accountId, opportunityId) => {
             const opportunity = opportunities.find((item) => item.id === opportunityId)
             if (!opportunity) throw new Error('Unknown sample opportunity.')
-            return buildWebEvaluation(opportunity, milestones.filter((item) => item.opportunityId === opportunityId))
+            return buildPreviewEvaluation(opportunity, milestones.filter((item) => item.opportunityId === opportunityId), roleByStage)
         },
         runAgentTask: async (capability, _accountId, opportunityId, prompt) => {
             const opportunity = opportunities.find((item) => item.id === opportunityId)
@@ -843,9 +816,18 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
             }
         } : {}),
         mode: 'desktop',
+        getInferenceMode: async () => bridge.getInferenceMode ? inferenceModeSchema.nullable().parse(await bridge.getInferenceMode()) ?? undefined : undefined,
         getDataMode: async () => (await bridge.getDataStatus()).mode,
         searchKnowledge: async (request) => knowledgeSearchResponseSchema.parse(
             await bridge.searchKnowledge(knowledgeSearchRequestSchema.parse(request))),
+        deriveWorkingSessionTopic: async (request) => workingSessionTopicResponseSchema.parse(
+            await bridge.deriveWorkingSessionTopic(workingSessionTopicRequestSchema.parse(request))),
+        prepareWorkingSession: async (request) => workingSessionResultSchema.parse(
+            await bridge.prepareWorkingSession(workingSessionPrepareRequestSchema.parse(request))),
+        openWorkingSessionFolder: (folderPath) => bridge.openWorkingSessionFolder(folderPath),
+        invokeStagePipelineReview: async (request) => stagePipelineResponseSchema.parse(
+            await bridge.invokeStagePipelineReview(stagePipelineRequestSchema.parse(request))
+        ),
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(
             await bridge.invokeSellerDashboard(sellerDashboardRequestSchema.parse(request))
         ),

@@ -125,7 +125,11 @@ describe('initial deterministic workflow cohort', () => {
         expect(queries[0]?.filter[0]).toEqual({ field: 'closeDate', operator: 'on-or-before', value: '2026-08-13' })
         expect(queries[5]?.filter).toContainEqual({ field: 'dueDate', operator: 'on-or-before', value: '2026-09-26' })
         expect(queries[7]?.filter).toContainEqual({ field: 'status', operator: 'ne', value: 'Completed' })
-        expect(queries.every(({ top, expand }) => top === 500 && expand.length === 0)).toBe(true)
+        expect(queries.every(({ top }) => top === 500)).toBe(true)
+        for (const query of queries) {
+            expect(query.expand).toEqual(query.entity === 'opportunity'
+                ? [] : [{ relationship: 'opportunity', select: ['accountId', 'name'] }])
+        }
     })
 
     it('returns valid empty output without synthetic queue records', async () => {
@@ -139,8 +143,7 @@ describe('initial deterministic workflow cohort', () => {
         expect(output.card).toMatchObject({ kind: 'action-list', actions: [] })
     })
 
-    it('resolves the owning account for milestone and activity items so every play can hand off to an agent', async () => {
-        const lookups: GuardedQueryRequest[] = []
+    it('uses projected parent data for handoffs without additional account lookup queries', async () => {
         const rowsFor = (entity: string): Array<Record<string, unknown>> => entity === 'engagementMilestone'
             ? [{ id: 'ms-1', opportunityId: 'opp-9', name: 'Architecture sign-off', status: 'At Risk', targetDate: '2026-09-01' }]
             : entity === 'activity'
@@ -148,8 +151,9 @@ describe('initial deterministic workflow cohort', () => {
                 : [{ id: 'opp-9', accountId: 'account-9', name: 'Fabrikam rollout' }]
         const dataverse = {
             query: vi.fn(async (query: GuardedQueryRequest): Promise<DataverseMcpQueryResult> => {
-                if (query.filter.some(({ field }) => field === 'id')) lookups.push(query)
-                const records = rowsFor(query.entity)
+                const records = rowsFor(query.entity).map((row) => ({
+                    ...row, accountId: 'account-9', opportunityName: 'Fabrikam rollout'
+                }))
                 return {
                     state: 'complete', records, recordCount: records.length, truncated: false,
                     sourceHealth: { source: 'dataverse-mcp', state: 'live', detail: 'Fixture Dataverse data.', checkedAt },
@@ -175,8 +179,8 @@ describe('initial deterministic workflow cohort', () => {
             const output = initialWorkflowOutputSchema.parse(runtime.getResult(run.resultRef!)?.output)
             expect(output.queueItems[0], workflowId).toMatchObject({ accountId: 'account-9', opportunityId: 'opp-9', opportunityName: 'Fabrikam rollout' })
         }
-        expect(lookups).toHaveLength(3)
-        expect(lookups[0]).toMatchObject({ entity: 'opportunity', filter: [{ field: 'id', operator: 'in', value: ['opp-9'] }] })
+        expect(dataverse.query).toHaveBeenCalledTimes(3)
+        expect(dataverse.query.mock.calls.every(([query]) => query.entity !== 'opportunity')).toBe(true)
     })
 
     it('embeds descriptive queue labels without exposing owner identifiers', async () => {

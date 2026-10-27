@@ -6,7 +6,7 @@ The hosted web app serves the revamp React renderer and a same-origin Node.js AP
 
 The host supports three data and authentication modes:
 
-- `sample`: localhost serves bundled sanitized fixtures and does not call MSX or Foundry.
+- `sample`: local or deliberately anonymous hosted Web serves SQLite sample business data. AI uses real Foundry by default with explicit offline fallback; no live MSX/Graph/Dataverse reads or writes are enabled. `TLC_AI_MODE=sample` selects completely offline AI.
 - `azure-cli`: localhost acquires MSX and Foundry tokens in the Node process from the current Azure CLI sign-in.
 - `easy-auth`: Azure App Service Authentication supplies the delegated user identity and MSX token; managed identity authenticates Foundry.
 
@@ -50,7 +50,185 @@ npm run test:smoke:web-release
 
 The web release workflow performs these checks in isolation and publishes an Azure App Service ZIP for tags such as `web-v0.1.0`. The ZIP includes production dependencies, the built host and renderer, the MCEM guidance document, and the safe Foundry configuration example. It never includes `config/foundry.environment.json`.
 
-## App Service Deployment
+## Anonymous Sample Deployment
+
+Sample business data and AI are independent. The default now uses real Foundry
+inference; [sample Foundry setup](sample-foundry-ai.md) covers its managed-identity
+permissions, 25-concurrent / 20-per-minute / 500-per-day slot quotas, and labeled
+fallback. **Existing live/Easy Auth behavior is unchanged.**
+
+**No IaC is required for this existing App Service.** Reuse the ZIP packaging and
+Azure CLI deployment wrapper. The configured target is subscription
+`cbaf34df-7bb5-4fcf-bd7d-686a5f43ad31`, resource group `myDemoRg`, app `tlc`,
+plan `ASP-myDemoRg-94e3`, with the existing **`sample`** slot.
+The app is **Linux / Node 24**, not Windows. Its P0v3 plan supports slots and
+currently has one worker. The slot's hostname starts with `tlc-sample`, but its
+resource name is `sample`.
+
+Visitors need no login, tokens, Azure CLI, Foundry configuration, or live-service
+permissions. The **publisher** needs Node.js 24+, npm, PowerShell 7, and an authorized
+Azure CLI session for Azure operations. Build/package-only needs no Azure sign-in:
+
+```powershell
+npm run web:release:sample
+# Or use the deployment entry point without contacting Azure:
+npm run web:deploy:sample -- -PackageOnly
+```
+
+Both build and smoke-test the actual staged host. The ZIP remains reusable;
+runtime mode is configured explicitly at deployment, not embedded in the browser.
+Production dependency installation disables lifecycle scripts. The isolated npm
+installs remove npm-run's inherited `allow-scripts` CLI flag, which newer npm
+rejects for project installs; `--ignore-scripts` remains enforced and user npm
+configuration is not changed.
+
+### Deploy and test the sample slot
+
+```powershell
+# Sign in as the publisher beforehand if needed: az login
+npm run web:deploy:sample
+
+# Reuse an already-built ZIP:
+npm run web:deploy:sample -- -SkipBuild
+
+# Read-only Azure preview (may build); no settings/upload/auth changes:
+npm run web:deploy:sample -- -SkipBuild -WhatIf
+
+# Only if the named slot is missing, explicitly permit creation:
+npm run web:deploy:sample -- -CreateSlot
+```
+
+Sample mode requires a named non-production slot and never falls back to
+production. Slot creation does not clone live configuration, create an App
+Service/plan, or upgrade the plan. The script rejects incompatible runtime,
+platform, tenant, plan, hostname, or scaling rather than changing a shared plan.
+Other targets can be selected explicitly:
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-web-appservice.ps1 -Mode sample -Slot sample `
+    -SubscriptionId '<subscription-id>' -TenantId '<tenant-id>' `
+    -ResourceGroup '<resource-group>' -WebAppName '<app-name>' `
+    -AppServicePlan '<existing-plan-name>' -ExpectedHostName '<production-hostname>'
+```
+
+The sample workflow sets `TLC_WEB_MODE=sample`, `TLC_DATA_MODE=sample`, `TLC_AI_MODE=foundry`
+(or `-AiMode sample` for offline AI),
+`TLC_DATA_STORE=sqlite`, `TLC_DATA_STORE_PATH=:memory:`,
+`TLC_HOSTING_MODEL=single-instance`, `TLC_BACKGROUND_SYNC=0`, and `HOST=0.0.0.0`.
+It uses run-from-package, disables remote build automation, and retains the
+platform `PORT` and Node runtime. **`TLC_DATA_MODE=sample` alone is insufficient**:
+without explicit `TLC_WEB_MODE`, App Service selects live Easy Auth mode.
+
+Authentication is disabled only on the selected sample target. Existing
+network restrictions are not removed; a restricted target must be deliberately
+made accessible by its owner before it can pass the public checks. HTTPS remains
+required. Local-only host Exit is unavailable on hosted Web; visitors cannot
+stop the shared process. Inherited live background-sync settings do not activate
+a durable sample journal in Azure.
+
+The wrapper detects each slot's **active** authentication version. Classic Auth v1
+uses `az webapp auth-classic update`; Auth v2 uses `az webapp auth update`.
+It does not migrate authentication or change production merely to deploy a sample
+slot. A v1 sample slot and v2 production slot are supported together.
+Protected production promotion requires v2's health-route exclusions; an enabled
+v1 production policy is rejected before changes rather than weakened or migrated.
+
+Verification uses no credentials/cookies and never follows login redirects.
+Sample ZIP publishing uses asynchronous upload acceptance followed by bounded
+deployment-record reconciliation, so a large package does not depend on one
+synchronous Kudu request surviving until deployment finishes. The existing live
+deployment command is unchanged.
+It checks the sample HTML marker, sample identity, seeded accounts/opportunities,
+and SQLite-backed meeting transcripts, not just `/api/health`. A successful
+upload or public health endpoint alone is not success. Wait for the script's
+verified-sample message, then evaluate the demo manually at the reported slot URL.
+
+**Data lifecycle:** in-memory SQLite enables the fuller sample experience,
+including sample meeting capture and edits, without writable database files or
+another Azure resource. Anonymous visitors share a dataset/identity within one
+process. Edits reset on recycle, deployment, or swap; this is not per-visitor
+isolation. Do not upload real customer transcripts or credentials. Keep one
+worker; the workflow does not scale or alter the shared plan automatically.
+
+### Recover a completed upload
+
+If upload completed but a later settings/check step failed, use the existing ZIP
+to verify and finalize it without rebuilding, uploading, or changing Azure:
+
+```powershell
+npm run web:deploy:sample -- -Action Verify
+```
+
+This checks the ZIP hash against the slot's release marker, the completed active
+deployment, sample configuration, disabled authentication, and anonymous SQLite
+APIs before saving the missing local receipt. It refuses a mismatched ZIP or an
+authenticated slot; it does not silently repair settings or overwrite an active
+production rollback receipt. `-WhatIf` does not write the receipt.
+
+The error `Cannot use auth v2 commands when the app is using auth v1` is an
+authentication **API-version mismatch**, not a publisher sign-in/RBAC or SCM
+publishing-credential error. Earlier wrappers could hit it even when classic
+authentication was already disabled. The updated wrapper selects the correct
+command without forcing migration to v2. If a manual setting change is needed,
+select deployment slot **sample** in App Service and disable its Authentication;
+do not disable production authentication to fix a sample-slot deployment.
+
+### Promote or roll back explicitly
+
+Staging deployment does not change production. The current production target
+requires login; promotion deliberately converts it into a **public sample demo**:
+
+```powershell
+npm run web:deploy:sample -- -Action Promote
+npm run web:deploy:sample -- -Action Rollback
+```
+
+Each operation requires confirmation. Promotion rechecks the recorded staged
+deployment and swaps it without rebuilding or uploading another ZIP. Effective
+sample settings are applied deliberately on both sides; existing slot-sticky
+flags are preserved. `TLC_SAMPLE_RELEASE_ID` tracks the ZIP's SHA256 with content
+and must **not** be marked slot-sticky.
+
+Production keeps authentication while live content could still be served. Only
+the non-sensitive `/api/health` route is temporarily excluded from authentication
+for HTTP-200 swap warm-up; previous exclusions are restored. Anonymous production
+access is opened only after the sample content/configuration is active, then
+functional checks must pass. Native swap-with-preview/auto-swap is not assumed.
+If promotion fails, prior enabled authentication is reapplied and the failure is
+reported; use the retained receipt to request recovery.
+
+The default local receipt is `release-web\tlc-sample-deployment.json` (ignored by
+Git). It contains the exact target, ZIP hash, accepted deployment ID, state, and
+only managed non-secret settings/authentication flags needed for rollback. It
+does not contain tokens, provider secrets, or the Foundry environment. Use
+`-ReceiptPath` to select another location, and retain it with the deployment.
+
+Rollback restores required authentication **before** any previous live content
+or mode, verifies both authentication flags and an actual anonymous-access denial
+before a reverse swap, then restores managed values and sticky flags,
+and verifies the anonymous-access policy. Authenticated live functionality still
+requires its normal sign-in to verify. A changed staging/rollback deployment or
+mismatched receipt is rejected. A subsequent deployment to the source slot would
+destroy the rollback point, so the wrapper refuses to overwrite it while the
+receipt records an active production transition. Archive the receipt explicitly
+only when you intend to discard that rollback point.
+
+### Local release validation
+
+For an actual packaged-host browser check as well as the normal release smoke:
+
+```powershell
+$env:TLC_WEB_RELEASE_BROWSER_SMOKE = '1'
+try { npm run web:release:sample }
+finally { Remove-Item Env:TLC_WEB_RELEASE_BROWSER_SMOKE -ErrorAction SilentlyContinue }
+```
+
+This exercises the real staged Node host, clean-browser sample navigation, host
+shutdown restrictions, and SQLite edit/reset behavior. It does not deploy to
+Azure. The local dual-mode demo launcher intentionally also starts live mode and
+requires Azure login; it is not used by this deployment workflow.
+
+## Live / Easy Auth App Service Deployment
 
 The PowerShell deployment wrapper builds and smoke-tests the release, validates the completed ZIP, verifies the Azure target, deploys it, and checks `/api/health`:
 
@@ -58,7 +236,7 @@ The PowerShell deployment wrapper builds and smoke-tests the release, validates 
 npm run web:deploy
 ```
 
-The default target is the production `tlc` app in `myDemoRg`. PowerShell confirmation is required before upload. Use `-WhatIf` to preview the deployment or package without contacting Azure:
+The default target is the production `tlc` app in `myDemoRg`. PowerShell confirmation is required before upload. `-WhatIf` previews mutations but may build and inspect Azure. `-PackageOnly` builds without contacting Azure:
 
 ```powershell
 pwsh -NoProfile -File scripts/deploy-web-appservice.ps1 -WhatIf
@@ -69,12 +247,12 @@ To deploy an already-built package or target a slot:
 
 ```powershell
 pwsh -NoProfile -File scripts/deploy-web-appservice.ps1 -SkipBuild
-pwsh -NoProfile -File scripts/deploy-web-appservice.ps1 -Slot sample
+pwsh -NoProfile -File scripts/deploy-web-appservice.ps1 -Slot live-staging
 ```
 
 The configured subscription belongs to tenant `72f988bf-86f1-41af-91ab-2d7cd011db47`. A different `-TenantId` is rejected before deployment. Before uploading, the script validates `config/foundry.environment.json`, rejects credential-like fields, and stores its Base64-encoded non-secret metadata in the `TLC_FOUNDRY_ENV_BASE64` App Service setting. The reusable ZIP still excludes the live file. Use `-FoundryEnvironmentPath` to select another environment file.
 
-The wrapper sets `WEBSITE_RUN_FROM_PACKAGE=1`, so App Service mounts the immutable ZIP rather than extracting it and re-zipping the large `node_modules` tree. It also disables Azure CLI deployment-status tracking because a transient gateway or polling failure can produce exit code 1 after OneDeploy accepts the package. If that happens, the wrapper reconciles the newly accepted deployment record before running the bounded `/api/health` check. The script does not alter authentication, identities, networking, or deployment slots.
+The live wrapper sets `WEBSITE_RUN_FROM_PACKAGE=1`, so App Service mounts the immutable ZIP rather than extracting it and re-zipping the large `node_modules` tree. It also disables Azure CLI deployment-status tracking because a transient gateway or polling failure can produce exit code 1 after OneDeploy accepts the package. If that happens, the wrapper reconciles the newly accepted deployment record before running the bounded `/api/health` check. This default live path does not alter authentication, identities, networking, or deployment slots; the explicit sample workflow above manages its own sample settings, authentication and slot lifecycle.
 
 `azd up` is not used for this existing app. This repository has no `azure.yaml`, infrastructure definitions, or azd environment, and `azd up` combines provisioning with deployment. Adopting azd requires a separately reviewed infrastructure plan that safely represents the existing App Service before azd is allowed to own it.
 
@@ -110,7 +288,7 @@ Local live mode is intended only for the signed-in developer on the same machine
 
 ## Authentication Flow
 
-- `sample`: the browser calls the local same-origin API, which serves sanitized fixtures. No token is acquired.
+- `sample`: the browser calls the same-origin API, which serves sanitized fixtures or the SQLite sample store. No token is acquired.
 - `azure-cli`: the Node host uses `AzureCliCredential` for MSX and Foundry. It validates the MSX token's user domain, creates the live runtime server-side, and returns only application data to the browser. The listener is restricted to loopback.
 - `easy-auth`: App Service authenticates the user and injects the delegated MSX token and client principal through trusted `X-MS-*` headers. The Node host uses that token for MSX and a managed identity for Foundry. Neither credential is sent to browser JavaScript.
 
@@ -121,14 +299,17 @@ Optional settings:
 | Setting                             | Purpose                                  | Default                                       |
 | ----------------------------------- | ---------------------------------------- | --------------------------------------------- |
 | `PORT`                              | HTTP listener port                       | `8080`                                        |
-| `HOST`                              | HTTP listener address                    | `127.0.0.1` locally; `0.0.0.0` in App Service |
+| `HOST`                              | HTTP listener address                    | Loopback in local/sample mode; `0.0.0.0` in Easy Auth; sample deployment explicitly sets `0.0.0.0` |
 | `TLC_WEB_MODE`                      | `sample`, `azure-cli`, or `easy-auth`    | `sample` locally; `easy-auth` in App Service  |
 | `TLC_DATA_STORE`                    | Sample data store (`fixture` or `sqlite`) | Fixture sample data unless `sqlite` is selected |
 | `TLC_DATA_STORE_PATH`               | File-backed Sample SQLite database       | In-memory when unset; local demo launcher supplies a path |
+| `TLC_AI_MODE`                       | Sample AI only: `foundry` or offline `sample` | Foundry for SQLite sample hosts; live mode unchanged |
+| `TLC_AI_BUDGET_PATH`                | Durable per-slot sample AI quota ledger  | `HOME\data\tlc-ai\<slot>\usage.sqlite` |
 | `TLC_WEB_STATIC_ROOT`               | Built renderer directory                 | `apps/desktop/dist/revamp`                    |
 | `TLC_FOUNDRY_ENV_BASE64`            | Base64-encoded hosted Foundry JSON       | unset                                         |
 | `TLC_FOUNDRY_ENV_FILE`              | Foundry environment JSON                 | `config/foundry.environment.json`             |
 | `WEBSITE_RUN_FROM_PACKAGE`          | Mount the deployment ZIP as `wwwroot`    | wrapper sets `1`                              |
+| `TLC_SAMPLE_RELEASE_ID`            | Non-sticky sample ZIP SHA256 for guarded swaps | Set by the sample deployment wrapper |
 | `TLC_MCEM_GUIDANCE_PATH`            | MCEM guidance PDF                        | `docs/knowledge/MCEM Overview.pdf`            |
 | `TLC_MSX_RISK_DETAILS_FIELD`        | Verified Risk/Blocker logical field name | unset; corresponding update is rejected       |
 | `TLC_MSX_STATUS_LOST_TO_COMPETITOR` | Verified integer option value            | unset; corresponding update is rejected       |

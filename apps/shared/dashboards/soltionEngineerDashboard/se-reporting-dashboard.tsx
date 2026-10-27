@@ -6,6 +6,7 @@ import {
 import { renderSeReportHtml } from '../../../../packages/documents/se-reporting.js'
 import { SeReportSetup, type InvokeSeReporting } from './report-setup.js'
 import { downloadSeReport, SeReportGeneration, SeReportPublication, SeReportReview } from './report-workflow.js'
+import { InferenceNotice } from '../../inference-status.js'
 
 export function SeReportingDashboardPane({ invoke }: { invoke: InvokeSeReporting }) {
     const [state, setState] = useState<Extract<SeReportingResponse, { kind: 'state' }> | null>(null)
@@ -76,6 +77,7 @@ export function SeReportingDashboardPane({ invoke }: { invoke: InvokeSeReporting
             {busy && <p role="status">Reporting operation in progress…</p>}
             {error && <div className="se-report-error" role="alert">{error}{state?.run && <p>The previous package remains visible; it is not a successful result of this operation.</p>}</div>}
             {state?.message && !error && <p className="se-report-notice" role="status">{state.message}</p>}
+            <InferenceNotice execution={state?.inference} />
             <div className="se-report-actions">
                 <label>Manager reporting profile<select value={profileId} onChange={(event) => {
                     setProfileId(event.target.value); setStatus(''); setAccess([]); setError('')

@@ -7,7 +7,10 @@ import type { WorkingSelection } from './accounts.js'
 import { ManualTranscriptInput } from './manual-transcript-input.js'
 import { meetingCaptureError, meetingResultSchema, type MeetingResult } from './meeting-capture.js'
 import { meetingProposalToMarkdown } from '../../../shared/meeting-proposal-markdown.js'
+import { MeetingPicker, useMeetingList } from '../../../shared/meeting-picker.js'
 import { ResponseActions } from './response-actions.js'
+
+const recentMeetingResolutionSchema = z.object({ meetingId: z.string().min(1), meetingType: z.enum(['customer', 'internal']).optional() }).strict()
 
 export function MeetingsWorkspace({ client, selection, mode, reviewPreview, compact = false, graphAvailable = true }: {
   client: TeamsApiClient; selection: WorkingSelection | null; mode: 'sample' | 'live'; reviewPreview: ReviewPreview
@@ -16,6 +19,7 @@ export function MeetingsWorkspace({ client, selection, mode, reviewPreview, comp
   const [task, setTask] = useState<'prep' | 'capture' | 'follow-up'>(compact ? 'prep' : 'follow-up')
   const [meetingId, setMeetingId] = useState('')
   const [meetingLink, setMeetingLink] = useState('')
+  const [recentId, setRecentId] = useState('')
   const [meetingType, setMeetingType] = useState<MeetingType>('customer')
   const [inputMode, setInputMode] = useState<'meeting' | 'manual'>(mode === 'live' && !graphAvailable ? 'manual' : 'meeting')
   const [sources, setSources] = useState<Array<z.infer<typeof meetingTranscriptSummarySchema>>>([])
@@ -26,6 +30,12 @@ export function MeetingsWorkspace({ client, selection, mode, reviewPreview, comp
   const [busy, setBusy] = useState(false)
   const [resolving, setResolving] = useState(false)
   const resolveController = useRef<AbortController | undefined>(undefined)
+  const recent = useMeetingList<z.infer<typeof meetingTranscriptSummarySchema>>(
+    () => client.request('meetings/sources', z.array(meetingTranscriptSummarySchema), { opportunityId: selection!.opportunity.id })
+      .catch((cause: unknown) => { throw new Error(meetingCaptureError(cause)) }),
+    mode === 'live' && graphAvailable && inputMode === 'meeting' && task === 'capture' && selection !== null,
+    selection?.opportunity.id ?? ''
+  )
   function clearDraft() {
     resolveController.current?.abort()
     setResolving(false); setBusy(false); setResult(null); setSelected(new Set()); setReason(''); setError('')
@@ -36,7 +46,7 @@ export function MeetingsWorkspace({ client, selection, mode, reviewPreview, comp
   }
   useEffect(() => () => { resolveController.current?.abort() }, [client, selection?.opportunity.id, inputMode, meetingType])
   useEffect(() => {
-    clearDraft(); setMeetingId(''); setMeetingLink(''); setSources([])
+    clearDraft(); setMeetingId(''); setMeetingLink(''); setRecentId(''); setSources([])
     if (!selection || mode !== 'sample' || inputMode !== 'meeting') return
     const controller = new AbortController()
     client.request('meetings/sources', z.array(meetingTranscriptSummarySchema), { opportunityId: selection.opportunity.id }, controller.signal)
@@ -78,6 +88,22 @@ export function MeetingsWorkspace({ client, selection, mode, reviewPreview, comp
       if (!meetingLink.trim().startsWith('https://')) throw new Error('Paste the HTTPS Teams meeting join link to verify its Graph identity.')
       const resolved = await client.request('meetings/resolve', z.object({ meetingId: z.string().min(1) }).strict(), { joinUrl: meetingLink.trim() }, controller.signal)
       if (!controller.signal.aborted) setMeetingId(resolved.meetingId)
+    } catch (cause) { if (!controller.signal.aborted) setError(meetingCaptureError(cause)) }
+    finally { if (!controller.signal.aborted) setResolving(false) }
+  }
+  async function chooseRecent(handle: string) {
+    clearDraft()
+    setMeetingId('')
+    setRecentId(handle)
+    if (!handle || !selection) return
+    const controller = new AbortController()
+    resolveController.current = controller
+    setResolving(true)
+    try {
+      const resolved = await client.request('meetings/resolve', recentMeetingResolutionSchema, { handle }, controller.signal)
+      if (controller.signal.aborted) return
+      if (resolved.meetingType) setMeetingType(resolved.meetingType)
+      setMeetingId(resolved.meetingId)
     } catch (cause) { if (!controller.signal.aborted) setError(meetingCaptureError(cause)) }
     finally { if (!controller.signal.aborted) setResolving(false) }
   }
@@ -136,6 +162,11 @@ export function MeetingsWorkspace({ client, selection, mode, reviewPreview, comp
         <option value="">Choose a bundled transcript</option>{sources.map((item) => <option key={item.id} value={item.id}>{item.subject}</option>)}
       </select></label> : <div>
         {!graphAvailable && <p role="status" className="warning">Automatic meeting-link lookup is unavailable in this Azure CLI profile. Use Paste / upload with a transcript you are authorized to provide, or a separately approved Graph-enabled profile.</p>}
+        {graphAvailable && <>
+          <MeetingPicker list={recent} selectedId={recentId} placeholder="Choose a recent meeting" labelClassName="field" disabled={resolving || busy}
+            onSelect={(id) => { void chooseRecent(id) }} />
+          <p className="muted">Or verify a meeting by its join link:</p>
+        </>}
         <label className="field">Teams meeting join link<input type="url" value={meetingLink} disabled={!graphAvailable || resolving || busy} onChange={(event) => {
           clearDraft(); setMeetingId(''); setMeetingLink(event.target.value)
         }} /></label>

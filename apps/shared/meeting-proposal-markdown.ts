@@ -1,4 +1,7 @@
+import { inferenceLabel, type InferenceExecution } from '../../packages/common/contracts/inference.js'
+
 interface MeetingProposalSummary {
+    inference?: InferenceExecution | undefined
     meetingType: string
     slots: readonly {
         checkedByDefault: boolean
@@ -15,6 +18,7 @@ interface MeetingProposalSummary {
 
 export function meetingProposalToMarkdown(proposal: MeetingProposalSummary, opportunityName: string): string {
     const lines = [`# Meeting signals - ${opportunityName}`, '', `Meeting type: ${proposal.meetingType}`, '', '## Proposed field changes', '', '| Apply | Field | Current | Proposed | MCEM | Confidence |', '| --- | --- | --- | --- | --- | --- |']
+    if (proposal.inference) lines.splice(4, 0, inferenceLabel(proposal.inference), '')
     for (const slot of proposal.slots) {
         lines.push(`| ${slot.checkedByDefault && !slot.blocked ? 'yes' : 'review'} | ${slot.label} | ${slot.displayBefore ?? '(empty)'} | ${slot.displayAfter} | ${slot.mcemCriterion} | ${Math.round(slot.confidence * 100)}% |`)
     }

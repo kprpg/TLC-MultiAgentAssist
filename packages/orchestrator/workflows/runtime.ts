@@ -30,6 +30,7 @@ export type WorkflowConnectorExecutionContext = {
     scope: ScopeRef
     input: unknown
     signal: AbortSignal
+    onProgress?: (result: WorkflowConnectorResult) => void
 }
 
 export interface WorkflowConnectorExecutor {
@@ -75,7 +76,10 @@ export type WorkflowStepErrorInfo = {
 }
 
 export type WorkflowRuntimeOptions = {
+    /** Finished runs retained for polling and results. Active runs are not counted or evicted. */
     historyCapacity?: number
+    /** Maximum queued plus running runs; further starts fail with `capacity_exceeded`. Default 100. */
+    maxActiveRuns?: number
     now?: () => number
     createId?: () => string
     resultAssembler?: WorkflowResultAssembler
@@ -94,6 +98,7 @@ export class WorkflowRuntime {
     private readonly completions = new Map<string, Completion>()
     private readonly now: () => number
     private readonly createId: () => string
+    private readonly maxActiveRuns: number
     private readonly resultAssembler: WorkflowResultAssembler | undefined
     private readonly onStepError: ((info: WorkflowStepErrorInfo) => void) | undefined
 
@@ -104,6 +109,10 @@ export class WorkflowRuntime {
     ) {
         this.now = options.now ?? Date.now
         this.createId = options.createId ?? randomUUID
+        this.maxActiveRuns = options.maxActiveRuns ?? 100
+        if (!Number.isInteger(this.maxActiveRuns) || this.maxActiveRuns < 1) {
+            throw new Error('Workflow active-run limit must be a positive integer.')
+        }
         this.resultAssembler = options.resultAssembler
         this.onStepError = options.onStepError
         this.history = new WorkflowRunHistory({
@@ -125,7 +134,9 @@ export class WorkflowRuntime {
         if (definition.executionMode === 'agentic') {
             throw new WorkflowRuntimeError('unsupported_execution_mode', 'This runtime does not execute agentic workflows.')
         }
-
+        if (this.history.activeCount() >= this.maxActiveRuns) {
+            throw new WorkflowRuntimeError('capacity_exceeded', 'Too many workflow runs are active. Wait for a run to finish or cancel one, then try again.')
+        }
         const runId = this.createId()
         const correlationId = request.correlationId ?? this.createId()
         const run = workflowRunSchema.parse({
@@ -142,6 +153,11 @@ export class WorkflowRuntime {
         this.completions.set(runId, deferredCompletion())
         queueMicrotask(() => { void this.execute(runId, definition, request.input) })
         return run
+    }
+
+    /** Number of queued or running runs; retention never removes them. */
+    activeRunCount(): number {
+        return this.history.activeCount()
     }
 
     get(runId: string): WorkflowRun | undefined {
@@ -193,6 +209,7 @@ export class WorkflowRuntime {
             for (const step of definition.connectorPlan) {
                 const callStarted = this.now()
                 const stepAbort = linkedAbortController(controller.signal)
+                let latestProgress: WorkflowConnectorResult | undefined
                 try {
                     const connectorResult = await withTimeout(
                         this.executor.execute(step, {
@@ -201,7 +218,22 @@ export class WorkflowRuntime {
                             correlationId: run.telemetry.correlationId,
                             scope: run.scope,
                             input,
-                            signal: stepAbort.controller.signal
+                            signal: stepAbort.controller.signal,
+                            onProgress: (progress) => {
+                                const current = this.history.get(runId)
+                                if (!this.resultAssembler || !current || current.status !== 'running' || stepAbort.controller.signal.aborted) return
+                                const progressiveResult: WorkflowExecutionResult = {
+                                    ...result, steps: [...result.steps, executionStep(step, progress)]
+                                }
+                                progressiveResult.output = this.resultAssembler.assemble({
+                                    definition, scope: current.scope, input, steps: progressiveResult.steps, generatedAt: iso(this.now())
+                                })
+                                this.results.set(resultRef, structuredClone(progressiveResult))
+                                current.telemetry.firstResultMs ??= Math.max(0, this.now() - startedMs)
+                                run = workflowRunSchema.parse({ ...current, resultRef })
+                                this.history.set(run)
+                                latestProgress = progress
+                            }
                         }),
                         Math.max(0, definition.sla.timeoutMs - (this.now() - startedMs)),
                         stepAbort.controller
@@ -221,13 +253,7 @@ export class WorkflowRuntime {
                     if (run.telemetry.firstResultMs === undefined && connectorResult.state !== 'unauthorized') {
                         run.telemetry.firstResultMs = Math.max(0, this.now() - startedMs)
                     }
-                    result.steps.push({
-                        connector: step.connector,
-                        operation: step.operation,
-                        data: connectorResult.data,
-                        ...(connectorResult.lineage ? { lineage: connectorResult.lineage } : {}),
-                        ...(connectorResult.sourceHealth ? { sourceHealth: connectorResult.sourceHealth } : {})
-                    })
+                    result.steps.push(executionStep(step, connectorResult))
                     if (connectorResult.state === 'unauthorized') {
                         outcome = step.required ? 'unauthorized' : 'partial'
                         this.onStepError?.({
@@ -272,12 +298,25 @@ export class WorkflowRuntime {
                         operation: step.operation,
                         status: unauthorized ? 'unauthorized' : 'failed',
                         durationMs: Math.max(0, this.now() - callStarted),
-                        recordCount: 0,
-                        truncated: false
+                        recordCount: latestProgress?.rowCount ?? 0,
+                        truncated: latestProgress !== undefined
                     })
                     this.history.set(run)
                     if (step.required) {
                         if (unauthorized) {
+                            this.results.delete(resultRef)
+                            delete run.resultRef
+                            this.history.set(run)
+                            if (latestProgress) {
+                                result.steps.push(executionStep(step, {
+                                    state: 'unauthorized', data: [], rowCount: 0, truncated: false,
+                                    ...(latestProgress.lineage ? { lineage: latestProgress.lineage } : {}),
+                                    sourceHealth: {
+                                        source: step.connector, state: 'unauthorized',
+                                        detail: `${step.connector} delegated authorization is unavailable.`, checkedAt: iso(this.now())
+                                    }
+                                }))
+                            }
                             outcome = 'unauthorized'
                             break
                         }
@@ -301,6 +340,14 @@ export class WorkflowRuntime {
                     outcome = 'partial'
                 } finally {
                     stepAbort.dispose()
+                }
+            }
+
+            function executionStep(step: ConnectorStep, result: WorkflowConnectorResult): WorkflowExecutionResult['steps'][number] {
+                return {
+                    connector: step.connector, operation: step.operation, data: result.data,
+                    ...(result.lineage ? { lineage: result.lineage } : {}),
+                    ...(result.sourceHealth ? { sourceHealth: result.sourceHealth } : {})
                 }
             }
 
@@ -352,7 +399,7 @@ export class WorkflowRuntime {
 }
 
 export class WorkflowRuntimeError extends Error {
-    constructor(readonly code: 'scope_mismatch' | 'unsupported_execution_mode' | 'run_not_found' | 'invalid_transition' | 'result_not_available' | 'queue_item_not_found' | 'opportunity_scope_required' | 'invalid_evidence', message: string) {
+    constructor(readonly code: 'scope_mismatch' | 'unsupported_execution_mode' | 'capacity_exceeded' | 'run_not_found' | 'invalid_transition' | 'result_not_available' | 'queue_item_not_found' | 'opportunity_scope_required' | 'invalid_evidence', message: string) {
         super(message)
         this.name = 'WorkflowRuntimeError'
     }

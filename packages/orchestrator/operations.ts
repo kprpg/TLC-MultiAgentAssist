@@ -6,10 +6,12 @@ import {
   listWorkflowRunsRequestSchema, workflowGuidanceRequestSchema
 } from './workflows/host.js'
 import { workflowRunViewSchema } from './workflows/view-contracts.js'
+import { WorkflowRuntimeError } from './workflows/runtime.js'
 import type { ApplicationServices } from './application-runtime.js'
 import { workflowContractVersion } from '../common/contracts/workflows.js'
 import { canonicalJson } from './collaboration/reviewed-actions.js'
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema } from '../common/contracts/seller-dashboard.js'
+import { stagePipelineRequestSchema, stagePipelineResponseSchema } from '../common/contracts/stage-pipeline-review.js'
 import { seReportingRequestSchema, seReportingResponseSchema } from '../common/contracts/se-reporting.js'
 import { measurePerformance } from '../common/telemetry/performance.js'
 import type { ThinSliceOrchestrator } from './index.js'
@@ -61,6 +63,7 @@ export function createApplicationOperations(services: ApplicationServices) {
     ...createCoreMutationOperations(core, (input) => services.meetings.applyMeetingChangeSet(input)),
     searchKnowledge: operation(c.knowledgeSearchRequestSchema, c.knowledgeSearchResponseSchema, (input) => core.searchKnowledge(input)),
     sellerDashboard: operation(sellerDashboardRequestSchema, sellerDashboardResponseSchema, (input) => services.sellerDashboard.invoke(input)),
+    stagePipelineReview: operation(stagePipelineRequestSchema, stagePipelineResponseSchema, (input) => services.stagePipelineReview.invoke(input)),
     seReporting: operation(seReportingRequestSchema.refine((input) => !['run', 'publish'].includes(input.operation)), seReportingResponseSchema, (input) => services.seReporting.invoke(input)),
     seReportingRun: operation(seReportingRequestSchema.refine((input) => input.operation === 'run'), seReportingResponseSchema, (input) => services.seReporting.invoke(input), 'read', true),
     publishSeReporting: operation(seReportingRequestSchema.refine((input) => input.operation === 'publish'), seReportingResponseSchema, async (input) => {
@@ -102,6 +105,16 @@ export function createApplicationOperations(services: ApplicationServices) {
     }
     return services.withReadContext ? services.withReadContext(capture) : capture()
   }
+  /** A run's scope record lives exactly as long as the runtime retains the run, so an active run never loses it. */
+  function pruneWorkflowScopes() {
+    if (services.workflowScopes.size < 100) return
+    for (const runId of [...services.workflowScopes.keys()]) {
+      try { workflows.get({ contractVersion: workflowContractVersion, runId }) } catch (error) {
+        if (!(error instanceof WorkflowRuntimeError) || error.code !== 'run_not_found') throw error
+        services.workflowScopes.delete(runId)
+      }
+    }
+  }
   async function verifyWorkflow(runId: string) {
     const captured = services.workflowScopes.get(runId)
     if (!captured || canonicalJson(captured) !== canonicalJson(await workingSet())) throw new WorkflowScopeAuthorizationError()
@@ -128,7 +141,7 @@ export function createApplicationOperations(services: ApplicationServices) {
           const request = entry.parse(input)
           const captured = await workingSet()
           const run = c.workflowRunSchema.parse(await entry.run(request))
-          if (services.workflowScopes.size >= 100) services.workflowScopes.delete(services.workflowScopes.keys().next().value!)
+          pruneWorkflowScopes()
           services.workflowScopes.set(run.runId, captured)
           return run
         }

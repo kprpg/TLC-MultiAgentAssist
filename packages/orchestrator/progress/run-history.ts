@@ -1,12 +1,19 @@
 import { workflowRunSchema, type ScopeRef, type WorkflowRun } from '../../common/index.js'
 
 export type WorkflowRunHistoryOptions = {
+    /** Maximum number of finished runs retained. Queued and running runs are never evicted. */
     capacity?: number
     onEvicted?: (run: WorkflowRun) => void
 }
 
+function isFinished(run: WorkflowRun): boolean {
+    return run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled'
+}
+
 export class WorkflowRunHistory {
     private readonly runs = new Map<string, WorkflowRun>()
+    /** Ids of finished runs in the order they finished; the front is evicted first. */
+    private readonly finished: string[] = []
     private readonly capacity: number
     private readonly onEvicted: ((run: WorkflowRun) => void) | undefined
 
@@ -20,15 +27,20 @@ export class WorkflowRunHistory {
 
     set(run: WorkflowRun): void {
         const validated = workflowRunSchema.parse(run)
-        if (!this.runs.has(validated.runId) && this.runs.size >= this.capacity) {
-            const oldestRunId = this.runs.keys().next().value as string | undefined
-            if (oldestRunId) {
-                const evicted = this.runs.get(oldestRunId)
-                this.runs.delete(oldestRunId)
-                if (evicted) this.onEvicted?.(structuredClone(evicted))
-            }
-        }
+        const previous = this.runs.get(validated.runId)
         this.runs.set(validated.runId, structuredClone(validated))
+        if (isFinished(validated) && !(previous && isFinished(previous))) this.finished.push(validated.runId)
+        while (this.finished.length > this.capacity) {
+            const evictedRunId = this.finished.shift()!
+            const evicted = this.runs.get(evictedRunId)
+            this.runs.delete(evictedRunId)
+            if (evicted) this.onEvicted?.(structuredClone(evicted))
+        }
+    }
+
+    /** Number of queued or running runs, which retention never removes. */
+    activeCount(): number {
+        return this.runs.size - this.finished.length
     }
 
     get(runId: string): WorkflowRun | undefined {
@@ -36,7 +48,7 @@ export class WorkflowRunHistory {
         return run ? structuredClone(run) : undefined
     }
 
-    list(scope?: ScopeRef, limit = this.capacity): WorkflowRun[] {
+    list(scope?: ScopeRef, limit: number = Number.MAX_SAFE_INTEGER): WorkflowRun[] {
         if (!Number.isInteger(limit) || limit < 1) throw new Error('Workflow run history limit must be a positive integer.')
         return [...this.runs.values()]
             .filter((run) => scope === undefined || sameScope(run.scope, scope))

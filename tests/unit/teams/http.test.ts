@@ -10,6 +10,8 @@ import JSZip from 'jszip'
 import { GraphMeetingError } from '../../../packages/orchestrator/collaboration/meeting-acquisition.js'
 import { manualMeetingTranscriptVersion, meetingChangeSetProposalSchema } from '../../../packages/common/contracts/meeting.js'
 import { acquisitionSchema } from '../../../packages/common/contracts/collaboration.js'
+import { workflowContractVersion } from '../../../packages/common/contracts/workflows.js'
+import { WorkflowRuntimeError } from '../../../packages/orchestrator/workflows/runtime.js'
 import { z } from 'zod'
 
 const cleanups: Array<() => Promise<void> | void> = []
@@ -67,6 +69,40 @@ describe('Teams same-origin verified operation boundary', () => {
     await post('/api/teams/lifecycle', { contractVersion: collaborationVersion, command: 'pause' })
     expect((await post('/api/teams/meetings/manual', input)).status).toBe(409)
     expect(propose).not.toHaveBeenCalled()
+  })
+  it('resolves a listed recent-meeting handle through the verified calendar, never a client-supplied link', async () => {
+    const { services, post } = await start()
+    const resolve = vi.spyOn(services, 'resolveRecentMeeting').mockResolvedValue({ meetingId: 'graph-meeting', meetingType: 'customer' })
+    const handle = `gm_${'a'.repeat(32)}`
+    const response = await post('/api/teams/meetings/resolve', { handle })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ meetingId: 'graph-meeting', meetingType: 'customer' })
+    expect(resolve).toHaveBeenCalledWith(handle)
+    for (const bad of [{ handle: 'https://evil.example.com' }, { handle: `gm_${'a'.repeat(31)}` }, { handle, joinUrl: 'https://teams.microsoft.com/l/meetup-join/x' }, {}]) {
+      expect((await post('/api/teams/meetings/resolve', bad)).status).toBe(400)
+    }
+    expect(resolve).toHaveBeenCalledTimes(1)
+  })
+  it.each([
+    ['auth-required', 'delegated_session_unavailable', 409, 'graph_auth_required'],
+    ['denied', 'http_403', 403, 'graph_denied'],
+    ['unsupported', 'meeting_not_in_recent_calendar', 400, 'graph_unsupported']
+  ] as const)('maps a %s recent-meeting failure to the same actionable Teams code', async (state, code, status, expected) => {
+    const { services, post } = await start()
+    vi.spyOn(services, 'resolveRecentMeeting').mockRejectedValue(new GraphMeetingError(state, code))
+    const response = await post('/api/teams/meetings/resolve', { handle: `gm_${'b'.repeat(32)}` })
+    expect(response.status).toBe(status)
+    expect(await response.json()).toEqual({ error: expected, correlationId: expect.any(String) })
+  })
+  it('keeps the bundled sample transcript list in sample mode without touching the live calendar', async () => {
+    const { services, post } = await start()
+    const account = (await services.orchestrator.listAccounts())[0]!
+    const opportunity = (await services.orchestrator.listOpportunities(account.id))[0]!
+    const live = vi.spyOn(services, 'listRecentMeetings')
+    const response = await post('/api/teams/meetings/sources', { opportunityId: opportunity.id })
+    expect(response.status).toBe(200)
+    expect(Array.isArray(await response.json())).toBe(true)
+    expect(live).not.toHaveBeenCalled()
   })
   it.each([
     ['auth-required', 'expired', 409, 'graph_auth_required'],
@@ -166,6 +202,19 @@ describe('Teams same-origin verified operation boundary', () => {
     const unknown = await post('/api/teams/operations/__proto__', {})
     expect(unknown.status).toBe(404)
     expect(await unknown.text()).not.toContain('node_modules')
+  })
+  it('returns an explicit retryable outcome when the workflow runtime is at its active-run limit', async () => {
+    const { post, services } = await start()
+    const definition = services.workflows.listDefinitions({ contractVersion: workflowContractVersion, scope: 'portfolio' })[0]!
+    vi.spyOn(services.workflows, 'start').mockImplementation(() => {
+      throw new WorkflowRuntimeError('capacity_exceeded', 'Too many workflow runs are active.')
+    })
+    const response = await post('/api/teams/operations/workflows.start', {
+      contractVersion: workflowContractVersion, workflowId: definition.id, scope: { kind: 'portfolio' }
+    })
+    expect(response.status).toBe(429)
+    expect(response.headers.get('retry-after')).toBe('5')
+    expect(await response.json()).toMatchObject({ error: 'workflow_capacity_exceeded' })
   })
   it('never falls through to sample for a missing or invalid live token', async () => {
     const store = new SqliteDocumentStore()
