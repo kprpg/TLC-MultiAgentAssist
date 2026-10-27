@@ -68,6 +68,7 @@ import { WorkflowProgress } from '../../../shared/workflow-progress.js'
 import { AgentResponse } from '../../../shared/agent-response.js'
 import { PaneResizeHandle } from '../../../shared/pane-resize-handle.js'
 import type { CustomerEmailAction } from '../../../shared/customer-email.js'
+import { MembershipAction, WorkflowMembershipResults } from '../../../shared/workflow-membership.js'
 
 type Shell = 'desktop' | 'web'
 type WorkspaceView = 'accounts' | 'workflows' | 'discover' | 'dashboard' | 'new'
@@ -1654,8 +1655,10 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
         {workflowLoading && <Spinner label="Loading workflow definitions" />}
         {!workflowLoading && filteredWorkflowDefinitions.length === 0 && <div className="empty-state compact">No workflows match this scope and filter set.</div>}
 
-        {selectedWorkflowOutput && <WorkflowResult
-          output={selectedWorkflowOutput}
+        {selectedWorkflowOutput && <WorkflowMembershipResults load={client.getWorkflowResultsView} runId={selectedWorkflowRun?.runId} output={selectedWorkflowOutput}>
+        {(output, reasonFor) => <WorkflowResult
+          output={output}
+          guidanceDisabledReason={reasonFor}
           runId={selectedWorkflowRun?.runId}
           guidanceLoading={workflowGuidanceLoading}
           guidanceLabel={agentCapabilities.find(({ id }) => id === workflowGuidanceCapability(selectedWorkflowOutput.workflowId))?.label ?? 'Guidance'}
@@ -1664,7 +1667,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           emailAction={customerEmailAction}
           onOpenEvidence={client.openEvidence}
           onSendGuidance={selectedWorkflowRun?.status === 'completed' ? sendWorkflowToGuidance : undefined}
-        />}
+        />}</WorkflowMembershipResults>}
 
         <div className="workflow-grid">
           {filteredWorkflowDefinitions.map((definition) => {
@@ -1844,7 +1847,8 @@ function WorkflowResult({
   invokeAgent,
   emailAction,
   onOpenEvidence,
-  onSendGuidance
+  onSendGuidance,
+  guidanceDisabledReason
 }: {
   output: InitialWorkflowOutput
   runId?: string
@@ -1855,6 +1859,7 @@ function WorkflowResult({
   emailAction: CustomerEmailAction
   onOpenEvidence: (url: string) => void | Promise<void>
   onSendGuidance?: (queueItemId: string) => void
+  guidanceDisabledReason: (queueItemId: string) => string
 }) {
   const card = output.card
   return <section className="workflow-results" aria-label="Workflow results">
@@ -1867,7 +1872,7 @@ function WorkflowResult({
     <section className="workflow-queue" aria-label="Operational queue"><h3>Operational queue <span>{output.queueItems.length}</span></h3>{output.queueItems.length === 0 ? <p>No queued follow-up.</p> : output.queueItems.map((item) => {
       const guidanceResult = runId ? guidanceResults[`${runId}:${item.id}`] : undefined
       return <Fragment key={item.id}>
-        <article><span className={`priority ${item.priority.toLowerCase()}`}>{item.priority}</span><div><strong>{item.title}</strong><p>{item.owner ?? 'Unassigned'}{item.dueDate ? ` · Due ${item.dueDate}` : ''}</p></div>{onSendGuidance && item.accountId && item.opportunityId && <Button appearance="subtle" className="text-action" icon={<Sparkle20Regular />} disabled={guidanceLoading !== null} onClick={() => onSendGuidance(item.id)}>{guidanceLoading === item.id ? 'Sending…' : `Send to ${guidanceLabel}`}</Button>}</article>
+        <article><span className={`priority ${item.priority.toLowerCase()}`}>{item.priority}</span><div><strong>{item.title}</strong><p>{item.owner ?? 'Unassigned'}{item.dueDate ? ` · Due ${item.dueDate}` : ''}</p></div>{onSendGuidance && item.accountId && item.opportunityId && <MembershipAction reason={guidanceDisabledReason(item.id)}><Button appearance="subtle" className="text-action" icon={<Sparkle20Regular />} disabled={guidanceLoading !== null || Boolean(guidanceDisabledReason(item.id))} onClick={() => onSendGuidance(item.id)}>{guidanceLoading === item.id ? 'Sending…' : `Send to ${guidanceLabel}`}</Button></MembershipAction>}</article>
         {guidanceResult && <section className="workflow-guidance-result" aria-label={`${guidanceLabel} result for ${item.title}`}>
           <header><div><p className="eyebrow">{guidanceLabel}</p><strong>Workflow follow-up</strong></div><span>Agent {guidanceResult.agentVersion}</span></header>
           <AgentResponse key={guidanceResult.correlationId} inference={guidanceResult.inference} content={guidanceResult.content}

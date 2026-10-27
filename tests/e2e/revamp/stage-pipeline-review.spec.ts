@@ -1,4 +1,6 @@
+import { resolve } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { createSampleStagePipelineReview } from '../../../packages/common/fixtures/stage-pipeline-review.js'
 
 function escapeRegExpLiteral(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -8,6 +10,112 @@ async function openStagePipelineReview(page: Page): Promise<void> {
     await page.getByRole('button', { name: 'Dashboards', exact: true }).click()
     await page.getByRole('tab', { name: 'Stage and Pipeline Review', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Stage and Pipeline Review', level: 1 })).toBeVisible()
+}
+
+interface PipelineThemeColors {
+    background: string
+    surface: string
+    text: string
+    accent: string
+    brand: string
+    onBrand: string
+    heading: string
+}
+
+function rgb(hex: string): string {
+    return `rgb(${[1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16)).join(', ')})`
+}
+
+async function expectPipelineTheme(page: Page, colors: PipelineThemeColors): Promise<void> {
+    const pane = page.getByRole('region', { name: 'Stage and Pipeline Review', exact: true })
+    await expect(pane).toHaveCSS('background-color', rgb(colors.background))
+    await expect(pane).toHaveCSS('color', rgb(colors.text))
+    await expect(pane.getByRole('heading', { level: 1 })).toHaveCSS('color', rgb(colors.heading))
+    const chart = pane.getByRole('region', { name: 'ACR Actuals and Outlook' })
+    await expect(chart).toHaveCSS('background-color', rgb(colors.surface))
+    await expect(chart.getByRole('heading')).toHaveCSS('color', rgb(colors.heading))
+    const selectedScope = pane.locator('.sprv-segmented label.active').first()
+    await expect(selectedScope).toHaveCSS('background-color', rgb(colors.brand))
+    await expect(selectedScope).toHaveCSS('color', rgb(colors.onBrand))
+    await expect(pane.getByRole('tab', { name: /Opportunities/ })).toHaveCSS('color', rgb(colors.accent))
+    await expect(pane.getByRole('button', { name: 'Reset', exact: true })).toHaveCSS('color', rgb(colors.accent))
+    await expect(pane.getByRole('button', { name: 'Refresh', exact: true })).toHaveCSS('color', rgb(colors.accent))
+    await expect(pane.locator('.sprv-chip').first()).toHaveCSS('color', rgb(colors.accent))
+    await expect(pane.locator('.sprv-alert--red strong')).toHaveCSS('color', 'rgb(209, 52, 56)')
+    for (const [label, color] of [
+        ['Committed Pipe', '#1a8cff'], ['Uncommitted Pipe', '#f2c811'], ['Stage 1 Pipe', '#f8e6a0']
+    ] as const) {
+        await expect(chart.locator('.sprv-legend li').filter({ hasText: `$ ${label}` }).locator('.sprv-swatch')).toHaveCSS('background-color', rgb(color))
+    }
+
+    await pane.getByRole('button', { name: /^Add forecast comment to / }).first().click()
+    const dialog = pane.getByRole('dialog', { name: 'Add forecast comment' })
+    await expect(dialog).toHaveCSS('color', rgb(colors.text))
+    await expect(dialog).toHaveCSS('background-color', rgb(colors.surface))
+    await dialog.getByLabel('New update').fill('Synthetic theme validation update.')
+    await expect(dialog.getByLabel('New update')).toHaveCSS('color', rgb(colors.text))
+    const save = dialog.getByRole('button', { name: 'Save to MSX' })
+    await expect(save).toHaveCSS('background-color', rgb(colors.brand))
+    await expect(save).toHaveCSS('color', rgb(colors.onBrand))
+    const cancel = dialog.getByRole('button', { name: 'Cancel', exact: true })
+    await expect(cancel).toHaveCSS('background-color', rgb(colors.surface))
+    await expect(cancel).toHaveCSS('color', rgb(colors.accent))
+    await cancel.click()
+    await expect(dialog).toHaveCount(0)
+}
+
+for (const name of ['light', 'dark']) {
+    test(`Stage and Pipeline Review uses the shared Desktop/Web ${name} palette`, async ({ page }) => {
+        await page.setViewportSize({ width: 1600, height: 1100 })
+        await page.goto(`/?scoutTheme=${name}`)
+        await openStagePipelineReview(page)
+        await expect(page.locator('html')).toHaveAttribute('data-theme', name)
+        const colors = await page.locator('.fluent-root').evaluate((element) => {
+            const style = getComputedStyle(element)
+            return {
+                background: style.getPropertyValue('--colorNeutralBackground2').trim(),
+                surface: style.getPropertyValue('--colorNeutralBackground1').trim(),
+                text: style.getPropertyValue('--colorNeutralForeground1').trim(),
+                accent: style.getPropertyValue('--colorBrandForeground1').trim(),
+                brand: style.getPropertyValue('--colorBrandBackground').trim(),
+                onBrand: style.getPropertyValue('--colorNeutralForegroundOnBrand').trim(),
+                heading: style.getPropertyValue('--colorPaletteTealForeground2').trim()
+            }
+        })
+        await expectPipelineTheme(page, colors)
+    })
+}
+
+for (const theme of [
+    { name: 'dark', background: '#1e1e1e', surface: '#252526', text: '#cccccc', muted: '#969696', border: '#454545', accent: '#3794ff', heading: '#29b8db' },
+    { name: 'light', background: '#ffffff', surface: '#f3f3f3', text: '#333333', muted: '#616161', border: '#d1d1d1', accent: '#006ab1', heading: '#006a7a' }
+]) {
+    test(`Stage and Pipeline Review matches Portfolio colors in the VS Code ${theme.name} webview`, async ({ page }) => {
+        await page.setViewportSize({ width: 1600, height: 1100 })
+        const colors = { ...theme, brand: '#0078d4', onBrand: '#ffffff' }
+        await page.route('**/', (route) => route.fulfill({
+            contentType: 'text/html',
+            body: `<!doctype html><html><head><style>:root{color-scheme:${theme.name};--vscode-editor-background:${colors.background};--vscode-editorWidget-background:${colors.surface};--vscode-foreground:${colors.text};--vscode-descriptionForeground:${theme.muted};--vscode-panel-border:${theme.border};--vscode-textLink-foreground:${colors.accent};--vscode-button-background:${colors.brand};--vscode-button-foreground:${colors.onBrand};--vscode-terminal-ansiBrightCyan:${colors.heading};--vscode-focusBorder:${colors.brand};--vscode-font-family:"Segoe UI",sans-serif}</style></head><body><div id="root" data-mode="sample"></div></body></html>`
+        }))
+        await page.addInitScript((snapshot) => {
+            Object.defineProperty(window, 'acquireVsCodeApi', {
+                value: () => ({
+                    getState: () => undefined, setState: () => undefined,
+                    postMessage: (message: { kind: string; id: string; method: string }) => {
+                        if (message.kind !== 'request') return
+                        const result = message.method === 'stagePipelineReview' ? snapshot
+                            : message.method === 'getCurrentUserEmail' ? null : []
+                        window.postMessage({ kind: 'response', id: message.id, ok: true, result }, window.location.origin)
+                    }
+                })
+            })
+        }, createSampleStagePipelineReview())
+        await page.goto('/')
+        await page.addStyleTag({ path: resolve('apps', 'vscode-extension', 'dist', 'webview', 'webview.css') })
+        await page.addScriptTag({ path: resolve('apps', 'vscode-extension', 'dist', 'webview', 'webview.js') })
+        await openStagePipelineReview(page)
+        await expectPipelineTheme(page, colors)
+    })
 }
 
 test('Stage and Pipeline Review is a Dashboards child tab with working scope, stage, alert and milestone filters', async ({ page }) => {

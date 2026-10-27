@@ -447,7 +447,7 @@ function registerIpc(): void {
     if (event.senderFrame !== event.sender.mainFrame) throw new Error('Voice capture requires the main renderer frame.')
     return invokeVoice(request)
   })
-  for (const [channel, handler] of Object.entries(createWorkflowIpcHandlers(workflowHost))) {
+  for (const [channel, handler] of Object.entries(createWorkflowIpcHandlers(workflowHost, () => orchestrator.getTeamMemberships()))) {
     ipcMain.handle(channel, (event, request: unknown) => {
       assertTrustedSender(event)
       return handler(request)

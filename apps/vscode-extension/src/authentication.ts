@@ -1,5 +1,6 @@
 import * as vscode from 'vscode'
 import type { AccessToken, TokenCredential } from '@azure/core-auth'
+import { currentFoundrySignIn } from './foundry-sign-in.js'
 
 export interface DelegatedToken {
     token: string
@@ -12,14 +13,16 @@ const reconnectMessage = 'Microsoft sign-in is required. Run TLC: Use Live Data 
 export function acquireMicrosoftSession(
     scopes: readonly string[],
     createIfNone: boolean,
-    account?: vscode.AuthenticationSessionAccountInformation
+    account?: vscode.AuthenticationSessionAccountInformation,
+    forceNewSession = false
 ): Promise<vscode.AuthenticationSession | undefined> {
-    const key = JSON.stringify([[...scopes].sort(), createIfNone, account?.id])
+    const key = JSON.stringify([[...scopes].sort(), createIfNone, account?.id, forceNewSession])
     const pending = pendingSessions.get(key)
     if (pending) return pending
 
     const request = Promise.resolve(vscode.authentication.getSession('microsoft', [...scopes], {
-        ...(createIfNone ? { createIfNone: true } : { silent: true }),
+        ...(forceNewSession ? { forceNewSession: { detail: 'Reconnect to Microsoft Foundry using the selected account.' } }
+            : createIfNone ? { createIfNone: true } : { silent: true }),
         ...(account ? { account } : {})
     })).finally(() => { pendingSessions.delete(key) })
     pendingSessions.set(key, request)
@@ -73,18 +76,94 @@ export async function createDelegatedTokenProvider(resource: string): Promise<{ 
 }
 
 export function createVsCodeTokenCredential(tenantId: string): TokenCredential {
-    return {
-        async getToken(scopes: string | string[]): Promise<AccessToken> {
-            const requestedScopes = Array.isArray(scopes) ? scopes : [scopes]
-            const session = await acquireMicrosoftSession(
-                [`VSCODE_TENANT:${tenantId}`, ...requestedScopes],
-                true
-            )
-            if (!session) throw new Error('No Microsoft account session was granted for Microsoft Foundry.')
-            return {
-                token: session.accessToken,
-                expiresOnTimestamp: tokenExpiry(session.accessToken)
+    let account: vscode.AuthenticationSessionAccountInformation | undefined
+    const credential: TokenCredential = {
+        async getToken(scopes, options): Promise<AccessToken> {
+            const requested = [...new Set(Array.isArray(scopes) ? scopes : [scopes])].sort()
+            const requestedScopes = [`VSCODE_TENANT:${tenantId}`, ...requested]
+            const context = currentFoundrySignIn()
+            const checkCancellation = () => {
+                context?.signal?.throwIfAborted()
+                if (options?.abortSignal?.aborted) throw new Error('Microsoft Foundry sign-in was cancelled.')
+                if (context?.failure) throw context.failure
             }
+            const fail = (message: string, cause?: unknown): never => {
+                const error = new Error(message, { cause })
+                if (context) context.failure = error
+                throw error
+            }
+            const validate = (session: vscode.AuthenticationSession): AccessToken | undefined => {
+                checkCancellation()
+                if (account && session.account.id !== account.id) {
+                    fail('The Microsoft Foundry account changed. Select the original Foundry account or reload TLC to choose another account.')
+                }
+                const tokenTenant = tokenTenantId(session.accessToken)
+                if (tokenTenant && tokenTenant.toLowerCase() !== tenantId.toLowerCase()) {
+                    fail('Microsoft Foundry returned a token for a different tenant. Verify the configured project tenant and your access before retrying.')
+                }
+                account = session.account
+                const expiresOnTimestamp = tokenExpiry(session.accessToken)
+                return expiresOnTimestamp > Date.now() ? { token: session.accessToken, expiresOnTimestamp } : undefined
+            }
+            const acquire = async (): Promise<AccessToken> => {
+                checkCancellation()
+                try {
+                    const session = await acquireMicrosoftSession(requestedScopes, false, account)
+                    if (session) {
+                        const token = validate(session)
+                        if (token) return token
+                    }
+                } catch (error) {
+                    checkCancellation()
+                    if (terminalSignInError(error)) fail('Microsoft Foundry access is unavailable in the configured tenant. Verify tenant membership and consent before retrying.', error)
+                    if (cancelledSignIn(error)) fail('Microsoft Foundry sign-in was cancelled.', error)
+                }
+                if (!context) throw new Error('Microsoft Foundry sign-in is required. Submit a Guidance prompt to reconnect.')
+                while (context.attempts < 3) {
+                    checkCancellation()
+                    context.attempts++
+                    try {
+                        const session = await acquireMicrosoftSession(requestedScopes, true, account, Boolean(account) || context.attempts > 1)
+                        checkCancellation()
+                        if (!session) return fail('Microsoft Foundry sign-in was cancelled.')
+                        const token = validate(session)
+                        if (token) return token
+                    } catch (error) {
+                        checkCancellation()
+                        if (cancelledSignIn(error)) fail('Microsoft Foundry sign-in was cancelled.', error)
+                        if (terminalSignInError(error)) fail('Microsoft Foundry access is unavailable in the configured tenant. Verify tenant membership and consent before retrying.', error)
+                        if (context.attempts >= 3) fail('Microsoft Foundry sign-in failed after 3 attempts. Verify access to the configured tenant and submit a new prompt to retry.', error)
+                    }
+                }
+                return fail('Microsoft Foundry sign-in failed after 3 attempts. Submit a new prompt to retry.')
+            }
+            if (!context) return acquire()
+            let pending = context.pending.get(credential)
+            if (!pending) { pending = new Map(); context.pending.set(credential, pending) }
+            const key = JSON.stringify(requested)
+            const existing = pending.get(key)
+            if (existing) return existing
+            const request = acquire().finally(() => { pending.delete(key) })
+            pending.set(key, request)
+            return request
         }
     }
+    return credential
+}
+
+function tokenTenantId(token: string): string | undefined {
+    const payload = token.split('.')[1]
+    if (!payload) return undefined
+    let claims: unknown
+    try { claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) }
+    catch { return undefined }
+    return claims && typeof claims === 'object' && 'tid' in claims && typeof claims.tid === 'string' ? claims.tid : undefined
+}
+
+function cancelledSignIn(error: unknown): boolean {
+    return error instanceof Error && /cancel|did not consent|user denied|AADSTS65004/i.test(error.message)
+}
+
+function terminalSignInError(error: unknown): boolean {
+    return error instanceof Error && /AADSTS(?:50020|50105|700016|90094)|does not exist in tenant|invalid.tenant|invalid.client|admin.consent|access.denied/i.test(error.message)
 }

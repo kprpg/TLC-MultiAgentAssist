@@ -19,6 +19,7 @@ export interface FoundryPromptAgentOptions<TContext = unknown> {
   serializeContext?: ((context: TContext) => string) | undefined
   retryFirstToken?: boolean | undefined
   inlineAgentReference?: boolean | undefined
+  prepareCredential?: ((signal?: AbortSignal) => Promise<void>) | undefined
 }
 
 export type FoundryOpenAIClient = ReturnType<AIProjectClient['getOpenAIClient']>
@@ -66,6 +67,7 @@ export class FoundryPromptAgent<TContext> implements AgentInvoker<TContext> {
   }
 
   async invoke(context: TContext): Promise<string> {
+    if (this.options.prepareCredential) await this.options.prepareCredential()
     const abortController = new AbortController()
     const timeout = setTimeout(() => abortController.abort(), this.options.requestTimeoutMs)
 
@@ -93,6 +95,8 @@ export class FoundryPromptAgent<TContext> implements AgentInvoker<TContext> {
 
   /** Streams model text through `handlers.onDelta`; resolves to the full trimmed text. */
   async stream(context: TContext, handlers: AgentStreamHandlers): Promise<string> {
+    if (this.options.prepareCredential) await this.options.prepareCredential(handlers.signal)
+    handlers.signal?.throwIfAborted()
     let attempt = 0
     for (;;) {
       attempt++

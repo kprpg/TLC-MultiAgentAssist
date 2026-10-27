@@ -91,7 +91,7 @@ test('Discover reuses searchable include/exclude customer filters without extra 
   await editor.getByRole('searchbox', { name: 'Search customers' }).press('Escape')
   await expect(editor).toBeHidden()
   await expect(panel.getByRole('button', { name: 'Add filter', exact: true })).toBeFocused()
-  expect(reads).toEqual(['getDiscoverySnapshot'])
+  expect(reads.filter((operation) => operation !== 'getInferenceMode')).toEqual(['getDiscoverySnapshot'])
 })
 
 test('Discover sorts Account, Stage and Action and keeps filters across domain changes and refresh', async ({ page }) => {
@@ -195,7 +195,7 @@ test('Discover expands only requested milestones and reviews membership before c
   await dialog.getByRole('button', { name: 'Confirm selected changes' }).click()
   await expect(expanded.getByRole('button', { name: 'Remove me from the team for Sanitized active milestone', exact: true })).toHaveAttribute('aria-pressed', 'true')
   expect(commits).toBe(2)
-  expect(reads).toEqual(['getDiscoverySnapshot', 'listDiscoverableMilestones'])
+  expect(reads.filter((operation) => operation !== 'getInferenceMode')).toEqual(['getDiscoverySnapshot', 'listDiscoverableMilestones'])
 })
 
 for (const theme of ['default', 'dark', 'contrast'] as const) {

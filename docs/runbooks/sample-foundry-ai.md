@@ -1,9 +1,11 @@
 # Sample data with real Foundry AI
 
-This changes **sample mode only**. Existing live-mode sources, sign-in, agent choices,
-model behavior and deployment defaults are unchanged.
+This runbook describes **sample business data with real AI**. Live business-source
+permissions, agent choices, model behavior and deployment defaults are unchanged.
+The shared VS Code Foundry session-renewal behavior applies to both Live and
+Sample + Foundry; see [authentication findings](../auth/Foundry-MSX-Authentication-Findings.md#successive-guidance-requests-and-renewal).
 
-Web, Desktop and VS Code can use SQLite sample business records while invoking the
+Web, Desktop, VS Code and Teams can use SQLite sample business records while invoking the
 existing real Foundry agents/models. No MSX, Dataverse, Graph, Power BI or live
 knowledge/deck-library connection is enabled by this combination.
 
@@ -14,7 +16,7 @@ knowledge/deck-library connection is enabled by this combination.
 | Default, or `TLC_AI_MODE=foundry` | SQLite sample store | Real Foundry, with clearly labeled offline fallback |
 | `TLC_AI_MODE=sample` | SQLite or existing fixture store | Explicit offline implementations; no AI sign-in/network |
 
-The setting is independent of `TLC_DATA_MODE` / `TLC_WEB_MODE`. It does not turn
+The setting is independent of `TLC_DATA_MODE` / `TLC_WEB_MODE` / `TLC_TEAMS_MODE`. It does not turn
 sample business records into live records. Fixture-only/static browser previews
 remain offline; select SQLite for hybrid inference.
 
@@ -39,6 +41,11 @@ Only the host calls Foundry. No token or service key is passed to browser JavaSc
 - **Local Web:** the configured Foundry tenant through Azure CLI, without MSX/Graph sign-in.
 - **Desktop:** its existing Foundry credential and per-user Foundry configuration.
 - **VS Code:** its existing Microsoft/Foundry sign-in and configured Foundry project.
+- **Teams:** its existing runtime-profile workload identity: tenant-pinned Azure
+  CLI locally, managed identity in the Azure profile. This is separate from the
+  business-source user's identity. AI configuration/credentials are acquired
+  lazily, not while browsing the sample portfolio. Hosted usage admission and
+  budget storage remain required.
 
 Foundry credentials are acquired for inference, not ordinary sample browsing.
 The project and four agent references use the existing validated Foundry environment
@@ -59,6 +66,9 @@ npm run web:start
 # Desktop: only business data changes to sample.
 $env:TLC_DATA_MODE = 'sample'
 npm run desktop:start
+
+# Teams: the same shared sample inference, Foundry by default.
+npm run teams:start
 
 # Completely offline sample AI (also suitable for fixture-only previews).
 $env:TLC_AI_MODE = 'sample'
@@ -84,7 +94,17 @@ In VS Code, the first AI request can ask you to approve Microsoft sign-in for
 Sample browsing does not request this sign-in. Interactive sign-in, including renewed
 consent, completes before the model's request/first-token timeout starts. If you decline or close sign-in,
 Guidance labels the fallback as `authentication`; run Guidance again to retry.
+Each submitted prompt allows up to three automatic interactive sign-in attempts
+shared across credential callbacks. Healthy sessions renew silently for the
+previously selected Foundry account. Cancellation or terminal tenant/access
+errors stop recovery rather than reopening the picker indefinitely.
 Failed initialization is not cached for the rest of the session.
+
+Teams displays **Sample data / Foundry AI** or **Sample data / Offline AI** in
+the header and labels fallback on the response. `TLC_AI_MODE=sample` keeps Teams
+AI fully offline too. This does not enable Live source connections, local-owner
+pairing, or reviewed writes to MSX. Sample and Live services remain separate when
+switching data modes.
 
 ## Azure sample slot
 

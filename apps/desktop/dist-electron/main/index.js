@@ -4896,6 +4896,19 @@ var LiveMsxConnector = class {
 		if (!navigationPropertyPattern.test(entitySet)) throw new Error("The entity set name is invalid.");
 		return this.requestAll(entitySet, parameters);
 	}
+	async getTeamMemberships() {
+		const userId = await this.getCurrentUserId();
+		const [dealTeamOpportunityIds, milestoneTeamOpportunityIds, milestoneIds] = await Promise.all([
+			this.listDealTeamOpportunityIds(userId),
+			this.milestoneTeamOpportunityIds(),
+			this.milestoneTeamMilestoneIds()
+		]);
+		return {
+			dealTeamOpportunityIds,
+			milestoneTeamOpportunityIds,
+			milestoneTeamMilestoneIds: [...milestoneIds]
+		};
+	}
 	/** Opportunity ids on the given user's active deal teams. */
 	async listDealTeamOpportunityIds(userId) {
 		if (!guidPattern.test(userId)) throw new Error("The user id must be a valid MSX GUID.");
@@ -7444,6 +7457,13 @@ var FixtureMsxConnector = class {
 		const ids = new Set(this.dealTeamOpportunityIds);
 		for (const [opportunityId, milestones] of Object.entries(this.milestonesByOpportunity)) if (milestones.some((milestone) => this.milestoneTeamIds.has(milestone.id))) ids.add(opportunityId);
 		return ids;
+	}
+	async getTeamMemberships() {
+		return {
+			dealTeamOpportunityIds: [...this.dealTeamOpportunityIds],
+			milestoneTeamMilestoneIds: [...this.milestoneTeamIds],
+			milestoneTeamOpportunityIds: Object.entries(this.milestonesByOpportunity).filter(([, milestones]) => milestones.some((milestone) => this.milestoneTeamIds.has(milestone.id))).map(([opportunityId]) => opportunityId)
+		};
 	}
 	/**
 	* Promotes a discoverable opportunity into the portfolio pool (without Deal Team membership) so
@@ -10012,6 +10032,14 @@ var LocalStoreMsxConnector = class {
 	createRecordCreationWriter() {
 		return new LocalStoreRecordCreation(this.store, this.currentUserId);
 	}
+	async getTeamMemberships() {
+		const milestones = this.store.all("SELECT milestone_id, opportunity_id FROM milestone_team_member WHERE systemuser_id = ?", this.currentUserId);
+		return {
+			dealTeamOpportunityIds: this.store.all("SELECT opportunity_id FROM opportunity_dealteam WHERE systemuser_id = ?", this.currentUserId).map((row) => String(row["opportunity_id"])),
+			milestoneTeamMilestoneIds: milestones.map((row) => String(row["milestone_id"])),
+			milestoneTeamOpportunityIds: [...new Set(milestones.map((row) => String(row["opportunity_id"])))]
+		};
+	}
 	ownerName(ownerId) {
 		const id = str(ownerId);
 		if (!id) return void 0;
@@ -11036,6 +11064,7 @@ var FoundryPromptAgent = class {
 		return this.options.serializeContext ? this.options.serializeContext(context) : JSON.stringify(context);
 	}
 	async invoke(context) {
+		if (this.options.prepareCredential) await this.options.prepareCredential();
 		const abortController = new AbortController();
 		const timeout = setTimeout(() => abortController.abort(), this.options.requestTimeoutMs);
 		try {
@@ -11058,6 +11087,8 @@ var FoundryPromptAgent = class {
 	}
 	/** Streams model text through `handlers.onDelta`; resolves to the full trimmed text. */
 	async stream(context, handlers) {
+		if (this.options.prepareCredential) await this.options.prepareCredential(handlers.signal);
+		handlers.signal?.throwIfAborted();
 		let attempt = 0;
 		for (;;) {
 			attempt++;
@@ -12586,6 +12617,116 @@ function createKnowledgeSearch(options) {
 	}, new SeismicMCPProvider(options.mode)], options.mode, options.now);
 }
 //#endregion
+//#region packages/common/contracts/workflow-output.ts
+var initialWorkflowIds = [
+	"WF-001",
+	"WF-002",
+	"WF-003",
+	"WF-004",
+	"WF-005",
+	"WF-006",
+	"WF-007",
+	"WF-008",
+	"WF-009",
+	"WF-010",
+	"WF-011",
+	"WF-012"
+];
+var workflowRecordReferenceSchema = z.object({
+	recordId: z.string().min(1).max(200),
+	kind: z.enum([
+		"opportunity",
+		"milestone",
+		"activity"
+	]),
+	accountId: z.string().min(1).max(200).optional(),
+	opportunityId: z.string().min(1).max(200).optional(),
+	milestoneId: z.string().min(1).max(200).optional(),
+	queueItemId: z.string().min(1).max(240).optional(),
+	cardIndex: z.number().int().nonnegative(),
+	ownerId: z.string().min(1).max(200).optional(),
+	ownerName: z.string().min(1).max(500).optional()
+}).strict();
+var workflowProjectionSchema = z.object({
+	records: z.array(workflowRecordReferenceSchema).max(500),
+	maximumActiveItems: z.number().int().min(1).max(100).optional()
+}).strict();
+var workflowQueueItemSchema = z.object({
+	id: z.string().min(1),
+	workflowId: z.enum(initialWorkflowIds),
+	priority: z.enum([
+		"P0",
+		"P1",
+		"P2"
+	]),
+	title: z.string().min(1),
+	owner: z.string().min(1).optional(),
+	accountId: z.string().min(1).optional(),
+	accountName: z.string().min(1).optional(),
+	opportunityId: z.string().min(1).optional(),
+	opportunityName: z.string().min(1).optional(),
+	dueDate: z.string().date().optional(),
+	evidenceIds: z.array(z.string().min(1)),
+	status: z.literal("new")
+}).strict();
+var initialWorkflowOutputSchema = z.object({
+	contractVersion: z.enum(["1.0", "2.0"]),
+	workflowId: z.enum(initialWorkflowIds),
+	generatedAt: z.string().datetime(),
+	scope: scopeRefSchema,
+	card: workflowResultCardSchema,
+	queueItems: z.array(workflowQueueItemSchema),
+	projection: workflowProjectionSchema.optional(),
+	lineage: z.array(mcpEvidenceLineageSchema).min(1),
+	sourceHealth: z.array(sourceHealthSchema).min(1)
+}).strict().refine((output) => output.contractVersion === "2.0" === (output.projection !== void 0), "Version 2 workflow output requires projection metadata; legacy output must not contain it.");
+/**
+* Output of a workflow registered through the extension seam. Its shape is owned and validated host-side
+* by the registration's approved schema; the wire carries it as bounded data beside the stable initial-cohort `output`.
+*/
+var registeredWorkflowOutputSchema = z.object({
+	workflowId: z.string().regex(/^WF-[0-9]{3}$/),
+	outputSchemaRef: z.string().min(1).max(200),
+	data: z.record(z.string(), z.unknown())
+}).strict();
+var workflowRunViewSchema = z.object({
+	run: workflowRunSchema,
+	output: initialWorkflowOutputSchema.optional(),
+	extensionOutput: registeredWorkflowOutputSchema.optional()
+}).strict();
+//#endregion
+//#region packages/common/contracts/workflow-membership.ts
+var workflowMembershipSnapshotSchema = z.object({
+	dealTeamOpportunityIds: z.array(z.string().min(1)),
+	milestoneTeamOpportunityIds: z.array(z.string().min(1)),
+	milestoneTeamMilestoneIds: z.array(z.string().min(1))
+}).strict();
+var workflowResultsViewRequestSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	runId: z.string().uuid(),
+	filter: z.enum(["all", "mine"]).default("all")
+}).strict();
+var workflowItemEligibilitySchema = z.object({
+	queueItemId: z.string().min(1),
+	eligible: z.boolean(),
+	reason: z.string()
+}).strict();
+var workflowResultsViewSchema = z.object({
+	contractVersion: z.literal("1.0"),
+	filter: z.enum(["all", "mine"]),
+	state: z.enum([
+		"ready",
+		"pending",
+		"unavailable",
+		"legacy"
+	]),
+	message: z.string().min(1).optional(),
+	totalItems: z.number().int().nonnegative(),
+	visibleItems: z.number().int().nonnegative(),
+	eligibility: z.array(workflowItemEligibilitySchema),
+	output: initialWorkflowOutputSchema.optional()
+}).strict().extend({ runId: z.string().uuid() }).strict();
+//#endregion
 //#region packages/orchestrator/policies/mcp-tool-authorization.ts
 var McpToolAuthorizationError = class extends Error {
 	code;
@@ -12795,64 +12936,6 @@ function getFailureCode(error) {
 	return "unknown";
 }
 //#endregion
-//#region packages/common/contracts/workflow-output.ts
-var initialWorkflowIds = [
-	"WF-001",
-	"WF-002",
-	"WF-003",
-	"WF-004",
-	"WF-005",
-	"WF-006",
-	"WF-007",
-	"WF-008",
-	"WF-009",
-	"WF-010",
-	"WF-011",
-	"WF-012"
-];
-var workflowQueueItemSchema = z.object({
-	id: z.string().min(1),
-	workflowId: z.enum(initialWorkflowIds),
-	priority: z.enum([
-		"P0",
-		"P1",
-		"P2"
-	]),
-	title: z.string().min(1),
-	owner: z.string().min(1).optional(),
-	accountId: z.string().min(1).optional(),
-	accountName: z.string().min(1).optional(),
-	opportunityId: z.string().min(1).optional(),
-	opportunityName: z.string().min(1).optional(),
-	dueDate: z.string().date().optional(),
-	evidenceIds: z.array(z.string().min(1)),
-	status: z.literal("new")
-}).strict();
-var initialWorkflowOutputSchema = z.object({
-	contractVersion: z.literal("1.0"),
-	workflowId: z.enum(initialWorkflowIds),
-	generatedAt: z.string().datetime(),
-	scope: scopeRefSchema,
-	card: workflowResultCardSchema,
-	queueItems: z.array(workflowQueueItemSchema),
-	lineage: z.array(mcpEvidenceLineageSchema).min(1),
-	sourceHealth: z.array(sourceHealthSchema).min(1)
-}).strict();
-/**
-* Output of a workflow registered through the extension seam. Its shape is owned and validated host-side
-* by the registration's approved schema; the wire carries it as bounded data beside the stable initial-cohort `output`.
-*/
-var registeredWorkflowOutputSchema = z.object({
-	workflowId: z.string().regex(/^WF-[0-9]{3}$/),
-	outputSchemaRef: z.string().min(1).max(200),
-	data: z.record(z.string(), z.unknown())
-}).strict();
-var workflowRunViewSchema = z.object({
-	run: workflowRunSchema,
-	output: initialWorkflowOutputSchema.optional(),
-	extensionOutput: registeredWorkflowOutputSchema.optional()
-}).strict();
-//#endregion
 //#region packages/orchestrator/workflows/cohort.ts
 var asOfSchema = z.string().date();
 var initialWorkflowInputSchemas = {
@@ -12990,14 +13073,14 @@ function createDefinition(id, name, personaTargets, category, cardStyle, connect
 		contractVersion: "1.0",
 		id,
 		name,
-		version: "1.0.0",
+		version: "2.0.0",
 		scope: "portfolio",
 		personaTargets,
 		category,
 		executionMode,
 		connectorPlan,
 		inputSchemaRef: `workflow-input-${id.toLowerCase()}.v1`,
-		outputSchemaRef: `workflow-output-${id.toLowerCase()}.v1`,
+		outputSchemaRef: `workflow-output-${id.toLowerCase()}.v2`,
 		sla: {
 			targetMs: 4e3,
 			timeoutMs: 6e4
@@ -13011,6 +13094,68 @@ function createDefinition(id, name, personaTargets, category, cardStyle, connect
 			resultPriority: "high",
 			showInQuickLaunch: true
 		}
+	};
+}
+//#endregion
+//#region packages/orchestrator/workflows/aggregate-results.ts
+function ownerWorkloadQueue(records, threshold, evidenceIds) {
+	const owners = /* @__PURE__ */ new Map();
+	for (const record of records) {
+		const ownerId = record.ownerId ?? "unassigned";
+		const ownerName = record.ownerName ?? (ownerId === "unassigned" ? "Unassigned owner" : "Owner name unavailable");
+		const current = owners.get(ownerId);
+		owners.set(ownerId, {
+			count: (current?.count ?? 0) + 1,
+			name: current?.name !== "Owner name unavailable" ? current?.name ?? ownerName : ownerName
+		});
+	}
+	return [...owners.entries()].filter(([, owner]) => owner.count > threshold).sort(([, left], [, right]) => left.name.localeCompare(right.name)).map(([ownerId, owner]) => ({
+		id: `WF-009:${ownerId}`,
+		workflowId: "WF-009",
+		priority: owner.count > threshold * 2 ? "P0" : "P1",
+		title: `${owner.name} owns ${owner.count} active opportunities`,
+		owner: owner.name,
+		evidenceIds,
+		status: "new"
+	}));
+}
+function aggregateResultCard(workflowId, title, records, queueCount, evidenceIds) {
+	if (workflowId === "WF-009") return {
+		kind: "metric-strip",
+		title,
+		evidenceIds,
+		metrics: [{
+			label: "Overloaded owners",
+			value: queueCount
+		}, {
+			label: "Active opportunities",
+			value: records.length
+		}]
+	};
+	const accounts = /* @__PURE__ */ new Map();
+	for (const record of records) {
+		const id = record.accountId ?? "Unassigned";
+		accounts.set(id, (accounts.get(id) ?? 0) + 1);
+	}
+	const largest = accounts.size ? Math.max(...accounts.values()) : 0;
+	return {
+		kind: "metric-strip",
+		title,
+		evidenceIds,
+		metrics: [
+			{
+				label: "Pipeline opportunities",
+				value: records.length
+			},
+			{
+				label: "Accounts",
+				value: accounts.size
+			},
+			{
+				label: "Top account share %",
+				value: records.length ? Math.round(largest / records.length * 100) : 0
+			}
+		]
 	};
 }
 //#endregion
@@ -13078,12 +13223,30 @@ var InitialWorkflowResultAssembler = class {
 		const evidenceIds = lineage.map(({ toolCallId }) => toolCallId);
 		const queueItems = buildQueueItems(workflowId, ordered, input, evidenceIds);
 		return initialWorkflowOutputSchema.parse({
-			contractVersion: "1.0",
+			contractVersion: "2.0",
 			workflowId,
 			generatedAt: context.generatedAt,
 			scope: context.scope,
 			card: buildCard(workflowId, context.definition.name, ordered, queueItems, evidenceIds),
 			queueItems,
+			projection: {
+				records: ordered.map((record, index) => {
+					const kind = milestoneWorkflows.has(workflowId) ? "milestone" : activityWorkflows.has(workflowId) ? "activity" : "opportunity";
+					const opportunityId = kind === "opportunity" ? text$3(record.id) : text$3(record.opportunityId);
+					return {
+						recordId: text$3(record.id) ?? String(index + 1),
+						kind,
+						cardIndex: index,
+						...opportunityId ? { opportunityId } : {},
+						...text$3(record.accountId) ? { accountId: text$3(record.accountId) } : {},
+						...kind === "milestone" && text$3(record.id) ? { milestoneId: text$3(record.id) } : {},
+						...workflowId !== "WF-009" && queueItems[index] ? { queueItemId: queueItems[index].id } : {},
+						...text$3(record.ownerId) ? { ownerId: text$3(record.ownerId) } : {},
+						...text$3(record.opportunityOwnerName) ? { ownerName: text$3(record.opportunityOwnerName) } : {}
+					};
+				}),
+				...input.maximumActiveItems !== void 0 ? { maximumActiveItems: input.maximumActiveItems } : {}
+			},
 			lineage,
 			sourceHealth
 		});
@@ -13299,42 +13462,7 @@ function buildCard(workflowId, title, records, queueItems, evidenceIds) {
 			priority: item.priority
 		}))
 	};
-	if (workflowId === "WF-009") return {
-		kind: "metric-strip",
-		title,
-		evidenceIds,
-		metrics: [{
-			label: "Overloaded owners",
-			value: queueItems.length
-		}, {
-			label: "Active opportunities",
-			value: records.length
-		}]
-	};
-	if (workflowId === "WF-008") {
-		const perAccount = /* @__PURE__ */ new Map();
-		for (const record of records) perAccount.set(text$3(record.accountId) ?? "Unassigned", (perAccount.get(text$3(record.accountId) ?? "Unassigned") ?? 0) + 1);
-		const topCount = perAccount.size > 0 ? Math.max(...perAccount.values()) : 0;
-		return {
-			kind: "metric-strip",
-			title,
-			evidenceIds,
-			metrics: [
-				{
-					label: "Pipeline opportunities",
-					value: records.length
-				},
-				{
-					label: "Accounts",
-					value: perAccount.size
-				},
-				{
-					label: "Top account share %",
-					value: records.length > 0 ? Math.round(topCount / records.length * 100) : 0
-				}
-			]
-		};
-	}
+	if (workflowId === "WF-009" || workflowId === "WF-008") return aggregateResultCard(workflowId, title, records.map((record) => ({ ...text$3(record.accountId) ? { accountId: text$3(record.accountId) } : {} })), queueItems.length, evidenceIds);
 	const columns = workflowId === "WF-007" ? [
 		"id",
 		"opportunityId",
@@ -13362,28 +13490,10 @@ function buildCard(workflowId, title, records, queueItems, evidenceIds) {
 	};
 }
 function buildQueueItems(workflowId, records, input, evidenceIds) {
-	if (workflowId === "WF-009") {
-		const threshold = input.maximumActiveItems ?? 20;
-		const owners = /* @__PURE__ */ new Map();
-		for (const record of records) {
-			const ownerId = text$3(record.ownerId) ?? "unassigned";
-			const ownerName = text$3(record.opportunityOwnerName) ?? (ownerId === "unassigned" ? "Unassigned owner" : "Owner name unavailable");
-			const current = owners.get(ownerId);
-			owners.set(ownerId, {
-				count: (current?.count ?? 0) + 1,
-				name: current?.name !== "Owner name unavailable" ? current?.name ?? ownerName : ownerName
-			});
-		}
-		return [...owners.entries()].filter(([, owner]) => owner.count > threshold).sort(([, left], [, right]) => left.name.localeCompare(right.name)).map(([ownerId, owner]) => ({
-			id: `${workflowId}:${ownerId}`,
-			workflowId,
-			priority: owner.count > threshold * 2 ? "P0" : "P1",
-			title: `${owner.name} owns ${owner.count} active opportunities`,
-			owner: owner.name,
-			evidenceIds,
-			status: "new"
-		}));
-	}
+	if (workflowId === "WF-009") return ownerWorkloadQueue(records.map((record) => ({
+		...text$3(record.ownerId) ? { ownerId: text$3(record.ownerId) } : {},
+		...text$3(record.opportunityOwnerName) ? { ownerName: text$3(record.opportunityOwnerName) } : {}
+	})), input.maximumActiveItems ?? 20, evidenceIds);
 	return records.map((record, index) => {
 		const recordId = text$3(record.id) ?? `${index + 1}`;
 		const dueDate = date$1(record.targetDate) ?? date$1(record.dueDate) ?? date$1(record.closeDate);
@@ -13413,6 +13523,13 @@ var opportunityScopedWorkflows = /* @__PURE__ */ new Set([
 	"WF-008",
 	"WF-011"
 ]);
+var milestoneWorkflows = /* @__PURE__ */ new Set([
+	"WF-002",
+	"WF-003",
+	"WF-005",
+	"WF-012"
+]);
+var activityWorkflows = /* @__PURE__ */ new Set(["WF-007", "WF-010"]);
 function queueOwnerName(workflowId, record) {
 	return text$3(record.owner) ?? (opportunityScopedWorkflows.has(workflowId) ? text$3(record.opportunityOwnerName) : void 0) ?? (text$3(record.ownerId) ? "Owner name unavailable" : void 0);
 }
@@ -14842,6 +14959,152 @@ function linkedAbortController(parent) {
 	};
 }
 //#endregion
+//#region packages/orchestrator/workflows/membership-projection.ts
+var noMembership = "You are not a member of this opportunity Deal Team or the applicable milestone team.";
+var unknownMembership = "Your team membership could not be verified. Refresh the result and try again.";
+var noScope = "Guidance requires an opportunity-scoped item.";
+function projectWorkflowOutput(output, filter, memberships) {
+	const base = {
+		contractVersion: "1.0",
+		filter,
+		totalItems: output.queueItems.length
+	};
+	const unavailable = (state, message) => ({
+		...base,
+		state,
+		message,
+		visibleItems: filter === "all" ? output.queueItems.length : 0,
+		eligibility: output.queueItems.map((item) => ({
+			queueItemId: item.id,
+			eligible: false,
+			reason: message
+		})),
+		...filter === "all" ? { output } : {}
+	});
+	if (!memberships) return unavailable("unavailable", unknownMembership);
+	if (!output.projection) return unavailable("legacy", "Run this Play again to verify membership for its saved result.");
+	const dealTeams = new Set(memberships.dealTeamOpportunityIds.map(normalize));
+	const milestoneOpportunities = new Set(memberships.milestoneTeamOpportunityIds.map(normalize));
+	const milestoneTeams = new Set(memberships.milestoneTeamMilestoneIds.map(normalize));
+	const member = (record) => {
+		if (!record.opportunityId) return false;
+		if (dealTeams.has(normalize(record.opportunityId))) return true;
+		return record.kind === "milestone" ? Boolean(record.milestoneId && milestoneTeams.has(normalize(record.milestoneId))) : milestoneOpportunities.has(normalize(record.opportunityId));
+	};
+	const records = output.projection.records;
+	const known = (record) => Boolean(record.opportunityId && (record.kind !== "milestone" || record.milestoneId));
+	const byItem = new Map(records.filter((record) => record.queueItemId).map((record) => [record.queueItemId, record]));
+	const eligibility = output.queueItems.map((item) => {
+		const record = byItem.get(item.id);
+		const scopeMatches = record?.opportunityId && item.opportunityId && normalize(record.opportunityId) === normalize(item.opportunityId) && (!record.accountId || Boolean(item.accountId && normalize(record.accountId) === normalize(item.accountId)));
+		const eligible = Boolean(item.accountId && item.opportunityId && record && scopeMatches && known(record) && member(record));
+		return {
+			queueItemId: item.id,
+			eligible,
+			reason: eligible ? "" : !item.accountId || !item.opportunityId ? noScope : !record || !known(record) || !scopeMatches ? unknownMembership : noMembership
+		};
+	});
+	if (filter === "all") return {
+		...base,
+		state: "ready",
+		eligibility,
+		visibleItems: output.queueItems.length,
+		output
+	};
+	if (records.some((record) => !known(record)) || output.queueItems.some((item) => item.opportunityId && !byItem.has(item.id))) return unavailable("unavailable", unknownMembership);
+	const selected = records.filter(member);
+	const selectedIds = new Set(eligibility.filter((item) => item.eligible).map((item) => item.queueItemId));
+	const queueItems = output.workflowId === "WF-009" ? ownerWorkloadQueue(selected, output.projection.maximumActiveItems ?? 20, output.card.evidenceIds) : output.queueItems.filter((item) => selectedIds.has(item.id));
+	const indexes = new Set(selected.map((record) => record.cardIndex));
+	let card;
+	switch (output.card.kind) {
+		case "record-table":
+			card = {
+				...output.card,
+				rows: output.card.rows.filter((_row, index) => indexes.has(index))
+			};
+			break;
+		case "timeline":
+			card = {
+				...output.card,
+				events: output.card.events.filter((_event, index) => indexes.has(index))
+			};
+			break;
+		case "exception-list":
+			card = {
+				...output.card,
+				exceptions: output.card.exceptions.filter((item) => selectedIds.has(item.id))
+			};
+			break;
+		case "action-list":
+			card = {
+				...output.card,
+				actions: output.card.actions.filter((item) => selectedIds.has(item.id))
+			};
+			break;
+		case "metric-strip":
+			if (output.workflowId !== "WF-008" && output.workflowId !== "WF-009") return unavailable("unavailable", "Run this Play again to obtain membership-aware metric contributors.");
+			card = aggregateResultCard(output.workflowId, output.card.title, selected, queueItems.length, output.card.evidenceIds);
+	}
+	const projected = initialWorkflowOutputSchema.parse({
+		...output,
+		card,
+		queueItems,
+		projection: {
+			...output.projection,
+			records: selected
+		}
+	});
+	return {
+		...base,
+		state: "ready",
+		eligibility,
+		visibleItems: queueItems.length,
+		output: projected
+	};
+}
+function normalize(id) {
+	return id.toLowerCase();
+}
+//#endregion
+//#region packages/orchestrator/workflows/membership-view.ts
+async function readWorkflowResultsView(host, readMemberships, rawRequest) {
+	const request = workflowResultsViewRequestSchema.parse(rawRequest);
+	const view = host.get({
+		contractVersion: "1.0",
+		runId: request.runId
+	});
+	if (!view.output) return workflowResultsViewSchema.parse({
+		contractVersion: "1.0",
+		runId: request.runId,
+		filter: request.filter,
+		state: "pending",
+		totalItems: 0,
+		visibleItems: 0,
+		eligibility: []
+	});
+	let memberships;
+	try {
+		memberships = workflowMembershipSnapshotSchema.parse(await readMemberships());
+	} catch {
+		console.warn("[workflow-membership] read-unavailable");
+	}
+	return workflowResultsViewSchema.parse({
+		...projectWorkflowOutput(view.output, request.filter, memberships),
+		runId: request.runId
+	});
+}
+async function prepareMemberWorkflowGuidance(host, readMemberships, rawRequest) {
+	const request = workflowGuidanceRequestSchema.parse(rawRequest);
+	const item = (await readWorkflowResultsView(host, readMemberships, {
+		contractVersion: "1.0",
+		runId: request.runId,
+		filter: "all"
+	})).eligibility.find((candidate) => candidate.queueItemId === request.queueItemId);
+	if (!item?.eligible) throw new WorkflowRuntimeError("membership_required", item?.reason || "Current team membership is required before preparing queue Guidance.");
+	return host.prepareGuidance(request);
+}
+//#endregion
 //#region packages/orchestrator/workflows/host.ts
 var workflowIdSchema = z.string().regex(/^WF-[0-9]{3}$/);
 var runIdSchema = z.string().uuid();
@@ -14879,7 +15142,8 @@ var workflowHostOperationSchema = z.enum([
 	"get",
 	"cancel",
 	"history",
-	"guidance"
+	"guidance",
+	"view"
 ]);
 var SharedWorkflowHost = class {
 	registry;
@@ -14981,14 +15245,17 @@ var SharedWorkflowHost = class {
 		});
 	}
 };
-function invokeWorkflowHost(host, rawOperation, request) {
+function invokeWorkflowHost(host, rawOperation, request, readMemberships = async () => {
+	throw new Error("Membership source is unavailable.");
+}) {
 	switch (workflowHostOperationSchema.parse(rawOperation)) {
 		case "list": return z.array(workflowDefinitionSchema).parse(host.listDefinitions(request));
 		case "start": return workflowRunSchema.parse(host.start(request));
 		case "get": return workflowRunViewSchema.parse(host.get(request));
 		case "cancel": return workflowRunSchema.parse(host.cancel(request));
 		case "history": return z.array(workflowRunSchema).parse(host.listRuns(request));
-		case "guidance": return workflowGuidanceHandoffSchema.parse(host.prepareGuidance(request));
+		case "guidance": return prepareMemberWorkflowGuidance(host, readMemberships, request);
+		case "view": return readWorkflowResultsView(host, readMemberships, request);
 	}
 }
 //#endregion
@@ -15575,6 +15842,12 @@ var ThinSliceOrchestrator = class {
 				...context,
 				milestones
 			}, guidance);
+		});
+	}
+	async getTeamMemberships() {
+		return this.withFreshReadContext(async () => {
+			if (!this.msx.getTeamMemberships) throw new Error("Current team membership is unavailable from this source.");
+			return workflowMembershipSnapshotSchema.parse(await this.msx.getTeamMemberships());
 		});
 	}
 	async prepareAgentTask(request) {
@@ -16387,10 +16660,11 @@ var workflowIpcChannels = {
 	get: "tlc:workflow-get",
 	cancel: "tlc:workflow-cancel",
 	history: "tlc:workflow-history",
-	guidance: "tlc:workflow-guidance"
+	guidance: "tlc:workflow-guidance",
+	view: "tlc:workflow-view"
 };
-function createWorkflowIpcHandlers(host) {
-	return Object.fromEntries(Object.entries(workflowIpcChannels).map(([operation, channel]) => [channel, (request) => invokeWorkflowHost(host, operation, request)]));
+function createWorkflowIpcHandlers(host, readMemberships) {
+	return Object.fromEntries(Object.entries(workflowIpcChannels).map(([operation, channel]) => [channel, (request) => invokeWorkflowHost(host, operation, request, readMemberships)]));
 }
 //#endregion
 //#region apps/desktop/electron/main/record-creation-ipc.ts
@@ -21705,12 +21979,195 @@ var SessionCacheValue = class {
 	}
 };
 //#endregion
+//#region apps/shared/operation-result-session.ts
+var allKinds = [
+	"meeting-extract",
+	"working-session-topic",
+	"working-session-prepare"
+];
+var keyFor = (kind, scope) => JSON.stringify([
+	kind,
+	scope.opportunityId,
+	scope.milestoneId ?? null
+]);
+/** Presentation ownership only: dispatches existing calls once, without scheduling, retry or persistence. */
+var OperationResultSession = class {
+	active = /* @__PURE__ */ new Map();
+	completed = /* @__PURE__ */ new Map();
+	latest = /* @__PURE__ */ new Map();
+	listeners = /* @__PURE__ */ new Set();
+	sequence = 0;
+	revision = 0;
+	generation = 0;
+	disposed = false;
+	subscribe = (listener) => {
+		this.listeners.add(listener);
+		return () => {
+			this.listeners.delete(listener);
+		};
+	};
+	getRevision = () => this.revision;
+	getGeneration() {
+		return this.generation;
+	}
+	activeCount() {
+		return this.active.size;
+	}
+	completedCount() {
+		return this.completed.size;
+	}
+	startMeeting(scope, input, invoke) {
+		const seed = {
+			kind: "meeting-extract",
+			scope: structuredClone(scope),
+			input: structuredClone(input)
+		};
+		return this.run((requestId) => ({
+			...seed,
+			requestId,
+			status: "pending"
+		}), async () => {
+			const result = await invoke();
+			if (result.opportunityId !== seed.scope.opportunityId) throw new Error("The meeting result belongs to a different opportunity.");
+			return result;
+		}, (requestId, result) => ({
+			...seed,
+			requestId,
+			status: "succeeded",
+			result
+		}));
+	}
+	startTopic(input, invoke) {
+		const seed = {
+			kind: "working-session-topic",
+			scope: {
+				opportunityId: input.opportunityId,
+				...input.milestoneId ? { milestoneId: input.milestoneId } : {}
+			},
+			input: structuredClone(input)
+		};
+		return this.run((requestId) => ({
+			...seed,
+			requestId,
+			status: "pending"
+		}), invoke, (requestId, result) => ({
+			...seed,
+			requestId,
+			status: "succeeded",
+			result
+		}));
+	}
+	startPreparation(scope, input, invoke) {
+		if (scope.opportunityId !== input.opportunityId) throw new Error("The preparation scope targets a different opportunity.");
+		const seed = {
+			kind: "working-session-prepare",
+			scope: structuredClone(scope),
+			input: structuredClone(input)
+		};
+		return this.run((requestId) => ({
+			...seed,
+			requestId,
+			status: "pending"
+		}), invoke, (requestId, result) => ({
+			...seed,
+			requestId,
+			status: "succeeded",
+			result
+		}));
+	}
+	getLatest(scope, kinds = allKinds) {
+		return this.findLatest((entry) => kinds.includes(entry.kind) && keyFor(entry.kind, entry.scope) === keyFor(entry.kind, scope));
+	}
+	getLatestForOpportunity(opportunityId, kinds) {
+		return this.findLatest((entry) => entry.scope.opportunityId === opportunityId && kinds.includes(entry.kind));
+	}
+	touch(requestId) {
+		for (const [key, entry] of this.completed) {
+			if (entry.requestId !== requestId) continue;
+			this.completed.delete(key);
+			this.completed.set(key, entry);
+			return;
+		}
+	}
+	consume(requestId) {
+		for (const [key, entry] of this.completed) {
+			if (entry.requestId !== requestId) continue;
+			this.completed.delete(key);
+			this.cleanupKey(key);
+			this.changed();
+			return;
+		}
+	}
+	clear() {
+		this.generation++;
+		this.active.clear();
+		this.completed.clear();
+		this.latest.clear();
+		this.changed();
+	}
+	dispose() {
+		this.clear();
+		this.disposed = true;
+		this.listeners.clear();
+	}
+	run(pending, invoke, success) {
+		if (this.disposed) throw new Error("The operation session is closed. Reload before starting more work.");
+		const requestId = ++this.sequence;
+		const entry = pending(requestId);
+		const generation = this.generation;
+		this.active.set(requestId, entry);
+		this.latest.set(keyFor(entry.kind, entry.scope), requestId);
+		this.changed();
+		Promise.resolve().then(() => {
+			if (this.disposed || generation !== this.generation) throw new DOMException("The source session changed before dispatch.", "AbortError");
+			return invoke();
+		}).then((result) => this.finish(success(requestId, result), generation), (error) => this.finish({
+			...entry,
+			status: "failed",
+			error: error instanceof Error ? error.message || "The operation failed." : String(error)
+		}, generation));
+		return requestId;
+	}
+	finish(entry, generation) {
+		if (this.disposed || generation !== this.generation) return;
+		this.active.delete(entry.requestId);
+		const key = keyFor(entry.kind, entry.scope);
+		if (this.latest.get(key) === entry.requestId) {
+			this.completed.delete(key);
+			this.completed.set(key, entry);
+			while (this.completed.size > 20) for (const oldest of this.completed.keys()) {
+				this.completed.delete(oldest);
+				this.cleanupKey(oldest);
+				break;
+			}
+		}
+		this.cleanupKey(key);
+		this.changed();
+	}
+	findLatest(matches) {
+		let result;
+		for (const entry of [...this.active.values(), ...this.completed.values()]) {
+			if (!matches(entry) || this.latest.get(keyFor(entry.kind, entry.scope)) !== entry.requestId) continue;
+			if (!result || entry.requestId > result.requestId) result = entry;
+		}
+		return result;
+	}
+	cleanupKey(key) {
+		if (!this.completed.has(key) && ![...this.active.values()].some((entry) => keyFor(entry.kind, entry.scope) === key)) this.latest.delete(key);
+	}
+	changed() {
+		this.revision++;
+		for (const listener of this.listeners) listener();
+	}
+};
+//#endregion
 //#region apps/shared/session-portfolio.ts
 var SessionPortfolio = class {
 	source;
 	portfolio;
 	discovery;
 	cache;
+	operationResults = new OperationResultSession();
 	refreshRequested = false;
 	draftFields = /* @__PURE__ */ new Map();
 	draftBytes = 0;
@@ -21738,6 +22195,7 @@ var SessionPortfolio = class {
 		this.cache.subscribe(() => {
 			if (generation === this.cache.generation) return;
 			generation = this.cache.generation;
+			this.operationResults.clear();
 			this.resetDrafts();
 			this.capturedVisibleAccounts.clear();
 		});
@@ -21753,6 +22211,7 @@ var SessionPortfolio = class {
 	}
 	dispose() {
 		this.cache.dispose();
+		this.operationResults.dispose();
 	}
 	readDataset(key, load, options = {}) {
 		return this.cache.value(key, options.reference).read(load);
@@ -25707,12 +26166,13 @@ var SampleInference = class {
 	async foundry() {
 		this.context ??= (async () => {
 			const environment = await (this.options.loadEnvironment?.() ?? loadFoundryEnvironmentFromEnvironment(this.environment));
-			const credential = this.options.credential ?? (this.environment["WEBSITE_SITE_NAME"] ? this.environment["AZURE_CLIENT_ID"]?.trim() ? new ManagedIdentityCredential(this.environment["AZURE_CLIENT_ID"].trim()) : new ManagedIdentityCredential() : new AzureCliCredential({
+			const hosted = this.options.hosted ?? Boolean(this.environment["WEBSITE_SITE_NAME"]);
+			const credential = this.options.credential ?? (hosted ? this.environment["AZURE_CLIENT_ID"]?.trim() ? new ManagedIdentityCredential(this.environment["AZURE_CLIENT_ID"].trim()) : new ManagedIdentityCredential() : new AzureCliCredential({
 				tenantId: environment.authentication.foundryTenantId,
 				processTimeoutInMs: 3e4
 			}));
 			let admission = this.options.admission;
-			if (this.environment["WEBSITE_SITE_NAME"] && !admission) {
+			if (hosted && !admission) {
 				const home = this.environment["HOME"]?.trim();
 				const slot = this.environment["WEBSITE_SLOT_NAME"]?.trim() || "production";
 				if (!home || !/^[a-zA-Z0-9-]+$/.test(slot)) throw new InferenceAdmissionError("configuration", "Sample AI needs writable, slot-specific usage storage.");
@@ -26213,7 +26673,7 @@ function registerIpc() {
 		if (event.senderFrame !== event.sender.mainFrame) throw new Error("Voice capture requires the main renderer frame.");
 		return invokeVoice(request);
 	});
-	for (const [channel, handler] of Object.entries(createWorkflowIpcHandlers(workflowHost))) ipcMain.handle(channel, (event, request) => {
+	for (const [channel, handler] of Object.entries(createWorkflowIpcHandlers(workflowHost, () => orchestrator.getTeamMemberships()))) ipcMain.handle(channel, (event, request) => {
 		assertTrustedSender(event);
 		return handler(request);
 	});

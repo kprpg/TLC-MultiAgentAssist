@@ -80,7 +80,7 @@ async function offlineNativeFixture(page: Page, cli = false, writeMode: CliWrite
 test('Sample can open before Live pairing and mode confirmation preserves or discards drafts explicitly', async ({ page, request }) => {
   const fixture = await offlineNativeFixture(page, true, 'read-only', 'sample')
   await page.goto('/')
-  await expect(page.getByText('Sample - no live business data', { exact: true })).toBeVisible()
+  await expect(page.getByText('Sample data / Offline AI', { exact: true })).toBeVisible()
   expect(fixture.privateRequests()).toBe(0)
   const { account, opportunity } = await chooseOpportunity(page, request)
   await page.getByText('Opportunity notes and reviewed updates', { exact: true }).click()
@@ -114,7 +114,7 @@ test('one paired page switches to persistent SQLite Sample and back to Live with
   await page.getByLabel('Data mode', { exact: true }).selectOption('sample')
   await page.getByRole('dialog', { name: 'Switch to Sample mode?', exact: true })
     .getByRole('button', { name: 'Switch mode and discard unsaved work', exact: true }).click()
-  await expect(page.getByText('Sample - no live business data', { exact: true })).toBeVisible()
+  await expect(page.getByText('Sample data / Offline AI', { exact: true })).toBeVisible()
   const privateBefore = fixture.privateRequests()
   const { account, opportunity } = await chooseOpportunity(page, request)
   await page.getByText('Opportunity notes and reviewed updates', { exact: true }).click()

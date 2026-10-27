@@ -86,6 +86,7 @@ export interface StageGuidance {
 }
 
 export interface MsxConnector {
+  getTeamMemberships?(): Promise<import('../../common/contracts/workflow-membership.js').WorkflowMembershipSnapshot>
   refresh?(): void
   withReadContext?<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T>
   withFreshReadContext?<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T>

@@ -204,6 +204,15 @@ const milestoneTeamIds = new Set(
         .filter((milestoneId): milestoneId is string => Boolean(milestoneId))
 )
 
+export function sampleTeamMemberships() {
+    const milestones = [...milestoneStore, ...discoverableMilestoneStore]
+    return {
+        dealTeamOpportunityIds: [...dealTeamOpportunityIds],
+        milestoneTeamMilestoneIds: [...milestoneTeamIds],
+        milestoneTeamOpportunityIds: [...new Set(milestones.filter((item) => milestoneTeamIds.has(item.id)).map((item) => item.opportunityId))]
+    }
+}
+
 // Discoverable opportunities each get a milestone so a user can expand them in Discovery and join a
 // milestone team for an opportunity they have never been on the Deal Team for.
 const discoverableMilestoneStore: Milestone[] = []

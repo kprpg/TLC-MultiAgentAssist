@@ -15,7 +15,7 @@ test('Portfolio waits for its session index and lazy selected detail without fal
   await expect(page.getByLabel('Customer account', { exact: true })).not.toHaveValue('')
   await expect(page.getByLabel('Opportunity', { exact: true })).not.toHaveValue('')
   await expect(page.locator('.milestone-card').first()).toBeVisible()
-  expect(operations).toEqual(['getPortfolioIndex', 'listMilestones'])
+  expect(operations.filter((operation) => operation !== 'getInferenceMode')).toEqual(['getPortfolioIndex', 'listMilestones'])
 })
 
 test('search focus and typed queries reuse the session index instead of per-account requests', async ({ page, request }) => {

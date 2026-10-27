@@ -10,6 +10,7 @@ vi.mock('vscode', () => ({
 }))
 
 import { acquireDelegatedToken, createDelegatedTokenProvider, createVsCodeTokenCredential } from '../../../apps/vscode-extension/src/authentication.js'
+import { withFoundrySignIn } from '../../../apps/vscode-extension/src/foundry-sign-in.js'
 
 const resource = 'https://microsoftsales.crm.dynamics.com'
 const session: AuthenticationSession = {
@@ -121,7 +122,7 @@ describe('VS Code delegated authentication', () => {
     const accessToken = createToken(expiresOnSeconds)
     getSession.mockResolvedValue({
       accessToken,
-      account: { label: 'seller@microsoft.com' }
+      account: session.account
     })
 
     const credential = createVsCodeTokenCredential('173eb3fc-9ba1-437f-99a1-89d5e53b91d1')
@@ -135,7 +136,7 @@ describe('VS Code delegated authentication', () => {
         'VSCODE_TENANT:173eb3fc-9ba1-437f-99a1-89d5e53b91d1',
         'https://ai.azure.com/.default'
       ],
-      { createIfNone: true }
+      { silent: true }
     )
   })
 
@@ -150,5 +151,92 @@ describe('VS Code delegated authentication', () => {
       credential.getToken('https://cognitiveservices.azure.com/.default')
     ])
     expect(getSession).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps the first Foundry account for successive prompt preflights and SDK callbacks', async () => {
+    getSession.mockResolvedValueOnce(undefined).mockResolvedValue(session)
+    const credential = createVsCodeTokenCredential('foundry-tenant')
+    for (let prompt = 0; prompt < 3; prompt++) {
+      await withFoundrySignIn(async () => {
+        await credential.getToken('https://ai.azure.com/.default')
+        await Promise.all([credential.getToken('https://ai.azure.com/.default'), credential.getToken(['https://ai.azure.com/.default'])])
+      })
+    }
+    const interactive = getSession.mock.calls.filter((call) => call[2].createIfNone || call[2].forceNewSession)
+    expect(interactive).toHaveLength(1)
+    for (const call of getSession.mock.calls.slice(2)) expect(call[2]).toEqual({ silent: true, account: session.account })
+  })
+
+  it('shares a maximum of three interactive attempts across callbacks, with a new budget for the next prompt', async () => {
+    getSession.mockImplementation(async (_provider, _scopes, options) => {
+      if (options.silent) return undefined
+      throw new Error('Temporary authentication service unavailable.')
+    })
+    const credential = createVsCodeTokenCredential('foundry-tenant')
+    await withFoundrySignIn(async () => {
+      await expect(Promise.all([credential.getToken('https://ai.azure.com/.default'), credential.getToken('https://ai.azure.com/.default')])).rejects.toThrow(/three|3/i)
+      await expect(credential.getToken('https://ai.azure.com/.default')).rejects.toThrow()
+    })
+    expect(getSession.mock.calls.filter((call) => call[2].createIfNone || call[2].forceNewSession)).toHaveLength(3)
+    await expect(withFoundrySignIn(() => credential.getToken('https://ai.azure.com/.default'))).rejects.toThrow()
+    expect(getSession.mock.calls.filter((call) => call[2].createIfNone || call[2].forceNewSession)).toHaveLength(6)
+  })
+
+  it.each(['User cancelled sign-in.', 'AADSTS50020: selected account does not exist in tenant'])('stops recovery on %s', async (message) => {
+    getSession.mockResolvedValueOnce(undefined).mockRejectedValue(new Error(message))
+    const credential = createVsCodeTokenCredential('foundry-tenant')
+    await expect(withFoundrySignIn(() => credential.getToken('https://ai.azure.com/.default'))).rejects.toThrow()
+    expect(getSession.mock.calls.filter((call) => call[2].createIfNone || call[2].forceNewSession)).toHaveLength(1)
+  })
+
+  it('rejects account drift even when the display label is unchanged', async () => {
+    getSession.mockResolvedValueOnce(session)
+    const credential = createVsCodeTokenCredential('foundry-tenant')
+    await withFoundrySignIn(() => credential.getToken('https://ai.azure.com/.default'))
+    getSession.mockResolvedValue({ ...session, account: { ...session.account, id: 'another-account' } })
+    await expect(withFoundrySignIn(() => credential.getToken('https://ai.azure.com/.default'))).rejects.toThrow(/account changed/i)
+  })
+
+  it('never opens interactive sign-in from background token acquisition', async () => {
+    getSession.mockResolvedValue(undefined)
+    const credential = createVsCodeTokenCredential('foundry-tenant')
+    await expect(credential.getToken('https://ai.azure.com/.default')).rejects.toThrow(/Guidance/i)
+    expect(getSession).toHaveBeenCalledOnce()
+    expect(getSession.mock.calls[0]?.[2]).toEqual({ silent: true })
+  })
+
+  it('does not retry after prompt cancellation', async () => {
+    const controller = new AbortController()
+    getSession.mockImplementation(async (_provider, _scopes, options) => {
+      if (options.silent) return undefined
+      controller.abort()
+      throw new Error('Temporary sign-in failure')
+    })
+    const credential = createVsCodeTokenCredential('foundry-tenant')
+    await expect(withFoundrySignIn(() => credential.getToken('https://ai.azure.com/.default'), controller.signal)).rejects.toThrow()
+    expect(getSession).toHaveBeenCalledTimes(2)
+  })
+
+  it('renews an expired token interactively for the previously selected account', async () => {
+    const expired = { ...session, accessToken: createToken(Math.floor(Date.now() / 1000) - 60) }
+    const renewed = { ...session, accessToken: createToken(Math.floor(Date.now() / 1000) + 3600) }
+    getSession.mockResolvedValueOnce(session)
+    const credential = createVsCodeTokenCredential('foundry-tenant')
+    await withFoundrySignIn(() => credential.getToken('https://ai.azure.com/.default'))
+    getSession.mockResolvedValueOnce(expired).mockResolvedValueOnce(renewed)
+    await expect(withFoundrySignIn(() => credential.getToken('https://ai.azure.com/.default'))).resolves.toMatchObject({ token: renewed.accessToken })
+    expect(getSession).toHaveBeenLastCalledWith('microsoft',
+      ['VSCODE_TENANT:foundry-tenant', 'https://ai.azure.com/.default'],
+      { forceNewSession: { detail: 'Reconnect to Microsoft Foundry using the selected account.' }, account: session.account })
+  })
+
+  it('rejects a token for the wrong resource tenant without reopening sign-in', async () => {
+    const accessToken = `${Buffer.from('{}').toString('base64url')}.${Buffer.from(JSON.stringify({
+      tid: 'other-tenant', exp: Math.floor(Date.now() / 1000) + 3600
+    })).toString('base64url')}.signature`
+    getSession.mockResolvedValue({ ...session, accessToken })
+    const credential = createVsCodeTokenCredential('foundry-tenant')
+    await expect(withFoundrySignIn(() => credential.getToken('https://ai.azure.com/.default'))).rejects.toThrow(/different tenant/)
+    expect(getSession).toHaveBeenCalledOnce()
   })
 })

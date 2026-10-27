@@ -66,7 +66,13 @@ export function buildFoundryTaskAgents(credential?: TokenCredential, performance
     if (!credential) return undefined
     const parsed = foundryEnvironmentSchema.safeParse(foundryEnvironmentJson)
     if (!parsed.success) return undefined
-    return createFoundryTaskAgents(parsed.data, credential, undefined, performanceReporter)
+    return createFoundryTaskAgents(parsed.data, credential, undefined, performanceReporter, {
+        prepareCredential: async (signal) => {
+            signal?.throwIfAborted()
+            const token = await credential.getToken(parsed.data.authentication.scopes.foundry, signal ? { abortSignal: signal } : {})
+            if (!token) throw new Error('No Microsoft Foundry token was granted.')
+        }
+    })
 }
 /**
  * Live provider (Desktop/Web parity). Portfolio, writes, MCEM evaluation, and agent guidance

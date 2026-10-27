@@ -33,9 +33,9 @@ describe('initial workflow cohort contracts', () => {
 
     it('keeps every definition and schema reference versioned', () => {
         for (const definition of initialWorkflowDefinitions) {
-            expect(definition.version).toBe('1.0.0')
+            expect(definition.version).toBe('2.0.0')
             expect(definition.inputSchemaRef).toBe(`workflow-input-${definition.id.toLowerCase()}.v1`)
-            expect(definition.outputSchemaRef).toBe(`workflow-output-${definition.id.toLowerCase()}.v1`)
+            expect(definition.outputSchemaRef).toBe(`workflow-output-${definition.id.toLowerCase()}.v2`)
         }
     })
 

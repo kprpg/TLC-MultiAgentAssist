@@ -399,7 +399,7 @@ export class WorkflowRuntime {
 }
 
 export class WorkflowRuntimeError extends Error {
-    constructor(readonly code: 'scope_mismatch' | 'unsupported_execution_mode' | 'capacity_exceeded' | 'run_not_found' | 'invalid_transition' | 'result_not_available' | 'queue_item_not_found' | 'opportunity_scope_required' | 'invalid_evidence', message: string) {
+    constructor(readonly code: 'scope_mismatch' | 'unsupported_execution_mode' | 'capacity_exceeded' | 'run_not_found' | 'invalid_transition' | 'result_not_available' | 'queue_item_not_found' | 'opportunity_scope_required' | 'invalid_evidence' | 'membership_required', message: string) {
         super(message)
         this.name = 'WorkflowRuntimeError'
     }

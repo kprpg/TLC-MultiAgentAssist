@@ -1,5 +1,6 @@
 import type { InitialWorkflowOutput } from '../../../../packages/common/contracts/workflow-output.js'
 import type { WorkflowResultCard } from '../../../../packages/common/contracts/workflows.js'
+import { MembershipAction } from '../../../shared/workflow-membership.js'
 
 function ResultCard({ card }: { card: WorkflowResultCard }) {
   switch (card.kind) {
@@ -12,8 +13,9 @@ function ResultCard({ card }: { card: WorkflowResultCard }) {
   }
 }
 
-export function WorkflowResult({ output, onFocus, onGuidance }: {
+export function WorkflowResult({ output, onFocus, onGuidance, guidanceDisabledReason = () => 'Your team membership could not be verified.' }: {
   output: InitialWorkflowOutput; onFocus(accountId: string, opportunityId: string): void; onGuidance(queueItemId: string): void
+  guidanceDisabledReason?: (queueItemId: string) => string
 }) {
   return <section className="play-result" aria-label="Play result">
     <h2>{output.card.title}</h2>
@@ -28,7 +30,9 @@ export function WorkflowResult({ output, onFocus, onGuidance }: {
       <small>Evidence: {item.evidenceIds.join(', ') || 'Not available'}</small>
       {item.accountId && item.opportunityId && <div className="toolbar">
         <button type="button" onClick={() => { if (item.accountId && item.opportunityId) onFocus(item.accountId, item.opportunityId) }}>Open opportunity</button>
-        <button type="button" onClick={() => onGuidance(item.id)}>Prepare guidance</button>
+        <MembershipAction reason={guidanceDisabledReason(item.id)}>
+          <button type="button" disabled={Boolean(guidanceDisabledReason(item.id))} onClick={() => onGuidance(item.id)}>Prepare guidance</button>
+        </MembershipAction>
       </div>}
     </li>)}</ul>
     <details open><summary>Evidence and source health</summary>

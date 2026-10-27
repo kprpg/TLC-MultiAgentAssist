@@ -15,6 +15,8 @@ import { WorkflowRegistry } from './registry.js'
 import { WorkflowRuntime, WorkflowRuntimeError } from './runtime.js'
 import type { RegisteredWorkflowOutputs } from './registration.js'
 import { workflowRunViewSchema, type WorkflowRunView } from './view-contracts.js'
+import type { WorkflowMembershipSnapshot } from '../../common/contracts/workflow-membership.js'
+import { prepareMemberWorkflowGuidance, readWorkflowResultsView } from './membership-view.js'
 
 export { workflowRunViewSchema } from './view-contracts.js'
 export type { WorkflowRunView } from './view-contracts.js'
@@ -57,7 +59,7 @@ export type WorkflowRunRequest = z.infer<typeof workflowRunRequestSchema>
 export type ListWorkflowRunsRequest = z.input<typeof listWorkflowRunsRequestSchema>
 export type WorkflowGuidanceRequest = z.infer<typeof workflowGuidanceRequestSchema>
 
-export const workflowHostOperationSchema = z.enum(['list', 'start', 'get', 'cancel', 'history', 'guidance'])
+export const workflowHostOperationSchema = z.enum(['list', 'start', 'get', 'cancel', 'history', 'guidance', 'view'])
 export type WorkflowHostOperation = z.infer<typeof workflowHostOperationSchema>
 
 export interface WorkflowHost {
@@ -166,7 +168,10 @@ export class SharedWorkflowHost implements WorkflowHost {
     }
 }
 
-export function invokeWorkflowHost(host: WorkflowHost, rawOperation: unknown, request: unknown): unknown {
+export function invokeWorkflowHost(
+    host: WorkflowHost, rawOperation: unknown, request: unknown,
+    readMemberships: () => Promise<WorkflowMembershipSnapshot> = async () => { throw new Error('Membership source is unavailable.') }
+): unknown {
     const operation = workflowHostOperationSchema.parse(rawOperation)
     switch (operation) {
         case 'list': return z.array(workflowDefinitionSchema).parse(host.listDefinitions(request))
@@ -174,6 +179,7 @@ export function invokeWorkflowHost(host: WorkflowHost, rawOperation: unknown, re
         case 'get': return workflowRunViewSchema.parse(host.get(request))
         case 'cancel': return workflowRunSchema.parse(host.cancel(request))
         case 'history': return z.array(workflowRunSchema).parse(host.listRuns(request))
-        case 'guidance': return workflowGuidanceHandoffSchema.parse(host.prepareGuidance(request))
+        case 'guidance': return prepareMemberWorkflowGuidance(host, readMemberships, request)
+        case 'view': return readWorkflowResultsView(host, readMemberships, request)
     }
 }
