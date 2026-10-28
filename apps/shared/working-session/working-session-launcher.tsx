@@ -10,6 +10,7 @@ import { InferenceNotice } from '../inference-status.js'
 import type { InferenceExecution } from '../../../packages/common/contracts/inference.js'
 import type { SessionOperation } from '../operation-result-session.js'
 import { useOperationResult } from '../use-operation-result.js'
+import targetIcon from './target.png'
 
 type Step = 'choose' | 'topic' | 'running' | 'done'
 const workingKinds = ['working-session-topic', 'working-session-prepare'] as const
@@ -18,14 +19,11 @@ const workingKinds = ['working-session-topic', 'working-session-prepare'] as con
  * One launcher for Desktop, Web, the VS Code webview and Teams. It only presents and dispatches: topic deduction,
  * searching, downloading and file writing all happen behind the orchestrator operations.
  */
-export function WorkingSessionLauncher({ client, opportunity, milestones, onNote, label = 'Working session', compact = false }: {
+export function WorkingSessionLauncher({ client, opportunity, milestones, onNote }: {
   client: WorkingSessionClient
   opportunity: WorkingSessionOpportunity
   milestones: readonly WorkingSessionMilestone[]
   onNote?: (message: string) => void
-  label?: string
-  /** Icon-only button for narrow headers; the accessible name is unchanged. */
-  compact?: boolean
 }): ReactElement {
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<Step>('choose')
@@ -204,11 +202,9 @@ export function WorkingSessionLauncher({ client, opportunity, milestones, onNote
 
   return (
     <div className="working-session-launcher" ref={anchor}>
-      <button type="button" className={`secondary working-session-button${compact ? ' working-session-compact' : ''}`} aria-expanded={open} aria-haspopup="dialog" aria-label="Prepare working session"
-        title="Prepare working session: decks, Microsoft Learn pages and Bicep/ARM templates for this milestone" onClick={toggle}>
-        {compact
-          ? <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 4.5A1.5 1.5 0 0 1 4.5 3h3.38a1.5 1.5 0 0 1 1.06.44L10.5 5h5A1.5 1.5 0 0 1 17 6.5V8h-1V6.5a.5.5 0 0 0-.5-.5h-5.2L8.23 4.44A.5.5 0 0 0 7.88 4H4.5a.5.5 0 0 0-.5.5v9a.5.5 0 0 0 .5.5H9v1H4.5A1.5 1.5 0 0 1 3 13.5v-9Zm12 6v2h2v1h-2v2h-1v-2h-2v-1h2v-2h1Z" /></svg>
-          : label}
+      <button type="button" className="secondary working-session-button" aria-expanded={open} aria-haspopup="dialog" aria-label="Generate Prep/ Delivery Artifacts"
+        title="Generate Prep/ Delivery Artifacts" onClick={toggle}>
+        <img className="working-session-icon" src={targetIcon} alt="" width={24} height={24} aria-hidden="true" />
       </button>
       {host && createPortal(panel, host)}
     </div>
