@@ -26,6 +26,7 @@ import { useTeamsDataMode } from './use-data-mode.js'
 import { DataModeSwitcher } from './data-mode-switcher.js'
 import type { TeamsDataMode } from '../../../../packages/common/contracts/teams-data-mode.js'
 import { WorkspaceBoundary } from './workspace-boundary.js'
+import { scaleFontTheme } from '../../../shared/font-scale.js'
 
 interface PendingReview { preview: ActionPreview; resolve(receipt: ActionReceipt): void; reject(error: Error): void }
 
@@ -33,6 +34,9 @@ const WorkflowsWorkspace = lazy(() => import('./workflows.js').then((module) => 
 const MeetingsWorkspace = lazy(() => import('./meetings.js').then((module) => ({ default: module.MeetingsWorkspace })))
 const ActivityWorkspace = lazy(() => import('./activity.js').then((module) => ({ default: module.ActivityWorkspace })))
 const DashboardWorkspace = lazy(() => import('../../../shared/dashboards/dashboard-workspace.js').then((module) => ({ default: module.DashboardWorkspace })))
+const scaledLightTheme = scaleFontTheme(teamsLightTheme)
+const scaledDarkTheme = scaleFontTheme(teamsDarkTheme)
+const scaledHighContrastTheme = scaleFontTheme(teamsHighContrastTheme)
 
 export function TeamsApp() {
   const parameters = new URLSearchParams(location.search)
@@ -200,7 +204,7 @@ export function TeamsApp() {
     if (!authentication?.context.embedded) { window.open(url, '_blank', 'noopener'); return }
     meeting.shareAppContentToStage((cause) => { if (cause) setError('Teams could not share this approved brief on the current client.') }, url)
   }
-  const selectedTheme = theme === 'dark' ? teamsDarkTheme : theme === 'contrast' ? teamsHighContrastTheme : teamsLightTheme
+  const selectedTheme = theme === 'dark' ? scaledDarkTheme : theme === 'contrast' ? scaledHighContrastTheme : scaledLightTheme
   const workspaceAllowed = !bindingId || bindingStatus === 'ready'
   const hostSurface = teamsSurface(parameters, authentication?.context.frameContext)
   function switchDataMode(mode: TeamsDataMode) {

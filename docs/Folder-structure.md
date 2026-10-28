@@ -27,6 +27,14 @@ The structure supports these boundaries:
 - [Backlog screenshot assets](./media/product-backlog/) contains redacted,
   ID-labelled references linked from each entry. Sensitive originals stay outside Git.
 
+### Dashboard design proposals
+
+- [Momentum & Focus Dashboard Proposal](./architecture/Momentum-Focus-Dashboard-Proposal.md)
+  records the proposed SSP/SE priority, traction and signal-richness dashboard; it is not an
+  implementation status report.
+- [Illustrative mockup assets](./media/momentum-focus-dashboard/) contains the synthetic PNG
+  preview and editable SVG referenced by the proposal.
+
 ### Knowledge connector foundation
 
 The read-only knowledge operation is implemented in these focused modules:
@@ -117,6 +125,9 @@ apps/desktop/electron/main/portfolio-ipc.ts
 apps/teams/.env.native.example       Safe per-user native configuration, not real credentials
 apps/teams/.env.cli.example          Safe existing-user CLI configuration, not tokens/secrets
 apps/shared/                         Browser-safe prompt/Markdown and existing UI reuse
+apps/shared/font-scale.ts            Shared additional 0.95 font factor and pure Fluent theme-font scaling
+apps/shared/postcss-font-scale.ts     Font-only build transform shared by all client Vite builds
+apps/shared/typography.css            Low-specificity native-control fallback; no layout or icon scaling
 apps/shared/transcript-file.ts       Shared UTF-8 VTT/text reader for Desktop/Web, VS Code and Teams
                                      Shared Portfolio controls, sorting and Next Best Actions
 apps/shared/pane-resize-handle.tsx   Accessible shared three-dot width divider for all four surfaces

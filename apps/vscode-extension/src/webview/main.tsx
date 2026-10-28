@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './app.js'
+import '../../../shared/typography.css'
 import './styles.css'
 import '../../../shared/feedback.css'
 import '../../../shared/record-creation/new-workspace.css'

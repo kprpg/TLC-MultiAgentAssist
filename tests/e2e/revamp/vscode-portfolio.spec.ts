@@ -5,6 +5,7 @@ import { briefOffer, conversionOffer, followUpAgentResponse, initialAgentRespons
 import { expectGuidancePaneMaximizing, expectHorizontalPaneScroll, expectPaneResizing } from '../pane-resizing.js'
 import { expectTextContrast } from '../color-contrast.js'
 import { expectCopiedCustomerEmail, installCustomerEmailClipboard } from '../customer-email.js'
+import { captureTypography, expectFontReduction } from '../typography.js'
 
 interface BridgeRequest {
     kind: string
@@ -257,6 +258,34 @@ async function mountWebview(page: Page, milestones: MilestoneView[] = []): Promi
     await page.addScriptTag({ path: resolve('apps', 'vscode-extension', 'dist', 'webview', 'webview.js') })
     await expect(page.locator('#portfolio-details-panel').getByRole('heading', { name: 'Alpha analysis', exact: true })).toBeVisible()
 }
+
+for (const hostSize of [undefined, '13px', '16px']) test(`VS Code font scale respects ${hostSize ?? 'fallback'} host settings`, async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 1000 })
+    await mountWebview(page, [{ id: 'ms-alpha', opportunityId: 'alpha-one', name: 'Synthetic milestone', status: 'On Track' }])
+    if (hostSize) await page.locator('html').evaluate((element, value) => element.style.setProperty('--vscode-font-size', value), hostSize)
+    await page.locator('#portfolio-details-panel').getByRole('button', { name: 'Activities', exact: true }).click()
+    const panel = page.locator('.milestone-activities-panel')
+    const fonts = await captureTypography(test.info(), {
+        body: page.locator('body'),
+        tab: page.getByRole('button', { name: 'Portfolio', exact: true }),
+        badge: page.locator('.mode-badge').first(),
+        subject: panel.getByLabel('Subject', { exact: true }),
+        category: panel.getByRole('combobox', { name: 'Task Category', exact: true }),
+        description: panel.getByLabel('Description', { exact: true }),
+        label: panel.locator('.milestone-activity-form label').first(),
+        cancel: panel.getByRole('button', { name: 'Cancel', exact: true }),
+        icon: page.locator('.layout-control svg').first()
+    })
+    const previousHostSize = Number.parseFloat(hostSize ?? '13px')
+    expectFontReduction(fonts, {
+        body: previousHostSize, tab: previousHostSize, badge: 11, subject: 13.3333, category: 13.3333,
+        description: 12, label: 11, cancel: 12
+    })
+    expect(fonts['icon']).toMatchObject({ width: 20, height: 20 })
+    expect(fonts['category']).toMatchObject({ padding: '4px 6px', fontFamily: 'Arial' })
+    expect(fonts['description']).toMatchObject({ padding: '6px 8px' })
+    if (!hostSize) await page.screenshot({ path: test.info().outputPath('activities.png') })
+})
 
 test('VS Code cancels blank and unsaved milestone activity drafts without creating tasks', async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 900 })

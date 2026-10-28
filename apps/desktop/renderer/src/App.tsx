@@ -46,6 +46,10 @@ import { agentCapabilities, contractVersion, type Account, type AgentCapability,
 import { getDataModeLabel } from './data-mode-label.js'
 import { agentTaskStreamEventSchema } from '../../../../packages/common/contracts/index.js'
 import { createAgentStreamAccumulator, progressToResponse } from '../../../shared/agent-stream.js'
+import { scaleFontTheme } from '../../../shared/font-scale.js'
+
+const scaledLightTheme = scaleFontTheme(webLightTheme)
+const scaledDarkTheme = scaleFontTheme(webDarkTheme)
 
 const prompt = 'How do we move this opportunity to the next MCEM stage?'
 const agentTasks: Record<AgentCapability, { label: string; prompts: readonly string[] }> = {
@@ -338,7 +342,7 @@ export function App() {
   const authReady = dataStatus?.auth.state === 'ready'
 
   return (
-    <FluentProvider className="app-provider" theme={themeMode === 'dark' ? webDarkTheme : webLightTheme}>
+    <FluentProvider className="app-provider" theme={themeMode === 'dark' ? scaledDarkTheme : scaledLightTheme}>
       <div className={`app-frame${sourceNoticeDismissed ? ' source-notice-dismissed' : ''}`}>
       <header className="topbar">
         <Button
