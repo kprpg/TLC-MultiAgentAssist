@@ -1,0 +1,180 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1560" height="1140" viewBox="0 0 1560 1140" fill="#22334a">
+  <defs>
+    <style>
+      text { font-family: "Segoe UI", Arial, sans-serif; }
+      .title { font-size: 26px; font-weight: 700; }
+      .heading { font-size: 17px; font-weight: 650; }
+      .body { font-size: 13px; }
+      .small { font-size: 11px; }
+      .muted { fill: #607087; }
+      .blue { fill: #0f6cbd; }
+      .white { fill: #fff; }
+      .number { font-size: 28px; font-weight: 700; }
+      .panel { fill: #fff; stroke: #dce3ed; }
+      .line { stroke: #e2e8f0; stroke-width: 1; }
+      .chip { fill: #f4f7fc; stroke: #dce3ed; }
+    </style>
+  </defs>
+  <rect width="1560" height="1140" fill="#f3f6fb"/>
+  <rect x="24" y="16" width="1512" height="106" rx="12" class="panel"/>
+  <text x="44" y="43" class="small blue">DASHBOARDS / MOMENTUM &amp; FOCUS</text>
+  <text x="44" y="77" class="title">What deserves my attention?</text>
+  <text x="44" y="103" class="body muted">SSP / SE portfolio decisions, supported by source facts rather than activity volume alone.</text>
+  <rect x="1020" y="38" width="205" height="36" rx="7" fill="#eaf3fc"/>
+  <text x="1034" y="61" class="body blue">Role preset: SSP | SE</text>
+  <rect x="1237" y="38" width="277" height="36" rx="7" class="chip"/>
+  <text x="1250" y="61" class="body">Scope: My authorized portfolio</text>
+  <text x="1020" y="103" class="small" fill="#8a5a00">DESIGN PROPOSAL - SYNTHETIC EXAMPLES, NOT LIVE DATA</text>
+
+  <rect x="24" y="136" width="1512" height="92" rx="10" class="panel"/>
+  <g class="body">
+    <rect x="40" y="150" width="194" height="30" rx="5" class="chip"/><text x="51" y="170">Customers: All selected</text>
+    <rect x="244" y="150" width="194" height="30" rx="5" class="chip"/><text x="255" y="170">Opportunities / milestones</text>
+    <rect x="448" y="150" width="116" height="30" rx="5" class="chip"/><text x="459" y="170">Stage: All</text>
+    <rect x="574" y="150" width="152" height="30" rx="5" class="chip"/><text x="585" y="170">Status: Active</text>
+    <rect x="736" y="150" width="224" height="30" rx="5" class="chip"/><text x="747" y="170">Value basis: Select measure</text>
+    <rect x="970" y="150" width="154" height="30" rx="5" class="chip"/><text x="981" y="170">Currency: USD *</text>
+    <rect x="1134" y="150" width="180" height="30" rx="5" class="chip"/><text x="1145" y="170">Value range: Any</text>
+    <text x="1386" y="170" class="blue">Reset filters</text>
+    <text x="42" y="208" class="muted">FOCUS</text>
+    <rect x="96" y="188" width="104" height="28" rx="5" fill="#0f6cbd"/><text x="113" y="207" class="white">This week</text>
+    <text x="217" y="207">This month</text>
+    <text x="410" y="207" class="muted">EVIDENCE</text>
+    <rect x="484" y="188" width="132" height="28" rx="5" class="chip"/><text x="499" y="207">Last 30 days</text>
+    <text x="651" y="207" class="small muted">Separate planning and lookback windows. * Illustrative currency, not an FX assumption.</text>
+  </g>
+
+  <g>
+    <rect x="24" y="242" width="242" height="84" rx="9" class="panel"/>
+    <text x="41" y="267" class="small muted">ACCOUNTS MOVING FORWARD</text><text x="41" y="302" class="number">7</text><text x="80" y="302" class="body muted">of 18 in this sample</text>
+    <rect x="278" y="242" width="242" height="84" rx="9" class="panel"/>
+    <text x="295" y="267" class="small muted">THIS WEEK'S PRIORITIES</text><text x="295" y="302" class="number">9</text><text x="336" y="302" class="body muted">actions to review</text>
+    <rect x="532" y="242" width="242" height="84" rx="9" class="panel"/>
+    <text x="549" y="267" class="small muted">MILESTONES THIS MONTH</text><text x="549" y="302" class="number">24</text><text x="599" y="302" class="body muted">linked, not extra revenue</text>
+    <rect x="786" y="242" width="242" height="84" rx="9" class="panel"/>
+    <text x="803" y="267" class="small muted">NO OBSERVED PROGRESS</text><text x="803" y="302" class="number">5</text><text x="841" y="302" class="body muted">review candidates</text>
+    <rect x="1040" y="242" width="242" height="84" rx="9" class="panel"/>
+    <text x="1057" y="267" class="small muted">BUSY, LIMITED MOVEMENT</text><text x="1057" y="302" class="number">3</text><text x="1095" y="302" class="body muted">do not confuse with wins</text>
+    <rect x="1294" y="242" width="242" height="84" rx="9" class="panel"/>
+    <text x="1311" y="267" class="small muted">ACCOUNTS WITH USABLE HISTORY</text><text x="1311" y="302" class="number">12/18</text><text x="1431" y="302" class="small muted">accounts</text>
+  </g>
+
+  <rect x="24" y="342" width="920" height="352" rx="10" class="panel"/>
+  <text x="44" y="373" class="heading">This week: focus queue</text>
+  <text x="671" y="373" class="small muted">Showing 4 of 9 illustrative priorities</text>
+  <text x="44" y="396" class="body muted">Balanced priorities. Each row says why now, who should act, and what is verified.</text>
+  <rect x="40" y="412" width="888" height="29" rx="4" fill="#f1f5fa"/>
+  <g class="small muted">
+    <text x="51" y="431">PRIORITY</text><text x="130" y="431">CUSTOMER / RECORD</text>
+    <text x="365" y="431">WHY NOW / NEXT STEP</text><text x="655" y="431">VALUE + UNIT</text><text x="807" y="431">OWNER / DATA</text>
+  </g>
+  <g class="body">
+    <rect x="47" y="456" width="48" height="25" rx="5" fill="#fce8e7"/><text x="60" y="473" fill="#a4262c">P1</text>
+    <text x="130" y="462" font-weight="650">Sample A - Proof milestone</text><text x="130" y="483" class="small muted">Milestone / Stage 3 / Blocked</text>
+    <text x="365" y="462">Overdue; unblock the proof decision</text><text x="365" y="483" class="small muted">Recorded target date + blocker evidence</text>
+    <text x="655" y="462">$35K / month</text><text x="655" y="483" class="small muted">Monthly potential</text>
+    <text x="807" y="462">SE + CSA</text><text x="807" y="483" class="small muted">Evidence available</text>
+    <line x1="42" y1="496" x2="926" y2="496" class="line"/>
+
+    <rect x="47" y="510" width="48" height="25" rx="5" fill="#fce8e7"/><text x="60" y="527" fill="#a4262c">P1</text>
+    <text x="130" y="516" font-weight="650">Sample B - Opportunity</text><text x="130" y="537" class="small muted">Opportunity / Stage 3 / Active</text>
+    <text x="365" y="516">Near-term decision; confirm commitment</text><text x="365" y="537" class="small muted">Close window, not a predicted win</text>
+    <text x="655" y="516">$1.2M</text><text x="655" y="537" class="small muted">Opportunity value</text>
+    <text x="807" y="516">SSP</text><text x="807" y="537" class="small muted">Evidence available</text>
+    <line x1="42" y1="550" x2="926" y2="550" class="line"/>
+
+    <rect x="47" y="564" width="48" height="25" rx="5" fill="#fff3cd"/><text x="60" y="581" fill="#805500">P2</text>
+    <text x="130" y="570" font-weight="650">Sample C - Validation checkpoint</text><text x="130" y="591" class="small muted">Milestone / Stage 2 / On track</text>
+    <text x="365" y="570">Proof checkpoint due in the horizon</text><text x="365" y="591" class="small muted">Gather outcome evidence, not more notes</text>
+    <text x="655" y="570">$20K / month</text><text x="655" y="591" class="small muted">Monthly potential</text>
+    <text x="807" y="570">SE</text><text x="807" y="591" class="small muted">Partial history</text>
+    <line x1="42" y1="604" x2="926" y2="604" class="line"/>
+
+    <rect x="47" y="618" width="64" height="25" rx="5" fill="#eaf0f6"/><text x="54" y="635" class="small">VERIFY</text>
+    <text x="130" y="624" font-weight="650">Sample D - Opportunity</text><text x="130" y="645" class="small muted">Opportunity / Date unconfirmed</text>
+    <text x="365" y="624">High activity; validate the next decision</text><text x="365" y="645" class="small muted">Missing history is not zero progress</text>
+    <text x="655" y="624">Unverified</text><text x="655" y="645" class="small muted">Not treated as $0</text>
+    <text x="807" y="624">SSP / SE</text><text x="807" y="645" class="small muted">Needs information</text>
+  </g>
+  <text x="44" y="675" class="small blue">Open in Portfolio   |   Why this item?   |   View evidence   |   Switch to This month</text>
+
+  <rect x="960" y="342" width="576" height="352" rx="10" class="panel"/>
+  <text x="980" y="373" class="heading">Progress versus signals</text>
+  <text x="980" y="394" class="small muted">Opportunity view / last 30 days / bubble size = same-currency pipeline value</text>
+  <rect x="1018" y="412" width="482" height="190" fill="#f8fafc"/>
+  <rect x="1018" y="412" width="182" height="100" fill="#fff8e6"/>
+  <rect x="1200" y="412" width="300" height="100" fill="#e9f7f1"/>
+  <line x1="1018" y1="512" x2="1500" y2="512" stroke="#b6c3d4" stroke-dasharray="4 4"/>
+  <line x1="1200" y1="412" x2="1200" y2="602" stroke="#b6c3d4" stroke-dasharray="4 4"/>
+  <line x1="1018" y1="602" x2="1500" y2="602" stroke="#708198"/>
+  <line x1="1018" y1="412" x2="1018" y2="602" stroke="#708198"/>
+  <text x="1030" y="431" class="small" fill="#805500">BUSY: VERIFY MOVEMENT</text>
+  <text x="1250" y="431" class="small" fill="#0b6a4c">MOVING + ENGAGED</text>
+  <text x="981" y="464" class="small muted">30</text><text x="981" y="519" class="small muted">15</text><text x="987" y="602" class="small muted">0</text>
+  <text x="1031" y="619" class="small muted">0</text><text x="1197" y="619" class="small muted">3</text><text x="1474" y="619" class="small muted">8</text>
+  <circle cx="1095" cy="468" r="22" fill="#e8b44b" fill-opacity="0.75" stroke="#a56b00"/>
+  <text x="1088" y="472" class="small">B</text>
+  <circle cx="1369" cy="470" r="30" fill="#3ba88b" fill-opacity="0.72" stroke="#087e61"/>
+  <text x="1363" y="474" class="body white">A</text>
+  <circle cx="1290" cy="501" r="18" fill="#69a9dd" fill-opacity="0.85" stroke="#0f6cbd"/>
+  <text x="1284" y="505" class="small white">C</text>
+  <circle cx="1125" cy="558" r="14" fill="#d9e3ef" stroke="#708198"/>
+  <text x="1120" y="562" class="small">E</text>
+  <text x="1085" y="642" class="small muted">Distinct qualified progress events in the window</text>
+  <text x="980" y="663" class="small">Y: relevant dated signals. Unknown history stays outside the axes.</text>
+  <text x="980" y="680" class="small blue">Select a bubble to filter records and inspect evidence.</text>
+
+  <rect x="24" y="710" width="488" height="326" rx="10" class="panel"/>
+  <text x="44" y="742" class="heading">Top accounts: traction</text>
+  <text x="44" y="765" class="small muted">Advancing share of eligible observed opportunities</text>
+  <text x="44" y="804" class="body">Sample A</text><rect x="143" y="790" width="276" height="20" rx="4" fill="#dceaf8"/><rect x="143" y="790" width="207" height="20" rx="4" fill="#0f6cbd"/><text x="432" y="804" class="body">3/4</text>
+  <text x="44" y="850" class="body">Sample B</text><rect x="143" y="836" width="276" height="20" rx="4" fill="#dceaf8"/><rect x="143" y="836" width="138" height="20" rx="4" fill="#0f6cbd"/><text x="432" y="850" class="body">2/4</text>
+  <text x="44" y="896" class="body">Sample C</text><rect x="143" y="882" width="276" height="20" rx="4" fill="#dceaf8"/><rect x="143" y="882" width="69" height="20" rx="4" fill="#0f6cbd"/><text x="432" y="896" class="body">1/4</text>
+  <text x="44" y="945" class="small muted">Also show absolute movement, latest evidence and coverage.</text>
+  <text x="44" y="967" class="small muted">Large accounts do not rank first merely because they are large.</text>
+  <text x="44" y="1008" class="small blue">Traction   |   Activity volume   |   Needs review</text>
+
+  <rect x="528" y="710" width="488" height="326" rx="10" class="panel"/>
+  <text x="548" y="742" class="heading">Milestones by stage and status</text>
+  <text x="548" y="765" class="small muted">Count mode / parent opportunity stage / selected scope</text>
+  <g class="small muted">
+    <text x="663" y="795">Stage 1</text><text x="732" y="795">Stage 2</text><text x="801" y="795">Stage 3</text><text x="870" y="795">Stage 4</text><text x="939" y="795">Stage 5</text>
+    <text x="548" y="832">On track</text><text x="548" y="878">At risk</text><text x="548" y="924">Blocked</text>
+  </g>
+  <g class="body">
+    <rect x="650" y="808" width="60" height="37" rx="4" fill="#e8f1fb"/><text x="675" y="832">2</text>
+    <rect x="719" y="808" width="60" height="37" rx="4" fill="#b9d8f1"/><text x="744" y="832">6</text>
+    <rect x="788" y="808" width="60" height="37" rx="4" fill="#80b7df"/><text x="813" y="832">9</text>
+    <rect x="857" y="808" width="60" height="37" rx="4" fill="#b9d8f1"/><text x="882" y="832">5</text>
+    <rect x="926" y="808" width="60" height="37" rx="4" fill="#e8f1fb"/><text x="951" y="832">2</text>
+    <rect x="650" y="854" width="60" height="37" rx="4" fill="#fff4d6"/><text x="675" y="878">0</text>
+    <rect x="719" y="854" width="60" height="37" rx="4" fill="#ffe1a3"/><text x="744" y="878">2</text>
+    <rect x="788" y="854" width="60" height="37" rx="4" fill="#ffd47d"/><text x="813" y="878">3</text>
+    <rect x="857" y="854" width="60" height="37" rx="4" fill="#ffe1a3"/><text x="882" y="878">1</text>
+    <rect x="926" y="854" width="60" height="37" rx="4" fill="#fff4d6"/><text x="951" y="878">0</text>
+    <rect x="650" y="900" width="60" height="37" rx="4" fill="#fceeed"/><text x="675" y="924">0</text>
+    <rect x="719" y="900" width="60" height="37" rx="4" fill="#f8c9c6"/><text x="744" y="924">1</text>
+    <rect x="788" y="900" width="60" height="37" rx="4" fill="#ee9a94"/><text x="813" y="924">2</text>
+    <rect x="857" y="900" width="60" height="37" rx="4" fill="#f8c9c6"/><text x="882" y="924">1</text>
+    <rect x="926" y="900" width="60" height="37" rx="4" fill="#fceeed"/><text x="951" y="924">0</text>
+  </g>
+  <text x="548" y="970" class="small muted">Select a cell to filter the queue. Unknown values stay visible.</text>
+  <text x="548" y="1008" class="small blue">Count   |   Monthly potential - one currency only</text>
+
+  <rect x="1032" y="710" width="504" height="326" rx="10" class="panel"/>
+  <text x="1052" y="742" class="heading">Why this item?</text>
+  <text x="1052" y="768" class="body" font-weight="650">Sample A - Proof milestone</text>
+  <rect x="1052" y="784" width="92" height="25" rx="5" fill="#fce8e7"/><text x="1067" y="801" class="small" fill="#a4262c">ACT NOW</text>
+  <text x="1052" y="835" class="body">1. Recorded target is overdue.</text>
+  <text x="1052" y="862" class="body">2. Current milestone status is Blocked.</text>
+  <text x="1052" y="889" class="body">3. Proof outcome is needed for the next checkpoint.</text>
+  <text x="1052" y="920" class="small muted">Evidence: source facts, dates, record links and history coverage.</text>
+  <text x="1052" y="943" class="small muted">Suggested handoff: SE + CSA. No automatic CRM update.</text>
+  <text x="1052" y="970" class="small muted">Loopbacks are normal. Activity does not prove a win.</text>
+  <rect x="1052" y="989" width="145" height="29" rx="5" fill="#0f6cbd"/><text x="1071" y="1009" class="small white">Open in Portfolio</text>
+  <text x="1218" y="1009" class="small blue">View source evidence</text>
+
+  <rect x="24" y="1052" width="1512" height="62" rx="8" fill="#eaf0f8"/>
+  <text x="43" y="1077" class="body">Design principle: busy is not the same as progressing. Missing data is not zero progress.</text>
+  <text x="43" y="1098" class="small muted">MSX first. M365 is optional and permission-gated. Figures and financial examples in this mockup are synthetic and are not additive.</text>
+</svg>

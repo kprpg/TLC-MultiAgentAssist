@@ -27,6 +27,14 @@ The structure supports these boundaries:
 - [Backlog screenshot assets](./media/product-backlog/) contains redacted,
   ID-labelled references linked from each entry. Sensitive originals stay outside Git.
 
+### Dashboard design proposals
+
+- [Momentum & Focus Dashboard Proposal](./architecture/Momentum-Focus-Dashboard-Proposal.md)
+  records the proposed SSP/SE priority, traction and signal-richness dashboard; it is not an
+  implementation status report.
+- [Illustrative mockup assets](./media/momentum-focus-dashboard/) contains the synthetic PNG
+  preview and editable SVG referenced by the proposal.
+
 ### Knowledge connector foundation
 
 The read-only knowledge operation is implemented in these focused modules:
