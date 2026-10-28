@@ -779,6 +779,35 @@ test('offers milestone sorting beside the milestone refresh control', async ({ p
     await expect(sortButton).toHaveAttribute('title', 'Sort milestones by Est. Change in Monthly Usage (ascending)')
 })
 
+test('cancels blank and unsaved milestone activities without creating tasks in Web', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await page.goto('/')
+    await page.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
+    await page.getByRole('region', { name: 'Opportunities blade' }).getByRole('button', { name: /^Grid operations modernization / }).click()
+    const milestone = page.getByRole('region', { name: 'Grid operations modernization milestones' })
+        .getByRole('row').filter({ hasText: 'Customer outcome validation' }).first()
+    const openActivities = async () => {
+        await milestone.getByRole('button', { name: /^Edit / }).click()
+        await page.getByRole('menuitem', { name: 'Activities', exact: true }).click()
+    }
+    await openActivities()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByRole('button', { name: 'Create task', exact: true })).toBeDisabled()
+    await expect(dialog.getByLabel('Milestone activities')).toHaveAttribute('aria-busy', 'false')
+    const initialActivities = await dialog.locator('.milestone-activity-item').allTextContents()
+
+    for (const draft of ['', 'Discard this activity']) {
+        await dialog.getByLabel('Subject').fill(draft)
+        await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+        await expect(dialog).toBeHidden()
+        await openActivities()
+        await expect(dialog.getByLabel('Subject')).toHaveValue('')
+        await expect(dialog.getByLabel('Milestone activities')).toHaveAttribute('aria-busy', 'false')
+        expect(await dialog.locator('.milestone-activity-item').allTextContents()).toEqual(initialActivities)
+    }
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+})
+
 test('edits milestone fields and opportunity comments with save and cancel', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/')

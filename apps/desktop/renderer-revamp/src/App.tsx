@@ -1264,7 +1264,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
             <Field label="Description"><Textarea resize="vertical" value={activityForm.description} onChange={(_, data) => setActivityForm((current) => ({ ...current, description: data.value }))} /></Field>
           </div>
         </DialogContent><DialogActions>
-          <Button disabled={savingActivity} onClick={() => setActivitiesMilestone(null)}>Close</Button>
+          <Button type="button" disabled={savingActivity} onClick={() => setActivitiesMilestone(null)}>Cancel</Button>
           <Button appearance="primary" disabled={savingActivity || activityForm.subject.trim().length === 0} onClick={() => void createMilestoneActivity()}>{savingActivity ? 'Creating…' : 'Create task'}</Button>
         </DialogActions></DialogBody></DialogSurface>
       </Dialog>
