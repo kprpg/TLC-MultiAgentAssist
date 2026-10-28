@@ -4,6 +4,10 @@ For the opportunity and milestone you are working, **Working session** prepares 
 folder: PowerPoint decks that already exist, a Microsoft Learn document set, and draft Bicep/ARM templates.
 It is read-only toward MSX and never deploys anything.
 
+On all four surfaces, open the same working-session flow using the **target icon**, with the tooltip
+**Generate Prep/ Delivery Artifacts**. The 24px icon sits in a 32px button and replaces the previous
+Working session text or file-share icon; topic suggestion, preparation and output actions are unchanged.
+
 | Surface | Where the control is | Result |
 |---|---|---|
 | VS Code | Next to **Run MCEM Coach** | Folder under `Documents\TLC`, **Open folder** |
@@ -66,7 +70,7 @@ Sources that are unavailable are listed under **Needs attention** and in the man
 ## Session-only result retention
 
 You can switch opportunities or views while topic deduction or preparation continues.
-Reopening **Working session** for the original opportunity restores its pending state or
+Reopening the **target icon** for the original opportunity restores its pending state or
 latest result, including the original milestone and confirmed preparation settings.
 Closing and reopening an unchanged panel preserves its current edits. Restoring a result
 does not run another search, inference call or preparation.

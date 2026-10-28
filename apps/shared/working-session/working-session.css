@@ -1,12 +1,12 @@
 .working-session-launcher { position: relative; display: inline-block; }
-.working-session-button { white-space: nowrap; }
-.working-session-compact {
+.working-session-launcher .working-session-button {
   display: inline-flex; align-items: center; justify-content: center; width: 32px; min-width: 32px; height: 32px; padding: 0;
   background: transparent; border: 0; border-radius: 4px; cursor: pointer;
   color: var(--vscode-textLink-foreground, var(--colorBrandForeground1, #0f6cbd));
 }
-.working-session-compact:hover { background: var(--colorSubtleBackgroundHover, rgb(127 127 127 / 18%)); }
-.working-session-compact:focus-visible { outline: 2px solid var(--colorStrokeFocus2, currentColor); outline-offset: -2px; }
+.working-session-button:hover { background: var(--colorSubtleBackgroundHover, rgb(127 127 127 / 18%)); }
+.working-session-button:focus-visible { outline: 2px solid var(--colorStrokeFocus2, currentColor); outline-offset: -2px; }
+.working-session-icon { display: block; width: 24px; height: 24px; object-fit: contain; }
 .working-session-actions { display: inline-flex; align-items: center; gap: 6px; }
 .working-session-panel {
   position: fixed; right: 16px; top: 72px; z-index: 1000; width: 400px; max-width: calc(100vw - 32px); max-height: calc(100vh - 96px); overflow: auto;

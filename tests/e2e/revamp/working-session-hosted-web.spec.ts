@@ -11,6 +11,7 @@ import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/shar
 import { LocalStore, LocalStoreMsxConnector } from '../../../packages/connectors/local-store/index.js'
 import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
 import { deferredSignal } from './operation-result-fixtures.js'
+import { expectWorkingSessionIcon } from '../working-session-icon.js'
 
 let server: Server | undefined
 let store: LocalStore | undefined
@@ -53,7 +54,9 @@ async function openLauncher(page: Page, base: string) {
   await page.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
   const blade = page.getByRole('region', { name: 'Opportunities blade' })
   await blade.getByRole('button', { name: /^Grid operations modernization/ }).click()
-  await blade.locator('.blade-header').getByRole('button', { name: 'Prepare working session' }).click()
+  const launcher = blade.locator('.blade-header').getByRole('button', { name: 'Generate Prep/ Delivery Artifacts' })
+  await expectWorkingSessionIcon(launcher)
+  await launcher.click()
   return page.getByRole('dialog', { name: 'Prepare working session' })
 }
 
@@ -125,7 +128,7 @@ test('@operation-retention restores a Web preparation completed after navigating
     release.resolve()
     await delivered.promise
     await page.getByRole('button', { name: 'Portfolio', exact: true }).click()
-    await page.getByRole('button', { name: 'Prepare working session', exact: true }).click()
+    await page.getByRole('button', { name: 'Generate Prep/ Delivery Artifacts', exact: true }).click()
     await expect(panel.getByRole('status').first()).toContainText(/Prepared \d+ file/)
     await expect(panel.getByRole('button', { name: 'Download zip' })).toBeVisible()
     expect(preparations).toBe(1)
@@ -153,7 +156,7 @@ test('@operation-retention restores pending Web work without dispatching it twic
     await arrived.promise
     await page.getByRole('button', { name: 'Discover', exact: true }).click()
     await page.getByRole('button', { name: 'Portfolio', exact: true }).click()
-    await page.getByRole('button', { name: 'Prepare working session' }).click()
+    await page.getByRole('button', { name: 'Generate Prep/ Delivery Artifacts' }).click()
     await expect(panel.getByRole('status')).toContainText('Working...')
     await expect(panel.getByRole('button', { name: 'Suggest topic' })).toHaveCount(0)
     expect(topics).toBe(1)
@@ -182,7 +185,7 @@ test('@operation-retention retains a background Web failure without notifying an
     await delivered.promise
     await expect(page.getByText('Background topic unavailable')).toHaveCount(0)
     await page.getByRole('button', { name: 'Portfolio', exact: true }).click()
-    await page.getByRole('button', { name: 'Prepare working session' }).click()
+    await page.getByRole('button', { name: 'Generate Prep/ Delivery Artifacts' }).click()
     await expect(panel.getByRole('alert')).toContainText('Background topic unavailable')
     await expect(panel.getByRole('button', { name: 'Suggest topic' })).toBeEnabled()
     expect(requests.filter((entry) => entry.path.endsWith('/topic'))).toHaveLength(1)
@@ -199,7 +202,7 @@ test('@operation-retention keeps expired download errors explicit without regene
   await panel.getByRole('button', { name: 'Close', exact: true }).click()
   await page.getByRole('button', { name: 'Discover', exact: true }).click()
   await page.getByRole('button', { name: 'Portfolio', exact: true }).click()
-  await page.getByRole('button', { name: 'Prepare working session' }).click()
+  await page.getByRole('button', { name: 'Generate Prep/ Delivery Artifacts' }).click()
   await expect(panel.getByRole('button', { name: 'Download zip' })).toBeVisible()
   await page.route('**/api/working-session/download/**', (route) => route.fulfill({
     status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'The download has expired. Prepare the working session again.' })

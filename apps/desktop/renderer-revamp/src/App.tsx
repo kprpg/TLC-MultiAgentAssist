@@ -1272,7 +1272,7 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
       {account && <section className={`blade opportunity-blade ${collapsed.has('opportunities') ? 'collapsed' : ''} ${opportunitiesFillAvailableSpace ? 'fill-available-space' : ''} ${mobileBlade === 'opportunities' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('opportunities') || opportunitiesFillAvailableSpace ? undefined : bladeWidths.opportunities }} aria-label="Opportunities blade">
         <BladeHeader title="Opportunities" subtitle={account.name} collapsed={collapsed.has('opportunities')} refreshing={loading} actions={<>
           {opportunity && <MeetingCaptureLauncher client={client} opportunityId={opportunity.id} opportunityName={opportunity.name} milestones={milestones} onApplied={() => void refreshOpportunityContext()} onNote={setError} />}
-          {opportunity && <WorkingSessionLauncher compact client={client} opportunity={opportunity} milestones={milestones} onNote={setError} />}
+          {opportunity && <WorkingSessionLauncher client={client} opportunity={opportunity} milestones={milestones} onNote={setError} />}
           <Menu checkedValues={{ opportunitySort: [opportunitySort] }} positioning="below-end">
             <MenuTrigger disableButtonEnhancement><Button appearance="subtle" className="icon-button" icon={<ArrowSort20Regular />} aria-label="Sort opportunities" title={`Sort opportunities by ${opportunitySort === 'closeDate' ? 'Close Date' : opportunitySort === 'stage' ? 'Stage' : 'Value'} (${opportunitySortDirection})`} /></MenuTrigger>
             <MenuPopover><MenuList aria-label="Sort opportunities by">
