@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { TeamsApp } from './app.js'
+import '../../../shared/typography.css'
 import './styles.css'
 import '../../../shared/record-creation/new-workspace.css'
 import '../../../shared/dashboards/dashboard-workspace.css'

@@ -7,6 +7,7 @@ import { renderSeReportHtml } from '../../../../packages/documents/se-reporting.
 import { SeReportSetup, type InvokeSeReporting } from './report-setup.js'
 import { downloadSeReport, SeReportGeneration, SeReportPublication, SeReportReview } from './report-workflow.js'
 import { InferenceNotice } from '../../inference-status.js'
+import { uiFontScale } from '../../font-scale.js'
 
 export function SeReportingDashboardPane({ invoke }: { invoke: InvokeSeReporting }) {
     const [state, setState] = useState<Extract<SeReportingResponse, { kind: 'state' }> | null>(null)
@@ -67,7 +68,7 @@ export function SeReportingDashboardPane({ invoke }: { invoke: InvokeSeReporting
     const selectedProfile = state?.profiles.find((profile) => profile.id === profileId)
     const activeRun = state?.run?.profileId === profileId ? state.run : null
     const selectedReport = activeRun?.reports.find((report) => report.report_id === reportId)
-    const html = useMemo(() => selectedReport ? renderSeReportHtml(selectedReport, { customerStatus: status, dark, includeFilters: false, styleNonce: document.getElementById('root')?.dataset['cspNonce'] ?? '' }) : '', [selectedReport, status, dark])
+    const html = useMemo(() => selectedReport ? renderSeReportHtml(selectedReport, { customerStatus: status, dark, includeFilters: false, styleNonce: document.getElementById('root')?.dataset['cspNonce'] ?? '', fontScale: uiFontScale }) : '', [selectedReport, status, dark])
     return <section ref={root} className="se-reporting-dashboard" aria-label="SE Reporting Dashboard" aria-busy={busy}>
         <div className="se-report-shell">
             <header className="se-report-header"><div><p className="se-report-eyebrow">MONTHLY POD REPORTING</p><h1>SE Reporting Dashboard</h1>

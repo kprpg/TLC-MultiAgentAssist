@@ -33,6 +33,24 @@ describe('SE monthly report presentation', () => {
         expect(html).toContain('No asks provided by the reporter.')
     })
 
+    it('scales preview typography without changing exported typography, spacing or report data', () => {
+        const report = buildSeReports(createSeReportingFixture())[0]!
+        const exported = renderSeReportHtml(report)
+        const preview = renderSeReportHtml(report, { fontScale: 0.95 })
+        expect(renderSeReportHtml(report, { fontScale: 1 })).toBe(exported)
+        expect(exported).toContain('font:14px/1.55')
+        expect(exported).toContain('h1{font-size:28px')
+        for (const value of ['font:13.3px/1.55', 'h1{font-size:26.6px', 'h2{font-size:19px', 'h3{font-size:15.2px', 'font-size:28.5px', 'font-size:25.65px', 'font-size:11.4px']) {
+            expect(preview).toContain(value)
+        }
+        expect(preview).toContain('main{max-width:1480px;margin:auto;padding:24px}')
+        expect(preview.slice(preview.indexOf('</style>'))).toBe(exported.slice(exported.indexOf('</style>')))
+    })
+
+    it.each([0, -0.5, Number.NaN, Number.POSITIVE_INFINITY])('rejects invalid preview font scale %s', (fontScale) => {
+        expect(() => renderSeReportHtml(buildSeReports(createSeReportingFixture())[0]!, { fontScale })).toThrow('Font scale must be a positive finite number.')
+    })
+
     it('escapes customer data and verbatim asks and hides only customer cards when filtering', () => {
         const input = createSeReportingFixture()
         input.assignments[0]!.accountName = '<script>not-code</script>'

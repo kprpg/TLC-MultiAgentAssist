@@ -3,6 +3,9 @@ import { accountPulseWorkflowDefinition, riskPlayWorkflowDefinition, workflowDef
 import { expectCompleteSamplePortfolio } from './sample-portfolio.js'
 import { expectOpportunityAndMilestoneRemoval } from './membership-removal.js'
 import { expectOpportunitiesToFillCollapsedWorkspace } from './opportunities-layout.js'
+import { captureTypography, expectFontReduction } from '../typography.js'
+import { projectWorkflowOutput } from '../../../packages/orchestrator/workflows/membership-projection.js'
+import { workflowResultsViewRequestSchema } from '../../../packages/common/contracts/workflow-membership.js'
 
 test('opens the focused opportunity in MSX without navigating away from Web', async ({ page }) => {
     await page.addInitScript(() => {
@@ -395,12 +398,21 @@ test('reviews recent workflow runs with typed results and activity detail', asyn
         connectorCalls: [{ connector: 'dataverse-mcp' as const, operation: 'read_query', status: 'success' as const, durationMs: 840, recordCount: 1, truncated: true }],
         telemetry: { correlationId: '22222222-2222-4222-8222-222222222222', firstResultMs: 620, cacheHit: false }
     }
+    const completedOutput = workflowOutput()
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.route('**/api/workflows/*', async (route) => {
         const operation = new URL(route.request().url()).pathname.split('/').at(-1)
         if (operation === 'list') await route.fulfill({ json: workflowDefinitions })
         else if (operation === 'history') await route.fulfill({ json: [completedRun] })
-        else await route.fulfill({ json: { run: completedRun, output: workflowOutput() } })
+        else if (operation === 'view') {
+            const { filter } = workflowResultsViewRequestSchema.parse(route.request().postDataJSON())
+            await route.fulfill({ json: {
+                ...projectWorkflowOutput(completedOutput, filter, {
+                    dealTeamOpportunityIds: [], milestoneTeamOpportunityIds: [], milestoneTeamMilestoneIds: []
+                }),
+                runId: completedRun.runId
+            } })
+        } else await route.fulfill({ json: { run: completedRun, output: completedOutput } })
     })
 
     await page.goto('/')
@@ -414,6 +426,7 @@ test('reviews recent workflow runs with typed results and activity detail', asyn
     await expect(launcher.getByRole('region', { name: 'Operational queue' })).toContainText('Review Northwind renewal')
     await recentRun.evaluate((element) => (element as HTMLElement).blur())
     const workflowWorkspace = launcher.locator('.workflow-workspace')
+    await expect(workflowWorkspace.getByText('Run this Play again to verify membership for its saved result.', { exact: true })).toBeVisible()
     const localeDependentText = [workflowWorkspace.locator('.workflow-run-list button > span'), workflowWorkspace.locator('.workflow-results > header > span')]
     await expect(workflowWorkspace).toHaveScreenshot('workflow-runs-desktop.png', { animations: 'disabled', mask: localeDependentText })
     await launcher.getByRole('button', { name: 'Activity details' }).click()
@@ -948,6 +961,57 @@ test('governs adjacent MCEM board advances, exceptions, and recycle moves', asyn
     await expect(board.getByLabel('Stage 3: Empower & Achieve')).toContainText('AI-assisted customer service')
 })
 
+for (const theme of ['light', 'dark']) test(`Web font scale covers controls, portals and shared dashboards in ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 1000 })
+    await page.goto(`/?scoutTheme=${theme}`)
+    const shell = await captureTypography(test.info(), {
+        body: page.locator('body'),
+        title: page.locator('.blade-header h2').first(),
+        caption: page.locator('.brand span'),
+        search: page.locator('.global-search input'),
+        tab: page.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'Portfolio', exact: true }),
+        icon: page.locator('.profile-button svg'),
+        commandBar: page.locator('.command-bar')
+    }, 'shell')
+    expectFontReduction(shell, { body: 11.4, title: 13.3, caption: 10.45, search: 11.4, tab: 11.4 })
+    expect(shell['icon']).toMatchObject({ width: 20, height: 20 })
+    expect(shell['commandBar']).toMatchObject({ height: 44, padding: '0px 10px', gap: '10px' })
+    await page.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
+    await page.getByRole('region', { name: 'Opportunities blade' }).getByRole('button', { name: /^Grid operations modernization / }).click()
+    await page.getByRole('region', { name: 'Grid operations modernization milestones' }).getByRole('row')
+        .filter({ hasText: 'Customer outcome validation' }).first().getByRole('button', { name: /^Edit / }).click()
+    await page.getByRole('menuitem', { name: 'Activities', exact: true }).click()
+    const dialog = page.getByRole('dialog')
+    const dialogFonts = await captureTypography(test.info(), {
+        title: dialog.getByRole('heading', { name: /^Activities/ }),
+        subject: dialog.getByLabel('Subject'),
+        category: dialog.locator('.milestone-activity-form select').first(),
+        description: dialog.getByLabel('Description'),
+        cancel: dialog.getByRole('button', { name: 'Cancel', exact: true })
+    }, 'dialog')
+    expectFontReduction(dialogFonts, { title: 19, subject: 13.3, category: 13.3333, description: 13.3, cancel: 13.3 })
+    await page.screenshot({ path: test.info().outputPath('activities.png') })
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await page.getByRole('navigation', { name: 'Primary tabs' }).getByRole('button', { name: 'Dashboard', exact: true }).click()
+    await page.getByRole('tab', { name: 'Stage and Pipeline Review', exact: true }).click()
+    const dashboard = await captureTypography(test.info(), {
+        heading: page.locator('.stage-pipeline-review h1'),
+        table: page.locator('.sprv-table').first(),
+        chartLabel: page.locator('.sprv-axis').first()
+    }, 'dashboard')
+    expectFontReduction(dashboard, { heading: 22.8, table: 11.4, chartLabel: 11.4 })
+    await page.getByRole('tab', { name: 'SE Reporting Dashboard', exact: true }).click()
+    const report = page.frameLocator('iframe[title="SE monthly report"]')
+    const reportFonts = await captureTypography(test.info(), {
+        body: report.locator('body'),
+        heading: report.getByRole('heading', { name: 'SE Reporting Dashboard', exact: true }),
+        kpi: report.locator('.kpi strong').first(),
+        chip: report.locator('.chip').first(),
+        tableHeading: report.locator('th').first()
+    }, 'report')
+    expectFontReduction(reportFonts, { body: 14, heading: 28, kpi: 30, chip: 12, tableHeading: 12 })
+})
+
 test('uses Fluent theme tokens and readable compact typography', async ({ page }) => {
     await page.goto('/?scoutTheme=dark')
 
@@ -980,15 +1044,15 @@ test('uses Fluent theme tokens and readable compact typography', async ({ page }
     })
 
     expect(styles.backgroundToken).not.toBe('')
-    expect(parseFloat(styles.bodyFontSize)).toBeCloseTo(11.4, 3)
-    expect(parseFloat(styles.introFontSize)).toBeCloseTo(10.45, 3)
+    expect(parseFloat(styles.bodyFontSize)).toBeCloseTo(10.83, 3)
+    expect(parseFloat(styles.introFontSize)).toBeCloseTo(9.928, 3)
     expect(styles.overflowX).toBe('auto')
     expect(styles.shellRows.split(' ')[0]).toBe('44px')
     expect(styles.bladeHeaderMinHeight).toBe('52px')
-    expect(parseFloat(styles.bladeTitleFontSize)).toBeCloseTo(13.3, 3)
+    expect(parseFloat(styles.bladeTitleFontSize)).toBeCloseTo(12.635, 3)
     expect(styles.accountPadding).toBe('7px 8px')
-    expect(parseFloat(styles.accountTitleFontSize)).toBeCloseTo(11.4, 3)
-    expect(parseFloat(styles.fluentButtonFontSize)).toBeCloseTo(11.4, 3)
+    expect(parseFloat(styles.accountTitleFontSize)).toBeCloseTo(10.83, 3)
+    expect(parseFloat(styles.fluentButtonFontSize)).toBeCloseTo(10.83, 3)
 })
 
 test('resizes blades by dragging and restores persisted widths after collapse and reload', async ({ page }) => {

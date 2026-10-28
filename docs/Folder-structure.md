@@ -117,6 +117,9 @@ apps/desktop/electron/main/portfolio-ipc.ts
 apps/teams/.env.native.example       Safe per-user native configuration, not real credentials
 apps/teams/.env.cli.example          Safe existing-user CLI configuration, not tokens/secrets
 apps/shared/                         Browser-safe prompt/Markdown and existing UI reuse
+apps/shared/font-scale.ts            Shared additional 0.95 font factor and pure Fluent theme-font scaling
+apps/shared/postcss-font-scale.ts     Font-only build transform shared by all client Vite builds
+apps/shared/typography.css            Low-specificity native-control fallback; no layout or icon scaling
 apps/shared/transcript-file.ts       Shared UTF-8 VTT/text reader for Desktop/Web, VS Code and Teams
                                      Shared Portfolio controls, sorting and Next Best Actions
 apps/shared/pane-resize-handle.tsx   Accessible shared three-dot width divider for all four surfaces

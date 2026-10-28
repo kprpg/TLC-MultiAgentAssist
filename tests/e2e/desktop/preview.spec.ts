@@ -3,6 +3,38 @@ import type { WebContents } from 'electron'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { captureTypography, expectFontReduction } from '../typography.js'
+
+test('legacy Desktop font scale covers Fluent text and both font shorthands', async () => {
+  const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-legacy-font-scale-'))
+  const app = await electron.launch({
+    args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+    env: { ...process.env, TLC_UI_MODE: 'legacy', TLC_DATA_MODE: 'sample', TLC_AI_MODE: 'sample' }
+  })
+  try {
+    const window = await app.firstWindow()
+    await window.getByRole('tab', { name: 'Multi-Agentic Guidance', exact: true }).click()
+    const fonts = await captureTypography(test.info(), {
+      provider: window.locator('.app-provider'),
+      brand: window.locator('.brand-mark'),
+      title: window.locator('.brand-copy strong'),
+      prompt: window.locator('.agent-prompt-card').first(),
+      input: window.locator('.fui-Textarea textarea'),
+      icon: window.locator('.edge-pane-toggle svg').first(),
+      commandBar: window.locator('.topbar')
+    })
+    expectFontReduction(fonts, { provider: 14, brand: 12, title: 13, prompt: 11, input: 14 })
+    expect(fonts['icon']).toMatchObject({ width: 20, height: 20 })
+    expect(fonts['commandBar']).toMatchObject({ height: 48, padding: '0px', gap: '10px' })
+    expect(fonts['brand']?.width).toBeCloseTo(30, 2)
+    expect(fonts['brand']?.height).toBeCloseTo(30, 2)
+    expect(fonts['prompt']?.padding).toBe('9px 11px')
+    await window.screenshot({ path: test.info().outputPath('workbench.png') })
+  } finally {
+    await app.close()
+    await rm(userDataDirectory, { recursive: true, force: true })
+  }
+})
 
 test('launches the secure MCEM operational workbench', async () => {
   test.setTimeout(60_000)
