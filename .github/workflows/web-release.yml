@@ -68,6 +68,11 @@ jobs:
             exit 1
           fi
 
+      - name: Seed non-secret Foundry configuration
+        run: >-
+          node --input-type=module -e
+          "import { seedFoundryEnvironment } from './scripts/package-vscode-extension-release.mjs'; await seedFoundryEnvironment()"
+
       - name: Run validation suite
         run: npm run phase0:check
 
