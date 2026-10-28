@@ -12,7 +12,7 @@ async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), 'tlc-teams-recovery-'))
   cleanups.push(() => rm(directory, { recursive: true, force: true }))
   const environment = {
-    TLC_TEAMS_MODE: 'sample', TLC_TEAMS_RUNTIME_PROFILE: 'local',
+    TLC_TEAMS_MODE: 'sample', TLC_AI_MODE: 'sample', TLC_TEAMS_RUNTIME_PROFILE: 'local',
     TLC_TEAMS_HOST: '127.0.0.1', TLC_TEAMS_PORT: '0', TLC_TEAMS_DATA_DIR: directory
   }
   async function start() {

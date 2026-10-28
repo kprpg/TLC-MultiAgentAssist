@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { z } from 'zod'
 import { workflowDefinitionSchema, workflowRunSchema, workflowContractVersion, workflowGuidanceHandoffSchema, type WorkflowDefinition, type WorkflowRun, type ScopeRef, type WorkflowGuidanceHandoff } from '../../../../packages/common/contracts/workflows.js'
 import { workflowRunViewSchema, type InitialWorkflowOutput } from '../../../../packages/common/contracts/workflow-output.js'
@@ -9,6 +9,8 @@ import { AgentResultView } from './result-view.js'
 import type { WorkingSelection } from './accounts.js'
 import { TeamsRequestError, type TeamsApiClient } from './data-client.js'
 import { nativeConnectionStatusSchema } from '../../../../packages/common/contracts/local-connection.js'
+import { workflowResultsViewSchema } from '../../../../packages/common/contracts/workflow-membership.js'
+import { WorkflowMembershipResults } from '../../../shared/workflow-membership.js'
 
 export function WorkflowsWorkspace({ client, scope: fixedScope, selection, onFocus, initialRunId, authentication }: {
   client: TeamsApiClient; scope?: ScopeRef; selection?: WorkingSelection | null
@@ -43,6 +45,9 @@ export function WorkflowsWorkspace({ client, scope: fixedScope, selection, onFoc
   const [mcpRevision, setMcpRevision] = useState(0)
   const [mcpError, setMcpError] = useState('')
   const request = useRef<AbortController | null>(null)
+  const loadMembership = useCallback((runId: string, filter: 'all' | 'mine') => client.operation(
+    'workflows.view', { contractVersion: workflowContractVersion, runId, filter }, workflowResultsViewSchema
+  ), [client])
   useEffect(() => {
     const controller = new AbortController()
     setOutput(null); setRun(null); setWorkflowId(''); setDefinitions([]); setError(''); setHandoff(undefined); setGuidance(undefined); setBusy(false); setStarting(false)
@@ -149,9 +154,14 @@ export function WorkflowsWorkspace({ client, scope: fixedScope, selection, onFoc
     request.current = controller
     setBusy(true)
     try {
+      if (!run || !handoff.context.queueItemId) throw new Error('Prepare a fresh queue Guidance handoff before running the agent.')
+      const currentHandoff = await client.operation('workflows.guidance', {
+        contractVersion: workflowContractVersion, runId: run.runId,
+        queueItemId: handoff.context.queueItemId, capability: handoff.capability
+      }, workflowGuidanceHandoffSchema, controller.signal)
       const result = await client.operation('runAgentTask', {
-        contractVersion, capability: handoff.capability, accountId: handoff.scope.accountId,
-        opportunityId: handoff.scope.opportunityId, prompt: handoff.prompt
+        contractVersion, capability: currentHandoff.capability, accountId: currentHandoff.scope.accountId,
+        opportunityId: currentHandoff.scope.opportunityId, prompt: currentHandoff.prompt
       }, agentTaskResponseSchema, controller.signal)
       if (!controller.signal.aborted) setGuidance(result)
     } catch (cause) { if (!controller.signal.aborted) setError(String(cause)) }
@@ -205,7 +215,11 @@ export function WorkflowsWorkspace({ client, scope: fixedScope, selection, onFoc
       {starting && <p role="status">Starting workflow: verifying your current source scope. No completed result is available yet.</p>}
       {run && <p data-testid="workflow-status" role="status">{run.status}{run.state ? ` - ${run.state}` : ''}</p>}
       {run?.status === 'failed' && <p role="alert" className="error-banner">The workflow failed. Check Activity and source permissions before retrying. Reference: {run.telemetry.correlationId}.</p>}
-      {output && <WorkflowResult output={output} onFocus={onFocus} onGuidance={(id) => { void prepareGuidance(id) }} />}
+      {output && <WorkflowMembershipResults load={loadMembership} runId={run?.runId} output={output}>
+        {(visibleOutput, reasonFor) => <WorkflowResult output={visibleOutput} onFocus={onFocus}
+          guidanceDisabledReason={(id) => run?.status === 'completed' ? reasonFor(id) : 'Wait for this Play to complete.'}
+          onGuidance={(id) => { void prepareGuidance(id) }} />}
+      </WorkflowMembershipResults>}
       {handoff && <section className="panel"><h2>Review guidance handoff</h2><p>{handoff.context.cardTitle}</p><p>{handoff.prompt}</p>
         <button type="button" disabled={busy} onClick={() => { void runGuidance() }}>Run scoped guidance</button>
         {guidance && <AgentResultView result={guidance} />}

@@ -152,6 +152,19 @@ export class LocalStoreMsxConnector implements MsxConnector {
     return new LocalStoreRecordCreation(this.store, this.currentUserId)
   }
 
+  async getTeamMemberships() {
+    const milestones = this.store.all(
+      'SELECT milestone_id, opportunity_id FROM milestone_team_member WHERE systemuser_id = ?', this.currentUserId
+    )
+    return {
+      dealTeamOpportunityIds: this.store.all(
+        'SELECT opportunity_id FROM opportunity_dealteam WHERE systemuser_id = ?', this.currentUserId
+      ).map((row) => String(row['opportunity_id'])),
+      milestoneTeamMilestoneIds: milestones.map((row) => String(row['milestone_id'])),
+      milestoneTeamOpportunityIds: [...new Set(milestones.map((row) => String(row['opportunity_id'])))]
+    }
+  }
+
   private ownerName(ownerId: unknown): string | undefined {
     const id = str(ownerId)
     if (!id) return undefined

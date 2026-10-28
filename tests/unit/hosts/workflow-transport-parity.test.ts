@@ -4,7 +4,11 @@ import { buildWebApiHandler, type WebRuntime } from '../../../apps/web/src/app.j
 import { createWorkflowIpcHandlers, workflowIpcChannels } from '../../../apps/desktop/electron/main/workflow-ipc.js'
 import { routeBridgeMessage } from '../../../apps/vscode-extension/src/host-router.js'
 import { createSampleDataProvider } from '../../../apps/vscode-extension/src/data-provider.js'
-import type { WorkflowDefinition } from '../../../packages/common/index.js'
+import { workflowRunSchema, type WorkflowDefinition } from '../../../packages/common/index.js'
+import { createSampleApplicationServices } from '../../../packages/orchestrator/application-runtime.js'
+import { createApplicationOperations } from '../../../packages/orchestrator/operations.js'
+import { readWorkflowResultsView, prepareMemberWorkflowGuidance } from '../../../packages/orchestrator/workflows/membership-view.js'
+import { workflowResultsViewSchema } from '../../../packages/common/contracts/workflow-membership.js'
 import {
     SharedWorkflowHost,
     InitialWorkflowResultAssembler,
@@ -195,6 +199,66 @@ describe('workflow trusted-host parity', () => {
 
         expect(await post(baseUrl, 'get', { contractVersion, runId: admitted.runId })).toMatchObject({ run: { runId: admitted.runId } })
         expect(runtime.list()).toHaveLength(1)
+    })
+
+    it('projects identical membership results over IPC, HTTP, VS Code and Teams and rejects nonmember handoffs', async () => {
+        const services = await createSampleApplicationServices()
+        const provider = createSampleDataProvider()
+        try {
+            const core = services.orchestrator
+            const milestone = (await core.listMilestones('opp-grid-modernization'))[0]!
+            await core.joinMilestoneTeam('opp-grid-modernization', milestone.id)
+            await core.leaveDealTeam('opp-grid-modernization')
+            const registry = new WorkflowRegistry([{ ...definition, id: 'WF-002' }])
+            const runtime = new WorkflowRuntime(registry, {
+                execute: async () => ({
+                    state: 'complete',
+                    data: [milestone.id, 'unjoined-sibling'].map((id) => ({
+                        id, opportunityId: 'opp-grid-modernization', accountId: 'account-contoso', name: id, targetDate: '2026-09-01'
+                    })),
+                    rowCount: 2, truncated: false,
+                    lineage: { connector: 'dataverse-mcp', operation: 'read_query', toolCallId: 'membership-call' },
+                    sourceHealth: { source: 'dataverse-mcp', state: 'sample', detail: 'Sanitized membership records.', checkedAt: '2026-10-27T00:00:00.000Z' }
+                })
+            }, { resultAssembler: new InitialWorkflowResultAssembler() })
+            const host = new SharedWorkflowHost(registry, runtime)
+            const read = () => core.getTeamMemberships()
+            const operations = createApplicationOperations({ ...services, workflows: host })
+            const queued = workflowRunSchema.parse(await operations.invoke('workflows.start', {
+                contractVersion, workflowId: 'WF-002', scope: { kind: 'portfolio' }, input: { asOf: '2026-10-27' }
+            }))
+            await runtime.wait(queued.runId)
+            const ipc = createWorkflowIpcHandlers(host, read)
+            const baseUrl = await listen(buildWebApiHandler({
+                createRuntime: () => ({ ...runtimeStub(), getTeamMemberships: read }), resolveWorkflowHost: () => host
+            }))
+            const bridgeProvider = {
+                ...provider,
+                getWorkflowResultsView: (runId: string, filter: 'all' | 'mine') => readWorkflowResultsView(host, read, { contractVersion, runId, filter }),
+                prepareWorkflowGuidance: (runId: string, queueItemId: string, capability: 'account-pulse' | 'mcem-coach' | 'pursuit-executive' | 'risk-solution-play') =>
+                    prepareMemberWorkflowGuidance(host, read, { contractVersion, runId, queueItemId, capability })
+            }
+            for (const filter of ['all', 'mine'] as const) {
+                const request = { contractVersion, runId: queued.runId, filter }
+                const expected = workflowResultsViewSchema.parse(await ipc[workflowIpcChannels.view]!(request))
+                expect(await post(baseUrl, 'view', request)).toEqual(expected)
+                expect(await operations.invoke('workflows.view', request)).toEqual(expected)
+                expect(await routeBridgeMessage(bridgeProvider, {
+                    kind: 'request', id: filter, method: 'getWorkflowResultsView', params: { runId: queued.runId, filter }
+                })).toMatchObject({ ok: true, result: expected })
+                expect(expected.visibleItems).toBe(filter === 'all' ? 2 : 1)
+            }
+            const forbidden = { contractVersion, runId: queued.runId, queueItemId: 'WF-002:unjoined-sibling', capability: 'mcem-coach' }
+            await expect(ipc[workflowIpcChannels.guidance]!(forbidden)).rejects.toThrow(/member/)
+            await expect(operations.invoke('workflows.guidance', forbidden)).rejects.toThrow(/member/)
+            const denied = await fetch(`${baseUrl}/api/workflows/guidance`, {
+                method: 'POST', headers: authenticationHeaders, body: JSON.stringify(forbidden)
+            })
+            expect(denied.status).toBe(403)
+            expect(await denied.json()).toMatchObject({ code: 'membership_required' })
+            const approved = { ...forbidden, queueItemId: `WF-002:${milestone.id}` }
+            expect(await post(baseUrl, 'guidance', approved)).toEqual(await ipc[workflowIpcChannels.guidance]!(approved))
+        } finally { await provider.dispose(); await services.dispose() }
     })
 
     async function post(baseUrl: string, operation: string, body: unknown): Promise<unknown> {

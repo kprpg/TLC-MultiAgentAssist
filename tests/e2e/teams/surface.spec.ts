@@ -34,7 +34,7 @@ test('personal workspace uses source data, guided prompts and grounded readable 
   const failures: string[] = []
   page.on('response', (response) => { if (new URL(response.url()).pathname.startsWith('/api/teams/') && response.status() >= 400) failures.push(`${response.request().method()} ${new URL(response.url()).pathname}: ${response.status()}`) })
   await page.goto('/')
-  await expect(page.getByText('Sample - no live business data', { exact: true })).toBeVisible()
+  await expect(page.getByText('Sample data / Offline AI', { exact: true })).toBeVisible()
   await chooseOpportunity(page, request)
   await page.getByRole('tab', { name: 'Guidance', exact: true }).click()
   await page.getByRole('button', { name: 'Run guidance', exact: true }).click()

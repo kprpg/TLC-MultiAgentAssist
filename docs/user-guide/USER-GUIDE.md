@@ -738,6 +738,16 @@ new milestones and other signals, plus the evidence attribution and a reminder t
 suggestions have not been applied. Downloading a document or email draft does not approve
 or apply any MSX changes.
 
+**Keeping results while navigating.** Meeting Capture extraction and Working Session work
+continue when you switch opportunities or views. Reopen the original launcher to recover
+its pending state or latest result; Meeting Capture offers **Review last result** rather
+than opening a review in another opportunity. Restoring does not run the operation again.
+The UI remembers up to 20 completed results in memory and never evicts active work.
+Refresh, restart, webview recreation and private-session/data-mode/access resets clear
+this memory. A meeting proposal is no longer offered as a retained review once explicit
+**Submit** begins. Generated files and hosted download expiry are unchanged; see
+[Working Session retention and output limits](../runbooks/working-session.md#session-only-result-retention).
+
 ---
 
 ## 8. MCEM Stage Management

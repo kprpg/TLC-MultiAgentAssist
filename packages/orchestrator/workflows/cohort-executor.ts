@@ -24,6 +24,7 @@ import type {
     WorkflowConnectorResult,
     WorkflowResultAssembler
 } from './runtime.js'
+import { aggregateResultCard, ownerWorkloadQueue } from './aggregate-results.js'
 
 type DataverseReader = Pick<DataverseMcpReadAdapter, 'query'>
 type ResolveDelegatedScope = (
@@ -97,12 +98,29 @@ export class InitialWorkflowResultAssembler implements WorkflowResultAssembler {
         const evidenceIds = lineage.map(({ toolCallId }) => toolCallId)
         const queueItems = buildQueueItems(workflowId, ordered, input, evidenceIds)
         return initialWorkflowOutputSchema.parse({
-            contractVersion: '1.0',
+            contractVersion: '2.0',
             workflowId,
             generatedAt: context.generatedAt,
             scope: context.scope,
             card: buildCard(workflowId, context.definition.name, ordered, queueItems, evidenceIds),
             queueItems,
+            projection: {
+                records: ordered.map((record, index) => {
+                    const kind = milestoneWorkflows.has(workflowId) ? 'milestone' as const
+                        : activityWorkflows.has(workflowId) ? 'activity' as const : 'opportunity' as const
+                    const opportunityId = kind === 'opportunity' ? text(record.id) : text(record.opportunityId)
+                    return {
+                        recordId: text(record.id) ?? String(index + 1), kind, cardIndex: index,
+                        ...(opportunityId ? { opportunityId } : {}),
+                        ...(text(record.accountId) ? { accountId: text(record.accountId) } : {}),
+                        ...(kind === 'milestone' && text(record.id) ? { milestoneId: text(record.id) } : {}),
+                        ...(workflowId !== 'WF-009' && queueItems[index] ? { queueItemId: queueItems[index]!.id } : {}),
+                        ...(text(record.ownerId) ? { ownerId: text(record.ownerId) } : {}),
+                        ...(text(record.opportunityOwnerName) ? { ownerName: text(record.opportunityOwnerName) } : {})
+                    }
+                }),
+                ...(input.maximumActiveItems !== undefined ? { maximumActiveItems: input.maximumActiveItems } : {})
+            },
             lineage,
             sourceHealth
         })
@@ -198,30 +216,10 @@ function buildCard(
             actions: queueItems.map((item) => ({ id: item.id, label: item.title, priority: item.priority }))
         }
     }
-    if (workflowId === 'WF-009') {
-        return {
-            kind: 'metric-strip', title, evidenceIds,
-            metrics: [
-                { label: 'Overloaded owners', value: queueItems.length },
-                { label: 'Active opportunities', value: records.length }
-            ]
-        }
-    }
-    if (workflowId === 'WF-008') {
-        const perAccount = new Map<string, number>()
-        for (const record of records) {
-            perAccount.set(text(record.accountId) ?? 'Unassigned', (perAccount.get(text(record.accountId) ?? 'Unassigned') ?? 0) + 1)
-        }
-        const topCount = perAccount.size > 0 ? Math.max(...perAccount.values()) : 0
-        return {
-            kind: 'metric-strip', title, evidenceIds,
-            metrics: [
-                { label: 'Pipeline opportunities', value: records.length },
-                { label: 'Accounts', value: perAccount.size },
-                { label: 'Top account share %', value: records.length > 0 ? Math.round((topCount / records.length) * 100) : 0 }
-            ]
-        }
-    }
+    if (workflowId === 'WF-009' || workflowId === 'WF-008') return aggregateResultCard(
+        workflowId, title, records.map((record) => ({ ...(text(record.accountId) ? { accountId: text(record.accountId) } : {}) })),
+        queueItems.length, evidenceIds
+    )
     const columns = workflowId === 'WF-007'
         ? ['id', 'opportunityId', 'subject', 'ownerId', 'dueDate', 'status']
         : workflowId === 'WF-001'
@@ -237,28 +235,10 @@ function buildQueueItems(
     evidenceIds: string[]
 ): WorkflowQueueItem[] {
     if (workflowId === 'WF-009') {
-        const threshold = input.maximumActiveItems ?? 20
-        const owners = new Map<string, { count: number; name: string }>()
-        for (const record of records) {
-            const ownerId = text(record.ownerId) ?? 'unassigned'
-            const ownerName = text(record.opportunityOwnerName)
-                ?? (ownerId === 'unassigned' ? 'Unassigned owner' : 'Owner name unavailable')
-            const current = owners.get(ownerId)
-            owners.set(ownerId, {
-                count: (current?.count ?? 0) + 1,
-                name: current?.name !== 'Owner name unavailable' ? current?.name ?? ownerName : ownerName
-            })
-        }
-        return [...owners.entries()]
-            .filter(([, owner]) => owner.count > threshold)
-            .sort(([, left], [, right]) => left.name.localeCompare(right.name))
-            .map(([ownerId, owner]) => ({
-                id: `${workflowId}:${ownerId}`, workflowId, priority: owner.count > threshold * 2 ? 'P0' : 'P1',
-                title: `${owner.name} owns ${owner.count} active opportunities`,
-                owner: owner.name,
-                evidenceIds,
-                status: 'new'
-            }))
+        return ownerWorkloadQueue(records.map((record) => ({
+            ...(text(record.ownerId) ? { ownerId: text(record.ownerId) } : {}),
+            ...(text(record.opportunityOwnerName) ? { ownerName: text(record.opportunityOwnerName) } : {})
+        })), input.maximumActiveItems ?? 20, evidenceIds)
     }
     return records.map((record, index) => {
         const recordId = text(record.id) ?? `${index + 1}`
@@ -286,6 +266,8 @@ function buildQueueItems(
 
 // Opportunity-entity workflows surface the row id as the opportunity id so queue items can hand off to guidance.
 const opportunityScopedWorkflows = new Set<InitialWorkflowId>(['WF-001', 'WF-004', 'WF-006', 'WF-008', 'WF-011'])
+const milestoneWorkflows = new Set<InitialWorkflowId>(['WF-002', 'WF-003', 'WF-005', 'WF-012'])
+const activityWorkflows = new Set<InitialWorkflowId>(['WF-007', 'WF-010'])
 
 function queueOwnerName(workflowId: InitialWorkflowId, record: Record<string, unknown>): string | undefined {
     return text(record.owner)

@@ -31,6 +31,7 @@ import { MeetingPicker, useMeetingList } from '../../../shared/meeting-picker.js
 import { WorkingSessionLauncher } from '../../../shared/working-session/working-session-launcher.js'
 import { DashboardWorkspace } from '../../../shared/dashboards/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
+import { MembershipAction, useWorkflowMembership, WorkflowMembershipControls } from '../../../shared/workflow-membership.js'
 import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
 import { MsxOpportunityLink } from '../../../shared/msx-opportunity-link.js'
@@ -41,6 +42,7 @@ import { usePortfolioRefresh } from './use-portfolio-refresh.js'
 import { SourceSyncStatus } from '../../../shared/sync-status.js'
 import { usePresentationSession } from '../../../shared/presentation-hooks.js'
 import { useAgentRun, type AgentInvoke } from '../../../shared/use-agent-run.js'
+import { useMeetingOperation } from '../../../shared/use-operation-result.js'
 import { AgentResponse, type AgentFollowUpContext } from '../../../shared/agent-response.js'
 import { WorkflowProgress } from '../../../shared/workflow-progress.js'
 import type {
@@ -376,8 +378,14 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
     }, [definitions, playQuery])
 
     const selectedRun = runs.find((run) => run.runId === selectedRunId)
-    const groups = useMemo<QueueGroup[]>(() => (selectedRun ? groupQueueByOpportunity(selectedRun.queue, resolvers) : []), [selectedRun, resolvers])
-    const displayCard = useMemo(() => (selectedRun ? humanizeResultCard(selectedRun.card, resolvers) : undefined), [selectedRun, resolvers])
+    const rawOutput = useMemo(() => selectedRun ? {
+        workflowId: selectedRun.workflowId, generatedAt: new Date(selectedRun.ranAt).toISOString(),
+        card: selectedRun.card, queueItems: selectedRun.queue, sourceHealth: selectedRun.sourceHealth
+    } : undefined, [selectedRun])
+    const membership = useWorkflowMembership(dataClient.getWorkflowResultsView, selectedRunId, rawOutput)
+    const queue = membership.output?.queueItems
+    const groups = useMemo<QueueGroup[]>(() => groupQueueByOpportunity(queue ?? [], resolvers), [queue, resolvers])
+    const displayCard = useMemo(() => membership.output ? humanizeResultCard(membership.output.card, resolvers) : undefined, [membership.output, resolvers])
 
     // Move focus to the run header when a result is shown so screen readers announce the run context.
     useEffect(() => {
@@ -452,11 +460,12 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                                 <span>{formatRunTime(selectedRun.ranAt)}</span>
                             </div>
                             <div className="run-metric-strip">
-                                <span className="run-metric"><strong>{selectedRun.queue.length}</strong> items</span>
-                                <span className="run-metric"><strong>{highPriorityCount(selectedRun.queue)}</strong> high priority</span>
+                                <span className="run-metric"><strong>{queue?.length ?? 0}</strong> items</span>
+                                <span className="run-metric"><strong>{highPriorityCount(queue ?? [])}</strong> high priority</span>
                                 <span className="run-metric"><strong>{groups.length}</strong> opportunities</span>
                             </div>
                         </header>
+                        <WorkflowMembershipControls membership={membership} />
                         <WorkflowProgress run={selectedRun} itemCount={selectedRun.queue.length} sourceHealth={selectedRun.sourceHealth} />
                         {runs.length > 1 && (
                             <div className="run-history" role="tablist" aria-label="Recent runs">
@@ -476,11 +485,11 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                             </div>
                         )}
                         <div className="results-body">
-                            <ResultCard card={displayCard ?? selectedRun.card} />
-                            {!cardHasContent(selectedRun.card) && selectedRun.queue.length === 0 && (
+                            {displayCard && <ResultCard card={displayCard} />}
+                            {membership.output && !cardHasContent(membership.output.card) && queue?.length === 0 && membership.filter === 'all' && (
                                 <p className="muted">This play returned no items for the current scope.</p>
                             )}
-                            {selectedRun.queue.length > 0 && (
+                            {queue && queue.length > 0 && (
                                 <div className="queue">
                                     <h4>Operational queue</h4>
                                     {groups.map((group) => {
@@ -507,14 +516,14 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                                                                     <div className="queue-item-row">
                                                                         <span className="queue-item-text"><span className={`badge priority ${priorityClass(item.priority)}`}>{item.priority}</span> {item.title}</span>
                                                                         {item.accountId && item.opportunityId && (
-                                                                            <button
+                                                                            <MembershipAction reason={membership.reasonFor(item.id)}><button
                                                                                 className="send-agent"
                                                                                 title={`Send this item to ${agentLabel(capability)}`}
-                                                                                disabled={selectedRun.status !== 'completed' || entry?.status === 'loading'}
+                                                                                disabled={selectedRun.status !== 'completed' || entry?.status === 'loading' || Boolean(membership.reasonFor(item.id))}
                                                                                 onClick={() => void sendToGuidance(selectedRun.runId, item.id, item.title, capability)}
                                                                             >
                                                                                 {entry?.status === 'loading' ? 'Sending...' : `Send to ${agentLabel(capability)}`}
-                                                                            </button>
+                                                                            </button></MembershipAction>
                                                                         )}
                                                                     </div>
                                                                     {entry && (
@@ -1001,13 +1010,14 @@ async function readFileIntoContent(event: ChangeEvent<HTMLInputElement>, setCont
 }
 
 /** Modal approval panel: per-row toggle, milestone multi-select, required reason, all-or-none submit. */
-function MeetingReviewModal({ proposal, opportunityName, milestones, onClose, onApplied, onNote }: {
+function MeetingReviewModal({ proposal, opportunityName, milestones, onClose, onApplied, onNote, onSubmitStart }: {
     proposal: MeetingChangeSetProposalView
     opportunityName: string
     milestones: MilestoneView[]
     onClose: () => void
     onApplied: () => void
     onNote: (message: string) => void
+    onSubmitStart: () => { isCurrent(): boolean }
 }): ReactElement {
     const [checkedSlots, setCheckedSlots] = useState<Set<string>>(() => new Set(proposal.slots.filter((slot) => slot.checkedByDefault && !slot.blocked).map((slot) => slot.slotId)))
     const [checkedNewMilestones, setCheckedNewMilestones] = useState<Set<string>>(() => new Set(proposal.newMilestones.filter((milestone) => milestone.checkedByDefault).map((milestone) => milestone.tempId)))
@@ -1021,6 +1031,7 @@ function MeetingReviewModal({ proposal, opportunityName, milestones, onClose, on
     const summaryMarkdown = meetingProposalToMarkdown(proposal, opportunityName)
 
     const submit = useCallback(async () => {
+        const { isCurrent } = onSubmitStart()
         setBusy(true)
         try {
             const applied = await dataClient.applyMeetingChangeSet(proposal, {
@@ -1031,14 +1042,15 @@ function MeetingReviewModal({ proposal, opportunityName, milestones, onClose, on
                 selectedMilestoneIds: [...selectedMilestones],
                 reason: reason.trim()
             })
+            if (!isCurrent()) return
             setResult(applied)
             onNote(applied.state === 'applied' ? 'Meeting signals injected.' : 'Change set rolled back (a record changed since review).')
         } catch (error) {
-            onNote((error as Error).message)
+            if (isCurrent()) onNote((error as Error).message)
         } finally {
-            setBusy(false)
+            if (isCurrent()) setBusy(false)
         }
-    }, [proposal, checkedSlots, checkedNewMilestones, selectedMilestones, reason, onNote])
+    }, [proposal, checkedSlots, checkedNewMilestones, selectedMilestones, reason, onNote, onSubmitStart])
 
     return (
         <div className="meeting-modal-backdrop" role="dialog" aria-modal="true" aria-label="Review meeting signals">
@@ -1148,16 +1160,15 @@ function MeetingCaptureLauncher({ opportunityId, opportunityName, milestones, on
     onApplied: () => void
     onNote: (message: string) => void
 }): ReactElement {
-    const [open, setOpen] = useState(false)
     const [transcriptId, setTranscriptId] = useState('')
     const [tab, setTab] = useState<'pick' | 'paste'>('pick')
     const [pasteContent, setPasteContent] = useState('')
     const [meetingType, setMeetingType] = useState<MeetingTypeView>('customer')
-    const [busy, setBusy] = useState(false)
-    const [proposal, setProposal] = useState<MeetingChangeSetProposalView | undefined>(undefined)
+    const operation = useMeetingOperation(dataClient, opportunityId, opportunityName, onNote)
+    const { open, busy, proposal } = operation
 
     useEffect(() => {
-        setOpen(false); setProposal(undefined); setPasteContent(''); setTranscriptId(''); setTab('pick')
+        setPasteContent(''); setTranscriptId(''); setTab('pick')
     }, [opportunityId])
     const meetings = useMeetingList<MeetingTranscriptSummaryView>(
         () => dataClient.listMeetingTranscripts(opportunityId), open && tab === 'pick', opportunityId,
@@ -1166,23 +1177,9 @@ function MeetingCaptureLauncher({ opportunityId, opportunityName, milestones, on
 
     const canExtract = tab === 'paste' ? pasteContent.trim().length > 10 : meetings.items.some((item) => item.id === transcriptId)
 
-    const extract = useCallback(async () => {
-        setBusy(true)
-        try {
-            const next = tab === 'paste'
-                ? await dataClient.proposeMeetingFromRaw(opportunityId, pasteContent, meetingType)
-                : await dataClient.proposeMeetingFromTranscript(opportunityId, transcriptId)
-            setProposal(next)
-        } catch (error) {
-            onNote((error as Error).message)
-        } finally {
-            setBusy(false)
-        }
-    }, [tab, opportunityId, pasteContent, meetingType, transcriptId, onNote])
-
     return (
         <div className="meeting-launcher">
-            <button className="secondary meeting-launch-button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>Meeting capture</button>
+            <button className="secondary meeting-launch-button" aria-expanded={open} onClick={operation.toggle}>Meeting capture</button>
             {open && (
                 <div className="meeting-launcher-panel">
                     <div className="meeting-launcher-tabs">
@@ -1202,9 +1199,12 @@ function MeetingCaptureLauncher({ opportunityId, opportunityName, milestones, on
                             <textarea rows={4} placeholder="Paste a Teams transcript (WebVTT) or 'Speaker: text' lines..." value={pasteContent} onChange={(event) => setPasteContent(event.target.value)} />
                         </div>
                     )}
+                    {operation.error && <p className="error" role="alert">{operation.error}</p>}
                     <div className="actions">
-                        <button className="secondary" onClick={() => setOpen(false)}>Close</button>
-                        <button className="primary" disabled={busy || !canExtract} onClick={() => void extract()}>{busy ? 'Extracting...' : 'Extract & Review'}</button>
+                        <button className="secondary" onClick={operation.close}>Close</button>
+                        {operation.canRestore && <button className="secondary" onClick={operation.restore}>Review last result</button>}
+                        <button className="primary" disabled={busy || !canExtract} onClick={() => operation.extract(tab === 'paste'
+                            ? { kind: 'raw', content: pasteContent, meetingType } : { kind: 'transcript', transcriptId })}>{busy ? 'Extracting...' : 'Extract & Review'}</button>
                     </div>
                 </div>
             )}
@@ -1214,9 +1214,10 @@ function MeetingCaptureLauncher({ opportunityId, opportunityName, milestones, on
                     proposal={proposal}
                     opportunityName={opportunityName}
                     milestones={milestones}
-                    onClose={() => setProposal(undefined)}
-                    onApplied={() => { setProposal(undefined); setOpen(false); onApplied() }}
+                    onClose={operation.dismissReview}
+                    onApplied={() => { operation.dismissReview(); operation.close(); onApplied() }}
                     onNote={onNote}
+                    onSubmitStart={operation.beginSubmit}
                 />
             )}
         </div>

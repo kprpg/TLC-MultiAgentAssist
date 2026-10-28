@@ -129,8 +129,21 @@ apps/shared/customer-email-actions.tsx
                                      Copy and human-reviewed unsent draft actions shared by all four surfaces
 apps/shared/session-portfolio.ts     Memory-only, mode/session-scoped Portfolio/Discovery snapshots
                                      Shared lazy detail caching, local filtering and confirmed-write updates
+apps/shared/operation-result-session.ts
+                                     UI-session ownership of existing async calls; 20 completed results, scope isolation and private reset
+apps/shared/use-operation-result.ts  Shared reactive result subscription and Meeting Capture review/restore behavior
 apps/shared/workflow-polling.ts      Workflow-definition deadline plus bounded transport grace across UI transports
 apps/shared/workflow-progress.tsx    Shared incomplete/partial/terminal Play result announcements
+apps/shared/workflow-membership.tsx Shared All/My results controls, scoped loading and accessible disabled-action explanations
+apps/shared/workflow-membership.css Shared membership toolbar and hover/keyboard tooltip styling
+packages/common/contracts/workflow-membership.ts
+                                     Strict results-view and current-membership contracts
+packages/orchestrator/workflows/membership-projection.ts
+                                     Browser-safe pure result projection; typed references and aggregate contributors
+packages/orchestrator/workflows/membership-view.ts
+                                     Current-user membership reads and guarded queue Guidance handoffs
+apps/vscode-extension/src/foundry-sign-in.ts
+                                     Prompt-owned sign-in budget shared by preflight and SDK token callbacks
 apps/shared/session-cache.ts         Bounded reactive datasets, active-interest freshness and safe read retries
 apps/shared/presentation-owner.ts    Host-owned cache composition and confirmed canonical patches
 apps/shared/presentation-hooks.ts    Visible-interest subscriptions and original editor-field capture

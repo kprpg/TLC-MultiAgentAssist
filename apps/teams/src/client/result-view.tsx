@@ -9,7 +9,7 @@ export function AgentResultView({ result, actions, busy = false, followUp, email
 }) {
   return <section className="result-panel" aria-label="Grounded TLC response">
     <header className="section-heading result-heading"><div className="result-title"><h2>TLC guidance</h2><span className={`status-pill ${result.state}`}>{result.state}</span></div>{actions}</header>
-    <AgentResponse key={result.correlationId} content={result.content} busy={busy || result.agentVersion === 'streaming'}
+    <AgentResponse key={result.correlationId} inference={result.inference} content={result.content} busy={busy || result.agentVersion === 'streaming'}
       followUp={followUp} emailAction={emailAction} urlTransform={(url) => {
       try { const parsed = new URL(url); return parsed.protocol === 'https:' && !parsed.username && !parsed.password ? url : '' } catch { return '' }
     }} onOpenEvidence={(url) => {

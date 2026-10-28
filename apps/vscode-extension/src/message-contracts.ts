@@ -64,6 +64,7 @@ export const bridgeMethodSchema = z.enum([
     'listWorkflowDefinitions',
     'startWorkflow',
     'getWorkflowRun',
+    'getWorkflowResultsView',
     'cancelWorkflowRun',
     'listWorkflowRuns',
     'prepareWorkflowGuidance',
@@ -149,6 +150,7 @@ export const bridgeParamSchemas = {
         correlationId: z.string().uuid().optional()
     }).strict(),
     getWorkflowRun: z.object({ runId: z.string().uuid() }).strict(),
+    getWorkflowResultsView: z.object({ runId: z.string().uuid(), filter: z.enum(['all', 'mine']) }).strict(),
     cancelWorkflowRun: z.object({ runId: z.string().uuid() }).strict(),
     listWorkflowRuns: z.object({
         scope: scopeRefSchema.optional(),

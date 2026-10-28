@@ -98,6 +98,6 @@ None. The reference page-level footer (product branding, source note) is intenti
 ## 11. Cross-cutting behaviour
 
 - Marks (Focus/Reviewed) persist in `localStorage` under `tlc.stagePipelineReview.marks.v1`; storage failure degrades to in-memory.
-- Theme: surfaces and text use the shared Fluent/VS Code tokens; brand maroon (`--sprv-brand`) and chart colours are fixed for fidelity.
+- Theme: surfaces and text use the shared Fluent/VS Code tokens, including charcoal surfaces in dark mode. Controls, links, selected tabs and filter chips use the host's blue accents; headings reuse the Portfolio cyan heading token (or Fluent teal). Filled controls use separate background/on-brand tokens so their text remains readable in light and dark themes. ACR chart layers and alert colours retain their existing meanings.
 - Accessibility: radio groups, `aria-pressed` toggles, labelled table regions, sortable header buttons, SVG chart has a text summary.
 - Empty/error states: loading text, `Retry` on failure, stale-snapshot notice, "No records match the current filters".

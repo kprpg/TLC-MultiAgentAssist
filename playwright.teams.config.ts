@@ -12,7 +12,7 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 120_000,
     env: {
-      TLC_TEAMS_MODE: 'sample', TLC_TEAMS_PORT: '4188',
+      TLC_TEAMS_MODE: 'sample', TLC_AI_MODE: 'sample', TLC_TEAMS_PORT: '4188',
       TLC_TEAMS_ORIGIN: 'http://127.0.0.1:4188',
       TLC_TEAMS_RUN_ID: '11111111111111111111111111111111',
       TLC_TEAMS_PACKAGE_ID: '8cb8c9a2-6ee6-4382-bfa4-5b409c77e54b',

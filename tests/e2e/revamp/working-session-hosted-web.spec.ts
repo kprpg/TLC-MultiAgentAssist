@@ -10,6 +10,7 @@ import { createWebWorkingSessionResolver } from '../../../apps/web/src/working-s
 import { LocalPdfMcemGuidanceConnector } from '../../../packages/connectors/sharepoint/index.js'
 import { LocalStore, LocalStoreMsxConnector } from '../../../packages/connectors/local-store/index.js'
 import { ThinSliceOrchestrator } from '../../../packages/orchestrator/index.js'
+import { deferredSignal } from './operation-result-fixtures.js'
 
 let server: Server | undefined
 let store: LocalStore | undefined
@@ -95,4 +96,115 @@ test('explains a failure and keeps the panel usable', async ({ page }) => {
   await panel.getByRole('button', { name: 'Suggest topic' }).click()
   await expect(panel.getByRole('alert')).toContainText('The topic service is unavailable.')
   await expect(panel.getByRole('button', { name: 'Suggest topic' })).toBeEnabled()
+})
+
+test('@operation-retention restores a Web preparation completed after navigating away without another request', async ({ page }) => {
+  const base = await hostedWeb()
+  const panel = await openLauncher(page, base)
+  await panel.getByRole('button', { name: 'Suggest topic' }).click()
+  await panel.getByRole('textbox', { name: 'Topic' }).fill('Retained grid preparation')
+  await panel.getByRole('checkbox', { name: /PowerPoint decks/ }).uncheck()
+  const arrived = deferredSignal()
+  const release = deferredSignal()
+  const delivered = deferredSignal()
+  let preparations = 0
+  await page.route('**/api/working-session/prepare', async (route) => {
+    preparations++
+    const response = await route.fetch()
+    arrived.resolve()
+    await release.promise
+    await route.fulfill({ response })
+    delivered.resolve()
+  })
+
+  try {
+    await panel.getByRole('button', { name: 'Prepare', exact: true }).click()
+    await arrived.promise
+    await page.getByRole('button', { name: 'Discover', exact: true }).click()
+    await expect(panel).toHaveCount(0)
+    release.resolve()
+    await delivered.promise
+    await page.getByRole('button', { name: 'Portfolio', exact: true }).click()
+    await page.getByRole('button', { name: 'Prepare working session', exact: true }).click()
+    await expect(panel.getByRole('status').first()).toContainText(/Prepared \d+ file/)
+    await expect(panel.getByRole('button', { name: 'Download zip' })).toBeVisible()
+    expect(preparations).toBe(1)
+    await panel.getByRole('button', { name: 'Prepare again' }).click()
+    await expect(panel.getByRole('textbox', { name: 'Topic' })).toHaveValue('Retained grid preparation')
+  } finally {
+    release.resolve()
+  }
+})
+
+test('@operation-retention restores pending Web work without dispatching it twice', async ({ page }) => {
+  const panel = await openLauncher(page, await hostedWeb())
+  const arrived = deferredSignal()
+  const release = deferredSignal()
+  let topics = 0
+  await page.route('**/api/working-session/topic', async (route) => {
+    topics++
+    const response = await route.fetch()
+    arrived.resolve()
+    await release.promise
+    await route.fulfill({ response })
+  })
+  try {
+    await panel.getByRole('button', { name: 'Suggest topic' }).click()
+    await arrived.promise
+    await page.getByRole('button', { name: 'Discover', exact: true }).click()
+    await page.getByRole('button', { name: 'Portfolio', exact: true }).click()
+    await page.getByRole('button', { name: 'Prepare working session' }).click()
+    await expect(panel.getByRole('status')).toContainText('Working...')
+    await expect(panel.getByRole('button', { name: 'Suggest topic' })).toHaveCount(0)
+    expect(topics).toBe(1)
+    release.resolve()
+    await expect(panel.getByRole('textbox', { name: 'Topic' })).not.toHaveValue('')
+    expect(topics).toBe(1)
+  } finally { release.resolve() }
+})
+
+test('@operation-retention retains a background Web failure without notifying another view', async ({ page }) => {
+  const panel = await openLauncher(page, await hostedWeb())
+  const arrived = deferredSignal()
+  const release = deferredSignal()
+  const delivered = deferredSignal()
+  await page.route('**/api/working-session/topic', async (route) => {
+    arrived.resolve()
+    await release.promise
+    await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Background topic unavailable' }) })
+    delivered.resolve()
+  })
+  try {
+    await panel.getByRole('button', { name: 'Suggest topic' }).click()
+    await arrived.promise
+    await page.getByRole('button', { name: 'Discover', exact: true }).click()
+    release.resolve()
+    await delivered.promise
+    await expect(page.getByText('Background topic unavailable')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Portfolio', exact: true }).click()
+    await page.getByRole('button', { name: 'Prepare working session' }).click()
+    await expect(panel.getByRole('alert')).toContainText('Background topic unavailable')
+    await expect(panel.getByRole('button', { name: 'Suggest topic' })).toBeEnabled()
+    expect(requests.filter((entry) => entry.path.endsWith('/topic'))).toHaveLength(1)
+  } finally { release.resolve() }
+})
+
+test('@operation-retention keeps expired download errors explicit without regenerating retained output', async ({ page }) => {
+  const panel = await openLauncher(page, await hostedWeb())
+  await panel.getByRole('button', { name: 'Suggest topic' }).click()
+  await expect(panel.getByRole('textbox', { name: 'Topic' })).toBeVisible()
+  await panel.getByRole('checkbox', { name: /PowerPoint decks/ }).uncheck()
+  await panel.getByRole('button', { name: 'Prepare', exact: true }).click()
+  await expect(panel.getByRole('status').first()).toContainText(/Prepared \d+ file/)
+  await panel.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.getByRole('button', { name: 'Discover', exact: true }).click()
+  await page.getByRole('button', { name: 'Portfolio', exact: true }).click()
+  await page.getByRole('button', { name: 'Prepare working session' }).click()
+  await expect(panel.getByRole('button', { name: 'Download zip' })).toBeVisible()
+  await page.route('**/api/working-session/download/**', (route) => route.fulfill({
+    status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'The download has expired. Prepare the working session again.' })
+  }))
+  await panel.getByRole('button', { name: 'Download zip' }).click()
+  await expect(panel.getByRole('alert')).toContainText('expired')
+  expect(requests.filter((entry) => entry.path.endsWith('/prepare'))).toHaveLength(1)
 })

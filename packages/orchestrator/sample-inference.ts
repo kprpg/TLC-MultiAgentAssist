@@ -22,6 +22,7 @@ import type { AgentStreamHandlers, AgentTaskContext, TaskAgentRegistry } from '.
 interface FoundryContext { environment: FoundryEnvironment; client: FoundryOpenAIClient; agents: TaskAgentRegistry }
 export interface SampleInferenceOptions {
   environment?: NodeJS.ProcessEnv
+  hosted?: boolean
   credential?: TokenCredential
   prepareCredential?: () => Promise<void>
   loadEnvironment?: () => Promise<FoundryEnvironment>
@@ -44,12 +45,13 @@ export class SampleInference {
   private async foundry(): Promise<FoundryContext> {
     this.context ??= (async () => {
       const environment = await (this.options.loadEnvironment?.() ?? loadFoundryEnvironmentFromEnvironment(this.environment))
-      const credential = this.options.credential ?? (this.environment['WEBSITE_SITE_NAME']
+      const hosted = this.options.hosted ?? Boolean(this.environment['WEBSITE_SITE_NAME'])
+      const credential = this.options.credential ?? (hosted
         ? this.environment['AZURE_CLIENT_ID']?.trim()
           ? new ManagedIdentityCredential(this.environment['AZURE_CLIENT_ID']!.trim()) : new ManagedIdentityCredential()
         : new AzureCliCredential({ tenantId: environment.authentication.foundryTenantId, processTimeoutInMs: 30_000 }))
       let admission = this.options.admission
-      if (this.environment['WEBSITE_SITE_NAME'] && !admission) {
+      if (hosted && !admission) {
         const home = this.environment['HOME']?.trim()
         const slot = this.environment['WEBSITE_SLOT_NAME']?.trim() || 'production'
         if (!home || !/^[a-zA-Z0-9-]+$/.test(slot)) throw new InferenceAdmissionError('configuration', 'Sample AI needs writable, slot-specific usage storage.')

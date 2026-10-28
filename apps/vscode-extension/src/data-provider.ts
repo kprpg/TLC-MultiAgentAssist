@@ -67,6 +67,9 @@ import { ExtensionMcemGuidanceConnector } from './mcem-guidance.js'
 import { buildLiveDataProvider, buildLiveTaskAgents } from './live-provider-core.js'
 import { configuredFoundryEnvironment } from './live-provider.js'
 import { SampleInference } from '../../../packages/orchestrator/sample-inference.js'
+import type { WorkflowResultsView } from '../../../packages/common/contracts/workflow-membership.js'
+import { prepareMemberWorkflowGuidance, readWorkflowResultsView } from '../../../packages/orchestrator/workflows/membership-view.js'
+import { sampleTeamMemberships } from './sample-data.js'
 import type { InferenceMode } from '../../../packages/common/contracts/inference.js'
 import type { SessionPortfolio } from '../../shared/session-portfolio.js'
 import type { MutationSyncRequest, MutationSyncResponse } from '../../../packages/common/contracts/cache-sync.js'
@@ -154,6 +157,7 @@ export interface ExtensionDataProvider {
     listWorkflowDefinitions(scope?: ScopeRef['kind']): Promise<WorkflowDefinition[]>
     startWorkflow(request: { workflowId: string; scope: ScopeRef; input?: unknown; correlationId?: string }): Promise<WorkflowRun>
     getWorkflowRun(runId: string): Promise<WorkflowRunView>
+    getWorkflowResultsView(runId: string, filter: 'all' | 'mine'): Promise<WorkflowResultsView>
     cancelWorkflowRun(runId: string): Promise<WorkflowRun>
     listWorkflowRuns(scope?: ScopeRef, limit?: number): Promise<WorkflowRun[]>
     prepareWorkflowGuidance(runId: string, queueItemId: string, capability: AgentCapability): Promise<WorkflowGuidanceHandoff>
@@ -307,13 +311,16 @@ export function createSampleDataProvider(): ExtensionDataProvider {
             ...(request.correlationId === undefined ? {} : { correlationId: request.correlationId })
         }),
         getWorkflowRun: async (runId) => host.get({ contractVersion: workflowContractVersion, runId }),
+        getWorkflowResultsView: (runId, filter) => readWorkflowResultsView(host, async () => sampleTeamMemberships(), {
+            contractVersion: workflowContractVersion, runId, filter
+        }),
         cancelWorkflowRun: async (runId) => host.cancel({ contractVersion: workflowContractVersion, runId }),
         listWorkflowRuns: async (scope, limit) => host.listRuns({
             contractVersion: workflowContractVersion,
             ...(scope ? { scope } : {}),
             ...(limit === undefined ? {} : { limit })
         }),
-        prepareWorkflowGuidance: async (runId, queueItemId, capability) => host.prepareGuidance({
+        prepareWorkflowGuidance: async (runId, queueItemId, capability) => prepareMemberWorkflowGuidance(host, async () => sampleTeamMemberships(), {
             contractVersion: workflowContractVersion,
             runId,
             queueItemId,

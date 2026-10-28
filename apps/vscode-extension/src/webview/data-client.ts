@@ -27,6 +27,7 @@ import { SessionPortfolio } from '../../../shared/session-portfolio.js'
 import { MutationSyncClient } from '../../../shared/mutation-sync.js'
 import type { StagePipelineWrites } from '../../../shared/dashboards/StageAndPipelineReview/stage-pipeline-writes.js'
 import { pollWorkflow } from '../../../shared/workflow-polling.js'
+import type { WorkflowResultsMembershipView } from './view-types.js'
 import type {
     AccountView,
     AccountCandidateView,
@@ -148,6 +149,8 @@ const transport = {
             signal?.addEventListener('abort', onAbort, { once: true })
         }),
     listWorkflowDefinitions: () => request<WorkflowDefinitionView[]>('listWorkflowDefinitions', { scope: 'portfolio' }),
+    getWorkflowResultsView: (runId: string, filter: 'all' | 'mine') =>
+        request<WorkflowResultsMembershipView>('getWorkflowResultsView', { runId, filter }),
     listWorkflowRuns: (limit = 10) => request<WorkflowRunView[]>('listWorkflowRuns', { limit }),
     openEvidence: async (url: string): Promise<void> => {
     await request<null>('openEvidence', { url })

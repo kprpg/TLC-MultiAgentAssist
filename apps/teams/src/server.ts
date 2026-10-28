@@ -8,7 +8,7 @@ import { ConfidentialClientApplication } from '@azure/msal-node'
 import { isLocalConfiguration, isNativeConfiguration, loadTeamsAdmission, loadTeamsConfiguration, loadTeamsRuntimeConfiguration, loadTeamsStateKey, loadTeamsTlsConfiguration } from './configuration.js'
 import { assertNativeHttpRequest, createTeamsHandler } from './app.js'
 import { createDelegatedTokenProvider, type DelegatedTokenProvider } from './authentication.js'
-import { createTeamsStateStore, createTeamsWorkloadCredential, requiresTeamsFoundryCredential } from './runtime-resources.js'
+import { createTeamsSampleInference, createTeamsStateStore, createTeamsWorkloadCredential, requiresTeamsFoundryCredential } from './runtime-resources.js'
 import { loadFoundryEnvironmentFromEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
 import { ScopedPortfolioPreferenceStore } from '../../../packages/connectors/common/scoped-portfolio-preferences.js'
 import { GraphContextAuthority } from '../../../packages/connectors/teams/context-authority.js'
@@ -90,12 +90,13 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
     }, {})
   } catch (error) { resources.close(); throw error }
   let sample: ApplicationServices | undefined
+  const sampleInference = createTeamsSampleInference(runtime, runtimeEnvironment)
   try {
   const lifecycle = new CollaborationLifecycle(store, acceptNewWork)
   const sessions = new Map<string, { services: Promise<ApplicationServices>; tokens: { current: DelegatedTokenProvider }; principal: ExecutionPrincipal; lastUsed: number; generation: number; nativeGeneration: number }>()
   const samplePath = runtime.samplePath
   if (samplePath !== ':memory:') await mkdir(dirname(samplePath), { recursive: true })
-  sample = await createSampleApplicationServices({ dataPath: samplePath })
+  sample = await createSampleApplicationServices({ dataPath: samplePath, inference: sampleInference })
   const confidential = hosted ? new ConfidentialClientApplication({
     auth: {
       clientId: hosted.apiClientId, authority: `https://login.microsoftonline.com/${hosted.tenantId}`,
@@ -367,13 +368,13 @@ export async function startTeamsServer(environment: NodeJS.ProcessEnv = process.
             await sample?.dispose()
           }
         }
-      } finally { if (sampleResources !== resources) sampleResources.close(); resources.close() }
+      } finally { sampleInference.close(); if (sampleResources !== resources) sampleResources.close(); resources.close() }
       })()
       return closing
     }
   }
   } catch (error) {
-    try { await sample?.dispose() } finally { if (sampleResources !== resources) sampleResources.close(); resources.close() }
+    try { await sample?.dispose() } finally { sampleInference.close(); if (sampleResources !== resources) sampleResources.close(); resources.close() }
     throw error
   }
 }

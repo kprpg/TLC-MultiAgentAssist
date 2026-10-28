@@ -98,12 +98,14 @@ import { mutationSyncRequestSchema, mutationSyncResponseSchema, type MutationSyn
 import { MutationDispatchPreventedError } from '../../../packages/orchestrator/mutations/host.js'
 import { MutationJournalError } from '../../../packages/orchestrator/mutations/journal.js'
 import { sourceHttpFailure } from '../../../packages/common/source-failure.js'
+import type { WorkflowMembershipSnapshot } from '../../../packages/common/contracts/workflow-membership.js'
 import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest, type KnowledgeSearchResponse } from '../../../packages/common/contracts/knowledge.js'
 
 const accountIdSchema = z.string().min(1).max(200)
 const maximumBodyBytes = 1_048_576
 
 export interface WebRuntime {
+    getTeamMemberships?(): Promise<WorkflowMembershipSnapshot>
     searchKnowledge(request: KnowledgeSearchRequest): Promise<KnowledgeSearchResponse>
     mutationSync?(request: MutationSyncRequest): Promise<MutationSyncResponse>
     withReadContext?<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T>
@@ -298,11 +300,15 @@ export function buildWebApiHandler(options: WebApiOptions) {
                 }
             }
 
-            const workflowMatch = /^\/api\/workflows\/(list|start|get|cancel|history)$/.exec(url.pathname)
+            const workflowMatch = /^\/api\/workflows\/(list|start|get|cancel|history|guidance|view)$/.exec(url.pathname)
             if (request.method === 'POST' && workflowMatch && options.resolveWorkflowHost) {
                 const host = await options.resolveWorkflowHost(authentication)
                 const operation = workflowMatch[1] as WorkflowHostOperation
-                sendJson(response, 200, invokeWorkflowHost(host, operation, await readJsonBody(request)))
+                sendJson(response, 200, await invokeWorkflowHost(host, operation, await readJsonBody(request), async () => {
+                    const runtime = await options.createRuntime(authentication)
+                    if (!runtime.getTeamMemberships) throw new Error('Membership source is unavailable.')
+                    return runtime.getTeamMemberships()
+                }))
                 return true
             }
 
@@ -582,6 +588,8 @@ export function buildWebApiHandler(options: WebApiOptions) {
                         ? error.code === 'target-disabled' ? 403 : error.code === 'parent-unavailable' ? 404 : 409
                         : error instanceof WorkflowRuntimeError && error.code === 'capacity_exceeded'
                             ? 429
+                            : error instanceof WorkflowRuntimeError && error.code === 'membership_required'
+                                ? 403
                             : error instanceof WorkflowRuntimeError && error.code === 'run_not_found'
                                 ? 404
                                 : 500
