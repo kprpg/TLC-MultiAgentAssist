@@ -745,7 +745,7 @@ const ACTIVITY_PRIORITIES = ['Low', 'Normal', 'High'] as const
 const emptyActivityForm = { subject: '', taskCategory: '', due: '', priority: 'Normal' as 'Low' | 'Normal' | 'High', durationMinutes: '', description: '' }
 
 /** Inline Activities (Tasks) panel for a milestone: list + a Quick-Create Task form. */
-function MilestoneActivitiesPanel({ opportunityId, milestoneId, onNote }: { opportunityId: string; milestoneId: string; onNote: (message: string) => void }): ReactElement {
+function MilestoneActivitiesPanel({ opportunityId, milestoneId, onNote, onCancel }: { opportunityId: string; milestoneId: string; onNote: (message: string) => void; onCancel: () => void }): ReactElement {
     const [activities, setActivities] = useState<MilestoneActivityView[]>([])
     const [loading, setLoading] = useState(true)
     const [form, setForm] = useState({ ...emptyActivityForm })
@@ -812,7 +812,10 @@ function MilestoneActivitiesPanel({ opportunityId, milestoneId, onNote }: { oppo
                 <label>Priority<select value={form.priority} onChange={(event) => setForm((current) => ({ ...current, priority: event.target.value as 'Low' | 'Normal' | 'High' }))}>{ACTIVITY_PRIORITIES.map((priority) => <option key={priority} value={priority}>{priority}</option>)}</select></label>
                 <label>Duration (minutes)<input type="number" min={1} value={form.durationMinutes} onChange={(event) => setForm((current) => ({ ...current, durationMinutes: event.target.value }))} /></label>
                 <label>Description<textarea rows={2} value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} /></label>
-                <button className="primary" disabled={saving || form.subject.trim().length === 0} onClick={() => void create()}>{saving ? 'Creating…' : 'Create task'}</button>
+                <div className="actions">
+                    <button type="button" className="secondary" disabled={saving} onClick={onCancel}>Cancel</button>
+                    <button type="button" className="primary" disabled={saving || form.subject.trim().length === 0} onClick={() => void create()}>{saving ? 'Creating…' : 'Create task'}</button>
+                </div>
             </div>
         </div>
     )
@@ -969,7 +972,7 @@ function MilestonesEditor({ opportunityId, currency, milestones, onChanged, onNo
                         {activitiesForId === milestone.id && (
                             <tr className="milestone-activities-row">
                                 <td colSpan={3}>
-                                    <MilestoneActivitiesPanel opportunityId={opportunityId} milestoneId={milestone.id} onNote={onNote} />
+                                    <MilestoneActivitiesPanel opportunityId={opportunityId} milestoneId={milestone.id} onNote={onNote} onCancel={() => setActivitiesForId(undefined)} />
                                 </td>
                             </tr>
                         )}

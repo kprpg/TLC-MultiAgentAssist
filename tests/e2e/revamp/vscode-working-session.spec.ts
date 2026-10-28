@@ -6,6 +6,7 @@ import { createSampleDataProvider } from '../../../apps/vscode-extension/src/dat
 import { routeBridgeMessage } from '../../../apps/vscode-extension/src/host-router.js'
 import { createWorkingSessionService, folderOutput } from '../../../packages/orchestrator/working-session/index.js'
 import { deferredSignal } from './operation-result-fixtures.js'
+import { expectWorkingSessionIcon } from '../working-session-icon.js'
 
 declare global {
   interface Window { invokeWorkingSessionBridge(message: unknown): Promise<unknown> }
@@ -51,8 +52,10 @@ async function mount(page: Page, opened: string[], onResponse?: (method: string 
 test('VS Code prepares the folder beside Run MCEM Coach, writes it under Documents\\TLC and opens it', async ({ page }) => {
   const opened: string[] = []
   const root = await mount(page, opened)
-  await expect(page.locator('.actions').filter({ has: page.getByRole('button', { name: 'Prepare working session' }) }).getByRole('button', { name: 'Run MCEM Coach' })).toBeVisible()
-  await page.getByRole('button', { name: 'Prepare working session' }).click()
+  const launcher = page.getByRole('button', { name: 'Generate Prep/ Delivery Artifacts' })
+  await expect(page.locator('.actions').filter({ has: launcher }).getByRole('button', { name: 'Run MCEM Coach' })).toBeVisible()
+  await expectWorkingSessionIcon(launcher)
+  await launcher.click()
   const panel = page.getByRole('dialog', { name: 'Prepare working session' })
 
   await panel.getByRole('button', { name: 'Suggest topic' }).click()
@@ -74,7 +77,7 @@ test('VS Code prepares the folder beside Run MCEM Coach, writes it under Documen
 
 test('VS Code shows why a working session could not be prepared', async ({ page }) => {
   await mount(page, [])
-  await page.getByRole('button', { name: 'Prepare working session' }).click()
+  await page.getByRole('button', { name: 'Generate Prep/ Delivery Artifacts' }).click()
   const panel = page.getByRole('dialog', { name: 'Prepare working session' })
   await panel.getByRole('button', { name: 'Suggest topic' }).click()
   await panel.getByRole('textbox', { name: 'Topic' }).fill('')
@@ -94,7 +97,7 @@ test('@operation-retention restores a VS Code preparation after the Portfolio vi
     await release.promise
     delivered.resolve()
   })
-  await page.getByRole('button', { name: 'Prepare working session' }).click()
+  await page.getByRole('button', { name: 'Generate Prep/ Delivery Artifacts' }).click()
   const panel = page.getByRole('dialog', { name: 'Prepare working session' })
   await panel.getByRole('button', { name: 'Suggest topic' }).click()
   await panel.getByRole('textbox', { name: 'Topic' }).fill('Retained extension preparation')
@@ -107,7 +110,7 @@ test('@operation-retention restores a VS Code preparation after the Portfolio vi
     release.resolve()
     await delivered.promise
     await page.getByRole('button', { name: 'Portfolio', exact: true }).click()
-    await page.getByRole('button', { name: 'Prepare working session' }).click()
+    await page.getByRole('button', { name: 'Generate Prep/ Delivery Artifacts' }).click()
     await expect(panel.getByRole('status').first()).toContainText(/Prepared \d+ file/)
     await expect(panel.getByRole('button', { name: 'Open folder' })).toBeVisible()
     expect(preparations).toBe(1)

@@ -52,17 +52,21 @@ describe('working-session launcher rendering', () => {
   const client = { deriveWorkingSessionTopic: async () => { throw new Error('unused') }, prepareWorkingSession: async () => { throw new Error('unused') } }
   it('renders only the launch button until it is opened, so no work starts on load', () => {
     const html = renderToStaticMarkup(createElement(WorkingSessionLauncher, { client, opportunity, milestones: [milestone] }))
-    expect(html).toContain('>Working session<')
-    expect(html).toContain('aria-label="Prepare working session"')
+    expect(html).toContain('aria-label="Generate Prep/ Delivery Artifacts"')
+    expect(html).toContain('title="Generate Prep/ Delivery Artifacts"')
     expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('aria-haspopup="dialog"')
     expect(html).not.toContain('working-session-panel')
   })
 
-  it('offers an icon-only button for narrow headers with the same accessible name', () => {
-    const html = renderToStaticMarkup(createElement(WorkingSessionLauncher, { client, opportunity, milestones: [milestone], compact: true }))
-    expect(html).toContain('working-session-compact')
-    expect(html).toContain('<svg')
-    expect(html).toContain('aria-label="Prepare working session"')
+  it('uses the supplied target image at toolbar size instead of text or a file-share icon', () => {
+    const html = renderToStaticMarkup(createElement(WorkingSessionLauncher, { client, opportunity, milestones: [milestone] }))
+    expect(html).toContain('<img')
+    expect(html).toContain('target.png')
+    expect(html).toContain('class="working-session-icon"')
+    expect(html).toContain('alt=""')
+    expect(html).toContain('width="24" height="24"')
+    expect(html).not.toContain('<svg')
     expect(html).not.toContain('>Working session<')
   })
 })

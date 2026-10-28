@@ -2,6 +2,7 @@ import { expect, test, _electron as electron } from '@playwright/test'
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { expectWorkingSessionIcon } from '../working-session-icon.js'
 
 // Runs the real Electron app (preload bridge, validated IPC, folder sink) in sample mode. Documents are redirected to a
 // temp folder so nothing is written to the user's real Documents.
@@ -18,7 +19,9 @@ test('prepares a working session through the Desktop IPC bridge into Documents\\
         await window.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
         const blade = window.getByRole('region', { name: 'Opportunities blade' })
         await blade.getByRole('button', { name: /^Grid operations modernization/ }).click()
-        await blade.locator('.blade-header').getByRole('button', { name: 'Prepare working session' }).click()
+        const launcher = blade.locator('.blade-header').getByRole('button', { name: 'Generate Prep/ Delivery Artifacts' })
+        await expectWorkingSessionIcon(launcher)
+        await launcher.click()
         const panel = window.getByRole('dialog', { name: 'Prepare working session' })
 
         await panel.getByRole('button', { name: 'Suggest topic' }).click()

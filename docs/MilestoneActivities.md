@@ -24,7 +24,9 @@ the sections below describe the research and the as-built shape.
   `listMilestoneActivities` / `createMilestoneActivity`.
 - **UI**: shared renderer shows an **Activities** item in the milestone Actions menu that opens a
   dialog with the activity list + a Quick-Create Task form; the VS Code webview shows an inline
-  Activities panel per milestone with the same form.
+  Activities panel per milestone with the same form. Both place **Cancel** beside **Create task**:
+  Cancel dismisses an empty or unsaved form without creating a task, and reopening starts with a
+  fresh draft. Cancel is disabled while a task is being created; existing activities are retained.
 - **Tests**: contract, connector (live mocked-fetch + SQLite), VS Code bridge, and a desktop e2e.
 
 ---
