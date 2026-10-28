@@ -21,6 +21,8 @@ import { createSellerDashboardHost } from '../../../packages/orchestrator/seller
 import { createStagePipelineReviewHost, createUnavailableStagePipelineReviewHost, type StagePipelineReviewHost } from '../../../packages/orchestrator/stage-pipeline-review.js'
 import { createSeReportingHost } from '../../../packages/orchestrator/se-reporting/composition.js'
 import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
+import { prepareMemberWorkflowGuidance, readWorkflowResultsView } from '../../../packages/orchestrator/workflows/membership-view.js'
+import { withFoundrySignIn } from './foundry-sign-in.js'
 
 export const AGENT_CAPABILITIES: readonly AgentCapability[] = workflowAgentCapabilityValues
 const MCEM_COACH_PROMPT = 'Evaluate the current MCEM stage exit criteria and recommend the next best actions.'
@@ -95,12 +97,12 @@ export function buildLiveDataProvider(
         createMilestoneActivity: (opportunityId, milestoneId, request) => orchestrator.createMilestoneActivity(opportunityId, milestoneId, request),
         updateOpportunity: (opportunityId, update) => orchestrator.updateOpportunity(opportunityId, update),
         updateMilestone: (opportunityId, milestoneId, update) => orchestrator.updateMilestone(opportunityId, milestoneId, update),
-        runMcemCoach: (accountId, opportunityId) => orchestrator.runMcemCoach({
+        runMcemCoach: (accountId, opportunityId) => withFoundrySignIn(() => orchestrator.runMcemCoach({
             contractVersion,
             accountId,
             opportunityId,
             prompt: MCEM_COACH_PROMPT
-        }),
+        })),
         transitionOpportunityStage: (accountId, opportunityId, targetStage, reason) => orchestrator.transitionOpportunityStage({
             contractVersion,
             accountId,
@@ -108,20 +110,20 @@ export function buildLiveDataProvider(
             targetStage,
             ...(reason ? { reason } : {})
         }),
-        runAgentTask: (capability, accountId, opportunityId, prompt) => orchestrator.runAgentTask({
+        runAgentTask: (capability, accountId, opportunityId, prompt) => withFoundrySignIn(() => orchestrator.runAgentTask({
             contractVersion,
             capability,
             accountId,
             opportunityId,
             prompt
-        }),
-        runAgentTaskStream: (capability, accountId, opportunityId, prompt, onEvent, signal) => orchestrator.runAgentTaskStream({
+        })),
+        runAgentTaskStream: (capability, accountId, opportunityId, prompt, onEvent, signal) => withFoundrySignIn(() => orchestrator.runAgentTaskStream({
             contractVersion,
             capability,
             accountId,
             opportunityId,
             prompt
-        }, onEvent, signal),
+        }, onEvent, signal), signal),
         listWorkflowDefinitions: async (scope?: ScopeRef['kind']) => host.listDefinitions({ contractVersion: workflowContractVersion, ...(scope ? { scope } : {}) }),
         startWorkflow: async (request) => host.start({
             contractVersion: workflowContractVersion,
@@ -131,13 +133,16 @@ export function buildLiveDataProvider(
             ...(request.correlationId === undefined ? {} : { correlationId: request.correlationId })
         }),
         getWorkflowRun: async (runId) => host.get({ contractVersion: workflowContractVersion, runId }),
+        getWorkflowResultsView: (runId, filter) => readWorkflowResultsView(host, () => orchestrator.getTeamMemberships(), {
+            contractVersion: workflowContractVersion, runId, filter
+        }),
         cancelWorkflowRun: async (runId) => host.cancel({ contractVersion: workflowContractVersion, runId }),
         listWorkflowRuns: async (scope, limit) => host.listRuns({
             contractVersion: workflowContractVersion,
             ...(scope ? { scope } : {}),
             ...(limit === undefined ? {} : { limit })
         }),
-        prepareWorkflowGuidance: async (runId, queueItemId, capability) => host.prepareGuidance({
+        prepareWorkflowGuidance: async (runId, queueItemId, capability) => prepareMemberWorkflowGuidance(host, () => orchestrator.getTeamMemberships(), {
             contractVersion: workflowContractVersion,
             runId,
             queueItemId,
@@ -154,11 +159,11 @@ export function buildLiveDataProvider(
                     ...(request.rawTranscript.meetingType ? { meetingType: request.rawTranscript.meetingType } : {})
                 })
                 : undefined
-            return connector.proposeMeetingChangeSet({
+            return withFoundrySignIn(() => connector.proposeMeetingChangeSet({
                 opportunityId: request.opportunityId,
                 ...(request.transcriptId ? { transcriptId: request.transcriptId } : {}),
                 ...(transcript ? { transcript } : {})
-            }, meetingExtractor)
+            }, meetingExtractor))
         },
         applyMeetingChangeSet: async (input) => requireMeeting().applyMeetingChangeSet(input),
         dispose

@@ -752,6 +752,9 @@ With no approved Live profile, Sample remains standalone and Live is unavailable
    clients, not browser-only mock records. Sample edits, approvals and activity
    are separate from Live; no customer records, source credentials or Live page
    capability are sent to Sample requests.
+   Sample AI defaults to Foundry through the separate workload credential, with
+   a visibly labeled offline fallback. Set `TLC_AI_MODE=sample` for credential-free
+   offline AI. Merely browsing Sample never signs into AI or a business source.
 4. First use of local Live still needs the configured source, explicit owner
    **Connect**, and the current page's code approval. If needed, use
    `teams-local-connection.ps1 -Action Connect` and `-Action Approve -UserCode`
@@ -1011,7 +1014,10 @@ npm run teams:start
 
 This is a **local browser preview**, not a Teams installation or proof of F5 inside
 Teams. It uses the canonical sanitized SQLite data and does not call live MSX, MCP,
-Graph or Foundry. Default state and sample data persist outside the release
+or Graph. AI defaults to Foundry using the existing workload identity and validated
+project configuration, with visible offline fallback; `TLC_AI_MODE=sample` also
+disables Foundry. See [Sample + Foundry](sample-foundry-ai.md).
+Default state and sample data persist outside the release
 directory under `%LOCALAPPDATA%\TLC-Assist\Teams\sample`; test launchers use
 in-memory stores. Existing explicit state/sample path settings remain supported.
 
@@ -1239,12 +1245,30 @@ Neither choice weakens live JWT/FTE, source authorization or reviewed writes.
 | Availability | Limited by laptop, process, ingress and network uptime | Host-managed availability, still subject to operational validation |
 | Teams package | Approved reachable test HTTPS origin | Deployed HTTPS origin; regenerate/reinstall for origin changes |
 
-For local/live Foundry calls, install Azure CLI, sign in to the Foundry tenant
+For local Foundry calls in Sample or Live, install Azure CLI, sign in to the Foundry tenant
 using your organization's approved procedure and obtain its project role. The CLI
 credential is only the agent workload identity; no source connector borrows the
 laptop owner's CLI MSX token. No fallback chain silently switches to another
 credential. Local CLI login/Foundry grants still require real corporate setup and
 have not been live-verified by offline tests.
+
+Sample inference is lazy and reuses the shared four-agent registry, follow-ups
+and Play Guidance paths. The header reports the requested sample AI mode, and
+each inference response identifies actual Foundry execution or offline fallback.
+Hosted sample inference retains usage admission/budget controls; missing budget
+configuration fails to a labeled fallback, not unmetered access. Inference and
+budget resources close with the runtime.
+
+### Plays membership filter
+
+The results toolbar defaults to **All visible items**. Select **My items** to
+show only qualifying result records and queue items, with matching counts, then
+switch back to restore All without rerunning the Play or model. Opportunity
+items use Deal Team or child-milestone membership; milestone items use parent
+Deal Team or that exact milestone. Nonmember Guidance buttons are disabled with
+hover/keyboard explanations. Current membership is rechecked at handoff, and
+again before running a reviewed Teams handoff. Source-scope authorization still
+applies to both views. See [membership rules](../MilestoneMembership.md#plays-all-visible-items-and-my-items).
 
 Live local state requires a stable, random **32-byte Base64**
 `TLC_TEAMS_STATE_KEY`. Payloads are AES-256-GCM protected with partition/key/revision

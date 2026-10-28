@@ -1,0 +1,40 @@
+.workflow-membership-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-block: 0.75rem;
+}
+.workflow-membership-controls select,
+.workflow-membership-controls button {
+  font: inherit;
+}
+.workflow-membership-controls p {
+  flex-basis: 100%;
+  margin: 0;
+}
+.membership-action {
+  position: relative;
+  display: inline-flex;
+}
+.membership-action-tooltip {
+  display: none;
+  position: absolute;
+  z-index: 20;
+  bottom: 100%;
+  right: 0;
+  width: max-content;
+  max-width: min(22rem, 75vw);
+  padding: 0.5rem 0.7rem;
+  border: 1px solid currentColor;
+  border-radius: 0.3rem;
+  background: var(--vscode-editor-background, Canvas);
+  color: var(--vscode-editor-foreground, CanvasText);
+  font-size: 0.85rem;
+  white-space: normal;
+}
+.membership-action:hover > .membership-action-tooltip,
+.membership-action:focus > .membership-action-tooltip,
+.membership-action:focus-within > .membership-action-tooltip {
+  display: block;
+}

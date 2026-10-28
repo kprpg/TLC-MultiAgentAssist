@@ -37,6 +37,30 @@ same as the milestone's single `Owner`. The toggle never changes the milestone `
 Row 3 is the architecturally significant case: leaving the Deal Team must **not** strand an
 opportunity (and its milestones) that the user still belongs to via a milestone team.
 
+### Plays: All visible items and My items
+
+Plays defaults to **All visible items**, meaning the full result already returned
+under source authorization, not organization-wide access. **My items** filters
+the selected run's result rows, operational queue and counts; switching back
+restores the full result without rerunning the workflow or calling an agent.
+
+- Opportunity/activity items qualify through the opportunity Deal Team or
+  membership on at least one of its milestones.
+- A milestone item qualifies through the parent Deal Team or membership on that
+  exact milestone. A milestone-only member does not qualify for its siblings.
+- Nonmember Agent buttons stay visible but disabled in All. Hover the button's
+  wrapper, or focus it with the keyboard, for the membership explanation.
+- Membership is checked for the current business-source user, not the milestone
+  owner, run creator, meeting attendee or Foundry workload identity. A queue
+  Guidance handoff rechecks eligibility before it is prepared.
+- If membership cannot be checked, All remains readable with actions disabled
+  and My shows an explicit error/retry state. Older saved results without typed
+  references require running the Play again for My; their All result is retained.
+
+The same controls and rules apply in Desktop, Web, VS Code and Teams. Aggregate
+cards are rebuilt from qualifying contributors; saved run history and source
+health/evidence are not rewritten.
+
 ---
 
 ## 2. Feasibility findings (why it is built this way)

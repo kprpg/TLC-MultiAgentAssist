@@ -76,6 +76,7 @@ import { RecordCreationService, RecordCreationError } from './record-creation/se
 import { KnowledgeSearchService, type KnowledgeSearch } from './knowledge-search.js'
 import type { KnowledgeSearchRequest, KnowledgeSearchResponse } from '../common/contracts/knowledge.js'
 import { inferenceResponseVersion, type InferenceExecution, type InferenceResult } from '../common/contracts/inference.js'
+import { workflowMembershipSnapshotSchema } from '../common/contracts/workflow-membership.js'
 
 export interface McemAgentContext {
   request: McemRequest
@@ -408,6 +409,13 @@ export class ThinSliceOrchestrator {
       ])
       const localEvaluation = evaluateMcemProgress({ ...context, milestones }, guidance)
       return localEvaluation
+    })
+  }
+
+  async getTeamMemberships() {
+    return this.withFreshReadContext(async () => {
+      if (!this.msx.getTeamMemberships) throw new Error('Current team membership is unavailable from this source.')
+      return workflowMembershipSnapshotSchema.parse(await this.msx.getTeamMemberships())
     })
   }
 

@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 import type { TeamsSurface, TeamsView } from './workspace-navigation.js'
+import { InferenceModeBadge } from '../../../shared/inference-status.js'
+import type { InferenceMode } from '../../../../packages/common/contracts/inference.js'
 export type { TeamsView } from './workspace-navigation.js'
 
 const destinations: Array<{ id: TeamsView; label: string }> = [
@@ -12,9 +14,10 @@ const utilities: Array<{ id: TeamsView; label: string }> = [
   { id: 'activity', label: 'Activity' }, { id: 'configure', label: 'Context settings' }
 ]
 
-export function TeamsShell({ mode, view, onNavigate, children, surface = 'personal', commands }: {
+export function TeamsShell({ mode, view, onNavigate, children, surface = 'personal', commands, loadInferenceMode }: {
   mode: 'sample' | 'live'; view: TeamsView; onNavigate(view: TeamsView): void; children: ReactNode
   surface?: TeamsSurface; commands?: ReactNode
+  loadInferenceMode?: () => Promise<InferenceMode | undefined>
 }) {
   const contextual = surface !== 'personal'
   return <div className={`teams-shell teams-surface-${surface}`}>
@@ -26,7 +29,9 @@ export function TeamsShell({ mode, view, onNavigate, children, surface = 'person
             aria-current={view === item.id ? 'page' : undefined} onClick={() => onNavigate(item.id)}>{item.label}</button>)}
       </nav>}
       {commands}
-      <span className="mode-badge">{mode === 'sample' ? 'Sample - no live business data' : 'Live - your delegated access'}</span>
+      {mode === 'sample'
+        ? <InferenceModeBadge label="Sample - no live business data" load={loadInferenceMode} />
+        : <span className="mode-badge">Live - your delegated access</span>}
       <details className="teams-utilities" onKeyDown={(event) => {
         if (event.key === 'Escape') {
           event.currentTarget.removeAttribute('open')

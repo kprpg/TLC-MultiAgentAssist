@@ -200,6 +200,16 @@ export interface WorkflowOutputView {
 }
 
 export interface WorkflowRunResultView { run: WorkflowRunView; output?: WorkflowOutputView }
+export interface WorkflowResultsMembershipView {
+    runId: string
+    filter: 'all' | 'mine'
+    state: 'ready' | 'pending' | 'unavailable' | 'legacy'
+    message?: string
+    totalItems: number
+    visibleItems: number
+    eligibility: Array<{ queueItemId: string; eligible: boolean; reason: string }>
+    output?: WorkflowOutputView
+}
 
 export interface GuidanceHandoffView {
     capability: AgentCapability

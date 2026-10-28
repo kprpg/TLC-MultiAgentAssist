@@ -26,9 +26,11 @@ import type { PerformanceReporter } from '../common/telemetry/performance.js'
 import { bindSourceToken } from './mutations/core-adapter.js'
 import { createKnowledgeSearch, type KnowledgeSearch } from './knowledge-search.js'
 import type { SampleInference } from './sample-inference.js'
+import type { InferenceMode } from '../common/contracts/inference.js'
 
 type MeetingConnector = Pick<LiveMeetingCaptureConnector, 'proposeMeetingChangeSet' | 'applyMeetingChangeSet'>
 export interface ApplicationServices {
+  inferenceMode?: InferenceMode
   performanceReporter?: PerformanceReporter
   orchestrator: ThinSliceOrchestrator
   workflows: WorkflowHost
@@ -75,7 +77,7 @@ export async function createSampleApplicationServices(options: { dataPath?: stri
     const { accounts, opportunities } = await msx.getPortfolioIndex()
     return { accountIds: accounts.map((account) => account.id), opportunityIds: opportunities.map((opportunity) => opportunity.id) }
   })
-  return assemble(
+  const services = assemble(
     msx, new LocalPdfMcemGuidanceConnector(resolve(options.workingDirectory ?? process.cwd(), 'docs/knowledge/MCEM Overview.pdf')),
     options.inference?.taskAgents(createSampleTaskAgents()) ?? createSampleTaskAgents(), new RecordCreationService(msx, writer, { writer }),
     { proposeMeetingChangeSet: (request) => msx.proposeMeetingChangeSet(request, options.inference?.meetingExtractor()),
@@ -100,6 +102,7 @@ export async function createSampleApplicationServices(options: { dataPath?: stri
       }
     }, async () => { store.close() }
   )
+  return Object.assign(services, { inferenceMode: options.inference?.mode ?? 'sample' as const })
 }
 
 export async function createLiveApplicationServices(options: {

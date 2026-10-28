@@ -532,6 +532,16 @@ export class FixtureMsxConnector implements MsxConnector {
     return ids
   }
 
+  async getTeamMemberships() {
+    return {
+      dealTeamOpportunityIds: [...this.dealTeamOpportunityIds],
+      milestoneTeamMilestoneIds: [...this.milestoneTeamIds],
+      milestoneTeamOpportunityIds: Object.entries(this.milestonesByOpportunity)
+        .filter(([, milestones]) => milestones.some((milestone) => this.milestoneTeamIds.has(milestone.id)))
+        .map(([opportunityId]) => opportunityId)
+    }
+  }
+
   /**
    * Promotes a discoverable opportunity into the portfolio pool (without Deal Team membership) so
    * that milestone-team membership can place it in the portfolio union. Idempotent.

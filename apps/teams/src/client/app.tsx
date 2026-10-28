@@ -1,3 +1,4 @@
+import { inferenceModeSchema } from '../../../../packages/common/contracts/inference.js'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { FluentProvider, teamsDarkTheme, teamsHighContrastTheme, teamsLightTheme } from '@fluentui/react-components'
 import { meeting } from '@microsoft/teams-js'
@@ -227,6 +228,10 @@ export function TeamsApp() {
     if (!client) throw new Error('Sign in before opening Dashboards.')
     return client.operation('sellerDashboard', input, sellerDashboardResponseSchema)
   }, [client])
+  const loadInferenceMode = useCallback(async () => {
+    if (!client) throw new Error('Connect before reading the AI mode.')
+    return await client.operation('getInferenceMode', {}, inferenceModeSchema.nullable()) ?? undefined
+  }, [client])
   const invokeStagePipelineReview = useCallback((input: StagePipelineRequest) => {
     if (!client) throw new Error('Sign in before opening Dashboards.')
     return client.operation('stagePipelineReview', input, stagePipelineResponseSchema)
@@ -255,7 +260,7 @@ export function TeamsApp() {
         writeMode={'writeMode' in authentication.configuration ? authentication.configuration.writeMode : 'read-only'}
         connected={false} onConnected={finishLocalConnection} onDisconnected={clearPrivateWorkspace} />
         : authentication?.configuration.mode === 'live' && <button type="button" className="primary" onClick={() => { void signIn() }}>Sign in with Microsoft</button>}
-    </main> : surface === 'stage' ? <SharedStage client={client} artifactId={parameters.get('artifactId')} /> : <TeamsShell mode={session.mode} view={view} onNavigate={setView} surface={hostSurface}
+    </main> : surface === 'stage' ? <SharedStage client={client} artifactId={parameters.get('artifactId')} /> : <TeamsShell mode={session.mode} view={view} onNavigate={setView} surface={hostSurface} loadInferenceMode={loadInferenceMode}
       commands={<>
         {modeControl}
         {hostSurface === 'personal' && <PortfolioSearch client={client} contextKey={`${session.mode}:${view}`} onSelect={focusPortfolio} />}

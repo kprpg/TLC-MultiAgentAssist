@@ -72,6 +72,34 @@ Code references:
 - VS Code host-neutral provider (accepts an injected credential, no direct `vscode` import): [`apps/vscode-extension/src/live-provider.ts`](../../apps/vscode-extension/src/live-provider.ts)
 - Web hosted runtime (Easy Auth / managed identity / local azure-cli): [`apps/web/src/runtime.ts`](../../apps/web/src/runtime.ts), [`apps/web/src/authentication.ts`](../../apps/web/src/authentication.ts), [`apps/web/src/server.ts`](../../apps/web/src/server.ts)
 
+### Successive Guidance requests and renewal
+
+The VS Code Foundry credential now retains the selected resource account as well
+as its configured tenant. Every later preflight/SDK token callback first asks the
+Microsoft provider to renew silently for that account. It does not choose the
+Windows/default account again, store a new application token cache, or reset the
+Foundry client between prompts.
+
+A submitted Guidance prompt owns one sign-in budget, shared by its preflight and
+SDK callbacks: at most **three automatic interactive attempts**. Concurrent
+requests coalesce. Cancellation, an account/tenant mismatch, or a terminal
+tenant-membership/consent error stops recovery. A later submitted prompt gets a
+fresh budget. Background token requests never open an account picker.
+
+Both Live and SQLite Sample + Foundry use this path, including follow-ups and
+queue Guidance. Interactive preparation completes before model request and
+first-token timers start. An inference failure still has the existing visible
+draft/offline fallback; it must not be described as a successful Foundry answer.
+Hosted Web/Teams retain workload identity rather than opening user sign-in.
+
+An error such as **AADSTS50020** can also mean the selected identity genuinely
+lacks access to the resource tenant. The code cannot invite a guest, grant
+consent, or assign a project role. Verify the configured project tenant and the
+chosen identity with the administrator instead of repeatedly selecting accounts.
+Regression coverage uses synthetic accounts and the real SDK's credential
+callback with intercepted HTTP; it does not establish access to a user's Entra
+tenant.
+
 ## 2. `AzureCliCredential` cannot use a custom client ID (SDK evidence)
 
 Checked directly against the installed package, not assumed:

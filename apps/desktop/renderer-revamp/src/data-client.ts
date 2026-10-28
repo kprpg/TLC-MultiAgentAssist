@@ -1,3 +1,4 @@
+import { workflowResultsViewSchema, type WorkflowResultsView } from '../../../../packages/common/contracts/workflow-membership.js'
 import {
     accountSchema,
     accountCandidateSchema,
@@ -170,6 +171,7 @@ export interface RevampDataClient extends WorkingSessionClient {
     listWorkflowDefinitions(scope?: ScopeRef['kind']): Promise<WorkflowDefinition[]>
     startWorkflow(request: StartWorkflowHostRequest): Promise<WorkflowRun>
     getWorkflowRun(runId: string): Promise<WorkflowRunView>
+    getWorkflowResultsView(runId: string, filter: 'all' | 'mine'): Promise<WorkflowResultsView>
     cancelWorkflowRun(runId: string): Promise<WorkflowRun>
     listWorkflowRuns(scope?: ScopeRef, limit?: number): Promise<WorkflowRun[]>
     prepareWorkflowGuidance(runId: string, queueItemId: string, capability: AgentCapability): Promise<WorkflowGuidanceHandoff>
@@ -401,6 +403,7 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
         listWorkflowDefinitions: async (scope) => workflowDefinitionSchema.array().parse(await invokeWorkflow('list', { contractVersion: workflowContractVersion, ...(scope ? { scope } : {}) })),
         startWorkflow: async (request) => workflowRunSchema.parse(await invokeWorkflow('start', request)),
         getWorkflowRun: async (runId) => workflowRunViewSchema.parse(await invokeWorkflow('get', { contractVersion: workflowContractVersion, runId })),
+        getWorkflowResultsView: async (runId, filter) => workflowResultsViewSchema.parse(await invokeWorkflow('view', { contractVersion: workflowContractVersion, runId, filter })),
         cancelWorkflowRun: async (runId) => workflowRunSchema.parse(await invokeWorkflow('cancel', { contractVersion: workflowContractVersion, runId })),
         listWorkflowRuns: async (scope, limit) => workflowRunSchema.array().parse(await invokeWorkflow('history', {
             contractVersion: workflowContractVersion,
@@ -797,6 +800,7 @@ function webClient(): RevampDataClient {
         listWorkflowDefinitions: createWebApiClient().listWorkflowDefinitions,
         startWorkflow: createWebApiClient().startWorkflow,
         getWorkflowRun: createWebApiClient().getWorkflowRun,
+        getWorkflowResultsView: createWebApiClient().getWorkflowResultsView,
         cancelWorkflowRun: createWebApiClient().cancelWorkflowRun,
         listWorkflowRuns: createWebApiClient().listWorkflowRuns,
         prepareWorkflowGuidance: createWebApiClient().prepareWorkflowGuidance,
@@ -900,6 +904,7 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         listWorkflowDefinitions: async (scope) => workflowDefinitionSchema.array().parse(await bridge.invokeWorkflow('list', { contractVersion: workflowContractVersion, ...(scope ? { scope } : {}) })),
         startWorkflow: async (request) => workflowRunSchema.parse(await bridge.invokeWorkflow('start', request)),
         getWorkflowRun: async (runId) => workflowRunViewSchema.parse(await bridge.invokeWorkflow('get', { contractVersion: workflowContractVersion, runId })),
+        getWorkflowResultsView: async (runId, filter) => workflowResultsViewSchema.parse(await bridge.invokeWorkflow('view', { contractVersion: workflowContractVersion, runId, filter })),
         cancelWorkflowRun: async (runId) => workflowRunSchema.parse(await bridge.invokeWorkflow('cancel', { contractVersion: workflowContractVersion, runId })),
         listWorkflowRuns: async (scope, limit) => workflowRunSchema.array().parse(await bridge.invokeWorkflow('history', {
             contractVersion: workflowContractVersion,

@@ -15,7 +15,7 @@ export function createDeterministicLiveTaskAgents(): TaskAgentRegistry {
   }]))
 }
 
-export function createFoundryTaskAgents(environment: FoundryEnvironment, credential: TokenCredential, client: FoundryOpenAIClient = createFoundryOpenAIClient(environment.foundry.projectEndpoint, credential), performanceReporter?: PerformanceReporter, options: { retryFirstToken?: boolean; inlineAgentReference?: boolean } = {}): TaskAgentRegistry {
+export function createFoundryTaskAgents(environment: FoundryEnvironment, credential: TokenCredential, client: FoundryOpenAIClient = createFoundryOpenAIClient(environment.foundry.projectEndpoint, credential), performanceReporter?: PerformanceReporter, options: { retryFirstToken?: boolean; inlineAgentReference?: boolean; prepareCredential?: (signal?: AbortSignal) => Promise<void> } = {}): TaskAgentRegistry {
   const bindings = environment.foundry.agents
   const agents = {
     'account-pulse': bindings.accountPulse,

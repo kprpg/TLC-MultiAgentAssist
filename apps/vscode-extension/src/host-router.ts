@@ -20,6 +20,7 @@ import { discoverySnapshotSchema, portfolioIndexSchema, portfolioWorkspaceSchema
 import { cacheControlResponseSchema, mutationSyncResponseSchema } from '../../../packages/common/contracts/cache-sync.js'
 import { knowledgeSearchResponseSchema } from '../../../packages/common/contracts/knowledge.js'
 import { workingSessionResultSchema, workingSessionTopicResponseSchema } from '../../../packages/common/contracts/working-session.js'
+import { withFoundrySignIn } from './foundry-sign-in.js'
 
 function extractId(raw: unknown): string {
     if (raw && typeof raw === 'object' && 'id' in raw) {
@@ -129,8 +130,9 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
             }
             case 'seReporting': {
                 const params = parseBridgeParams('seReporting', parsed.data.params)
-                if (!provider.seReporting) throw new Error('The SE Reporting Dashboard host is unavailable.')
-                return successResponse(id, await provider.seReporting.invoke(params))
+                const host = provider.seReporting
+                if (!host) throw new Error('The SE Reporting Dashboard host is unavailable.')
+                return successResponse(id, await withFoundrySignIn(() => host.invoke(params)))
             }
             case 'voiceInput':
                 return errorResponse(id, 'Voice input must be handled by the local presentation host.', 'host_only')
@@ -251,6 +253,10 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
                 const params = parseBridgeParams('getWorkflowRun', parsed.data.params)
                 return successResponse(id, await provider.getWorkflowRun(params.runId))
             }
+            case 'getWorkflowResultsView': {
+                const params = parseBridgeParams('getWorkflowResultsView', parsed.data.params)
+                return successResponse(id, await provider.getWorkflowResultsView(params.runId, params.filter))
+            }
             case 'cancelWorkflowRun': {
                 const params = parseBridgeParams('cancelWorkflowRun', parsed.data.params)
                 return successResponse(id, await provider.cancelWorkflowRun(params.runId))
@@ -299,12 +305,16 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
             case 'workingSessionOpenFolder':
                 return errorResponse(id, 'workingSessionOpenFolder must be handled by the extension host.', 'host_only')
             case 'workingSessionTopic': {
-                if (!provider.workingSession) throw new Error('Preparing a working session is not available on this connection.')
-                return successResponse(id, workingSessionTopicResponseSchema.parse(await provider.workingSession.deriveTopic(parseBridgeParams('workingSessionTopic', parsed.data.params))))
+                const host = provider.workingSession
+                if (!host) throw new Error('Preparing a working session is not available on this connection.')
+                const params = parseBridgeParams('workingSessionTopic', parsed.data.params)
+                return successResponse(id, workingSessionTopicResponseSchema.parse(await withFoundrySignIn(() => host.deriveTopic(params))))
             }
             case 'workingSessionPrepare': {
-                if (!provider.workingSession) throw new Error('Preparing a working session is not available on this connection.')
-                return successResponse(id, workingSessionResultSchema.parse(await provider.workingSession.prepare(parseBridgeParams('workingSessionPrepare', parsed.data.params))))
+                const host = provider.workingSession
+                if (!host) throw new Error('Preparing a working session is not available on this connection.')
+                const params = parseBridgeParams('workingSessionPrepare', parsed.data.params)
+                return successResponse(id, workingSessionResultSchema.parse(await withFoundrySignIn(() => host.prepare(params))))
             }
             default:
                 return errorResponse(id, 'The requested method is not supported.', 'unknown_method')

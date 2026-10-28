@@ -84,6 +84,7 @@ describe('shared Teams operations and sample composition', () => {
     await expect(operations.invoke('workflows.get', request)).resolves.toMatchObject({ run: { status: 'completed' } })
     for (const account of await service.orchestrator.listAccounts()) await service.orchestrator.setAccountVisibility(account.id, 'hidden')
     await expect(operations.invoke('workflows.get', request)).rejects.toThrow(/scope|access/i)
+    await expect(operations.invoke('workflows.view', { ...request, filter: 'mine' })).rejects.toThrow(/scope|access/i)
   })
   it('keeps the source scope of every retained run, however many other runs were started', async () => {
     const { service } = await fixture()

@@ -86,11 +86,12 @@ describe('agent composition parity across actual host factories', () => {
 
     it('produces identical model input and capability coverage through every host', async () => {
         const context = await canonicalContext()
-        const results = await Promise.all(hosts().map(async ([, build]) => {
+        const results: Array<{ capabilities: string[]; versions: string[]; inputs: string[] }> = []
+        for (const [, build] of hosts()) {
             const registry = build()
             if (!registry) throw new Error('The host did not build a Foundry registry.')
-            return { capabilities: Object.keys(registry).sort(), versions: Object.values(registry).map((entry) => entry!.version), inputs: await modelInputs(registry, context) }
-        }))
+            results.push({ capabilities: Object.keys(registry).sort(), versions: Object.values(registry).map((entry) => entry!.version), inputs: await modelInputs(registry, context) })
+        }
         for (const result of results.slice(1)) expect(result).toEqual(results[0])
     })
 

@@ -45,7 +45,7 @@ test('Discover waits for delayed results instead of showing empty data and makes
   await expect(page.getByText('No eligible opportunities for this source scope and domain.', { exact: true })).toBeHidden()
   release()
   await expect(page.getByText(infra[0]!.name, { exact: true })).toBeVisible()
-  expect(reads).toEqual(['getDiscoverySnapshot'])
+  expect(reads.filter((operation) => operation !== 'getInferenceMode')).toEqual(['getDiscoverySnapshot'])
 })
 
 test('Discover displays source failures with retry rather than falsely reporting an empty working set', async ({ page, request }) => {

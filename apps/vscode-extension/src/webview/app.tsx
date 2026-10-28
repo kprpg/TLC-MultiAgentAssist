@@ -31,6 +31,7 @@ import { MeetingPicker, useMeetingList } from '../../../shared/meeting-picker.js
 import { WorkingSessionLauncher } from '../../../shared/working-session/working-session-launcher.js'
 import { DashboardWorkspace } from '../../../shared/dashboards/dashboard-workspace.js'
 import { MembershipRemovalPrompt } from '../../../shared/membership-removal.js'
+import { MembershipAction, useWorkflowMembership, WorkflowMembershipControls } from '../../../shared/workflow-membership.js'
 import { NewWorkspace } from '../../../shared/record-creation/new-workspace.js'
 import { formatOpportunityIntent } from '../../../shared/opportunity-intent.js'
 import { MsxOpportunityLink } from '../../../shared/msx-opportunity-link.js'
@@ -377,8 +378,14 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
     }, [definitions, playQuery])
 
     const selectedRun = runs.find((run) => run.runId === selectedRunId)
-    const groups = useMemo<QueueGroup[]>(() => (selectedRun ? groupQueueByOpportunity(selectedRun.queue, resolvers) : []), [selectedRun, resolvers])
-    const displayCard = useMemo(() => (selectedRun ? humanizeResultCard(selectedRun.card, resolvers) : undefined), [selectedRun, resolvers])
+    const rawOutput = useMemo(() => selectedRun ? {
+        workflowId: selectedRun.workflowId, generatedAt: new Date(selectedRun.ranAt).toISOString(),
+        card: selectedRun.card, queueItems: selectedRun.queue, sourceHealth: selectedRun.sourceHealth
+    } : undefined, [selectedRun])
+    const membership = useWorkflowMembership(dataClient.getWorkflowResultsView, selectedRunId, rawOutput)
+    const queue = membership.output?.queueItems
+    const groups = useMemo<QueueGroup[]>(() => groupQueueByOpportunity(queue ?? [], resolvers), [queue, resolvers])
+    const displayCard = useMemo(() => membership.output ? humanizeResultCard(membership.output.card, resolvers) : undefined, [membership.output, resolvers])
 
     // Move focus to the run header when a result is shown so screen readers announce the run context.
     useEffect(() => {
@@ -453,11 +460,12 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                                 <span>{formatRunTime(selectedRun.ranAt)}</span>
                             </div>
                             <div className="run-metric-strip">
-                                <span className="run-metric"><strong>{selectedRun.queue.length}</strong> items</span>
-                                <span className="run-metric"><strong>{highPriorityCount(selectedRun.queue)}</strong> high priority</span>
+                                <span className="run-metric"><strong>{queue?.length ?? 0}</strong> items</span>
+                                <span className="run-metric"><strong>{highPriorityCount(queue ?? [])}</strong> high priority</span>
                                 <span className="run-metric"><strong>{groups.length}</strong> opportunities</span>
                             </div>
                         </header>
+                        <WorkflowMembershipControls membership={membership} />
                         <WorkflowProgress run={selectedRun} itemCount={selectedRun.queue.length} sourceHealth={selectedRun.sourceHealth} />
                         {runs.length > 1 && (
                             <div className="run-history" role="tablist" aria-label="Recent runs">
@@ -477,11 +485,11 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                             </div>
                         )}
                         <div className="results-body">
-                            <ResultCard card={displayCard ?? selectedRun.card} />
-                            {!cardHasContent(selectedRun.card) && selectedRun.queue.length === 0 && (
+                            {displayCard && <ResultCard card={displayCard} />}
+                            {membership.output && !cardHasContent(membership.output.card) && queue?.length === 0 && membership.filter === 'all' && (
                                 <p className="muted">This play returned no items for the current scope.</p>
                             )}
-                            {selectedRun.queue.length > 0 && (
+                            {queue && queue.length > 0 && (
                                 <div className="queue">
                                     <h4>Operational queue</h4>
                                     {groups.map((group) => {
@@ -508,14 +516,14 @@ function PlaysPanel({ runRequest }: { runRequest?: { workflowId: string; token: 
                                                                     <div className="queue-item-row">
                                                                         <span className="queue-item-text"><span className={`badge priority ${priorityClass(item.priority)}`}>{item.priority}</span> {item.title}</span>
                                                                         {item.accountId && item.opportunityId && (
-                                                                            <button
+                                                                            <MembershipAction reason={membership.reasonFor(item.id)}><button
                                                                                 className="send-agent"
                                                                                 title={`Send this item to ${agentLabel(capability)}`}
-                                                                                disabled={selectedRun.status !== 'completed' || entry?.status === 'loading'}
+                                                                                disabled={selectedRun.status !== 'completed' || entry?.status === 'loading' || Boolean(membership.reasonFor(item.id))}
                                                                                 onClick={() => void sendToGuidance(selectedRun.runId, item.id, item.title, capability)}
                                                                             >
                                                                                 {entry?.status === 'loading' ? 'Sending...' : `Send to ${agentLabel(capability)}`}
-                                                                            </button>
+                                                                            </button></MembershipAction>
                                                                         )}
                                                                     </div>
                                                                     {entry && (

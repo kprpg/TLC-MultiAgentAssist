@@ -16,6 +16,8 @@ import { seReportingRequestSchema, seReportingResponseSchema } from '../common/c
 import { measurePerformance } from '../common/telemetry/performance.js'
 import type { ThinSliceOrchestrator } from './index.js'
 import type { SyncMutationOperation } from '../common/contracts/cache-sync.js'
+import { workflowResultsViewRequestSchema, workflowResultsViewSchema } from '../common/contracts/workflow-membership.js'
+import { prepareMemberWorkflowGuidance, readWorkflowResultsView } from './workflows/membership-view.js'
 
 export class WorkflowScopeAuthorizationError extends Error {
   constructor() { super('Workflow source scope is unavailable or changed. Start a fresh workflow after verifying current access.'); this.name = 'WorkflowScopeAuthorizationError' }
@@ -60,6 +62,7 @@ export function createApplicationOperations(services: ApplicationServices) {
   const core = services.orchestrator
   const workflows = services.workflows
   const operations: Record<string, ApplicationOperation> = {
+    getInferenceMode: operation(z.object({}).strict(), c.inferenceModeSchema.nullable(), () => services.inferenceMode ?? null),
     ...createCoreMutationOperations(core, (input) => services.meetings.applyMeetingChangeSet(input)),
     searchKnowledge: operation(c.knowledgeSearchRequestSchema, c.knowledgeSearchResponseSchema, (input) => core.searchKnowledge(input)),
     sellerDashboard: operation(sellerDashboardRequestSchema, sellerDashboardResponseSchema, (input) => services.sellerDashboard.invoke(input)),
@@ -92,7 +95,10 @@ export function createApplicationOperations(services: ApplicationServices) {
     'workflows.get': operation(workflowRunRequestSchema, workflowRunViewSchema, (input) => workflows.get(input)),
     'workflows.cancel': operation(workflowRunRequestSchema, c.workflowRunSchema, (input) => workflows.cancel(input)),
     'workflows.history': operation(listWorkflowRunsRequestSchema, z.array(c.workflowRunSchema), (input) => workflows.listRuns(input)),
-    'workflows.guidance': operation(workflowGuidanceRequestSchema, c.workflowGuidanceHandoffSchema, (input) => workflows.prepareGuidance(input), 'read', true)
+    'workflows.guidance': operation(workflowGuidanceRequestSchema, c.workflowGuidanceHandoffSchema,
+      (input) => prepareMemberWorkflowGuidance(workflows, () => core.getTeamMemberships(), input), 'read', true),
+    'workflows.view': operation(workflowResultsViewRequestSchema, workflowResultsViewSchema,
+      (input) => readWorkflowResultsView(workflows, () => core.getTeamMemberships(), input))
   }
   function describe(name: string): ApplicationOperation {
     if (!Object.hasOwn(operations, name)) throw new Error('Unknown application operation.')
@@ -146,7 +152,7 @@ export function createApplicationOperations(services: ApplicationServices) {
           return run
         }
         const read = async () => {
-          if (name === 'workflows.get' || name === 'workflows.guidance') {
+          if (name === 'workflows.get' || name === 'workflows.guidance' || name === 'workflows.view') {
             const request = entry.parse(input)
             await verifyWorkflow(String(request['runId']))
           }

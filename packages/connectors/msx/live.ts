@@ -1355,6 +1355,14 @@ export class LiveMsxConnector implements MsxConnector {
     return this.requestAll<Record<string, unknown>>(entitySet, parameters)
   }
 
+  async getTeamMemberships() {
+    const userId = await this.getCurrentUserId()
+    const [dealTeamOpportunityIds, milestoneTeamOpportunityIds, milestoneIds] = await Promise.all([
+      this.listDealTeamOpportunityIds(userId), this.milestoneTeamOpportunityIds(), this.milestoneTeamMilestoneIds()
+    ])
+    return { dealTeamOpportunityIds, milestoneTeamOpportunityIds, milestoneTeamMilestoneIds: [...milestoneIds] }
+  }
+
   /** Opportunity ids on the given user's active deal teams. */
   async listDealTeamOpportunityIds(userId: string): Promise<string[]> {
     if (!guidPattern.test(userId)) throw new Error('The user id must be a valid MSX GUID.')

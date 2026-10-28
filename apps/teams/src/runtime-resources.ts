@@ -7,6 +7,8 @@ import { EncryptedDocumentStore } from '../../../packages/connectors/common/encr
 import { SqliteDocumentStore, type ScopedDocumentStore } from '../../../packages/connectors/common/scoped-document-store.js'
 import { TableDocumentStore } from '../../../packages/connectors/common/table-document-store.js'
 import { loadTeamsStateKey, type TeamsConfiguration, type TeamsRuntimeConfiguration } from './configuration.js'
+import { SampleInference } from '../../../packages/orchestrator/sample-inference.js'
+import { loadFoundryEnvironmentFromEnvironment, type FoundryEnvironment } from '../../../packages/common/configuration/foundry-environment.js'
 
 export function requiresTeamsFoundryCredential(environment: NodeJS.ProcessEnv, hosted: boolean, nativeFoundryGuidance: boolean): boolean {
   return hosted || nativeFoundryGuidance || environment['TLC_SE_REPORTING_ENABLED'] === '1'
@@ -16,6 +18,27 @@ export function createTeamsWorkloadCredential(runtime: TeamsRuntimeConfiguration
   return runtime.profile === 'local'
     ? new AzureCliCredential({ tenantId: foundryTenantId, processTimeoutInMs: 30_000 })
     : new ManagedIdentityCredential(environment['AZURE_CLIENT_ID'] ? { clientId: environment['AZURE_CLIENT_ID'] } : {})
+}
+
+export function createTeamsSampleInference(runtime: TeamsRuntimeConfiguration, environment: NodeJS.ProcessEnv): SampleInference {
+  let configuration: Promise<FoundryEnvironment> | undefined
+  let credential: TokenCredential | undefined
+  const loadEnvironment = () => {
+    configuration ??= loadFoundryEnvironmentFromEnvironment(environment).catch((error: unknown) => {
+      configuration = undefined
+      throw error
+    })
+    return configuration
+  }
+  return new SampleInference({
+    environment, hosted: runtime.profile === 'azure', loadEnvironment,
+    credential: {
+      async getToken(scopes, options) {
+        credential ??= createTeamsWorkloadCredential(runtime, (await loadEnvironment()).authentication.foundryTenantId, environment)
+        return credential.getToken(scopes, options)
+      }
+    }
+  })
 }
 
 export async function createTeamsStateStore(configuration: TeamsConfiguration, runtime: TeamsRuntimeConfiguration, environment: NodeJS.ProcessEnv): Promise<{
