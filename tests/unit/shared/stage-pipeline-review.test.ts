@@ -136,7 +136,7 @@ describe('Stage and Pipeline Review analysis', () => {
 describe('Stage and Pipeline Review rendering', () => {
     it('registers a Stage and Pipeline Review child tab under the Dashboards workspace', () => {
         const markup = renderToStaticMarkup(createElement(DashboardWorkspace, { invokeSellerDashboard: vi.fn(), invokeSeReporting: vi.fn() }))
-        expect(markup.match(/role="tab"/g)).toHaveLength(3)
+        expect(markup.match(/role="tab"/g)).toHaveLength(4)
         expect(markup).toContain('>Stage and Pipeline Review<')
         expect(markup).toContain('aria-label="Seller Dashboard"')
     })

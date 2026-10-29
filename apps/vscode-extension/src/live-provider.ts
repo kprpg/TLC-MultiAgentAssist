@@ -27,6 +27,7 @@ import type { ExtensionDataProvider } from './data-provider.js'
 import { ExtensionMcemGuidanceConnector } from './mcem-guidance.js'
 import { buildLiveDataProvider, buildLiveTaskAgents } from './live-provider-core.js'
 import { createStagePipelineReviewHost } from '../../../packages/orchestrator/stage-pipeline-review.js'
+import { createMomentumFocusHost } from '../../../packages/orchestrator/momentum-focus/host.js'
 import { bindSourceToken } from '../../../packages/orchestrator/mutations/core-adapter.js'
 import { createSeReportingHost } from '../../../packages/orchestrator/se-reporting/composition.js'
 import type { SeReportingResource } from '../../../packages/common/contracts/se-reporting.js'
@@ -126,5 +127,10 @@ export function createLiveDataProvider(
         ...(getReportingToken ? { getToken: getReportingToken } : {}),
         ...(foundryCredential ? { foundryCredential } : {})
     })
-    return buildLiveDataProvider({ orchestrator, host: configured.host, account, meetingConnector, getSourceToken: sourceToken, reportingHost, stagePipelineHost: createStagePipelineReviewHost({ mode: 'live', source: msx }), workingSession: createExtensionWorkingSession({ mode: 'live', knowledgeSearch: orchestrator, foundryCredential }), ...(meetingExtractor ? { meetingExtractor } : {}), dispose: () => configured.dispose() })
+    const momentumHost = createMomentumFocusHost({
+        mode: 'live', source: msx, getToken: sourceToken,
+        ...(foundryCredential ? { credential: foundryCredential } : {}),
+        excludedAccountIds: async () => (await portfolioPreferenceStore.read(await msx.getCurrentUserId())).hiddenAccountIds
+    })
+    return buildLiveDataProvider({ orchestrator, host: configured.host, account, meetingConnector, getSourceToken: sourceToken, reportingHost, momentumHost, stagePipelineHost: createStagePipelineReviewHost({ mode: 'live', source: msx }), workingSession: createExtensionWorkingSession({ mode: 'live', knowledgeSearch: orchestrator, foundryCredential }), ...(meetingExtractor ? { meetingExtractor } : {}), dispose: () => configured.dispose() })
 }

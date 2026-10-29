@@ -584,7 +584,7 @@ var base64url = /^[A-Za-z0-9_-]*$/;
 var httpProtocol = /^https?$/;
 var e164 = /^\+[1-9]\d{6,14}$/;
 var dateSource = `(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))`;
-var date$3 = /*@__PURE__*/ new RegExp(`^${dateSource}$`);
+var date$4 = /*@__PURE__*/ new RegExp(`^${dateSource}$`);
 function timeSource(args) {
 	const hhmm = `(?:[01]\\d|2[0-3]):[0-5]\\d`;
 	return typeof args.precision === "number" ? args.precision === -1 ? `${hhmm}` : args.precision === 0 ? `${hhmm}:[0-5]\\d` : `${hhmm}:[0-5]\\d\\.\\d{${args.precision}}` : `${hhmm}(?::[0-5]\\d(?:\\.\\d+)?)?`;
@@ -1242,7 +1242,7 @@ var $ZodISODateTime = /*@__PURE__*/ $constructor("$ZodISODateTime", (inst, def) 
 	$ZodStringFormat.init(inst, def);
 });
 var $ZodISODate = /*@__PURE__*/ $constructor("$ZodISODate", (inst, def) => {
-	def.pattern ?? (def.pattern = date$3);
+	def.pattern ?? (def.pattern = date$4);
 	$ZodStringFormat.init(inst, def);
 });
 var $ZodISOTime = /*@__PURE__*/ $constructor("$ZodISOTime", (inst, def) => {
@@ -3451,7 +3451,7 @@ var ZodISODate = /*@__PURE__*/ $constructor("ZodISODate", (inst, def) => {
 	$ZodISODate.init(inst, def);
 	ZodStringFormat.init(inst, def);
 });
-function date$2(params) {
+function date$3(params) {
 	return /* @__PURE__ */ _isoDate(ZodISODate, params);
 }
 var ZodISOTime = /*@__PURE__*/ $constructor("ZodISOTime", (inst, def) => {
@@ -3751,7 +3751,7 @@ var ZodString = /*@__PURE__*/ $constructor("ZodString", (inst, def) => {
 	inst.cidrv6 = (params) => inst.check(/* @__PURE__ */ _cidrv6(ZodCIDRv6, params));
 	inst.e164 = (params) => inst.check(/* @__PURE__ */ _e164(ZodE164, params));
 	inst.datetime = (params) => inst.check(datetime(params));
-	inst.date = (params) => inst.check(date$2(params));
+	inst.date = (params) => inst.check(date$3(params));
 	inst.time = (params) => inst.check(time(params));
 	inst.duration = (params) => inst.check(duration(params));
 });
@@ -4320,6 +4320,435 @@ function refine(fn, _params = {}) {
 function superRefine(fn, params) {
 	return /* @__PURE__ */ _superRefine(fn, params);
 }
+var momentumRuleVersion = "momentum-rules-1";
+var id = string().min(1).max(200);
+var label = string().min(1).max(500);
+var date$2 = date$3();
+var timestamp$2 = datetime({ offset: true });
+var count$2 = number().int().nonnegative();
+var currency = string().regex(/^[A-Z]{3}$/);
+var ids = array(id).max(500).default([]);
+var momentumBasisSchema = _enum(["pipeline", "monthly-usage"]);
+var momentumCustomerIndustrySchema = _enum(["hls", "all"]);
+var momentumQualitySchema = _enum([
+	"complete",
+	"partial",
+	"unknown"
+]);
+var momentumDeadlineSchema = _enum([
+	"overdue",
+	"this-week",
+	"rest-of-month",
+	"later",
+	"undated"
+]);
+var momentumEventSchema = object({
+	id,
+	kind: _enum([
+		...[
+			"stage-advanced",
+			"milestone-completed",
+			"commitment-recorded",
+			"proof-completed"
+		],
+		"activity",
+		"note",
+		"task",
+		"forecast-comment",
+		"loopback",
+		"date-slipped"
+	]),
+	source: _enum(["msx", "observed"]),
+	sourceAt: timestamp$2.nullable(),
+	observedAt: timestamp$2,
+	intervalStart: timestamp$2.nullable(),
+	intervalEnd: timestamp$2.nullable(),
+	field: string().max(100).nullable(),
+	relatedRecordKey: id.optional(),
+	from: string().max(500).nullable(),
+	to: string().max(500).nullable()
+}).strict();
+var momentumHistorySchema = object({
+	state: _enum([
+		"insufficient",
+		"observed",
+		"authoritative",
+		"unavailable"
+	]),
+	scope: _enum([
+		"shared",
+		"synthetic",
+		"unavailable"
+	]),
+	availableSince: timestamp$2.nullable(),
+	lastObserved: timestamp$2.nullable(),
+	observations: count$2,
+	maxGapDays: number().nonnegative().nullable()
+}).strict();
+var momentumRecordSchema = object({
+	key: id,
+	id,
+	entity: _enum(["opportunity", "milestone"]),
+	name: label,
+	accountId: id.nullable(),
+	accountName: label.nullable(),
+	opportunityId: id,
+	stage: label.nullable(),
+	status: label.nullable(),
+	ownerId: id.nullable(),
+	ownerName: label.nullable(),
+	dueDate: date$2.nullable(),
+	value: object({
+		basis: momentumBasisSchema,
+		amount: number().finite().nonnegative().nullable(),
+		currency: currency.nullable()
+	}).strict(),
+	active: boolean().nullable(),
+	onMyTeam: boolean().nullable(),
+	role: _enum([
+		"SSP",
+		"SE",
+		"both"
+	]),
+	commitment: boolean().nullable(),
+	blocked: boolean().nullable(),
+	blockingMilestoneIds: array(id).max(2e4),
+	plannedHold: boolean(),
+	sourceQuality: momentumQualitySchema,
+	sourceUpdatedAt: timestamp$2.nullable(),
+	sourceUrl: url().refine((value) => {
+		const url = new URL(value);
+		return url.protocol === "https:" && !url.username && !url.password;
+	}, "Evidence links must use HTTPS without credentials.").nullable(),
+	history: momentumHistorySchema,
+	events: array(momentumEventSchema).max(1096)
+}).strict();
+var momentumFocusQuerySchema = object({
+	timezone: string().max(100).refine((value) => {
+		try {
+			new Intl.DateTimeFormat("en", { timeZone: value });
+			return true;
+		} catch (error) {
+			if (error instanceof RangeError) return false;
+			throw error;
+		}
+	}, "Use a valid IANA timezone.").default("UTC"),
+	focus: _enum([
+		"week",
+		"month",
+		"custom"
+	]).default("week"),
+	from: date$2.optional(),
+	to: date$2.optional(),
+	lookbackDays: union([
+		literal(7),
+		literal(14),
+		literal(30),
+		literal(90)
+	]).default(30),
+	role: _enum(["SSP", "SE"]).default("SSP"),
+	scope: _enum([
+		"portfolio",
+		"mine",
+		"team"
+	]).default("portfolio"),
+	customerIndustry: momentumCustomerIndustrySchema.default("hls"),
+	accountIds: ids,
+	opportunityIds: ids,
+	milestoneIds: ids,
+	stages: ids,
+	opportunityStatuses: ids,
+	milestoneStatuses: ids,
+	ownerIds: ids,
+	entity: _enum([
+		"all",
+		"opportunity",
+		"milestone"
+	]).default("all"),
+	sourceQuality: array(momentumQualitySchema).max(3).default([]),
+	basis: _enum([
+		"all",
+		"pipeline",
+		"monthly-usage"
+	]).default("all"),
+	currency: currency.optional(),
+	minValue: number().finite().nonnegative().optional(),
+	maxValue: number().finite().nonnegative().optional(),
+	dateFrom: date$2.optional(),
+	dateTo: date$2.optional(),
+	includeUndated: boolean().default(true),
+	lens: _enum([
+		"all",
+		"advancing",
+		"review",
+		"busy",
+		"weekly",
+		"monthly",
+		"history",
+		"unknown-history"
+	]).default("all"),
+	deadline: momentumDeadlineSchema.optional(),
+	accountSort: _enum([
+		"traction",
+		"activity",
+		"review"
+	]).default("traction"),
+	heatmap: _enum(["count", "value"]).default("count"),
+	page: number().int().min(1).max(1e4).default(1),
+	pageSize: number().int().min(1).max(100).default(25)
+}).strict().superRefine((query, context) => {
+	if (query.focus === "custom" && (!query.from || !query.to || query.from > query.to)) context.addIssue({
+		code: "custom",
+		message: "A custom focus needs an ordered start and end date."
+	});
+	if (query.minValue !== void 0 && query.maxValue !== void 0 && query.minValue > query.maxValue || query.dateFrom && query.dateTo && query.dateFrom > query.dateTo) context.addIssue({
+		code: "custom",
+		message: "Filter ranges must be ordered."
+	});
+	if (query.heatmap === "value" && (query.basis !== "monthly-usage" || !query.currency)) context.addIssue({
+		code: "custom",
+		message: "Monetary heatmaps require monthly usage and one verified currency."
+	});
+	if ((query.minValue !== void 0 || query.maxValue !== void 0) && (query.basis === "all" || !query.currency)) context.addIssue({
+		code: "custom",
+		message: "Value ranges require one financial basis and a verified currency."
+	});
+});
+var momentumFocusRequestSchema = object({
+	contractVersion: literal("1.2"),
+	operation: _enum([
+		"load",
+		"get",
+		"refresh",
+		"detail"
+	]),
+	query: momentumFocusQuerySchema.prefault({}),
+	refresh: boolean().optional(),
+	recordKey: id.optional(),
+	snapshotId: id.optional()
+}).strict().superRefine((request, context) => {
+	if (request.operation === "detail" && (!request.recordKey || !request.snapshotId)) context.addIssue({
+		code: "custom",
+		message: "Detail reads require a record key and snapshot identity."
+	});
+	if (request.operation !== "detail" && (request.recordKey || request.snapshotId)) context.addIssue({
+		code: "custom",
+		message: "Record and snapshot identities are only valid for detail reads."
+	});
+	if (request.operation !== "load" && request.refresh !== void 0) context.addIssue({
+		code: "custom",
+		message: "The dataset refresh flag is only valid for load requests."
+	});
+});
+var momentumSourceHealthSchema = object({
+	source: _enum([
+		"portfolio",
+		"milestones",
+		"activities",
+		"notes",
+		"currencies",
+		"hierarchy",
+		"industry",
+		"history",
+		"m365"
+	]),
+	state: _enum([
+		"complete",
+		"partial",
+		"unavailable",
+		"denied",
+		"capped"
+	]),
+	detail: string().min(1).max(2e3),
+	count: count$2.nullable(),
+	checkedAt: timestamp$2
+}).strict();
+var momentumCollectionSchema = object({
+	mode: _enum(["sample", "live"]),
+	generatedAt: timestamp$2,
+	scopeKey: id,
+	scope: _enum([
+		"portfolio",
+		"mine",
+		"team"
+	]),
+	customerIndustry: momentumCustomerIndustrySchema,
+	teamAvailable: boolean(),
+	complete: boolean(),
+	records: array(momentumRecordSchema).max(3e4),
+	sources: array(momentumSourceHealthSchema).max(12)
+}).strict();
+var momentumDatasetSchema = object({
+	contractVersion: literal("1.2"),
+	kind: literal("dataset"),
+	ruleVersion: literal(momentumRuleVersion),
+	snapshotId: id,
+	asOf: timestamp$2,
+	data: momentumCollectionSchema
+}).strict();
+var momentumPrioritySchema = momentumRecordSchema.extend({
+	tier: _enum([
+		"act-now",
+		"this-week",
+		"plan-month",
+		"verify"
+	]),
+	deadline: momentumDeadlineSchema,
+	reviewDate: date$2.nullable(),
+	progressCount: count$2.nullable(),
+	historyCoverage: _enum([
+		"sufficient",
+		"partial",
+		"unknown"
+	]),
+	signalCount: count$2.nullable(),
+	signalTypes: array(string().max(100)).max(12),
+	latestSignal: timestamp$2.nullable(),
+	latestProgress: timestamp$2.nullable(),
+	reasons: array(object({
+		code: id,
+		text: string().min(1).max(1e3)
+	}).strict()).max(20),
+	nextAction: string().min(1).max(1e3),
+	accountableRole: label,
+	needsReview: boolean()
+}).strict();
+var window = object({
+	from: string().min(1),
+	to: string().min(1)
+}).strict();
+var momentumFocusResponseSchema = discriminatedUnion("kind", [
+	momentumDatasetSchema,
+	object({
+		contractVersion: literal("1.2"),
+		kind: literal("snapshot"),
+		ruleVersion: literal(momentumRuleVersion),
+		mode: _enum(["sample", "live"]),
+		generatedAt: timestamp$2,
+		snapshotId: id,
+		queryKey: id,
+		scopeKey: id,
+		query: momentumFocusQuerySchema,
+		scope: _enum([
+			"portfolio",
+			"mine",
+			"team"
+		]),
+		customerIndustry: momentumCustomerIndustrySchema,
+		teamAvailable: boolean(),
+		complete: boolean(),
+		focusWindow: window,
+		evidenceWindow: window,
+		sources: array(momentumSourceHealthSchema).max(12),
+		total: count$2,
+		rows: array(momentumPrioritySchema).max(100),
+		summary: object({
+			advancingAccounts: count$2,
+			weeklyPriorities: count$2,
+			monthlyMilestones: count$2,
+			reviewCandidates: count$2,
+			busyWithoutMovement: count$2,
+			usableHistory: count$2,
+			totalRecords: count$2
+		}).strict(),
+		facets: object({
+			accounts: array(object({
+				id,
+				name: label
+			}).strict()),
+			opportunities: array(object({
+				id,
+				name: label
+			}).strict()),
+			milestones: array(object({
+				id,
+				name: label
+			}).strict()),
+			owners: array(object({
+				id,
+				name: label
+			}).strict()),
+			stages: array(label),
+			opportunityStatuses: array(label),
+			milestoneStatuses: array(label),
+			currencies: array(currency)
+		}).strict(),
+		charts: object({
+			matrix: array(object({
+				key: id,
+				id,
+				entity: _enum(["opportunity", "milestone"]),
+				name: label,
+				progressCount: count$2,
+				signalCount: count$2.nullable(),
+				coverage: _enum([
+					"sufficient",
+					"partial",
+					"unknown"
+				]),
+				amount: number().finite().nullable(),
+				basis: momentumBasisSchema,
+				currency: currency.nullable()
+			}).strict()),
+			unknownHistoryKeys: array(id),
+			accounts: array(object({
+				accountId: id.nullable(),
+				name: label,
+				advancing: count$2,
+				eligible: count$2,
+				active: count$2,
+				advancingShare: number().min(0).max(1).nullable(),
+				progressCount: count$2,
+				signalCount: count$2,
+				reviewCount: count$2,
+				latestMovement: timestamp$2.nullable()
+			}).strict()),
+			heatmap: array(object({
+				stage: label,
+				status: label,
+				count: count$2,
+				value: number().finite().nonnegative().nullable(),
+				unit: label,
+				missingValues: count$2
+			}).strict()),
+			deadlines: array(object({
+				bucket: momentumDeadlineSchema,
+				opportunities: count$2,
+				milestones: count$2
+			}).strict()).length(5),
+			values: array(object({
+				basis: momentumBasisSchema,
+				currency,
+				amount: number().finite().nonnegative(),
+				records: count$2
+			}).strict()),
+			unknownValues: count$2
+		}).strict()
+	}).strict(),
+	object({
+		contractVersion: literal("1.2"),
+		kind: literal("detail"),
+		snapshotId: id,
+		queryKey: id,
+		scopeKey: id,
+		item: momentumPrioritySchema
+	}).strict(),
+	object({
+		contractVersion: literal("1.2"),
+		kind: literal("unavailable"),
+		code: _enum([
+			"unauthorized",
+			"forbidden",
+			"source-unavailable",
+			"throttled",
+			"scope-unavailable",
+			"industry-unavailable",
+			"stale",
+			"history-unavailable"
+		]),
+		message: string().min(1).max(2e3)
+	}).strict()
+]);
 var knowledgeSourceIdSchema = _enum([
 	"mcem",
 	"seismic-m365",
@@ -5327,7 +5756,7 @@ var tpid = string().regex(/^[1-9][0-9]{0,19}$/);
 var amount = number().finite();
 var nonnegative$1 = amount.nonnegative();
 var count$1 = number().int().nonnegative();
-var date$1 = date$2();
+var date$1 = date$3();
 var timestamp$1 = datetime({ offset: true });
 var quality = _enum([
 	"complete",
@@ -5725,7 +6154,7 @@ var name = string().min(1).max(500);
 var text = string().max(3e4);
 var nonnegative = number().finite().nonnegative();
 var count = number().int().nonnegative();
-var date = date$2();
+var date = date$3();
 var timestamp = datetime({ offset: true });
 var month = string().regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/);
 var stagePipelineStages = [
@@ -6744,6 +7173,7 @@ electron.contextBridge.exposeInMainWorld("tlc", {
 	},
 	invokeSellerDashboard: (request) => electron.ipcRenderer.invoke("tlc:seller-dashboard", request),
 	invokeStagePipelineReview: (request) => electron.ipcRenderer.invoke("tlc:stage-pipeline-review", request),
+	invokeMomentumFocus: async (request) => momentumFocusResponseSchema.parse(await electron.ipcRenderer.invoke("tlc:momentum-focus", momentumFocusRequestSchema.parse(request))),
 	invokeSeReporting: (request) => electron.ipcRenderer.invoke("tlc:se-reporting", request),
 	invokeVoice: (request) => electron.ipcRenderer.invoke("tlc:voice-input", request),
 	exitApplication: () => electron.ipcRenderer.invoke("tlc:exit-application"),

@@ -99,16 +99,31 @@ test('creates an Activity (Task) regarding a milestone from the milestone Action
 
         const milestones = window.getByRole('region', { name: 'Grid operations modernization milestones' })
         const firstRow = milestones.getByRole('row').filter({ hasText: 'Customer outcome validation' }).first()
-        await firstRow.getByRole('button', { name: /^Edit / }).click()
-        await window.getByRole('menuitem', { name: 'Activities', exact: true }).click()
+        const openActivities = async () => {
+            await firstRow.getByRole('button', { name: /^Edit / }).click()
+            await window.getByRole('menuitem', { name: 'Activities', exact: true }).click()
+        }
+        await openActivities()
 
         const dialog = window.getByRole('dialog')
         await expect(dialog).toContainText('Activities —')
-        await expect(dialog.getByRole('button', { name: 'Close' })).toBeInViewport()
+        await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeInViewport()
         await expect(dialog.getByRole('button', { name: 'Create task' })).toBeInViewport()
+        await expect(dialog.getByRole('button', { name: 'Create task' })).toBeDisabled()
         const dialogBox = await dialog.boundingBox()
         expect(dialogBox).not.toBeNull()
         expect((dialogBox?.y ?? 0) + (dialogBox?.height ?? 0)).toBeLessThanOrEqual(600)
+        await expect(dialog.getByLabel('Milestone activities')).toHaveAttribute('aria-busy', 'false')
+        const initialActivities = await dialog.locator('.milestone-activity-item').allTextContents()
+        for (const draft of ['', 'Discard this activity']) {
+            await dialog.getByLabel('Subject').fill(draft)
+            await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+            await expect(dialog).toBeHidden()
+            await openActivities()
+            await expect(dialog.getByLabel('Subject')).toHaveValue('')
+            await expect(dialog.getByLabel('Milestone activities')).toHaveAttribute('aria-busy', 'false')
+            expect(await dialog.locator('.milestone-activity-item').allTextContents()).toEqual(initialActivities)
+        }
         await dialog.getByLabel('Subject').fill('Architecture review session')
         await dialog.getByRole('button', { name: 'Create task' }).click()
         await expect(dialog.getByText('Architecture review session')).toBeVisible()

@@ -19,6 +19,7 @@ import { createLivePlayWorkflowHost, WorkflowRuntimeError, type WorkflowHost } f
 import { createSellerDashboardHost, type SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 import { createSeReportingHost, seReportingScopes } from '../../../packages/orchestrator/se-reporting/composition.js'
 import { createStagePipelineReviewHost, type StagePipelineReviewHost } from '../../../packages/orchestrator/stage-pipeline-review.js'
+import { createMomentumFocusHost, type MomentumFocusHost } from '../../../packages/orchestrator/momentum-focus/host.js'
 import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
 import type { AuthenticatedRequest, WebRuntime } from './app.js'
 import { hostedMutationState } from '../../../packages/connectors/common/mutation-state.js'
@@ -33,6 +34,28 @@ export function createWebSellerDashboardHost(mode: 'sample' | 'live'): SellerDas
         allowLocalProfile: false,
         resolveUserEmail: async () => undefined
     })
+}
+
+export function createWebMomentumResolver(
+    mode: 'sample' | 'azure-cli' | 'easy-auth',
+    options: { environment?: NodeJS.ProcessEnv; fetchImplementation?: typeof fetch; credential?: TokenCredential } = {}
+): (authentication: AuthenticatedRequest) => MomentumFocusHost {
+    if (mode === 'sample') {
+        const host = createMomentumFocusHost({ mode: 'sample' })
+        return () => host
+    }
+    return (authentication) => {
+        const environment = options.environment ?? process.env
+        const preferences = new JsonFilePortfolioPreferenceStore(resolve(environment['TLC_PORTFOLIO_PREFERENCES_PATH']?.trim() || '.tlc/portfolio-preferences.json'))
+        const getToken = async () => authentication.accessToken
+        const msx = new LiveMsxConnector({ getAccessToken: getToken }, options.fetchImplementation ?? fetch, undefined, undefined,
+            msxWriteMetadataFromEnvironment(environment), preferences, { cachePortfolio: false })
+        return createMomentumFocusHost({
+            mode: 'live', source: msx, getToken, environment,
+            ...(options.credential ? { credential: options.credential } : {}),
+            excludedAccountIds: async () => (await preferences.read(await msx.getCurrentUserId())).hiddenAccountIds
+        })
+    }
 }
 
 export function createWebStagePipelineResolver(

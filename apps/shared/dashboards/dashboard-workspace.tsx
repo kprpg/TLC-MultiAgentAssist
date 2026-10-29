@@ -4,20 +4,26 @@ import { StagePipelineReviewPane, type InvokeStagePipelineReview } from './Stage
 import type { StagePipelineWrites } from './StageAndPipelineReview/stage-pipeline-writes.js'
 import type { InvokeSeReporting } from './soltionEngineerDashboard/report-setup.js'
 import type { SessionPortfolio } from '../session-portfolio.js'
+import type { InvokeMomentumFocus } from './momentumFocus/use-momentum-focus.js'
+import type { OpenMomentumPortfolio } from './momentumFocus/momentum-detail.js'
 
-type DashboardId = 'seller-dashboard' | 'stage-and-pipeline-review' | 'se-reporting'
+type DashboardId = 'seller-dashboard' | 'stage-and-pipeline-review' | 'se-reporting' | 'momentum-focus'
 const SeReportingDashboardPane = lazy(() => import('./soltionEngineerDashboard/se-reporting-dashboard.js').then((module) => ({ default: module.SeReportingDashboardPane })))
+const MomentumFocusPane = lazy(() => import('./momentumFocus/momentum-focus.js').then((module) => ({ default: module.MomentumFocusPane })))
 
 const dashboards: ReadonlyArray<{ id: DashboardId; label: string }> = [
     { id: 'seller-dashboard', label: 'Seller Dashboard' },
     { id: 'stage-and-pipeline-review', label: 'Stage and Pipeline Review' },
-    { id: 'se-reporting', label: 'SE Reporting Dashboard' }
+    { id: 'se-reporting', label: 'SE Reporting Dashboard' },
+    { id: 'momentum-focus', label: 'Momentum & Focus' }
 ]
 
-export function DashboardWorkspace({ invokeSellerDashboard, invokeSeReporting, invokeStagePipelineReview, stagePipelineWrites, sourceSession }: {
+export function DashboardWorkspace({ invokeSellerDashboard, invokeSeReporting, invokeStagePipelineReview, invokeMomentumFocus, onOpenPortfolio, stagePipelineWrites, sourceSession }: {
     invokeSellerDashboard: InvokeSellerDashboard
     invokeSeReporting: InvokeSeReporting
     invokeStagePipelineReview?: InvokeStagePipelineReview
+    invokeMomentumFocus?: InvokeMomentumFocus
+    onOpenPortfolio?: OpenMomentumPortfolio
     stagePipelineWrites?: StagePipelineWrites
     sourceSession?: SessionPortfolio | undefined
 }): ReactElement {
@@ -71,6 +77,11 @@ export function DashboardWorkspace({ invokeSellerDashboard, invokeSeReporting, i
                 </div>
                 <div className="dashboard-panel" role="tabpanel" id="dashboard-panel-se-reporting" aria-labelledby="dashboard-tab-se-reporting" hidden={activeDashboard !== 'se-reporting'}>
                     {visited.has('se-reporting') && <Suspense fallback={<p role="status">Loading SE Reporting Dashboard...</p>}><SeReportingDashboardPane invoke={invokeSeReporting} /></Suspense>}
+                </div>
+                <div className="dashboard-panel" role="tabpanel" id="dashboard-panel-momentum-focus" aria-labelledby="dashboard-tab-momentum-focus" hidden={activeDashboard !== 'momentum-focus'}>
+                    {visited.has('momentum-focus') && (invokeMomentumFocus
+                        ? <Suspense fallback={<p role="status">Loading Momentum &amp; Focus...</p>}><MomentumFocusPane invoke={invokeMomentumFocus} onOpenPortfolio={onOpenPortfolio} /></Suspense>
+                        : <p role="alert">The Momentum &amp; Focus operation is unavailable in this host.</p>)}
                 </div>
             </div>
         </section>

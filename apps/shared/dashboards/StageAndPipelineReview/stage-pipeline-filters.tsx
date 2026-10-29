@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react'
+import type { ReactElement } from 'react'
+import { MultiSelect } from '../dashboard-controls.js'
+export { MultiSelect } from '../dashboard-controls.js'
 import { stagePipelineStages, type StagePipelineStage } from '../../../../packages/common/contracts/stage-pipeline-review.js'
 import {
     activeFilterChips, clearFilterChip, defaultReviewFilters, withScope,
@@ -12,56 +14,6 @@ export interface FilterOptions {
     solutions: readonly string[]
     quarters: readonly string[]
     partners: readonly string[]
-}
-
-export function MultiSelect<T extends string>({ label, allLabel, options, selected, onChange }: {
-    label: string
-    allLabel: string
-    options: ReadonlyArray<{ value: T; label?: string; count?: number }>
-    selected: readonly T[]
-    onChange(next: T[]): void
-}): ReactElement {
-    const [open, setOpen] = useState(false)
-    const root = useRef<HTMLDivElement>(null)
-    useEffect(() => {
-        if (!open) return undefined
-        const close = (event: MouseEvent | KeyboardEvent) => {
-            if (event instanceof KeyboardEvent) {
-                if (event.key === 'Escape') {
-                    if (root.current?.contains(document.activeElement)) {
-                        event.preventDefault()
-                        root.current.querySelector<HTMLButtonElement>('button')?.focus()
-                    }
-                    setOpen(false)
-                }
-                return
-            }
-            if (!root.current?.contains(event.target as Node)) setOpen(false)
-        }
-        document.addEventListener('mousedown', close)
-        document.addEventListener('keydown', close)
-        return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close) }
-    }, [open])
-    const summary = selected.length === 0 ? allLabel
-        : selected.length === 1 ? options.find((option) => option.value === selected[0])?.label ?? selected[0] ?? allLabel
-            : `${selected.length} ${label.toLowerCase()}`
-    return <div className="sprv-multiselect" ref={root}>
-        <button type="button" className={selected.length > 0 ? 'sprv-pill sprv-pill--active' : 'sprv-pill'} aria-haspopup="true" aria-expanded={open} onClick={() => setOpen(!open)}>
-            {summary} <span aria-hidden="true">▾</span>
-        </button>
-        {open && <div className="sprv-popover" role="group" aria-label={label}>
-            {options.map((option) => <label key={option.value} className="sprv-popover-row">
-                <input type="checkbox" checked={selected.includes(option.value)} onChange={(event) =>
-                    onChange(event.target.checked ? [...selected, option.value] : selected.filter((value) => value !== option.value))} />
-                <span>{option.label ?? option.value}</span>
-                {option.count !== undefined && <span className="sprv-count">{option.count}</span>}
-            </label>)}
-            <div className="sprv-popover-footer">
-                <button type="button" onClick={() => onChange(options.map((option) => option.value))}>Select all</button>
-                <button type="button" onClick={() => onChange([])}>Clear</button>
-            </div>
-        </div>}
-    </div>
 }
 
 export function Segmented<T extends string>({ name, label, value, options, onChange }: {

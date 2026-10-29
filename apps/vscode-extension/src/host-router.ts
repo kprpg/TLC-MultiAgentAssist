@@ -128,6 +128,11 @@ export async function routeBridgeMessage(provider: ExtensionDataProvider, raw: u
                 if (!provider.stagePipelineReview) throw new Error('The Stage and Pipeline Review host is unavailable.')
                 return successResponse(id, await provider.stagePipelineReview.invoke(params))
             }
+            case 'momentumFocus': {
+                const params = parseBridgeParams('momentumFocus', parsed.data.params)
+                if (!provider.momentumFocus) throw new Error('The Momentum & Focus host is unavailable.')
+                return successResponse(id, await provider.momentumFocus.invoke(params))
+            }
             case 'seReporting': {
                 const params = parseBridgeParams('seReporting', parsed.data.params)
                 const host = provider.seReporting

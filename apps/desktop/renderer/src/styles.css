@@ -92,7 +92,10 @@ input {
   height: 30px;
   background: #c8f135;
   color: #17223a;
-  font: 800 12px/1 "Segoe UI Variable", sans-serif;
+  font-family: "Segoe UI Variable", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .brand-copy {
@@ -526,7 +529,10 @@ input {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  font: 600 11px/1.35 "Segoe UI Variable", "Aptos", sans-serif;
+  font-family: "Segoe UI Variable", "Aptos", sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
   text-align: left;
   cursor: pointer;
 }

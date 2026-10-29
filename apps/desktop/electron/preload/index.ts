@@ -4,6 +4,7 @@ import type { WorkflowHostOperation } from '../../../../packages/orchestrator/wo
 import type { VoiceRequest, VoiceResponse } from '../../../../packages/common/contracts/voice.js'
 import type { SellerDashboardRequest, SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
 import type { StagePipelineRequest, StagePipelineResponse } from '../../../../packages/common/contracts/stage-pipeline-review.js'
+import { momentumFocusRequestSchema, momentumFocusResponseSchema, type MomentumFocusRequest, type MomentumFocusResponse } from '../../../../packages/common/contracts/momentum-focus.js'
 import type { SeReportingRequest, SeReportingResponse } from '../../../../packages/common/contracts/se-reporting.js'
 import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest, type KnowledgeSearchResponse } from '../../../../packages/common/contracts/knowledge.js'
 import {
@@ -27,6 +28,7 @@ export interface TlcDesktopApi {
   onCacheChanged(listener: (state: CacheReadState) => void): () => void
   invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
   invokeStagePipelineReview(request: StagePipelineRequest): Promise<StagePipelineResponse>
+  invokeMomentumFocus(request: MomentumFocusRequest): Promise<MomentumFocusResponse>
   invokeSeReporting(request: SeReportingRequest): Promise<SeReportingResponse>
   invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
   exitApplication(): Promise<void>
@@ -90,6 +92,7 @@ const api: TlcDesktopApi = {
   },
   invokeSellerDashboard: (request) => ipcRenderer.invoke('tlc:seller-dashboard', request),
   invokeStagePipelineReview: (request) => ipcRenderer.invoke('tlc:stage-pipeline-review', request),
+  invokeMomentumFocus: async (request) => momentumFocusResponseSchema.parse(await ipcRenderer.invoke('tlc:momentum-focus', momentumFocusRequestSchema.parse(request))),
   invokeSeReporting: (request) => ipcRenderer.invoke('tlc:se-reporting', request),
   invokeVoice: (request) => ipcRenderer.invoke('tlc:voice-input', request),
   exitApplication: () => ipcRenderer.invoke('tlc:exit-application'),

@@ -1,16 +1,17 @@
 import { expect, test, type Page } from '@playwright/test'
 import { resolve } from 'node:path'
-import type { AccountView, OpportunityView } from '../../../apps/vscode-extension/src/webview/view-types.js'
+import type { AccountView, CreateMilestoneActivityInput, MilestoneActivityView, MilestoneView, OpportunityView } from '../../../apps/vscode-extension/src/webview/view-types.js'
 import { briefOffer, conversionOffer, followUpAgentResponse, initialAgentResponse } from './agent-response-fixtures.js'
 import { expectGuidancePaneMaximizing, expectHorizontalPaneScroll, expectPaneResizing } from '../pane-resizing.js'
 import { expectTextContrast } from '../color-contrast.js'
 import { expectCopiedCustomerEmail, installCustomerEmailClipboard } from '../customer-email.js'
+import { captureTypography, expectFontReduction } from '../typography.js'
 
 interface BridgeRequest {
     kind: string
     id: string
     method: string
-    params?: { accountId?: string; opportunityId?: string; capability?: string; prompt?: string; url?: string; draft?: unknown; preview?: unknown; update?: { comments: string } }
+    params?: { accountId?: string; opportunityId?: string; milestoneId?: string; request?: CreateMilestoneActivityInput; capability?: string; prompt?: string; url?: string; draft?: unknown; preview?: unknown; update?: { comments: string } }
 }
 
 declare global {
@@ -25,6 +26,7 @@ declare global {
             rejectEvidence: boolean
             rejectComments: boolean
             delayComments: boolean
+            delayActivities: boolean
             delayAgent: boolean
             failAgent: boolean
             failEmail: boolean
@@ -75,16 +77,17 @@ const creationCatalog = {
     maxMutations: 50
 }
 
-async function mountWebview(page: Page): Promise<void> {
+async function mountWebview(page: Page, milestones: MilestoneView[] = []): Promise<void> {
     await page.route('**/', (route) => route.fulfill({
         contentType: 'text/html',
         body: '<!doctype html><html><head><style>:root{--vscode-editor-background:#fff;--vscode-foreground:#333;--vscode-font-family:"Segoe UI",sans-serif;--vscode-textLink-foreground:#006ab1;--vscode-panel-border:#d1d1d1}</style></head><body><div id="root" data-mode="sample"></div></body></html>'
     }))
-    await page.addInitScript(({ accounts, opportunities, creationCatalog, initialAgentResponse, followUpAgentResponse }) => {
+    await page.addInitScript(({ accounts, opportunities, milestones, creationCatalog, initialAgentResponse, followUpAgentResponse }) => {
         const reply = (id: string, result: unknown) => window.postMessage({ kind: 'response', id, ok: true, result }, window.location.origin)
+        const activities: MilestoneActivityView[] = []
         window.portfolioTest = {
             accounts, requests: [], delayed: [], delayCoach: false, failAccounts: false, rejectEvidence: false,
-            rejectComments: false, delayComments: false,
+            rejectComments: false, delayComments: false, delayActivities: false,
             delayAgent: false, failAgent: false, failEmail: false, cancelEmail: false, delayedAgent: [],
             release() {
                 for (const response of this.delayed.splice(0)) reply(response.id, response.result)
@@ -152,6 +155,19 @@ async function mountWebview(page: Page): Promise<void> {
                     }
                     else if (message.method === 'listAccounts') result = state.accounts
                     else if (message.method === 'listOpportunities') result = opportunities.filter((item) => item.accountId === message.params?.accountId)
+                    else if (message.method === 'listMilestones') result = milestones.filter((item) => item.opportunityId === message.params?.opportunityId)
+                    else if (message.method === 'listMilestoneActivities') result = activities.filter((item) =>
+                        item.opportunityId === message.params?.opportunityId && item.milestoneId === message.params?.milestoneId)
+                    else if (message.method === 'createMilestoneActivity') {
+                        const input = message.params
+                        if (!input?.opportunityId || !input.milestoneId || !input.request) throw new Error('Invalid milestone task request.')
+                        const activity: MilestoneActivityView = {
+                            id: `activity-${activities.length + 1}`, opportunityId: input.opportunityId, milestoneId: input.milestoneId,
+                            activityType: 'task', status: 'Open', ...input.request
+                        }
+                        activities.unshift(activity)
+                        result = activity
+                    }
                     else if (message.method === 'updateOpportunity') {
                         const opportunity = opportunities.find((item) => item.id === message.params?.opportunityId)
                         const comments = message.params?.update?.comments
@@ -205,7 +221,7 @@ async function mountWebview(page: Page): Promise<void> {
                             files: [{ name: 'creation-manifest.json', content: '{}', mimeType: 'application/json' }]
                         }
                     }
-                    else if (['listMilestones', 'discoverOpportunities', 'listWorkflowDefinitions', 'listWorkflowRuns'].includes(message.method)) result = []
+                    else if (['discoverOpportunities', 'listWorkflowDefinitions', 'listWorkflowRuns'].includes(message.method)) result = []
                     else if (message.method === 'openEvidence') result = null
                     else if (message.method === 'runMcemCoach') {
                         const opportunity = opportunities.find((item) => item.id === message.params?.opportunityId)
@@ -228,6 +244,7 @@ async function mountWebview(page: Page): Promise<void> {
                         }
                     } else throw new Error(`Unexpected test request: ${message.method}`)
                     if ((message.method === 'updateOpportunity' && state.delayComments) ||
+                        (message.method === 'createMilestoneActivity' && state.delayActivities) ||
                         (message.method === 'runMcemCoach' && state.delayCoach) ||
                         (message.method === 'listOpportunities' && message.params?.accountId === state.delayAccount)) {
                         state.delayed.push({ id: message.id, result })
@@ -235,12 +252,99 @@ async function mountWebview(page: Page): Promise<void> {
                 }
             })
         })
-    }, { accounts, opportunities, creationCatalog, initialAgentResponse, followUpAgentResponse })
+    }, { accounts, opportunities, milestones, creationCatalog, initialAgentResponse, followUpAgentResponse })
     await page.goto('/')
     await page.addStyleTag({ path: resolve('apps', 'vscode-extension', 'dist', 'webview', 'webview.css') })
     await page.addScriptTag({ path: resolve('apps', 'vscode-extension', 'dist', 'webview', 'webview.js') })
     await expect(page.locator('#portfolio-details-panel').getByRole('heading', { name: 'Alpha analysis', exact: true })).toBeVisible()
 }
+
+for (const hostSize of [undefined, '13px', '16px']) test(`VS Code font scale respects ${hostSize ?? 'fallback'} host settings`, async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 1000 })
+    await mountWebview(page, [{ id: 'ms-alpha', opportunityId: 'alpha-one', name: 'Synthetic milestone', status: 'On Track' }])
+    if (hostSize) await page.locator('html').evaluate((element, value) => element.style.setProperty('--vscode-font-size', value), hostSize)
+    await page.locator('#portfolio-details-panel').getByRole('button', { name: 'Activities', exact: true }).click()
+    const panel = page.locator('.milestone-activities-panel')
+    const fonts = await captureTypography(test.info(), {
+        body: page.locator('body'),
+        tab: page.getByRole('button', { name: 'Portfolio', exact: true }),
+        badge: page.locator('.mode-badge').first(),
+        subject: panel.getByLabel('Subject', { exact: true }),
+        category: panel.getByRole('combobox', { name: 'Task Category', exact: true }),
+        description: panel.getByLabel('Description', { exact: true }),
+        label: panel.locator('.milestone-activity-form label').first(),
+        cancel: panel.getByRole('button', { name: 'Cancel', exact: true }),
+        icon: page.locator('.layout-control svg').first()
+    })
+    const previousHostSize = Number.parseFloat(hostSize ?? '13px')
+    expectFontReduction(fonts, {
+        body: previousHostSize, tab: previousHostSize, badge: 11, subject: 13.3333, category: 13.3333,
+        description: 12, label: 11, cancel: 12
+    })
+    expect(fonts['icon']).toMatchObject({ width: 20, height: 20 })
+    expect(fonts['category']).toMatchObject({ padding: '4px 6px', fontFamily: 'Arial' })
+    expect(fonts['description']).toMatchObject({ padding: '6px 8px' })
+    if (!hostSize) await page.screenshot({ path: test.info().outputPath('activities.png') })
+})
+
+test('VS Code cancels blank and unsaved milestone activity drafts without creating tasks', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await mountWebview(page, [{ id: 'ms-alpha', opportunityId: 'alpha-one', name: 'Synthetic milestone', status: 'On Track' }])
+    const activitiesButton = page.locator('#portfolio-details-panel').getByRole('button', { name: 'Activities', exact: true })
+    const panel = page.locator('.milestone-activities-panel')
+    const cancel = panel.getByRole('button', { name: 'Cancel', exact: true })
+    const create = panel.getByRole('button', { name: 'Create task', exact: true })
+    const createRequests = () => page.evaluate(() => window.portfolioTest.requests.filter((entry) => entry.method === 'createMilestoneActivity'))
+
+    await activitiesButton.click()
+    await expect(create).toBeDisabled()
+    await expect(cancel).toBeEnabled()
+    const cancelBox = await cancel.boundingBox()
+    const createBox = await create.boundingBox()
+    expect(cancelBox).not.toBeNull()
+    expect(createBox).not.toBeNull()
+    expect(cancelBox!.y).toBeCloseTo(createBox!.y, 0)
+    await cancel.click()
+    await expect(panel).toHaveCount(0)
+    await expect(activitiesButton).toHaveAttribute('aria-expanded', 'false')
+    expect(await createRequests()).toEqual([])
+
+    await activitiesButton.click()
+    await panel.getByLabel('Subject', { exact: true }).fill('Discard this activity')
+    await panel.getByLabel('Task Category').selectOption('Demo')
+    await panel.getByLabel('Due', { exact: true }).fill('2027-01-15')
+    await panel.getByRole('combobox', { name: 'Priority', exact: true }).selectOption('High')
+    await panel.getByLabel('Duration (minutes)').fill('30')
+    await panel.getByLabel('Description', { exact: true }).fill('Unsaved activity details')
+    await expect(create).toBeEnabled()
+    await cancel.click()
+    await expect(panel).toHaveCount(0)
+    expect(await createRequests()).toEqual([])
+
+    await activitiesButton.click()
+    await expect(panel.getByLabel('Subject', { exact: true })).toHaveValue('')
+    await expect(panel.getByLabel('Task Category')).toHaveValue('')
+    await expect(panel.getByLabel('Due', { exact: true })).toHaveValue('')
+    await expect(panel.getByRole('combobox', { name: 'Priority', exact: true })).toHaveValue('Normal')
+    await expect(panel.getByLabel('Duration (minutes)')).toHaveValue('')
+    await expect(panel.getByLabel('Description', { exact: true })).toHaveValue('')
+    await expect(panel.locator('.milestone-activity-item')).toHaveCount(0)
+    await panel.getByLabel('Subject', { exact: true }).fill('Keep this activity')
+    await page.evaluate(() => { window.portfolioTest.delayActivities = true })
+    await create.click()
+    await expect(cancel).toBeDisabled()
+    await expect(panel.getByRole('button', { name: 'Creating…', exact: true })).toBeDisabled()
+    await page.evaluate(() => window.portfolioTest.release())
+    await expect(panel.locator('.milestone-activity-item')).toContainText('Keep this activity')
+    await expect(cancel).toBeEnabled()
+    expect(await createRequests()).toMatchObject([{
+        params: { opportunityId: 'alpha-one', milestoneId: 'ms-alpha', request: { subject: 'Keep this activity', priority: 'Normal' } }
+    }])
+    await cancel.click()
+    await activitiesButton.click()
+    await expect(panel.locator('.milestone-activity-item')).toHaveCount(1)
+    await expect(panel.locator('.milestone-activity-item')).toContainText('Keep this activity')
+})
 
 test('VS Code resizes Portfolio panes with dot grips and scrolls wide tables without changing scope', async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 900 })

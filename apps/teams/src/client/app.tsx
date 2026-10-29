@@ -13,6 +13,7 @@ import { teamsSurface } from './workspace-navigation.js'
 import { sellerDashboardResponseSchema } from '../../../../packages/common/contracts/seller-dashboard.js'
 import type { SellerDashboardRequest } from '../../../../packages/common/contracts/seller-dashboard.js'
 import { stagePipelineResponseSchema, type StagePipelineRequest } from '../../../../packages/common/contracts/stage-pipeline-review.js'
+import { momentumFocusResponseSchema, type MomentumFocusRequest } from '../../../../packages/common/contracts/momentum-focus.js'
 import { seReportingResponseSchema, type SeReportingRequest } from '../../../../packages/common/contracts/se-reporting.js'
 import { PortfolioLayoutControls } from '../../../shared/portfolio-layout-controls.js'
 import { PortfolioSearch } from './portfolio-search.js'
@@ -26,6 +27,7 @@ import { useTeamsDataMode } from './use-data-mode.js'
 import { DataModeSwitcher } from './data-mode-switcher.js'
 import type { TeamsDataMode } from '../../../../packages/common/contracts/teams-data-mode.js'
 import { WorkspaceBoundary } from './workspace-boundary.js'
+import { scaleFontTheme } from '../../../shared/font-scale.js'
 
 interface PendingReview { preview: ActionPreview; resolve(receipt: ActionReceipt): void; reject(error: Error): void }
 
@@ -33,6 +35,9 @@ const WorkflowsWorkspace = lazy(() => import('./workflows.js').then((module) => 
 const MeetingsWorkspace = lazy(() => import('./meetings.js').then((module) => ({ default: module.MeetingsWorkspace })))
 const ActivityWorkspace = lazy(() => import('./activity.js').then((module) => ({ default: module.ActivityWorkspace })))
 const DashboardWorkspace = lazy(() => import('../../../shared/dashboards/dashboard-workspace.js').then((module) => ({ default: module.DashboardWorkspace })))
+const scaledLightTheme = scaleFontTheme(teamsLightTheme)
+const scaledDarkTheme = scaleFontTheme(teamsDarkTheme)
+const scaledHighContrastTheme = scaleFontTheme(teamsHighContrastTheme)
 
 export function TeamsApp() {
   const parameters = new URLSearchParams(location.search)
@@ -200,7 +205,7 @@ export function TeamsApp() {
     if (!authentication?.context.embedded) { window.open(url, '_blank', 'noopener'); return }
     meeting.shareAppContentToStage((cause) => { if (cause) setError('Teams could not share this approved brief on the current client.') }, url)
   }
-  const selectedTheme = theme === 'dark' ? teamsDarkTheme : theme === 'contrast' ? teamsHighContrastTheme : teamsLightTheme
+  const selectedTheme = theme === 'dark' ? scaledDarkTheme : theme === 'contrast' ? scaledHighContrastTheme : scaledLightTheme
   const workspaceAllowed = !bindingId || bindingStatus === 'ready'
   const hostSurface = teamsSurface(parameters, authentication?.context.frameContext)
   function switchDataMode(mode: TeamsDataMode) {
@@ -235,6 +240,10 @@ export function TeamsApp() {
   const invokeStagePipelineReview = useCallback((input: StagePipelineRequest) => {
     if (!client) throw new Error('Sign in before opening Dashboards.')
     return client.operation('stagePipelineReview', input, stagePipelineResponseSchema)
+  }, [client])
+  const invokeMomentumFocus = useCallback((input: MomentumFocusRequest) => {
+    if (!client) throw new Error('Sign in before opening Dashboards.')
+    return client.operation('momentumFocus', input, momentumFocusResponseSchema)
   }, [client])
   const invokeSeReporting = useCallback(async (input: SeReportingRequest) => {
     if (!client) throw new Error('Sign in before opening Dashboards.')
@@ -308,7 +317,7 @@ export function TeamsApp() {
         {...(linkedRunId ? { initialRunId: linkedRunId } : {})} {...(bindingId && preferredAccountId ? {
         scope: selection ? { kind: 'opportunity' as const, accountId: selection.account.id, opportunityId: selection.opportunity.id } : { kind: 'account' as const, accountId: preferredAccountId }
       } : {})} />}
-      {workspaceAllowed && view === 'dashboard' && !bindingId && <DashboardWorkspace invokeSellerDashboard={invokeDashboard} invokeStagePipelineReview={invokeStagePipelineReview} invokeSeReporting={invokeSeReporting} />}
+      {workspaceAllowed && view === 'dashboard' && !bindingId && <DashboardWorkspace invokeSellerDashboard={invokeDashboard} invokeStagePipelineReview={invokeStagePipelineReview} invokeMomentumFocus={invokeMomentumFocus} invokeSeReporting={invokeSeReporting} onOpenPortfolio={focusPortfolio} />}
       {workspaceAllowed && view === 'meetings' && <MeetingsWorkspace client={client} mode={session.mode} selection={selection} reviewPreview={reviewPreview} compact={hostSurface === 'panel'}
         graphAvailable={!('authentication' in authentication.configuration && authentication.configuration.authentication === 'local-azure-cli')} />}
       {workspaceAllowed && view === 'activity' && <ActivityWorkspace client={client} onDisconnect={() => {

@@ -88,6 +88,7 @@ import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest, type VoiceR
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema, type SellerDashboardRequest, type SellerDashboardResponse } from '../../../../packages/common/contracts/seller-dashboard.js'
 import { createSampleSellerDashboard } from '../../../../packages/common/fixtures/seller-dashboard.js'
 import { stagePipelineRequestSchema, stagePipelineResponseSchema, type StagePipelineRequest, type StagePipelineResponse } from '../../../../packages/common/contracts/stage-pipeline-review.js'
+import { momentumFocusRequestSchema, momentumFocusResponseSchema, type MomentumFocusRequest, type MomentumFocusResponse } from '../../../../packages/common/contracts/momentum-focus.js'
 import { createSampleStagePipelineReview } from '../../../../packages/common/fixtures/stage-pipeline-review.js'
 import { seReportingRequestSchema, seReportingResponseSchema, type SeReportingRequest, type SeReportingResponse } from '../../../../packages/common/contracts/se-reporting.js'
 import { createPreviewSeReportingHost } from './preview/preview-reporting.js'
@@ -126,6 +127,7 @@ export interface RevampDataClient extends WorkingSessionClient {
     getDataMode(): Promise<'sample' | 'live'>
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
     invokeStagePipelineReview(request: StagePipelineRequest): Promise<StagePipelineResponse>
+    invokeMomentumFocus(request: MomentumFocusRequest): Promise<MomentumFocusResponse>
     invokeSeReporting(request: SeReportingRequest): Promise<SeReportingResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     readonly mode: 'desktop' | 'web-live' | 'web-sample'
@@ -279,6 +281,9 @@ export function createWebApiClient(fetcher: Fetcher = fetch, mode: 'web-live' | 
         invokeStagePipelineReview: async (request) => stagePipelineResponseSchema.parse(await apiRequest(fetcher, '/api/stage-pipeline-review', {
             method: 'POST', body: JSON.stringify(stagePipelineRequestSchema.parse(request))
         })),
+        invokeMomentumFocus: async (request) => momentumFocusResponseSchema.parse(await apiRequest(fetcher, '/api/momentum-focus', {
+            method: 'POST', body: JSON.stringify(momentumFocusRequestSchema.parse(request))
+        })),
         invokeSeReporting: async (request) => seReportingResponseSchema.parse(await apiRequest(fetcher, '/api/se-reporting', {
             method: 'POST', body: JSON.stringify(seReportingRequestSchema.parse(request))
         })),
@@ -430,6 +435,7 @@ interface DesktopBridge {
     getPortfolioWorkspace(request: PortfolioWorkspaceRequest): Promise<PortfolioWorkspace>
     invokeSellerDashboard(request: SellerDashboardRequest): Promise<SellerDashboardResponse>
     invokeStagePipelineReview(request: StagePipelineRequest): Promise<StagePipelineResponse>
+    invokeMomentumFocus(request: MomentumFocusRequest): Promise<MomentumFocusResponse>
     invokeSeReporting(request: SeReportingRequest): Promise<SeReportingResponse>
     invokeVoice(request: VoiceRequest): Promise<VoiceResponse>
     exitApplication(): Promise<void>
@@ -591,6 +597,9 @@ function webClient(): RevampDataClient {
             return createSampleStagePipelineReview({ scope: input.scope, ...(input.reportIds ? { reportIds: input.reportIds } : {}) })
         },
         invokeSeReporting: (request) => seReporting.invoke(request),
+        invokeMomentumFocus: async (request) => momentumFocusResponseSchema.parse(await apiRequest(fetch, '/api/momentum-focus', {
+            method: 'POST', body: JSON.stringify(momentumFocusRequestSchema.parse(request))
+        })),
         exitApplication: async () => { await apiRequest(fetch, '/api/exit', { method: 'POST' }) },
         getCurrentUserEmail: async () => undefined,
         async getDiscoverySnapshot(input = { contractVersion: discoverySnapshotVersion }) {
@@ -831,6 +840,9 @@ function desktopClient(bridge: DesktopBridge): RevampDataClient {
         openWorkingSessionFolder: (folderPath) => bridge.openWorkingSessionFolder(folderPath),
         invokeStagePipelineReview: async (request) => stagePipelineResponseSchema.parse(
             await bridge.invokeStagePipelineReview(stagePipelineRequestSchema.parse(request))
+        ),
+        invokeMomentumFocus: async (request) => momentumFocusResponseSchema.parse(
+            await bridge.invokeMomentumFocus(momentumFocusRequestSchema.parse(request))
         ),
         invokeSellerDashboard: async (request) => sellerDashboardResponseSchema.parse(
             await bridge.invokeSellerDashboard(sellerDashboardRequestSchema.parse(request))

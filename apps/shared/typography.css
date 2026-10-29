@@ -1,0 +1,7 @@
+:root {
+    --tlc-native-control-font-size: 13.333333px;
+}
+
+:where(input, select, textarea) {
+    font-size: var(--tlc-native-control-font-size);
+}

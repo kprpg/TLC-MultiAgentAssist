@@ -88,6 +88,7 @@ function servicesFor(backend: ReturnType<typeof createControlledLiveBackend>): A
     sellerDashboard: { invoke: disabled },
     seReporting: { invoke: disabled },
     stagePipelineReview: { invoke: disabled },
+    momentumFocus: { invoke: disabled },
     meetings: { proposeMeetingChangeSet: disabled, applyMeetingChangeSet: disabled },
     acquireTranscripts: disabled, resolveMeeting: disabled, listTranscriptSources: disabled, listRecentMeetings: disabled, resolveRecentMeeting: disabled, proposeTranscript: disabled,
     refreshSource: () => backend.msx.refresh(),

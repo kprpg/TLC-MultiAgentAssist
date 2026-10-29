@@ -10,6 +10,48 @@ import { expectOpportunitiesToFillCollapsedWorkspace } from './opportunities-lay
 import { conversionOffer, followUpAgentResponse, initialAgentResponse } from './agent-response-fixtures.js'
 import { agentTaskRequestSchema, contractVersion, emailComposeRequestSchema } from '../../../packages/common/contracts/index.js'
 import { expectCopiedCustomerEmail, installCustomerEmailClipboard } from '../customer-email.js'
+import { captureTypography, expectFontReduction } from '../typography.js'
+
+test('Desktop font scale preserves icon and shell dimensions while reducing dialog text', async () => {
+    const userDataDirectory = await mkdtemp(join(tmpdir(), 'tlc-font-scale-'))
+    const app = await electron.launch({
+        args: [resolve('apps/desktop'), `--user-data-dir=${userDataDirectory}`],
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_UI_MODE: '' }
+    })
+    try {
+        const window = await app.firstWindow()
+        await window.setViewportSize({ width: 1600, height: 1000 })
+        const shell = await captureTypography(test.info(), {
+            body: window.locator('body'),
+            title: window.locator('.blade-header h2').first(),
+            caption: window.locator('.brand span'),
+            search: window.locator('.global-search input'),
+            icon: window.locator('.profile-button svg'),
+            commandBar: window.locator('.command-bar')
+        }, 'shell')
+        expectFontReduction(shell, { body: 11.4, title: 13.3, caption: 10.45, search: 11.4 })
+        expect(shell['icon']).toMatchObject({ width: 20, height: 20 })
+        expect(shell['commandBar']).toMatchObject({ height: 44, padding: '0px 10px', gap: '10px' })
+        await window.getByRole('region', { name: 'Accounts blade' }).getByRole('button', { name: /Contoso Energy/ }).click()
+        await window.getByRole('region', { name: 'Opportunities blade' }).getByRole('button', { name: /^Grid operations modernization / }).click()
+        await window.getByRole('region', { name: 'Grid operations modernization milestones' }).getByRole('row')
+            .filter({ hasText: 'Customer outcome validation' }).first().getByRole('button', { name: /^Edit / }).click()
+        await window.getByRole('menuitem', { name: 'Activities', exact: true }).click()
+        const dialog = window.getByRole('dialog')
+        const dialogFonts = await captureTypography(test.info(), {
+            title: dialog.getByRole('heading', { name: /^Activities/ }),
+            subject: dialog.getByLabel('Subject'),
+            category: dialog.locator('.milestone-activity-form select').first(),
+            description: dialog.getByLabel('Description'),
+            cancel: dialog.getByRole('button', { name: 'Cancel', exact: true })
+        }, 'dialog')
+        expectFontReduction(dialogFonts, { title: 19, subject: 13.3, category: 13.3333, description: 13.3, cancel: 13.3 })
+        await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+    } finally {
+        await app.close()
+        await rm(userDataDirectory, { recursive: true, force: true })
+    }
+})
 
 for (const scenario of [
     {

@@ -12,6 +12,7 @@ import { workflowContractVersion } from '../common/contracts/workflows.js'
 import { canonicalJson } from './collaboration/reviewed-actions.js'
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema } from '../common/contracts/seller-dashboard.js'
 import { stagePipelineRequestSchema, stagePipelineResponseSchema } from '../common/contracts/stage-pipeline-review.js'
+import { momentumFocusRequestSchema, momentumFocusResponseSchema } from '../common/contracts/momentum-focus.js'
 import { seReportingRequestSchema, seReportingResponseSchema } from '../common/contracts/se-reporting.js'
 import { measurePerformance } from '../common/telemetry/performance.js'
 import type { ThinSliceOrchestrator } from './index.js'
@@ -67,6 +68,7 @@ export function createApplicationOperations(services: ApplicationServices) {
     searchKnowledge: operation(c.knowledgeSearchRequestSchema, c.knowledgeSearchResponseSchema, (input) => core.searchKnowledge(input)),
     sellerDashboard: operation(sellerDashboardRequestSchema, sellerDashboardResponseSchema, (input) => services.sellerDashboard.invoke(input)),
     stagePipelineReview: operation(stagePipelineRequestSchema, stagePipelineResponseSchema, (input) => services.stagePipelineReview.invoke(input)),
+    momentumFocus: operation(momentumFocusRequestSchema, momentumFocusResponseSchema, (input) => services.momentumFocus.invoke(input)),
     seReporting: operation(seReportingRequestSchema.refine((input) => !['run', 'publish'].includes(input.operation)), seReportingResponseSchema, (input) => services.seReporting.invoke(input)),
     seReportingRun: operation(seReportingRequestSchema.refine((input) => input.operation === 'run'), seReportingResponseSchema, (input) => services.seReporting.invoke(input), 'read', true),
     publishSeReporting: operation(seReportingRequestSchema.refine((input) => input.operation === 'publish'), seReportingResponseSchema, async (input) => {

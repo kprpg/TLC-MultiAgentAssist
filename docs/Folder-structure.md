@@ -27,6 +27,14 @@ The structure supports these boundaries:
 - [Backlog screenshot assets](./media/product-backlog/) contains redacted,
   ID-labelled references linked from each entry. Sensitive originals stay outside Git.
 
+### Dashboard design and implementation
+
+- [Momentum & Focus Dashboard Proposal](./architecture/Momentum-Focus-Dashboard-Proposal.md)
+  records the SSP/SE priority, traction and signal-richness requirements, implementation seams,
+  source limitations, shared-history configuration and verification approach.
+- [Illustrative mockup assets](./media/momentum-focus-dashboard/) contains the synthetic PNG
+  preview and editable SVG referenced by the proposal.
+
 ### Knowledge connector foundation
 
 The read-only knowledge operation is implemented in these focused modules:
@@ -117,6 +125,9 @@ apps/desktop/electron/main/portfolio-ipc.ts
 apps/teams/.env.native.example       Safe per-user native configuration, not real credentials
 apps/teams/.env.cli.example          Safe existing-user CLI configuration, not tokens/secrets
 apps/shared/                         Browser-safe prompt/Markdown and existing UI reuse
+apps/shared/font-scale.ts            Shared additional 0.95 font factor and pure Fluent theme-font scaling
+apps/shared/postcss-font-scale.ts     Font-only build transform shared by all client Vite builds
+apps/shared/typography.css            Low-specificity native-control fallback; no layout or icon scaling
 apps/shared/transcript-file.ts       Shared UTF-8 VTT/text reader for Desktop/Web, VS Code and Teams
                                      Shared Portfolio controls, sorting and Next Best Actions
 apps/shared/pane-resize-handle.tsx   Accessible shared three-dot width divider for all four surfaces
@@ -401,6 +412,7 @@ the VS Code webview, and the existing Teams client:
 apps/shared/dashboards/
   dashboard-workspace.tsx
   dashboard-workspace.css
+  dashboard-controls.tsx              shared Stage/Momentum checkbox selectors and section tabs
   sellerDashboard/
     seller-dashboard.tsx
     seller-dashboard-sections.tsx
@@ -428,13 +440,25 @@ apps/shared/dashboards/
     report-setup.tsx
     report-workflow.tsx
     se-reporting-dashboard.css
+  momentumFocus/
+    momentum-focus.tsx                 shared pane, queue, summary and source/history notices
+    momentum-priority-queue.tsx        dense, paginated queue with bounded scrolling and full detail links
+    momentum-coverage.tsx              labelled source-health and separate native-currency financial tables
+    use-momentum-focus.ts              typed invokes, stale-response rejection, scope/detail invalidation
+    momentum-data-session.ts           in-memory scoped datasets, single-flight loads and cached local views
+    momentum-filters.tsx               independent clocks and canonical linked slicers
+    momentum-charts.tsx                four linked charts and accessible table alternatives
+    momentum-detail.tsx                reasons, evidence intervals, coverage and explicit drill-through
+    momentum-format.ts                 unit and priority-label presentation only
+    momentum-focus.css                 responsive, theme-aware feature styles
 ```
 
 Each dashboard owns its components, helpers, and feature-scoped styles in its own
 folder. Future dashboards, such as `SE-manager-dashboard` or `AE-dashboard`, belong
 in sibling folders beside `sellerDashboard`. Register their tabs and panes in
 `dashboard-workspace.tsx` and import their styles in each consuming surface's entry
-point. Seller Dashboard, Stage and Pipeline Review and SE Reporting Dashboard are registered; no placeholder
+point (or load feature CSS with the lazy pane). Seller Dashboard, Stage and Pipeline Review,
+SE Reporting Dashboard and Momentum & Focus are registered; no placeholder
 tabs are shown. The `soltionEngineerDashboard` spelling is intentional for the
 requested module path.
 Stage and Pipeline Review's browser-safe contract is
@@ -454,6 +478,20 @@ in `packages/connectors/se-reporting`. The browser-safe HTML document renderer i
 `packages/documents/se-reporting.ts` is used for both the dashboard preview and
 download/publication. See the [SE Reporting Dashboard guide](user-guide/SE-REPORTING-DASHBOARD.md)
 for setup, source grants, privacy and publication boundaries.
+
+Momentum's independent browser-safe v1.2 contract and fixed-clock synthetic data live in
+`packages/common/contracts/momentum-focus.ts` and `packages/common/fixtures/momentum-focus.ts`.
+`packages/connectors/msx/momentum-focus.ts` collects bounded, nullable source facts;
+`customer-industry.ts` resolves the verified HLS Vertical options and the connector restricts
+collection to HLS accounts within the existing authorized portfolio by default.
+`momentum-history.ts` and `momentum-storage.ts` provide principal-isolated comparison history in an
+explicitly configured secure shared store. `packages/common/projections/momentum-focus.ts` is the
+single browser-safe ranking/filtering/aggregation implementation, reused by the orchestrator's
+`momentum-focus/analytics.ts` entry point and the shared UI's loaded-dataset session.
+`packages/orchestrator/momentum-focus/host.ts` owns collection, history and source authorization.
+All hosts marshal the same read-only `momentumFocus` family. Cached cohorts and views live only in
+memory while the pane is mounted; no analytics or customer history is persisted in browser storage.
+See the [implementation and configuration](architecture/Momentum-Focus-Dashboard-Proposal.md).
 
 Seller Dashboard's browser-safe, independently versioned
 schemas live in `packages/common/contracts/seller-dashboard.ts`, with one fictitious

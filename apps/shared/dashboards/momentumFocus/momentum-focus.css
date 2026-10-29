@@ -1,0 +1,121 @@
+.momentum-focus {
+    --mf-border: var(--sprv-border);
+    --mf-surface: var(--sprv-surface);
+    --mf-muted: var(--sprv-muted);
+    --mf-accent: var(--sprv-accent);
+}
+.momentum-inner { min-width: 0; }
+.momentum-heading { align-items: center; margin-bottom: 10px; }
+.momentum-heading .sprv-refresh { flex-shrink: 0; }
+.momentum-context { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px 12px; margin: 0 0 10px; }
+.momentum-context > label, .momentum-filter-grid > label { display: flex; flex-direction: column; min-width: 0; gap: 4px; font-size: 11px; color: var(--sprv-muted); }
+.momentum-context :is(select, input), .momentum-filter-grid :is(select, input:not([type="checkbox"])) {
+    min-width: 0; max-width: 100%; padding: 7px 10px; border: 1px solid var(--sprv-border); border-radius: 8px;
+    background: var(--sprv-surface); color: var(--sprv-text); font: inherit; font-size: 12px;
+}
+.momentum-filterbar { align-items: center; margin-bottom: 8px; }
+.momentum-filterbar > .sprv-multiselect { min-width: 0; max-width: 190px; }
+.momentum-filterbar > .sprv-multiselect > button { max-width: 190px; }
+.momentum-filterbar .sprv-select { min-width: 115px; }
+.momentum-filter-drawer { min-width: 0; }
+.momentum-filter-drawer > summary { cursor: pointer; white-space: nowrap; }
+.momentum-filter-drawer[open] { flex: 1 1 100%; padding: 10px; border: 1px solid var(--sprv-border); border-radius: 8px; background: var(--sprv-surface); }
+.momentum-filter-drawer[open] > summary { display: inline-block; }
+.momentum-filter-drawer p { margin: 10px 0; font-size: 11px; color: var(--sprv-muted); }
+.momentum-filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 10px 12px; align-items: end; }
+.momentum-filter-grid .sprv-multiselect > button { width: 100%; justify-content: space-between; }
+.momentum-filter-grid .momentum-checkbox { flex-direction: row; align-items: center; min-height: 32px; }
+.momentum-selection { margin: 6px 0 10px; }
+.momentum-provenance { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 6px 0 12px; color: var(--sprv-muted); font-size: 11px; }
+.momentum-provenance strong { color: var(--colorPaletteMarigoldForeground1, var(--sprv-accent)); }
+.momentum-summary { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.momentum-focus .momentum-summary-card {
+    min-width: 0; border-left: 3px solid var(--sprv-accent); text-align: left; cursor: pointer; color: var(--sprv-text);
+    font: inherit; padding: 10px 12px; background: var(--sprv-surface);
+}
+.momentum-summary-card span { font-size: 11px; color: var(--sprv-muted); }
+.momentum-summary-card.sprv-kpi--good { border-left-color: var(--sprv-green); }
+.momentum-summary-card.sprv-kpi--bad { border-left-color: var(--colorPaletteRedForeground1, #d13438); }
+.momentum-summary-card.sprv-kpi--warn { border-left-color: var(--sprv-amber); }
+.momentum-summary-card[aria-pressed="true"] { outline: 2px solid var(--sprv-accent); background: var(--sprv-brand-soft); }
+.momentum-summary-card:disabled { opacity: 0.65; cursor: progress; }
+.momentum-card, .momentum-chart, .momentum-queue { min-width: 0; padding: 14px; border: 1px solid var(--sprv-border); border-radius: 10px; background: var(--sprv-surface); }
+.momentum-queue-heading { gap: 8px 16px; flex-wrap: wrap; align-items: center; }
+.momentum-queue-heading h2 { margin: 0 0 3px; }
+.momentum-queue-heading [data-testid="momentum-total"] { font-size: 11px; font-weight: 400; color: var(--sprv-muted); }
+.momentum-page-size { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; color: var(--sprv-muted); }
+.momentum-page-size .sprv-select { min-width: 66px; padding: 6px 8px; }
+.momentum-queue-scroll { max-height: min(66vh, 640px); }
+.momentum-queue-table { min-width: 1180px; table-layout: fixed; }
+.momentum-col-entity { width: 24%; }.momentum-col-stage { width: 14%; }.momentum-col-date { width: 10%; }
+.momentum-col-value { width: 12%; }.momentum-col-priority { width: 18%; }.momentum-col-evidence { width: 12%; }.momentum-col-action { width: 10%; }
+.momentum-queue-table thead th { padding: 10px; color: var(--sprv-muted); font-size: 11px; }
+.momentum-queue-table :is(td, tbody th) { padding: 8px 10px; line-height: 1.4; font-weight: 400; }
+.momentum-queue-table tbody th, .momentum-info-table tbody th { position: static; z-index: auto; background: transparent; text-align: left; }
+.momentum-queue .momentum-entity-link { display: block; width: auto; max-width: 100%; padding: 0; border: 0; background: none; color: var(--sprv-accent); text-align: left; font: inherit; font-weight: 600; cursor: pointer; white-space: normal; }
+.momentum-queue-table small { margin-top: 3px; line-height: 1.3; }
+.momentum-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.momentum-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.momentum-date, .momentum-amount { font-variant-numeric: tabular-nums; }
+.momentum-amount { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.momentum-tier.act-now { color: var(--colorPaletteRedForeground1, #b4181c); background: color-mix(in srgb, #d13438 12%, transparent); }
+.momentum-tier.this-week { color: var(--colorPaletteMarigoldForeground1, #9a5b00); background: color-mix(in srgb, var(--sprv-amber) 15%, transparent); }
+.momentum-tier.plan-month { color: var(--sprv-accent); background: var(--sprv-brand-soft); }
+.momentum-tier.verify { color: var(--sprv-muted); }
+.momentum-pagination { flex-wrap: wrap; gap: 8px; font-size: 11px; }
+.momentum-pagination > div { display: inline-flex; gap: 6px; }
+.momentum-pagination button:disabled { cursor: default; opacity: 0.5; }
+.momentum-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.momentum-chart { display: flex; flex-direction: column; gap: 8px; }
+.momentum-chart h3 { margin: 0; font-size: 15px; color: var(--sprv-heading); }
+.momentum-chart p { margin: 0; color: var(--sprv-muted); font-size: 11px; }
+.momentum-chart-control { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 11px; color: var(--sprv-muted); }
+.momentum-chart-control .sprv-select { max-width: 260px; }
+.momentum-methodology, .momentum-chart details { color: var(--sprv-muted); font-size: 11px; }
+.momentum-methodology summary, .momentum-chart summary { cursor: pointer; }
+.momentum-methodology p { margin-top: 8px; }
+.momentum-table-scroll { max-width: 100%; overflow: auto; margin: 8px 0; }
+.momentum-chart details .momentum-table-scroll { max-height: 220px; }
+.momentum-info-table { min-width: 520px; }
+.momentum-info-table thead th { padding: 9px 10px; color: var(--sprv-muted); font-size: 11px; }
+.momentum-info-table tbody th { padding: 10px; font-weight: 600; }
+.momentum-matrix { display: block; width: 100%; height: auto; max-height: 280px; color: var(--sprv-muted); }
+.momentum-matrix line { stroke: currentColor; }.momentum-matrix text { fill: currentColor; font-size: 12px; }
+.momentum-matrix circle { fill: var(--sprv-accent); fill-opacity: 0.6; stroke: var(--sprv-accent); cursor: pointer; }
+.momentum-matrix circle.milestone { fill: var(--sprv-green); stroke: var(--sprv-green); }
+.momentum-matrix circle.partial { stroke-dasharray: 3 2; fill-opacity: 0.3; }
+.momentum-account-bars { display: grid; gap: 4px; }
+.momentum-account-bars button { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; padding: 7px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--sprv-text); text-align: left; font: inherit; cursor: pointer; }
+.momentum-account-bars button:hover { background: var(--sprv-brand-soft); }
+.momentum-bar-track, .momentum-account-bars small { grid-column: 1 / -1; }
+.momentum-bar-track { display: block; height: 8px; border-radius: 4px; background: var(--sprv-soft); overflow: hidden; }
+.momentum-bar-track > span { display: block; height: 100%; background: var(--sprv-accent); }
+.momentum-heatmap { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.momentum-heatmap button { display: flex; flex-direction: column; gap: 4px; padding: 10px; border: 1px solid var(--sprv-border); border-left: 3px solid var(--sprv-accent); border-radius: 8px; background: var(--sprv-soft); color: var(--sprv-text); text-align: left; font: inherit; cursor: pointer; }
+.momentum-heatmap strong { font-size: 20px; font-variant-numeric: tabular-nums; }
+.momentum-deadlines { display: grid; grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); gap: 8px; }
+.momentum-deadlines button { display: flex; flex-direction: column; gap: 5px; padding: 9px; border: 1px solid var(--sprv-border); border-radius: 8px; background: var(--sprv-soft); color: var(--sprv-text); text-align: left; font: inherit; cursor: pointer; }
+.momentum-deadlines meter { width: 100%; }
+.momentum-coverage { display: grid; gap: 16px; }
+.momentum-coverage h2 { margin-bottom: 6px; }
+.momentum-coverage .momentum-table-scroll { max-height: 420px; }
+.momentum-coverage :is(td, th) { overflow-wrap: anywhere; }
+.momentum-detail {
+    width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 18px 20px; border-radius: 10px;
+    background: var(--sprv-surface); color: var(--sprv-text); border: 1px solid var(--sprv-border); font: inherit;
+}
+.momentum-detail::backdrop { background: rgb(0 0 0 / 45%); }
+.momentum-detail header, .momentum-detail-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.momentum-detail button { padding: 6px 12px; border: 1px solid var(--sprv-border); border-radius: 8px; background: var(--sprv-surface); color: var(--sprv-accent); font: inherit; cursor: pointer; }
+.momentum-facts { display: grid; grid-template-columns: minmax(140px, 1fr) 2fr; gap: 8px; overflow-wrap: anywhere; }
+.momentum-facts dt { font-weight: 600; }.momentum-facts dd { margin: 0; }
+.momentum-timeline { padding-left: 24px; overflow-wrap: anywhere; }.momentum-timeline li { padding-bottom: 12px; }
+@media (max-width: 1100px) { .momentum-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }.momentum-context { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 800px) { .momentum-charts { grid-template-columns: 1fr; }.momentum-context { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) {
+    .momentum-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }.momentum-heading .sprv-refresh { width: 100%; }
+    .momentum-filter-grid { grid-template-columns: 1fr; }.momentum-facts { grid-template-columns: 1fr; }
+    .momentum-card, .momentum-chart, .momentum-queue { padding: 10px; }.momentum-focus .sprv-tabs button { padding: 9px 10px; }
+    .momentum-pagination { align-items: flex-start; }.momentum-pagination > div { flex-wrap: wrap; }
+}
+@media (forced-colors: active) { .momentum-matrix circle { fill: CanvasText; stroke: Highlight; }.momentum-bar-track > span { background: Highlight; } }

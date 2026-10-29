@@ -3,6 +3,9 @@
 > Capture only. Part of [Code / Refactoring / Optimization / Tests](Code-Refactoring-Optimization-Tests.md).
 > Scope: the four UI layers — Desktop (Electron renderer-revamp), VS Code extension webview, Web
 > (serves the desktop build), and Teams (absent / stub).
+>
+> The layout inventory is historical. The shared typography subsection records current behavior
+> across all four shipped clients.
 
 ## 1. Current layout inventory
 
@@ -44,6 +47,35 @@
 
 - **Absent.** No tab/bot/message-extension, no manifest. See
   [MOD-6](01-modularization.md#mod-6--enforced-teams-stub-surface-boundary--p2) for the stub boundary.
+
+### Shared typography (implemented across all four clients)
+
+The shared additional font reduction is **0.95** in
+[`apps/shared/font-scale.ts`](../../apps/shared/font-scale.ts). Desktop and Web retain their earlier
+0.95 reduction, so their existing CSS and Fluent fonts use **0.9025** cumulatively. VS Code, Teams,
+and optional legacy Desktop fonts use **0.95**.
+
+- [`postcss-font-scale.ts`](../../apps/shared/postcss-font-scale.ts) runs once per client CSS build.
+  It scales absolute `font-size` values and Fluent `--fontSize*` tokens, including shared dashboard
+  and chart styles. Parent-relative `em`/percentage fonts and references to already-scaled tokens
+  are not reduced a second time.
+- VS Code's `--vscode-font-size` setting and its 13px fallback are multiplied by 0.95 without
+  changing the host-owned setting. Teams' responsive heading scales the entire `clamp` expression.
+- The pure Fluent theme helper scales font tokens for Desktop light/dark and Teams
+  light/dark/high-contrast themes, including menus, dialogs, and other portals. Other theme values,
+  including line-height tokens, remain unchanged.
+- [`typography.css`](../../apps/shared/typography.css) supplies a low-specificity fallback for
+  otherwise unstyled native controls. Their previously unscaled 13.3333px font receives only the
+  additional 0.95 reduction, even in the cumulative Desktop/Web build. Existing authored control
+  fonts, families, weights, and padding retain precedence.
+- SE Reporting's sandboxed HTML preview opts into the additional 0.95 factor through the pure
+  document renderer. Exported HTML keeps its original default fonts; report data, Word exports,
+  and document layout are unchanged.
+
+Font sizes retain fractional pixels. There is no page zoom, runtime DOM font rewriting, minimum
+font-size clamp, or rescaling of layout dimensions, spacing, icons, or host chrome. Natural text
+reflow is expected. Typography tests compare computed fonts with recorded pre-change baselines
+within 0.01 CSS px and preserve fixed shell/icon dimensions and padding.
 
 ## 2. Headline layout problems
 

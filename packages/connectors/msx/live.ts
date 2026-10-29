@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { accountSearchLimit, assertAccountNameIndex, fuzzyAccountName, indexedAccountIds, parseAccountSearchPage } from './account-search.js'
 import { commentHistoryEntries, isoTimestamp, newestFirst, parseCommentHistoryRows, plainText } from './evidence.js'
+import { hlsVerticalValues } from './customer-industry.js'
 import {
   accountSearchRequestSchema,
   createMilestoneActivityRequestSchema,
@@ -347,6 +348,7 @@ export class LiveMsxConnector implements MsxConnector {
   private readonly observationPromises = new Map<string, Promise<CriterionObservation[]>>()
   private readonly milestonePromises = new Map<string, Promise<MilestoneRow[]>>()
   private currentUserIdPromise: Promise<string> | undefined
+  private hlsVerticalValuesPromise: Promise<ReadonlySet<number>> | undefined
   private dealTeamBindingsPromise: Promise<{ userNavigationProperty: string; opportunityNavigationProperty: string }> | undefined
   private milestoneTeamTemplateIdPromise: Promise<string> | undefined
   private accountTpidField: string | undefined
@@ -441,7 +443,7 @@ export class LiveMsxConnector implements MsxConnector {
   }
 
   private async getCreationChoiceValues(
-    entity: 'opportunity' | 'msp_engagementmilestone',
+    entity: 'account' | 'opportunity' | 'msp_engagementmilestone',
     field: string,
     metadataType: 'PicklistAttributeMetadata' | 'MultiSelectPicklistAttributeMetadata'
   ): Promise<ChoiceRef[]> {
@@ -1355,6 +1357,33 @@ export class LiveMsxConnector implements MsxConnector {
     return this.requestAll<Record<string, unknown>>(entitySet, parameters)
   }
 
+  async readRowsBounded(entitySet: string, parameters: Record<string, string>, maximumRows: number): Promise<Array<Record<string, unknown>>> {
+    if (!navigationPropertyPattern.test(entitySet) || !Number.isInteger(maximumRows) || maximumRows < 1 || maximumRows > 30_001) {
+      throw new Error('The bounded dashboard read is invalid.')
+    }
+    return this.requestAll<Record<string, unknown>>(entitySet, { ...parameters, '$top': String(maximumRows) }, maximumRows)
+  }
+
+  async getHlsAccountIds(accountIds: string[]): Promise<string[]> {
+    const ids = unique(accountIds.map((id) => {
+      if (!guidPattern.test(id)) throw new Error('HLS customer scope requires canonical account GUIDs.')
+      return id.toLowerCase()
+    }))
+    if (ids.length === 0) return []
+    this.hlsVerticalValuesPromise ??= this.getCreationChoiceValues('account', 'msp_verticalcode', 'PicklistAttributeMetadata')
+      .then(hlsVerticalValues).catch((error: unknown) => { this.hlsVerticalValuesPromise = undefined; throw error })
+    const values = await this.hlsVerticalValuesPromise
+    const allowed = new Set(ids)
+    const rows = await this.collectChunks(ids, (chunk) => this.readRowsBounded('accounts', {
+      '$select': 'accountid,msp_verticalcode',
+      '$filter': `(${chunk.map((id) => `accountid eq ${id}`).join(' or ')}) and (${[...values].map((value) => `msp_verticalcode eq ${value}`).join(' or ')})`
+    }, chunk.length))
+    return unique(rows.flatMap((row) => {
+      const id = typeof row['accountid'] === 'string' ? row['accountid'].toLowerCase() : undefined
+      return id && allowed.has(id) && typeof row['msp_verticalcode'] === 'number' && values.has(row['msp_verticalcode']) ? [id] : []
+    })).sort()
+  }
+
   async getTeamMemberships() {
     const userId = await this.getCurrentUserId()
     const [dealTeamOpportunityIds, milestoneTeamOpportunityIds, milestoneIds] = await Promise.all([
@@ -1606,17 +1635,20 @@ export class LiveMsxConnector implements MsxConnector {
     return rows
   }
 
-  private async requestAll<T>(entitySet: string, parameters: Record<string, string>): Promise<T[]> {
+  private async requestAll<T>(entitySet: string, parameters: Record<string, string>, maximumRows?: number): Promise<T[]> {
     const firstUrl = new URL(entitySet, this.baseUrl)
     for (const [name, value] of Object.entries(parameters)) firstUrl.searchParams.set(name, value)
 
     const rows: T[] = []
+    let pages = 0
     let nextUrl: URL | undefined = firstUrl
     while (nextUrl) {
+      if (maximumRows !== undefined && ++pages > 100) throw new Error('The bounded dashboard read exceeded its page limit.')
       this.readContext.getStore()?.signal?.throwIfAborted()
       this.assertTrustedUrl(nextUrl)
       const page: ODataPage<T> = await this.requestJson<ODataPage<T>>(nextUrl)
       rows.push(...page.value)
+      if (maximumRows !== undefined && rows.length >= maximumRows) return rows.slice(0, maximumRows)
       nextUrl = page['@odata.nextLink'] ? new URL(page['@odata.nextLink']) : undefined
     }
     return rows

@@ -1,2 +1,4 @@
-// Desktop and Web share this renderer; 0.95 reduces every UI font size by 5%.
-export const uiFontScale = 0.95
+import { uiFontScale as additionalFontScale } from '../../../shared/font-scale.js'
+
+// Preserve the renderer's previous reduction when applying the additional five percent.
+export const uiFontScale = 0.95 * additionalFontScale

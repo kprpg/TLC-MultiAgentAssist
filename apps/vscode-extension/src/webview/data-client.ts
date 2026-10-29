@@ -4,6 +4,7 @@ import { voiceRequestSchema, voiceResponseSchema, type VoiceRequest } from '../.
 import { sellerDashboardRequestSchema, sellerDashboardResponseSchema, type SellerDashboardRequest } from '../../../../packages/common/contracts/seller-dashboard.js'
 import { seReportingRequestSchema, seReportingResponseSchema, type SeReportingRequest } from '../../../../packages/common/contracts/se-reporting.js'
 import { stagePipelineRequestSchema, stagePipelineResponseSchema, type StagePipelineRequest } from '../../../../packages/common/contracts/stage-pipeline-review.js'
+import { momentumFocusRequestSchema, momentumFocusResponseSchema, type MomentumFocusRequest } from '../../../../packages/common/contracts/momentum-focus.js'
 import { knowledgeSearchRequestSchema, knowledgeSearchResponseSchema, type KnowledgeSearchRequest } from '../../../../packages/common/contracts/knowledge.js'
 import {
     workingSessionPrepareRequestSchema, workingSessionResultSchema, workingSessionTopicRequestSchema, workingSessionTopicResponseSchema,
@@ -78,6 +79,9 @@ const transport = {
     ),
     invokeStagePipelineReview: async (input: StagePipelineRequest) => stagePipelineResponseSchema.parse(
         await request('stagePipelineReview', stagePipelineRequestSchema.parse(input))
+    ),
+    invokeMomentumFocus: async (input: MomentumFocusRequest) => momentumFocusResponseSchema.parse(
+        await request('momentumFocus', momentumFocusRequestSchema.parse(input))
     ),
     invokeVoice: async (input: VoiceRequest) => voiceResponseSchema.parse(await request('voiceInput', voiceRequestSchema.parse(input))),
     getCurrentUserEmail: () => request<string | null>('getCurrentUserEmail'),
