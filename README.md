@@ -93,7 +93,7 @@ Requires **VS Code or VS Code Insiders 1.90.0 or later**. The extension is self-
 
 ### Install
 
-1. Open the [VS Code extension releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=extension) and expand **Assets**. Stable builds and nightly **Pre-release** builds both appear here.
+1. Open the [VS Code extension releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=%22TLC+MultiAgent+Assist+VS+Code+Extension%22), select a release titled **TLC MultiAgent Assist VS Code Extension**, and expand **Assets**. Stable builds and nightly **Pre-release** builds both appear here.
 2. Download `tlc-assist-vscode-<version>.vsix`. The companion `tlc-assist-vscode-mcp-config-<version>.zip` is optional.
 3. Install it from the Command Palette (`Ctrl+Shift+P`) with **Extensions: Install from VSIX...**, or run `code --install-extension tlc-assist-vscode-<version>.vsix --force`. Confirm the publisher-trust prompt on VS Code 1.97+.
 4. Run **Developer: Reload Window**, then open **TLC Assist** from the Activity Bar (or run **TLC: Open Assist**).
