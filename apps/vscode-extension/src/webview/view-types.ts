@@ -111,19 +111,19 @@ export interface MilestoneActivityView {
 
 export interface CreateMilestoneActivityInput {
     subject: string
-    taskCategory?: string
-    description?: string
-    due?: string
-    priority?: 'Low' | 'Normal' | 'High'
-    durationMinutes?: number
+    taskCategory?: string | undefined
+    description?: string | undefined
+    due?: string | undefined
+    priority?: 'Low' | 'Normal' | 'High' | undefined
+    durationMinutes?: number | undefined
 }
 
 export interface MilestoneUpdateInput {
-    status?: string
-    riskDetails?: string
-    targetDate?: string
-    customerCommitment?: string
-    comments?: string
+    status?: string | undefined
+    riskDetails?: string | undefined
+    targetDate?: string | undefined
+    customerCommitment?: string | undefined
+    comments?: string | undefined
 }
 
 export interface CriterionView { id: string; label: string; status: 'met' | 'partial' | 'missing'; rationale: string }
@@ -258,15 +258,15 @@ export interface MeetingSlotView {
     label: string
     mcemCriterion: string
     targetKind: 'opportunity' | 'milestone' | 'new-milestone'
-    targetRecordId?: string
+    targetRecordId?: string | undefined
     targetField: string
     valueType: 'text' | 'money' | 'date' | 'optionset' | 'boolean' | 'percent'
-    displayBefore?: string
+    displayBefore?: string | undefined
     displayAfter: string
     confidence: number
     checkedByDefault: boolean
     blocked: boolean
-    blockedReason?: string
+    blockedReason?: string | undefined
     sensitive: boolean
     rationale: string
     evidence: string[]
@@ -275,9 +275,9 @@ export interface MeetingSlotView {
 export interface MeetingNewMilestoneView {
     tempId: string
     name: string
-    milestoneDate?: string
-    ownerName?: string
-    commitment?: 'Uncommitted' | 'Committed'
+    milestoneDate?: string | undefined
+    ownerName?: string | undefined
+    commitment?: 'Uncommitted' | 'Committed' | undefined
     confidence: number
     checkedByDefault: boolean
     evidence: string[]
@@ -291,8 +291,8 @@ export interface MeetingUnmappedSignalView {
 }
 
 export interface MeetingChangeSetProposalView {
-    inference?: import('../../../../packages/common/contracts/inference.js').InferenceExecution
-    contractVersion?: '1.3'
+    inference?: import('../../../../packages/common/contracts/inference.js').InferenceExecution | undefined
+    contractVersion?: '1.3' | undefined
     changeSetId: string
     transcriptId: string
     opportunityId: string
