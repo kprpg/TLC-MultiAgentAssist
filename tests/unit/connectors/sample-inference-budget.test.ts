@@ -10,8 +10,8 @@ afterEach(async () => {
   for (const budget of budgets.splice(0)) budget.close()
   await Promise.all(directories.splice(0).map((path) => rm(path, { recursive: true, force: true })))
 })
-function budget(path = ':memory:', now = Date.now) {
-  const instance = new SampleInferenceBudget(path, now)
+function budget(path = ':memory:', now = Date.now, limits?: ConstructorParameters<typeof SampleInferenceBudget>[2]) {
+  const instance = new SampleInferenceBudget(path, now, limits)
   budgets.push(instance)
   return instance
 }
@@ -33,22 +33,35 @@ describe('sample-only inference admission', () => {
     for (const done of releases) done()
   })
 
-  it('admits exactly 500 daily attempts, preserves them across restarts and resets at UTC rollover', async () => {
+  it('admits exactly 500 daily attempts and resets at UTC rollover', () => {
+    let now = Date.UTC(2026, 0, 1)
+    const store = budget(':memory:', () => now)
+    for (let index = 0; index < 500; index++) {
+      if (index && index % 20 === 0) now += 60_000
+      store.acquire()()
+    }
+    now += 60_000
+    expect(() => store.acquire()).toThrow('quota exhausted')
+    now = Date.UTC(2026, 0, 2)
+    expect(() => store.acquire()()).not.toThrow()
+  }, 15_000)
+
+  it('preserves daily attempts on disk across restarts and resets at UTC rollover', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'tlc-inference-quota-'))
     directories.push(directory)
     let now = Date.UTC(2026, 0, 1)
     const path = join(directory, 'usage.sqlite')
-    const first = budget(path, () => now)
-    for (let index = 0; index < 500; index++) {
-      if (index && index % 20 === 0) now += 60_000
-      first.acquire()()
-    }
+    const limits = { concurrent: 25, minute: 20, day: 2 }
+    const first = budget(path, () => now, limits)
+    first.acquire()()
     first.close()
-    now += 60_000
-    const restarted = budget(path, () => now)
-    expect(() => restarted.acquire()).toThrow('quota exhausted')
+    const restarted = budget(path, () => now, limits)
+    restarted.acquire()()
+    restarted.close()
+    const reopened = budget(path, () => now, limits)
+    expect(() => reopened.acquire()).toThrow('quota exhausted')
     now = Date.UTC(2026, 0, 2)
-    expect(() => restarted.acquire()()).not.toThrow()
+    expect(() => reopened.acquire()()).not.toThrow()
   }, 15_000)
 
   it('fails closed when usage storage cannot be opened', () => {
