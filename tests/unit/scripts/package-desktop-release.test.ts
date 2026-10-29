@@ -11,6 +11,16 @@ afterEach(async () => {
 })
 
 describe('desktop release package', () => {
+  it('declares Azure Table Storage as a packaged production dependency', async () => {
+    const rootPackageJson = JSON.parse(await readFile(join(process.cwd(), 'package.json'), 'utf8'))
+    const packageJson = JSON.parse(await readFile(join(process.cwd(), 'apps/desktop/package.json'), 'utf8'))
+    const lockfile = JSON.parse(await readFile(join(process.cwd(), 'package-lock.json'), 'utf8'))
+
+    expect(rootPackageJson.dependencies).toHaveProperty('@azure/data-tables')
+    expect(packageJson.dependencies).toHaveProperty('@azure/data-tables', rootPackageJson.dependencies['@azure/data-tables'])
+    expect(lockfile.packages['apps/desktop'].dependencies).toHaveProperty('@azure/data-tables', packageJson.dependencies['@azure/data-tables'])
+  })
+
   it('includes the MCP runtime configuration as packaged resources', async () => {
     const packageJson = JSON.parse(await readFile(join(process.cwd(), 'apps/desktop/package.json'), 'utf8'))
 

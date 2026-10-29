@@ -84,8 +84,17 @@ configuration is not changed.
 
 ### Deploy and test the sample slot
 
+Routine deployments default to the **sample slot**, including direct invocation
+of the PowerShell wrapper without mode/slot arguments. `web:deploy:sample` remains
+an explicit alias. Updating production does not update the separate `sample`
+slot or its browser assets.
+
+Restart any deployment process that was already running when these defaults
+changed: PowerShell keeps the defaults loaded at process startup.
+
 ```powershell
 # Sign in as the publisher beforehand if needed: az login
+npm run web:deploy
 npm run web:deploy:sample
 
 # Reuse an already-built ZIP:
@@ -230,33 +239,86 @@ requires Azure login; it is not used by this deployment workflow.
 
 ## Live / Easy Auth App Service Deployment
 
-The PowerShell deployment wrapper builds and smoke-tests the release, validates the completed ZIP, verifies the Azure target, deploys it, and checks `/api/health`:
+Routine `npm run web:deploy` commands target the sample slot, not production.
+The live / Easy Auth workflow is an explicit opt-in. It builds and smoke-tests
+the release, validates the completed ZIP, verifies the Azure target, deploys it,
+and checks `/api/health`:
 
 ```powershell
-npm run web:deploy
+npm run web:deploy -- -Mode easy-auth
 ```
 
-The default target is the production `tlc` app in `myDemoRg`. PowerShell confirmation is required before upload. `-WhatIf` previews mutations but may build and inspect Azure. `-PackageOnly` builds without contacting Azure:
+Only explicit `-Mode easy-auth` without a slot targets production `tlc` in
+`myDemoRg`. PowerShell confirmation is required before upload. `-WhatIf` previews
+mutations but may build and inspect Azure. `-PackageOnly` builds without contacting Azure:
 
 ```powershell
-pwsh -NoProfile -File scripts/deploy-web-appservice.ps1 -WhatIf
-pwsh -NoProfile -File scripts/deploy-web-appservice.ps1 -PackageOnly
+pwsh -NoProfile -File .\scripts\deploy-web-appservice.ps1 -Mode easy-auth -WhatIf
+pwsh -NoProfile -File .\scripts\deploy-web-appservice.ps1 -Mode easy-auth -PackageOnly
 ```
 
-To deploy an already-built package or target a slot:
+To target an existing slot:
 
 ```powershell
-pwsh -NoProfile -File scripts/deploy-web-appservice.ps1 -SkipBuild
-pwsh -NoProfile -File scripts/deploy-web-appservice.ps1 -Slot live-staging
+pwsh -NoProfile -File .\scripts\deploy-web-appservice.ps1 -Mode easy-auth -Slot live-staging
 ```
 
 The configured subscription belongs to tenant `72f988bf-86f1-41af-91ab-2d7cd011db47`. A different `-TenantId` is rejected before deployment. Before uploading, the script validates `config/foundry.environment.json`, rejects credential-like fields, and stores its Base64-encoded non-secret metadata in the `TLC_FOUNDRY_ENV_BASE64` App Service setting. The reusable ZIP still excludes the live file. Use `-FoundryEnvironmentPath` to select another environment file.
 
-The live wrapper sets `WEBSITE_RUN_FROM_PACKAGE=1`, so App Service mounts the immutable ZIP rather than extracting it and re-zipping the large `node_modules` tree. It also disables Azure CLI deployment-status tracking because a transient gateway or polling failure can produce exit code 1 after OneDeploy accepts the package. If that happens, the wrapper reconciles the newly accepted deployment record before running the bounded `/api/health` check. This default live path does not alter authentication, identities, networking, or deployment slots; the explicit sample workflow above manages its own sample settings, authentication and slot lifecycle.
+The live wrapper sets `WEBSITE_RUN_FROM_PACKAGE=1`, so App Service mounts the immutable ZIP rather than extracting it and re-zipping the large `node_modules` tree. It also disables Azure CLI deployment-status tracking because a transient gateway or polling failure can produce exit code 1 after OneDeploy accepts the package. If that happens, the wrapper reconciles the newly accepted deployment record before running the bounded `/api/health` check. This explicit live path does not alter authentication, identities, networking, or deployment slots; the default sample workflow above manages its own sample settings, authentication and slot lifecycle.
 
 `azd up` is not used for this existing app. This repository has no `azure.yaml`, infrastructure definitions, or azd environment, and `azd up` combines provisioning with deployment. Adopting azd requires a separately reviewed infrastructure plan that safely represents the existing App Service before azd is allowed to own it.
 
 After a build, the host can also be started directly with `npm start`. Set `TLC_WEB_MODE` first when a mode other than the environment-derived default is required.
+
+### Deploy an existing ZIP without rebuilding
+
+From the repository root, reuse the current package version's App Service ZIP in
+`release-web` and deploy it to the default **sample slot**:
+
+```powershell
+npm run web:deploy -- -SkipBuild
+```
+
+To specify the ZIP explicitly:
+
+```powershell
+npm run web:deploy -- -SkipBuild -ArtifactPath ".\release-web\TLC-MultiAgent-Assist-0.1.0-Web-AppService.zip"
+```
+
+Without `-SkipBuild`, deployment rebuilds the release even if a ZIP exists. The flag validates the
+archive, not its freshness; run `npm run web:release` after source changes before reusing it.
+Use the **Web-AppService ZIP**, not the desktop portable ZIP.
+
+### Health-check failure after a successful ZIP deployment
+
+A successful OneDeploy record (`status: 4`) confirms package deployment, not the
+subsequent readiness check. The live wrapper requires HTTP 200 with an
+`application/json` response containing `"status":"ready"`; it does not follow
+redirects or accept a sign-in page as readiness. Failures are retried within the
+configured `-HealthAttempts` and `-HealthDelaySeconds` limits, with the final
+HTTP, content-type, or JSON validation error reported explicitly.
+
+For live hosting, Easy Auth v2 must exclude only the non-sensitive `/api/health`
+route from authentication. Append it to `globalValidation.excludedPaths`,
+preserving existing exclusions and keeping authentication required for every
+other protected route. The Easy Auth setup script
+[`configure-web-easyauth.ps1`](../../scripts/configure-web-easyauth.ps1) now
+preserves existing exclusions and adds this readiness route idempotently.
+The live deployment wrapper itself still does not change authentication.
+
+If a health check reports HTTP 401/403, a redirect, or an HTML response, check
+this exclusion rather than disabling Easy Auth or using `-SkipHealthCheck` to
+hide the failure. After correcting the exclusion, verify anonymously:
+
+```powershell
+curl.exe --include --max-time 20 --max-redirs 0 "https://tlc-frfwf5g4g8edhcc0.westus3-01.azurewebsites.net/api/health"
+```
+
+Expect HTTP 200 and `{"status":"ready"}`. An anonymous request to a protected
+route such as `/api/me` must still require sign-in (HTTP 401/403 or a login
+redirect). An authentication-only correction does not require rebuilding or
+re-uploading an already deployed ZIP.
 
 ## Local Startup
 

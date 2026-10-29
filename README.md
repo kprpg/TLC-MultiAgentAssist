@@ -183,13 +183,16 @@ App Service and its `sample` slot; no new infrastructure or external database is
 
 ```powershell
 npm run web:deploy:sample -- -PackageOnly # Build/test the ZIP without Azure sign-in
-npm run web:deploy:sample                # Publisher signs in to Azure; deploy/test sample slot only
+npm run web:deploy                       # Default: deploy/test the sample slot only
+npm run web:deploy:sample                # Explicit alias for the same sample-slot workflow
 npm run web:deploy:sample -- -Action Verify # Finalize an existing upload; no build/upload/Azure changes
 npm run web:deploy:sample -- -Action Promote  # Separately confirmed public sample production swap
 npm run web:deploy:sample -- -Action Rollback # Restore the previous production access policy/content
 ```
 
-The configured target is `tlc` in `myDemoRg`. In-memory SQLite supports the fuller
+The default target is the `sample` slot of `tlc` in `myDemoRg`, including when
+reusing a ZIP with `npm run web:deploy -- -SkipBuild`. Live deployment requires an
+explicit `-Mode easy-auth`; it is never selected by default. In-memory SQLite supports the fuller
 sample demo; all visitors share sample state, which resets on restart/swap.
 Production's current login requirement is left intact until explicit promotion.
 See [anonymous sample deployment and rollback](docs/runbooks/web-app.md#anonymous-sample-deployment)

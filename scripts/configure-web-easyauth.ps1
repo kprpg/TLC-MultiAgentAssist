@@ -19,7 +19,8 @@
          app setting that Easy Auth reads instead of a client secret.
       7. Disabling any residual auth v1 configuration.
       8. Turning on Easy Auth v2 with the Microsoft Entra provider, token store, and
-         a login parameter that requests the MSX delegated scope.
+         a login parameter that requests the MSX delegated scope, while excluding
+         the non-sensitive /api/health readiness route from authentication.
 
     The script never creates, prints, or handles secret material. The UAMI acts as the
     confidential-client credential for the app registration via workload identity
@@ -126,6 +127,17 @@ function New-TemporaryJsonFile {
     $file = New-TemporaryFile
     Set-Content -LiteralPath $file -Value ($Value | ConvertTo-Json -Depth 30) -Encoding utf8
     return $file
+}
+
+function Add-HealthEndpointAuthExclusion {
+    param([Parameter(Mandatory)] [pscustomobject] $GlobalValidation)
+
+    $existingPaths = $GlobalValidation.PSObject.Properties['excludedPaths']
+    $paths = @(
+        if ($null -ne $existingPaths) { $existingPaths.Value | Where-Object { $null -ne $_ } }
+        '/api/health'
+    ) | Select-Object -Unique
+    $GlobalValidation | Add-Member -NotePropertyName excludedPaths -NotePropertyValue @($paths) -Force
 }
 
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
@@ -279,6 +291,7 @@ Invoke-AzChecked -Arguments @(
 # 9. Login parameters must be set via a full authsettingsV2 PUT (no dedicated CLI flag).
 Write-Host "Requesting the MSX delegated scope at sign-in."
 $current = Invoke-AzJson -Arguments @('webapp', 'auth', 'show', '--subscription', $SubscriptionId, '--resource-group', $ResourceGroup, '--name', $WebAppName)
+Add-HealthEndpointAuthExclusion -GlobalValidation $current.properties.globalValidation
 $current.properties.identityProviders.azureActiveDirectory.login = @{
     loginParameters = @("scope=openid profile offline_access $MsxScope")
 }
@@ -302,6 +315,7 @@ Select-Object -ExpandProperty properties
 [pscustomobject]@{
     Platform        = $summary.platform.enabled
     Unauthenticated = $summary.globalValidation.unauthenticatedClientAction
+    ExcludedPaths   = @($summary.globalValidation.excludedPaths)
     Provider        = $summary.identityProviders.azureActiveDirectory.registration.clientId
     Issuer          = $summary.identityProviders.azureActiveDirectory.registration.openIdIssuer
     SecretSetting   = $summary.identityProviders.azureActiveDirectory.registration.clientSecretSettingName

@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process'
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
+import type { Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -9,10 +11,16 @@ import JSZip from 'jszip'
 const executeFile = promisify(execFile)
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const scriptPath = join(repositoryRoot, 'scripts', 'deploy-web-appservice.ps1')
+const authScriptPath = join(repositoryRoot, 'scripts', 'configure-web-easyauth.ps1')
 const temporaryDirectories: string[] = []
+const healthServers: Server[] = []
 const powershellScriptTimeoutMs = 20_000
 
 afterEach(async () => {
+    await Promise.all(healthServers.splice(0).map((server) => new Promise<void>((resolve, reject) => {
+        server.closeAllConnections()
+        server.close((error) => error ? reject(error) : resolve())
+    })))
     await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
 })
 
@@ -26,6 +34,7 @@ describe('App Service deployment script', () => {
         const result = await executeFile('pwsh', [
             '-NoProfile',
             '-File', scriptPath,
+            '-Mode', 'easy-auth',
             '-SkipBuild',
             '-PackageOnly',
             '-ArtifactPath', artifactPath
@@ -44,6 +53,7 @@ describe('App Service deployment script', () => {
         await expect(executeFile('pwsh', [
             '-NoProfile',
             '-File', scriptPath,
+            '-Mode', 'easy-auth',
             '-SkipBuild',
             '-PackageOnly',
             '-ArtifactPath', artifactPath
@@ -61,6 +71,7 @@ describe('App Service deployment script', () => {
         await expect(executeFile('pwsh', [
             '-NoProfile',
             '-File', scriptPath,
+            '-Mode', 'easy-auth',
             '-SkipBuild',
             '-PackageOnly',
             '-ArtifactPath', artifactPath
@@ -82,6 +93,7 @@ describe('App Service deployment script', () => {
         await executeFile('pwsh', [
             '-NoProfile',
             '-File', scriptPath,
+            '-Mode', 'easy-auth',
             '-SkipBuild',
             '-SkipHealthCheck',
             '-Confirm:$false',
@@ -116,6 +128,7 @@ describe('App Service deployment script', () => {
         const result = await executeFile('pwsh', [
             '-NoProfile',
             '-File', scriptPath,
+            '-Mode', 'easy-auth',
             '-SkipBuild',
             '-SkipHealthCheck',
             '-Confirm:$false',
@@ -132,6 +145,167 @@ describe('App Service deployment script', () => {
         expect(result.stdout).toContain('Deployment completed')
     }, powershellScriptTimeoutMs)
 })
+
+describe('App Service health verification', () => {
+    it('accepts a ready JSON health response', async () => {
+        const { uri, requests } = await startHealthServer([{
+            status: 200, contentType: 'application/json; charset=utf-8', body: '{"status":"ready"}'
+        }])
+
+        const result = await runHealthCheck(uri)
+
+        expect(result.stdout).toContain('Health check passed')
+        expect(requests).toEqual(['/api/health'])
+    }, powershellScriptTimeoutMs)
+
+    it.each([301, 302, 307, 308, 401, 403])('reports HTTP %i without following login redirects', async (status) => {
+        const { uri, requests } = await startHealthServer([
+            { status, contentType: 'text/html', body: 'Sign in', location: '/login?private=do-not-log' },
+            { status: 200, contentType: 'application/json', body: '{"status":"ready"}' }
+        ])
+
+        await expect(runHealthCheck(uri)).rejects.toMatchObject({
+            stderr: expect.stringMatching(new RegExp(`HTTP ${status}[\\s\\S]*\\/api\\/health[\\s\\S]*authentication`))
+        })
+        expect(requests).toEqual(['/api/health'])
+    }, powershellScriptTimeoutMs)
+
+    it.each([
+        { contentType: 'text/html', body: '<html>Sign in</html>' },
+        { body: '{"status":"ready"}' }
+    ])('rejects a response without a JSON content type: %j', async (fixture) => {
+        const { uri } = await startHealthServer([{ status: 200, ...fixture }])
+
+        await expect(runHealthCheck(uri)).rejects.toMatchObject({
+            stderr: expect.stringContaining('application/json')
+        })
+    }, powershellScriptTimeoutMs)
+
+    it.each([
+        ['invalid JSON', '{private-do-not-log', 'invalid JSON'],
+        ['missing status', '{}', 'JSON object with a string status'],
+        ['null', 'null', 'JSON object with a string status'],
+        ['an array', '[{"status":"ready"}]', 'JSON object with a string status'],
+        ['an array status', '{"status":["ready"]}', 'JSON object with a string status'],
+        ['a boolean status', '{"status":true}', 'JSON object with a string status'],
+        ['a non-ready status', '{"status":"starting"}', "status 'ready'"]
+    ])('rejects %s with a useful diagnostic', async (_name, body, diagnostic) => {
+        const { uri } = await startHealthServer([{ status: 200, contentType: 'application/json', body }])
+
+        try {
+            await runHealthCheck(uri)
+            expect.fail('An invalid health response must fail verification')
+        } catch (error) {
+            expect(error).toMatchObject({ stderr: expect.stringContaining(diagnostic) })
+            expect(error).toMatchObject({ stderr: expect.not.stringContaining('private-do-not-log') })
+            expect(error).toMatchObject({ stderr: expect.not.stringContaining("The property 'status' cannot be found") })
+        }
+    }, powershellScriptTimeoutMs)
+
+    it('retries a transient HTTP failure and accepts the ready response', async () => {
+        const { uri, requests } = await startHealthServer([
+            { status: 503, contentType: 'text/html', body: 'Starting' },
+            { status: 200, contentType: 'application/json', body: '{"status":"ready"}' }
+        ])
+
+        const result = await runHealthCheck(uri, 2)
+
+        expect(result.stdout).toContain('Health check passed')
+        expect(requests).toEqual(['/api/health', '/api/health'])
+    }, powershellScriptTimeoutMs)
+
+    it('reports the HTTP status after exhausting the configured attempts', async () => {
+        const { uri, requests } = await startHealthServer([
+            { status: 503, contentType: 'text/html', body: 'Starting' }
+        ])
+
+        await expect(runHealthCheck(uri, 2)).rejects.toMatchObject({
+            stderr: expect.stringMatching(/failed after 2 attempts[\s\S]*HTTP 503/)
+        })
+        expect(requests).toEqual(['/api/health', '/api/health'])
+    }, powershellScriptTimeoutMs)
+})
+
+describe('Easy Auth health-route configuration', () => {
+    it.each([
+        [undefined, ['/api/health']],
+        [null, ['/api/health']],
+        [[], ['/api/health']],
+        [['/existing'], ['/existing', '/api/health']],
+        [['/existing', '/api/health'], ['/existing', '/api/health']]
+    ])('preserves existing exclusions and protects other routes: %j', async (excludedPaths, expected) => {
+        const globalValidation = {
+            requireAuthentication: true,
+            unauthenticatedClientAction: 'RedirectToLoginPage',
+            redirectToProvider: 'azureactivedirectory',
+            ...(excludedPaths === undefined ? {} : { excludedPaths })
+        }
+        const result = await executeFile('pwsh', ['-NoProfile', '-Command', `
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+${loadPowerShellFunction(authScriptPath, 'Add-HealthEndpointAuthExclusion')}
+$validation = '${JSON.stringify(globalValidation)}' | ConvertFrom-Json
+Add-HealthEndpointAuthExclusion -GlobalValidation $validation
+$validation | ConvertTo-Json -Depth 10 -Compress
+`])
+
+        expect(JSON.parse(result.stdout)).toEqual({ ...globalValidation, excludedPaths: expected })
+    }, powershellScriptTimeoutMs)
+})
+
+interface HealthResponseFixture {
+    status: number
+    contentType?: string
+    body: string
+    location?: string
+}
+
+async function startHealthServer(fixtures: readonly [HealthResponseFixture, ...HealthResponseFixture[]]) {
+    const requests: string[] = []
+    const server = createServer((request, response) => {
+        requests.push(request.url ?? '')
+        const fixture = fixtures[Math.min(requests.length - 1, fixtures.length - 1)] ?? fixtures[0]
+        response.writeHead(fixture.status, {
+            ...(fixture.contentType ? { 'content-type': fixture.contentType } : {}),
+            ...(fixture.location ? { location: fixture.location } : {})
+        })
+        response.end(fixture.body)
+    })
+    await new Promise<void>((resolve, reject) => {
+        server.once('error', reject)
+        server.listen(0, '127.0.0.1', resolve)
+    })
+    healthServers.push(server)
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('The health fixture must listen on a TCP port')
+    return { uri: `http://127.0.0.1:${address.port}/api/health`, requests }
+}
+
+function runHealthCheck(uri: string, attempts = 1) {
+    return executeFile('pwsh', ['-NoProfile', '-Command', `
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$HealthAttempts = ${attempts}
+$HealthDelaySeconds = 0
+${loadPowerShellFunction(scriptPath, 'Test-HealthEndpoint')}
+Test-HealthEndpoint -Uri '${uri}'
+`])
+}
+
+function loadPowerShellFunction(path: string, name: string) {
+    return `
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile('${path.replaceAll("'", "''")}', [ref] $tokens, [ref] $parseErrors)
+if ($parseErrors.Count) { throw 'The PowerShell script must parse successfully' }
+$definition = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq '${name}'
+}, $true)
+if ($null -eq $definition) { throw 'The expected PowerShell function was not found' }
+. ([scriptblock]::Create($definition.Extent.Text))
+`
+}
 
 async function installAzureCliMock(temporaryDirectory: string, logPath: string, failDeployment = false) {
     if (process.platform === 'win32') {

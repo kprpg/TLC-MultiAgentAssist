@@ -240,6 +240,28 @@ Use `Export` to choose a destination and save the response as a formatted Word `
 
 ## Troubleshooting
 
+### Installed app reports `ERR_MODULE_NOT_FOUND` for `@azure/data-tables`
+
+This is a release-packaging defect, not a missing Windows or Node.js installation.
+The Electron main bundle imports Azure Table Storage at startup, so
+`@azure/data-tables` must be a production dependency in `apps/desktop/package.json`
+and its workspace entry in `package-lock.json`. Declaring it only at the repository
+root can make development work while the installed application fails.
+
+Maintainers must rebuild with `npm run desktop:package` and publish both the
+corrected installer and portable ZIP. Validate the executable extracted from that
+ZIP, not the installer or the development build:
+
+```powershell
+$env:TLC_PACKAGED_APP_PATH = 'C:\path\to\extracted\TLC MultiAgent Assist.exe'
+$env:TLC_AI_MODE = 'sample'
+node .\node_modules\@playwright\test\cli.js test packaged-default.spec.ts --workers=1 --reporter=line
+```
+
+The test must pass, not skip. Installed users need the corrected installer;
+reinstalling the same affected release or running `desktop:build` alone does not
+repair an already-installed copy. No user-data reset is required.
+
 ### Cache access errors when Live and Sample run together
 
 Live and Sample use separate persistent Chromium sessions so they can run side by side

@@ -8,6 +8,7 @@
   "main": "dist-electron/main/index.js",
   "dependencies": {
     "@azure/ai-projects": "^2.5.0",
+    "@azure/data-tables": "13.3.2",
     "@azure/identity": "^4.13.2",
     "@modelcontextprotocol/sdk": "1.32.1",
     "docx": "^9.7.1",
