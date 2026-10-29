@@ -13,13 +13,13 @@ test('a fresh packaged install seeds the shared Foundry default and opens the ap
     const app = await electron.launch({
         executablePath,
         args: [`--user-data-dir=${userDataDirectory}`],
-        env: { ...process.env, TLC_DATA_MODE: 'sample' }
+        env: { ...process.env, TLC_DATA_MODE: 'sample', TLC_AI_MODE: 'sample' }
     })
 
     try {
         const window = await app.firstWindow()
         await expect(window).toHaveTitle('TLC Account Team Intelligence | Desktop')
-        await expect(window.getByText('DESKTOP · CONNECTED DATA')).toBeVisible()
+        await expect(window.getByRole('banner').getByText('Sample data / Offline AI', { exact: true })).toBeVisible()
         await expect(window.getByRole('region', { name: 'Accounts blade' })).toBeVisible()
 
         const [seededContent, defaultContent] = await Promise.all([

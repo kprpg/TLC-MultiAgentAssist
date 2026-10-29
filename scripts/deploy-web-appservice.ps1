@@ -9,7 +9,7 @@ param(
     [string] $Slot,
     [string] $ArtifactPath,
     [ValidateSet('easy-auth', 'sample')]
-    [string] $Mode = 'easy-auth',
+    [string] $Mode = 'sample',
     [ValidateSet('sample', 'foundry')]
     [string] $AiMode = 'foundry',
     [ValidateSet('Deploy', 'Verify', 'Promote', 'Rollback')]
@@ -210,30 +210,66 @@ function Get-FoundryEnvironmentSetting {
 }
 
 function Test-HealthEndpoint {
-    param([Parameter(Mandatory)] [string] $HostName)
+    param([Parameter(Mandatory)] [uri] $Uri)
 
-    $healthUri = "https://$HostName/api/health"
-    for ($attempt = 1; $attempt -le $HealthAttempts; $attempt++) {
-        try {
-            $health = Invoke-RestMethod -Uri $healthUri -Method Get -TimeoutSec 20
-            if ($health.status -eq 'ready') {
-                Write-Host "Health check passed: $healthUri"
-                return
+    $handler = [System.Net.Http.HttpClientHandler]::new()
+    $handler.AllowAutoRedirect = $false
+    $client = [System.Net.Http.HttpClient]::new($handler)
+    $client.Timeout = [TimeSpan]::FromSeconds(20)
+    $client.DefaultRequestHeaders.Accept.ParseAdd('application/json')
+    try {
+        for ($attempt = 1; $attempt -le $HealthAttempts; $attempt++) {
+            try {
+                $response = $client.GetAsync($Uri).GetAwaiter().GetResult()
+                try {
+                    $statusCode = [int] $response.StatusCode
+                    if ($statusCode -in @(401, 403) -or ($statusCode -ge 300 -and $statusCode -lt 400)) {
+                        throw "Health endpoint returned HTTP $statusCode. Exclude only /api/health from App Service authentication; keep other routes protected."
+                    }
+                    if ($statusCode -ne 200) {
+                        throw "Health endpoint returned HTTP $statusCode; expected HTTP 200."
+                    }
+                    $contentType = $response.Content.Headers.ContentType
+                    if ($null -eq $contentType -or $contentType.MediaType -ine 'application/json') {
+                        throw 'Health endpoint must return application/json, not an HTML login or error page.'
+                    }
+                    $content = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                    try {
+                        $health = ConvertFrom-Json -InputObject $content -AsHashtable -NoEnumerate
+                    }
+                    catch {
+                        throw 'Health endpoint returned invalid JSON.'
+                    }
+                    if ($health -isnot [Collections.IDictionary] -or -not $health.Contains('status') -or $health['status'] -isnot [string]) {
+                        throw 'Health endpoint must return a JSON object with a string status.'
+                    }
+                    if ($health['status'] -cne 'ready') {
+                        throw "Health endpoint did not return status 'ready'."
+                    }
+                    Write-Host "Health check passed: $Uri"
+                    return
+                }
+                finally {
+                    $response.Dispose()
+                }
             }
-        }
-        catch {
-            if ($attempt -eq $HealthAttempts) {
-                throw "Health check failed after $HealthAttempts attempts at ${healthUri}: $($_.Exception.Message)"
+            catch {
+                if ($attempt -eq $HealthAttempts) {
+                    throw "Health check failed after $HealthAttempts attempts at ${Uri}: $($_.Exception.Message)"
+                }
             }
+            Start-Sleep -Seconds $HealthDelaySeconds
         }
-        Start-Sleep -Seconds $HealthDelaySeconds
     }
-    throw "Health endpoint did not return status 'ready': $healthUri"
+    finally {
+        $client.Dispose()
+    }
 }
 
 Push-Location $repositoryRoot
 try {
     if ($Mode -eq 'sample') {
+        if (-not $PSBoundParameters.ContainsKey('Slot')) { $Slot = 'sample' }
         if (-not $PSBoundParameters.ContainsKey('AiMode') -and $env:TLC_AI_MODE -and $env:TLC_AI_MODE.Trim()) {
             $AiMode = $env:TLC_AI_MODE.Trim().ToLowerInvariant()
         }
@@ -320,7 +356,7 @@ try {
     Publish-AppServiceArchive -Path $resolvedArtifactPath
 
     if (-not $SkipHealthCheck) {
-        Test-HealthEndpoint -HostName $app.defaultHostName
+        Test-HealthEndpoint -Uri "https://$($app.defaultHostName)/api/health"
     }
     Write-Host "Deployment completed: https://$($app.defaultHostName)"
 }

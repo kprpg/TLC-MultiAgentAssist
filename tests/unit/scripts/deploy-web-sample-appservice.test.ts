@@ -48,6 +48,21 @@ afterEach(async () => {
 })
 
 describe('public sample App Service workflow', () => {
+    it('defaults to the sample slot without requiring mode or slot arguments', async () => {
+        const fixture = await createFixture()
+        const before = await fixture.state()
+        const result = await fixture.run('Deploy', [], false, undefined, true)
+        const after = await fixture.state()
+
+        expect(result.stdout).toContain('Verified sample deployment')
+        expect(after.settings['production']).toEqual(before.settings['production'])
+        expect(after.auth['production']).toEqual(before.auth['production'])
+        expect(after.deployments['production']).toEqual(before.deployments['production'])
+        const upload = after.calls.find((call) => call.args.slice(0, 2).join(' ') === 'webapp deploy')
+        expect(upload?.args).toEqual(expect.arrayContaining(['--slot', 'sample']))
+        expect(after.calls.filter((call) => mutation(call) && call.args[0] !== 'rest').every((call) => call.args.includes('--slot'))).toBe(true)
+    }, 60_000)
+
     it('packages without Azure login or a real Foundry configuration', async () => {
         const fixture = await createFixture()
         const result = await fixture.run('Deploy', ['-PackageOnly'])
@@ -170,9 +185,14 @@ describe('public sample App Service workflow', () => {
         expect((await fixture.state()).auth['production']).toEqual(original.auth['production'])
     }, 120_000)
 
-    it('requires a named slot and refuses to bypass sample verification', async () => {
+    it.each(['', 'production'])('rejects an explicit unsafe slot: %j', async (slot) => {
         const fixture = await createFixture()
-        await expect(fixture.run('Deploy', [], false)).rejects.toMatchObject({ stderr: expect.stringContaining('named non-production') })
+        await expect(fixture.run('Deploy', ['-Slot', slot], false)).rejects.toMatchObject({ stderr: expect.stringContaining('named non-production') })
+        expect((await fixture.state()).calls).toEqual([])
+    }, powershellScriptTimeoutMs)
+
+    it('refuses to bypass sample verification', async () => {
+        const fixture = await createFixture()
         await expect(fixture.run('Deploy', ['-SkipHealthCheck'])).rejects.toMatchObject({ stderr: expect.stringContaining('cannot skip') })
         expect((await fixture.state()).calls).toEqual([])
     }, powershellScriptTimeoutMs)
@@ -334,8 +354,8 @@ async function createFixture(configure?: (state: MockState) => void) {
     return {
         receipt, state, directory,
         update: async (change: (value: MockState) => void) => { const value = await state(); change(value); await writeFile(statePath, JSON.stringify(value)) },
-        run: (action = 'Deploy', extra: string[] = [], withSlot = true, foundryEnvironmentPath = join(directory, 'does-not-exist.json')) => execute('pwsh', [
-            '-NoProfile', '-File', script, '-Mode', 'sample', '-Action', action,
+        run: (action = 'Deploy', extra: string[] = [], withSlot = true, foundryEnvironmentPath = join(directory, 'does-not-exist.json'), useDefaults = false) => execute('pwsh', [
+            '-NoProfile', '-File', script, ...(useDefaults ? [] : ['-Mode', 'sample']), '-Action', action,
             '-SubscriptionId', subscription, '-TenantId', tenant, '-ResourceGroup', 'test-rg',
             '-WebAppName', 'test-app', '-AppServicePlan', 'test-plan', '-ExpectedHostName', 'demo.example.test',
             '-ReceiptPath', receipt, '-FoundryEnvironmentPath', foundryEnvironmentPath,
