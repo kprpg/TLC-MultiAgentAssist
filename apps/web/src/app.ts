@@ -88,6 +88,8 @@ import { invokeWorkflowHost, WorkflowRuntimeError, type WorkflowHost, type Workf
 import { createBrowserOnlyVoiceHost, type SharedVoiceInputHost } from '../../../packages/orchestrator/voice-input.js'
 import type { SellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 import type { StagePipelineReviewHost } from '../../../packages/orchestrator/stage-pipeline-review.js'
+import type { MomentumFocusHost } from '../../../packages/orchestrator/momentum-focus/host.js'
+import { momentumFocusRequestSchema, momentumFocusResponseSchema } from '../../../packages/common/contracts/momentum-focus.js'
 import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
 import { RecordCreationError } from '../../../packages/orchestrator/record-creation/service.js'
 import { MeetingSourceError } from '../../../packages/connectors/common/meeting-source.js'
@@ -152,6 +154,7 @@ export interface WebApiOptions {
     resolveSeReportingHost?(authentication: AuthenticatedRequest): Promise<SeReportingHost> | SeReportingHost
     resolveSellerDashboardHost?(authentication: AuthenticatedRequest): Promise<SellerDashboardHost> | SellerDashboardHost
     resolveStagePipelineReviewHost?(authentication: AuthenticatedRequest): Promise<StagePipelineReviewHost> | StagePipelineReviewHost
+    resolveMomentumFocusHost?(authentication: AuthenticatedRequest): Promise<MomentumFocusHost> | MomentumFocusHost
     resolveVoiceHost?(authentication: AuthenticatedRequest): SharedVoiceInputHost
     resolveWorkingSessionHost?(authentication: AuthenticatedRequest): Promise<WorkingSessionWebHost> | WorkingSessionWebHost
     createRuntime(authentication: AuthenticatedRequest): Promise<WebRuntime> | WebRuntime
@@ -240,6 +243,12 @@ export function buildWebApiHandler(options: WebApiOptions) {
             if (request.method === 'POST' && url.pathname === '/api/stage-pipeline-review' && options.resolveStagePipelineReviewHost) {
                 const host = await options.resolveStagePipelineReviewHost(authentication)
                 sendJson(response, 200, await host.invoke(await readJsonBody(request)))
+                return true
+            }
+            if (request.method === 'POST' && url.pathname === '/api/momentum-focus' && options.resolveMomentumFocusHost) {
+                const input = momentumFocusRequestSchema.parse(await readJsonBody(request))
+                const host = await options.resolveMomentumFocusHost(authentication)
+                sendJson(response, 200, momentumFocusResponseSchema.parse(await host.invoke(input)))
                 return true
             }
             if (request.method === 'POST' && url.pathname === '/api/se-reporting' && options.resolveSeReportingHost) {

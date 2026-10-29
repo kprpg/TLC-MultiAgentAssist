@@ -19,12 +19,13 @@ describe('Seller Dashboard analysis and rendering', () => {
 
         expect(markup).toContain('aria-label="Dashboard workspace"')
         expect(markup).toContain('aria-label="Dashboards"')
-        expect(markup.match(/role="tab"/g)).toHaveLength(3)
+        expect(markup.match(/role="tab"/g)).toHaveLength(4)
         expect(markup).toContain('aria-selected="true"')
         expect(markup).toContain('aria-label="Seller Dashboard"')
         expect(invokeSellerDashboard).not.toHaveBeenCalled()
         expect(invokeSeReporting).not.toHaveBeenCalled()
         expect(markup).toContain('SE Reporting Dashboard')
+        expect(markup).toContain('Momentum &amp; Focus')
     })
 
     it('uses Microsoft fiscal boundaries and defaults to the source as-of quarter', () => {

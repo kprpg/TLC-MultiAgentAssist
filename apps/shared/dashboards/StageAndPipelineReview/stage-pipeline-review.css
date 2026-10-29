@@ -1,4 +1,4 @@
-.stage-pipeline-review {
+.stage-pipeline-review, .review-dashboard {
     --sprv-bg: var(--colorNeutralBackground2, var(--cp-bg, var(--vscode-editor-background, #f5f5f5)));
     --sprv-surface: var(--colorNeutralBackground1, var(--cp-surface, var(--vscode-editorWidget-background, #ffffff)));
     --sprv-soft: var(--colorNeutralBackground3, var(--cp-surface-soft, var(--vscode-toolbar-hoverBackground, #f0f0f0)));
@@ -35,15 +35,15 @@
     line-height: 1.45;
 }
 
-.stage-pipeline-review *, .stage-pipeline-review *::before, .stage-pipeline-review *::after { box-sizing: border-box; }
+:is(.stage-pipeline-review, .review-dashboard) *, :is(.stage-pipeline-review, .review-dashboard) *::before, :is(.stage-pipeline-review, .review-dashboard) *::after { box-sizing: border-box; }
 .sprv-inner { max-width: 1600px; margin: 0 auto; }
-.stage-pipeline-review :is(h1, h2) { color: var(--sprv-heading); }
-.stage-pipeline-review h1 { margin: 0 0 4px; font-size: 24px; letter-spacing: -0.3px; }
-.stage-pipeline-review h2 { margin: 0 0 12px; font-size: 15px; }
-.stage-pipeline-review p { margin: 4px 0 10px; }
-.stage-pipeline-review :where(button, input, select) { font: inherit; color: inherit; }
-.stage-pipeline-review :is(button, input, select, summary, a, [tabindex]):focus-visible { outline: 2px solid var(--sprv-focus); outline-offset: 2px; }
-.stage-pipeline-review small { display: block; color: var(--sprv-muted); font-size: 11px; }
+:is(.stage-pipeline-review, .review-dashboard) :is(h1, h2) { color: var(--sprv-heading); }
+:is(.stage-pipeline-review, .review-dashboard) h1 { margin: 0 0 4px; font-size: 24px; letter-spacing: -0.3px; }
+:is(.stage-pipeline-review, .review-dashboard) h2 { margin: 0 0 12px; font-size: 15px; }
+:is(.stage-pipeline-review, .review-dashboard) p { margin: 4px 0 10px; }
+:is(.stage-pipeline-review, .review-dashboard) :where(button, input, select) { font: inherit; color: inherit; }
+:is(.stage-pipeline-review, .review-dashboard) :is(button, input, select, summary, a, [tabindex]):focus-visible { outline: 2px solid var(--sprv-focus); outline-offset: 2px; }
+:is(.stage-pipeline-review, .review-dashboard) small { display: block; color: var(--sprv-muted); font-size: 11px; }
 .sprv-muted { color: var(--sprv-muted); }
 .sprv-aside { float: right; font-size: 11px; font-weight: 400; }
 .sprv-push { margin-left: auto; }
@@ -67,7 +67,10 @@
 .sprv-reset { border-color: var(--sprv-accent) !important; color: var(--sprv-accent) !important; }
 .sprv-select:hover, .sprv-pill:hover, .sprv-reset:hover { border-color: var(--sprv-accent); }
 .sprv-multiselect { position: relative; }
-.sprv-popover { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; min-width: 240px; padding: 8px; border: 1px solid var(--sprv-border); border-radius: 10px; background: var(--sprv-surface); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); }
+.sprv-multiselect > button { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+.sprv-multiselect-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sprv-popover { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; width: min(280px, calc(100vw - 32px)); min-width: min(240px, calc(100vw - 32px)); max-height: min(360px, 60vh); overflow: auto; padding: 8px; border: 1px solid var(--sprv-border); border-radius: 10px; background: var(--sprv-surface); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); }
+.sprv-popover--end { left: auto; right: 0; }
 .sprv-popover-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; border-radius: 6px; }
 .sprv-popover-row:hover { background: var(--sprv-soft); }
 .sprv-popover-row .sprv-count { margin-left: auto; color: var(--sprv-muted); font-size: 11px; }
@@ -173,7 +176,7 @@
 .sprv-error { border-left-color: #d13438; color: #b4181c; }
 
 @media (max-width: 900px) {
-    .stage-pipeline-review { padding: 12px; }
+    .stage-pipeline-review, .review-dashboard { padding: 12px; }
     .sprv-bars li > button, .sprv-bars li > div { grid-template-columns: 110px 1fr 64px; }
 }
 .sprv-viewbar { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; margin: 8px 0; }

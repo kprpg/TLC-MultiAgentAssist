@@ -17,6 +17,7 @@ import type { MeetingTranscriptSummary } from '../common/contracts/meeting.js'
 import { GraphMeetingConnector, type GraphAcquisitionResult } from '../connectors/graph/meetings.js'
 import { createSellerDashboardHost, type SellerDashboardHost } from './seller-dashboard.js'
 import { createStagePipelineReviewHost, type StagePipelineReviewHost } from './stage-pipeline-review.js'
+import { createMomentumFocusHost, type MomentumFocusHost } from './momentum-focus/host.js'
 import { createSeReportingHost } from './se-reporting/composition.js'
 import { createSampleSeReportingHost } from './se-reporting/sample.js'
 import type { SeReportingHost, SeReportingOwner } from './se-reporting/host.js'
@@ -37,6 +38,7 @@ export interface ApplicationServices {
   sellerDashboard: SellerDashboardHost
   seReporting: SeReportingHost
   stagePipelineReview: StagePipelineReviewHost
+  momentumFocus: MomentumFocusHost
   meetings: MeetingConnector
   proposeTranscript(opportunityId: string, transcript: MeetingTranscript): ReturnType<MeetingConnector['proposeMeetingChangeSet']>
   acquireTranscripts(request: MeetingAcquisitionRequest): Promise<GraphAcquisitionResult>
@@ -53,11 +55,11 @@ export interface ApplicationServices {
   dispose(): Promise<void>
 }
 
-function assemble(msx: MsxConnector, guidance: McemGuidanceConnector, agents: TaskAgentRegistry, recordCreation: RecordCreationService, meetings: MeetingConnector, workflows: WorkflowHost, sellerDashboard: SellerDashboardHost, seReporting: SeReportingHost, stagePipelineReview: StagePipelineReviewHost, knowledge: KnowledgeSearch, source: Pick<ApplicationServices, 'acquireTranscripts' | 'resolveMeeting' | 'listTranscriptSources' | 'listRecentMeetings' | 'resolveRecentMeeting'>, dispose: () => Promise<void>, refreshSource = () => {}, performanceReporter?: PerformanceReporter): ApplicationServices {
+function assemble(msx: MsxConnector, guidance: McemGuidanceConnector, agents: TaskAgentRegistry, recordCreation: RecordCreationService, meetings: MeetingConnector, workflows: WorkflowHost, sellerDashboard: SellerDashboardHost, seReporting: SeReportingHost, stagePipelineReview: StagePipelineReviewHost, momentumFocus: MomentumFocusHost, knowledge: KnowledgeSearch, source: Pick<ApplicationServices, 'acquireTranscripts' | 'resolveMeeting' | 'listTranscriptSources' | 'listRecentMeetings' | 'resolveRecentMeeting'>, dispose: () => Promise<void>, refreshSource = () => {}, performanceReporter?: PerformanceReporter): ApplicationServices {
   return {
     ...(performanceReporter ? { performanceReporter } : {}),
     orchestrator: new ThinSliceOrchestrator(msx, guidance, agents, performanceReporter, recordCreation, knowledge),
-    meetings, workflows, sellerDashboard, seReporting, stagePipelineReview, dispose, workflowScopes: new Map(), ...source,
+    meetings, workflows, sellerDashboard, seReporting, stagePipelineReview, momentumFocus, dispose, workflowScopes: new Map(), ...source,
     refreshSource,
     withReadContext: (operation) => msx.withReadContext ? msx.withReadContext(operation) : operation(),
     withReviewedVersions: (before, operation) => {
@@ -84,6 +86,7 @@ export async function createSampleApplicationServices(options: { dataPath?: stri
       applyMeetingChangeSet: (request) => msx.applyMeetingChangeSet(request) }, workflows,
     createSellerDashboardHost({ mode: 'sample', resolveUserEmail: async () => undefined }), createSampleSeReportingHost(options.inference ? { inference: options.inference } : {}),
     createStagePipelineReviewHost({ mode: 'sample' }),
+    createMomentumFocusHost({ mode: 'sample' }),
     createKnowledgeSearch({ mode: 'sample' }), {
       listTranscriptSources: (opportunityId) => msx.listMeetingTranscripts(opportunityId),
       listRecentMeetings: async () => [],
@@ -155,7 +158,11 @@ export async function createLiveApplicationServices(options: {
       ...(options.getReportingToken ? { getToken: options.getReportingToken } : {}),
       ...(options.foundryCredential ? { foundryCredential: options.foundryCredential } : {}),
       ...(options.reportingFetcher ? { fetcher: options.reportingFetcher } : {})
-    }), createStagePipelineReviewHost({ mode: 'live', source: msx }), createKnowledgeSearch({
+    }), createStagePipelineReviewHost({ mode: 'live', source: msx }), createMomentumFocusHost({
+      mode: 'live', source: msx, getToken: sourceToken, sourceId: options.msxResource, environment: options.environment,
+      excludedAccountIds: async () => (await options.preferences.read(await msx.getCurrentUserId())).hiddenAccountIds,
+      ...(options.foundryCredential ? { credential: options.foundryCredential } : {})
+    }), createKnowledgeSearch({
       mode: 'live', environment: options.environment, getGraphToken: () => options.getToken('graph'),
       ...(options.fetchImplementation ? { fetcher: options.fetchImplementation } : {})
     }), {

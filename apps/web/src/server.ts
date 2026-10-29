@@ -5,7 +5,7 @@ import { buildWebApiHandler, type WebRuntime } from './app.js'
 import { assertLoopbackHost, createAzureCliAuthentication, createAzureCliGraphKnowledgeTokenProvider, createAzureCliGraphMeetingTokenProvider, createSampleAuthentication } from './authentication.js'
 import { buildStaticHandler, setSecurityHeaders } from './hosting.js'
 import { listenWebServer } from './listener.js'
-import { createHostedRuntimeFactory, createHostedWorkflowHostResolver, createWebSellerDashboardHost, createWebSeReportingResolver, createWebStagePipelineResolver } from './runtime.js'
+import { createHostedRuntimeFactory, createHostedWorkflowHostResolver, createWebSellerDashboardHost, createWebSeReportingResolver, createWebStagePipelineResolver, createWebMomentumResolver } from './runtime.js'
 import { createWebWorkingSessionResolver } from './working-session.js'
 import { createSampleWorkflowHost } from '../../../packages/orchestrator/workflows/index.js'
 import { FixtureMsxConnector } from '../../../packages/connectors/msx/index.js'
@@ -122,6 +122,9 @@ const handleApi = buildWebApiHandler({
     resolveWorkflowHost,
     resolveSellerDashboardHost: () => createWebSellerDashboardHost(mode === 'sample' ? 'sample' : 'live'),
     resolveStagePipelineReviewHost: createWebStagePipelineResolver(mode),
+    resolveMomentumFocusHost: createWebMomentumResolver(mode, {
+        ...('foundryCredential' in createRuntime && createRuntime.foundryCredential ? { credential: createRuntime.foundryCredential } : {})
+    }),
     resolveSeReportingHost: createWebSeReportingResolver(mode, 'foundryCredential' in createRuntime ? createRuntime.foundryCredential : undefined,
         Date.now, sampleInference ? { inference: sampleInference } : {}),
     resolveWorkingSessionHost: createWebWorkingSessionResolver({

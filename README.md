@@ -209,6 +209,35 @@ HTTP caller authentication is bound to the seller identity; Web sample mode rema
 See [setup and methodology](docs/user-guide/SELLER-DASHBOARD.md) and the
 [source analysis/implementation plan](docs/Seller-Dashboard-Implementation.md).
 
+## Momentum & Focus
+
+Open **Dashboards > Momentum & Focus** on Desktop, Web, VS Code or Teams for a shared,
+read-only SSP/SE decision view: weekly/monthly priorities, qualified movement, dated business
+signals and items needing review. Linked charts and accessible tables share canonical filters,
+explicit financial units and independent focus/evidence windows. Seller Dashboard remains the default.
+Momentum defaults to **HLS Customers only** within the signed-in user's authorized portfolio.
+It uses the verified MSX **Vertical** classification (Health Payor, Health Pharma, Health Provider,
+MedTech), not customer-name matching. Other/unclassified customers are excluded before charts,
+customer choices or history are assembled. **All authorized customers** is an explicit opt-in;
+Clear selection does not remove the HLS scope. Reload/restart after updating both host and UI to
+the Momentum v1.2 contract.
+Its layout follows **Stage and Pipeline Review**: compact scope/filter controls, six clickable KPI
+cards and focused **Priorities**, **Traction & signals**, **Milestones & deadlines**, and
+**Sources & financials** sections. Queue rows use compact links and separate date/value columns;
+full explanations remain in the detail drawer. Native currencies and calculations are unchanged.
+The dashboard loads each authorized cohort once into memory. Role presets, windows, filters,
+charts, paging and details run locally without more source requests. My work reuses the loaded
+portfolio; Team or All customers load only when explicitly selected, then remain cached.
+**Refresh and capture history** clears the cache and reads current source updates. Leaving the
+workspace or changing the source session clears private cached data; nothing is persisted in browser storage.
+
+Sample mode is a single fixed-clock synthetic dataset. Live mode uses caller-scoped MSX reads;
+private refresh history requires an approved shared Azure Table configured with
+`TLC_MOMENTUM_TABLE_URL` and optional `TLC_MOMENTUM_TABLE_NAME`. Without it, current priorities still
+work and history stays visibly unavailable, never replaced with local/plaintext or sample history.
+M365 enrichment, CRM writes and LLM scoring are not part of this feature.
+See the [implementation, source/retention limits and setup](docs/architecture/Momentum-Focus-Dashboard-Proposal.md).
+
 ## Voice search
 
 The main portfolio search supports a microphone button and **Ctrl+Alt+M** on all

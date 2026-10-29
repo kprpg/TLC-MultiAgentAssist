@@ -42,6 +42,8 @@ import { createSeReportingIpcHandler, seReportingIpcChannel } from './se-reporti
 import { createSellerDashboardIpcHandler, sellerDashboardIpcChannel } from './seller-dashboard-ipc.js'
 import { createStagePipelineIpcHandler, stagePipelineIpcChannel } from './stage-pipeline-ipc.js'
 import { createStagePipelineReviewHost } from '../../../../packages/orchestrator/stage-pipeline-review.js'
+import { createMomentumFocusHost } from '../../../../packages/orchestrator/momentum-focus/host.js'
+import { createMomentumFocusIpcHandler, momentumFocusIpcChannel } from './momentum-focus-ipc.js'
 import { desktopWindowBounds } from './window-bounds.js'
 import { createMutationSyncIpcHandler, createPortfolioIpcHandlers } from './portfolio-ipc.js'
 import { createPresentationOwner } from '../../../shared/presentation-owner.js'
@@ -194,6 +196,12 @@ const msxConnector = liveMsxConnector ?? localStoreMsxConnector ?? new FixtureMs
 const stagePipelineHost = liveMsxConnector
   ? createStagePipelineReviewHost({ mode: 'live', source: liveMsxConnector })
   : createStagePipelineReviewHost({ mode: 'sample' })
+const momentumFocusHost = liveMsxConnector
+  ? createMomentumFocusHost({
+    mode: 'live', source: liveMsxConnector, getToken: sourceToken, credential: credentials.foundry,
+    excludedAccountIds: async () => (await portfolioPreferenceStore.read(await liveMsxConnector.getCurrentUserId())).hiddenAccountIds
+  })
+  : createMomentumFocusHost({ mode: 'sample' })
 const creationWriter = localStoreMsxConnector?.createRecordCreationWriter()
 const recordCreation = new RecordCreationService(
   msxConnector,
@@ -437,6 +445,11 @@ function registerIpc(): void {
     return invokeSellerDashboard(request)
   })
   const invokeStagePipeline = createStagePipelineIpcHandler(stagePipelineHost)
+  const invokeMomentumFocus = createMomentumFocusIpcHandler(momentumFocusHost)
+  ipcMain.handle(momentumFocusIpcChannel, (event, request: unknown) => {
+    assertTrustedSender(event)
+    return invokeMomentumFocus(request)
+  })
   ipcMain.handle(stagePipelineIpcChannel, (event, request: unknown) => {
     assertTrustedSender(event)
     return invokeStagePipeline(request)

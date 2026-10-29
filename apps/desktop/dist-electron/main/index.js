@@ -19,6 +19,7 @@ import { unified } from "unified";
 import { AlignmentType, Document, ExternalHyperlink, HeadingLevel, LevelFormat, Packer, Paragraph, Table, TableCell, TableRow, TextRun, WidthType } from "docx";
 import { execFile, spawn } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
+import { TableClient } from "@azure/data-tables";
 import JSZip from "jszip";
 //#region packages/common/contracts/agent-task-limits.ts
 var agentTaskPromptMaxLength = 64e3;
@@ -846,15 +847,15 @@ var voiceResponseSchema = z.discriminatedUnion("kind", [z.object({
 	kind: z.literal("availability"),
 	availability: voiceAvailabilitySchema
 }).strict(), voiceSessionSchema]);
-var text$6 = z.string().max(3e4);
+var text$7 = z.string().max(3e4);
 var name$1 = z.string().min(1).max(500);
 var identifier$3 = z.string().min(1).max(200);
 var tpid = z.string().regex(/^[1-9][0-9]{0,19}$/);
 var amount$1 = z.number().finite();
 var nonnegative$1 = amount$1.nonnegative();
-var count$2 = z.number().int().nonnegative();
-var date$3 = z.iso.date();
-var timestamp$1 = z.iso.datetime({ offset: true });
+var count$3 = z.number().int().nonnegative();
+var date$4 = z.iso.date();
+var timestamp$4 = z.iso.datetime({ offset: true });
 var quality = z.enum([
 	"complete",
 	"partial",
@@ -910,89 +911,89 @@ var accountSchema = z.object({
 	metrics: z.array(accountMetricSchema).max(100),
 	pipeline: z.object({
 		status: quality,
-		openCount: count$2,
-		inQuarterCount: count$2,
+		openCount: count$3,
+		inQuarterCount: count$3,
 		inQuarterValue: amount$1,
-		productionCount: count$2,
-		inQuarterProductionCount: count$2,
+		productionCount: count$3,
+		inQuarterProductionCount: count$3,
 		committedMonthly: amount$1,
 		uncommittedMonthly: amount$1,
 		noPipeline: z.boolean(),
 		noInQuarterPipeline: z.boolean()
 	}).strict(),
-	nextAction: text$6
+	nextAction: text$7
 }).strict();
 var opportunitySchema$1 = z.object({
 	id: identifier$3,
-	number: text$6,
+	number: text$7,
 	tpid,
 	account: name$1,
 	name: name$1,
-	owner: text$6,
-	stage: text$6,
-	solutionArea: text$6,
-	salesPlay: text$6,
-	intent: text$6,
+	owner: text$7,
+	stage: text$7,
+	solutionArea: text$7,
+	salesPlay: text$7,
+	intent: text$7,
 	estimatedValue: amount$1.nullable(),
-	currency: text$6,
+	currency: text$7,
 	monthlyRunRate: amount$1.nullable(),
-	closeDate: date$3.nullable(),
-	state: text$6,
-	forecastComments: text$6,
+	closeDate: date$4.nullable(),
+	state: text$7,
+	forecastComments: text$7,
 	timing,
-	relevance: text$6,
-	modifiedAt: timestamp$1.optional(),
+	relevance: text$7,
+	modifiedAt: timestamp$4.optional(),
 	estimatedBilledRevenue: amount$1.nullable().optional(),
 	estimatedSqlRevenue: amount$1.nullable().optional()
 }).strict();
 var milestoneSchema$1 = z.object({
 	id: identifier$3,
-	number: text$6,
+	number: text$7,
 	opportunityId: identifier$3,
 	opportunityName: name$1,
 	tpid,
 	account: name$1,
 	name: name$1,
-	owner: text$6,
-	category: text$6,
-	status: text$6,
-	commitment: text$6,
+	owner: text$7,
+	category: text$7,
+	status: text$7,
+	commitment: text$7,
 	monthly: amount$1.nullable(),
-	date: date$3.nullable(),
-	workload: text$6,
-	forecastComments: text$6,
-	currency: text$6,
+	date: date$4.nullable(),
+	workload: text$7,
+	forecastComments: text$7,
+	currency: text$7,
 	active: z.boolean().nullable(),
 	timing,
 	metricCandidates: z.array(name$1).max(100),
-	mappingBasis: text$6,
-	classification: text$6,
+	mappingBasis: text$7,
+	classification: text$7,
 	scenarioCredit: amount$1.nullable(),
-	modifiedAt: timestamp$1.optional(),
-	commitmentChangedAt: timestamp$1.optional(),
-	region: text$6.optional(),
-	riskDetails: text$6.optional()
+	modifiedAt: timestamp$4.optional(),
+	commitmentChangedAt: timestamp$4.optional(),
+	region: text$7.optional(),
+	riskDetails: text$7.optional()
 }).strict();
 var coverageSchema = z.object({
 	metric: name$1,
 	bucket: name$1,
 	gap: nonnegative$1,
-	candidateCount: count$2,
+	candidateCount: count$3,
 	committedMonthly: amount$1,
 	uncommittedMonthly: amount$1,
 	verifiedPeriodCredit: z.null(),
-	state: text$6,
+	state: text$7,
 	mappingSupported: z.boolean(),
 	mappingReviewRequired: z.boolean(),
 	scenarioAllowed: z.boolean(),
 	scenarioCommittedCredit: amount$1.nullable(),
 	scenarioUncommittedCredit: amount$1.nullable(),
 	scenarioRemainingGap: amount$1.nullable(),
-	nextAction: text$6
+	nextAction: text$7
 }).strict();
 var sellerDashboardReportSchema = z.object({
 	schemaVersion: z.literal(1),
-	generatedAt: timestamp$1,
+	generatedAt: timestamp$4,
 	plan: z.object({
 		currency: z.literal("USD"),
 		unit: z.literal("USD"),
@@ -1002,37 +1003,37 @@ var sellerDashboardReportSchema = z.object({
 			metric: name$1,
 			bucket: name$1,
 			hintSupported: z.boolean(),
-			state: text$6,
+			state: text$7,
 			scenarioAllowed: z.boolean()
 		}).strict()).max(100),
-		unmappedProductionCandidates: count$2
+		unmappedProductionCandidates: count$3
 	}).strict(),
 	period: z.object({
 		label: name$1,
-		start: date$3,
-		end: date$3,
-		today: date$3
+		start: date$4,
+		end: date$4,
+		today: date$4
 	}).strict(),
 	sources: z.object({
 		earnings: z.object({
 			status: z.enum(["live", "stale"]),
-			generatedAt: timestamp$1,
-			refreshedAt: timestamp$1.nullable(),
+			generatedAt: timestamp$4,
+			refreshedAt: timestamp$4.nullable(),
 			months: z.array(name$1).max(12),
 			ageDays: z.number().int().nullable()
 		}).strict(),
 		pipeline: z.object({
 			status: quality,
-			asOf: timestamp$1.nullable(),
-			errors: z.array(text$6).max(1e3)
+			asOf: timestamp$4.nullable(),
+			errors: z.array(text$7).max(1e3)
 		}).strict(),
 		quota: z.object({
 			name: name$1,
-			rows: count$2,
-			accounts: count$2.max(200)
+			rows: count$3,
+			accounts: count$3.max(200)
 		}).strict()
 	}).strict(),
-	warnings: z.array(text$6).max(1e3),
+	warnings: z.array(text$7).max(1e3),
 	official: z.object({
 		weightedAttainment: amount$1,
 		closedMonthAttainment: amount$1.nullable(),
@@ -1053,11 +1054,11 @@ var sellerDashboardReportSchema = z.object({
 			"Medium",
 			"Low"
 		]),
-		issue: text$6,
-		action: text$6,
-		owner: text$6
+		issue: text$7,
+		action: text$7,
+		owner: text$7
 	}).strict()).max(2e4),
-	methodology: z.array(text$6).max(100)
+	methodology: z.array(text$7).max(100)
 }).strict().superRefine((report, context) => {
 	const reject = (message) => context.addIssue({
 		code: "custom",
@@ -1122,10 +1123,10 @@ var sellerDashboardReportSchema = z.object({
 var supplementSourceSchema = z.object({
 	name: name$1,
 	status: quality,
-	asOf: timestamp$1,
-	start: date$3,
-	end: date$3,
-	detail: text$6
+	asOf: timestamp$4,
+	start: date$4,
+	end: date$4,
+	detail: text$7
 }).strict().refine((source) => source.start <= source.end, "Invalid supplemental source interval.");
 var sellerDashboardSupplementSchema = z.object({
 	schemaVersion: z.literal(1),
@@ -1137,7 +1138,7 @@ var sellerDashboardSupplementSchema = z.object({
 			previousActual: nonnegative$1.nullable(),
 			averageDaily: nonnegative$1,
 			projected: nonnegative$1.nullable(),
-			daysPosted: count$2,
+			daysPosted: count$3,
 			pillars: z.array(z.object({
 				name: name$1,
 				actual: nonnegative$1
@@ -1156,7 +1157,7 @@ var sellerDashboardSupplementSchema = z.object({
 			id: identifier$3,
 			tpid,
 			name: name$1,
-			created: date$3,
+			created: date$4,
 			averageDaily: nonnegative$1
 		}).strict()).max(5e4),
 		sqlReclassification: z.array(z.object({
@@ -1164,20 +1165,20 @@ var sellerDashboardSupplementSchema = z.object({
 			tpid,
 			workload: name$1,
 			monthlyOpportunity: nonnegative$1,
-			evidence: text$6
+			evidence: text$7
 		}).strict()).max(5e4)
 	}).strict().nullable(),
 	conversion: z.object({
 		source: supplementSourceSchema,
 		accounts: z.array(z.object({
 			tpid,
-			territory: text$6,
+			territory: text$7,
 			startingMonthly: nonnegative$1,
 			convertedMonthly: nonnegative$1,
 			inQuarterMonthly: nonnegative$1,
 			shiftedOutMonthly: nonnegative$1,
-			startingCount: count$2,
-			convertedCount: count$2
+			startingCount: count$3,
+			convertedCount: count$3
 		}).strict()).max(200)
 	}).strict().nullable()
 }).strict().superRefine((supplement, context) => {
@@ -1204,7 +1205,7 @@ var sellerDashboardSnapshotSchema = z.object({
 	kind: z.literal("snapshot"),
 	mode: z.enum(["sample", "live"]),
 	state: z.enum(["ready", "stale"]),
-	message: text$6,
+	message: text$7,
 	report: sellerDashboardReportSchema,
 	supplement: sellerDashboardSupplementSchema.nullable()
 }).strict().superRefine((snapshot, context) => {
@@ -1247,15 +1248,15 @@ var sellerDashboardRequestSchema = z.discriminatedUnion("operation", [z.object({
 	contractVersion: z.literal("1.0"),
 	operation: z.literal("refresh"),
 	confirmed: z.literal(true),
-	asOf: date$3.optional()
+	asOf: date$4.optional()
 }).strict()]);
 var identifier$2 = z.string().min(1).max(200);
 var name = z.string().min(1).max(500);
-var text$5 = z.string().max(3e4);
+var text$6 = z.string().max(3e4);
 var nonnegative = z.number().finite().nonnegative();
-var count$1 = z.number().int().nonnegative();
-var date$2 = z.iso.date();
-var timestamp = z.iso.datetime({ offset: true });
+var count$2 = z.number().int().nonnegative();
+var date$3 = z.iso.date();
+var timestamp$3 = z.iso.datetime({ offset: true });
 var month = z.string().regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/);
 var stagePipelineStages = [
 	"Listen & Consult",
@@ -1308,8 +1309,8 @@ var stagePipelineOpportunitySchema = z.object({
 	name,
 	owner: z.string().max(200),
 	editable: z.boolean(),
-	notes: text$5,
-	contact: text$5,
+	notes: text$6,
+	contact: text$6,
 	scope: stagePipelineScopeSchema,
 	solutionArea: name,
 	inbound: z.boolean(),
@@ -1321,15 +1322,15 @@ var stagePipelineOpportunitySchema = z.object({
 		"Lost"
 	]),
 	forecast: name,
-	closeDate: date$2,
-	daysInStage: count$1,
-	idleDays: count$1.nullable(),
+	closeDate: date$3,
+	daysInStage: count$2,
+	idleDays: count$2.nullable(),
 	consumedRecurring: nonnegative,
 	consumedNonRecurring: nonnegative,
 	maccCommit: nonnegative,
-	partner: text$5.nullable(),
+	partner: text$6.nullable(),
 	competitor: z.object({
-		name: text$5.nullable(),
+		name: text$6.nullable(),
 		threat: stagePipelineThreatSchema
 	}).strict(),
 	solutionTagReview: z.boolean()
@@ -1339,13 +1340,13 @@ var stagePipelineMilestoneSchema = z.object({
 	number: name,
 	opportunityId: identifier$2,
 	name,
-	workload: text$5,
+	workload: text$6,
 	estimatedMonthlyAcr: nonnegative,
 	commitment: z.enum(["Committed", "Uncommitted"]),
 	status: stagePipelineMilestoneStatusSchema,
-	date: date$2.nullable(),
-	comment: text$5,
-	owner: text$5
+	date: date$3.nullable(),
+	comment: text$6,
+	owner: text$6
 }).strict();
 var acrMonthSchema = z.object({
 	month,
@@ -1358,7 +1359,7 @@ var acrMonthSchema = z.object({
 }).strict();
 var stagePipelineAcrSchema = z.object({
 	source: z.enum(stagePipelineAcrSources),
-	syncedAt: date$2.nullable(),
+	syncedAt: date$3.nullable(),
 	lastActualMonth: month.nullable(),
 	accounts: z.array(z.object({
 		customer: name,
@@ -1383,8 +1384,8 @@ var stagePipelineSourceHealthSchema = z.object({
 		"partial",
 		"unavailable"
 	]),
-	detail: text$5,
-	count: count$1.optional()
+	detail: text$6,
+	count: count$2.optional()
 }).strict();
 var stagePipelineReportSchema = z.object({
 	id: identifier$2,
@@ -1395,10 +1396,10 @@ var stagePipelineSnapshotSchema = z.object({
 	kind: z.literal("snapshot"),
 	mode: z.enum(["sample", "live"]),
 	state: z.enum(["fresh", "stale"]),
-	message: text$5,
-	generatedAt: timestamp,
+	message: text$6,
+	generatedAt: timestamp$3,
 	owner: z.string().max(200),
-	asOf: date$2,
+	asOf: date$3,
 	fiscalYear: z.number().int().min(2e3).max(2100),
 	scope: stagePipelineViewScopeSchema,
 	reports: z.array(stagePipelineReportSchema).max(50),
@@ -1468,7 +1469,7 @@ var stagePipelineUnavailableSchema = z.object({
 		"throttled",
 		"invalid-snapshot"
 	]),
-	message: text$5
+	message: text$6
 }).strict();
 var stagePipelineRequestSchema = z.object({
 	contractVersion: z.literal("1.1"),
@@ -1483,6 +1484,437 @@ var stagePipelineRequestSchema = z.object({
 	});
 });
 var stagePipelineResponseSchema = z.union([stagePipelineSnapshotSchema, stagePipelineUnavailableSchema]);
+var momentumRuleVersion = "momentum-rules-1";
+var id$2 = z.string().min(1).max(200);
+var label = z.string().min(1).max(500);
+var date$2 = z.iso.date();
+var timestamp$2 = z.iso.datetime({ offset: true });
+var count$1 = z.number().int().nonnegative();
+var currency = z.string().regex(/^[A-Z]{3}$/);
+var ids = z.array(id$2).max(500).default([]);
+var momentumBasisSchema = z.enum(["pipeline", "monthly-usage"]);
+var momentumCustomerIndustrySchema = z.enum(["hls", "all"]);
+var momentumQualitySchema = z.enum([
+	"complete",
+	"partial",
+	"unknown"
+]);
+var momentumDeadlineSchema = z.enum([
+	"overdue",
+	"this-week",
+	"rest-of-month",
+	"later",
+	"undated"
+]);
+var momentumProgressKinds = [
+	"stage-advanced",
+	"milestone-completed",
+	"commitment-recorded",
+	"proof-completed"
+];
+var momentumEventSchema = z.object({
+	id: id$2,
+	kind: z.enum([
+		...momentumProgressKinds,
+		"activity",
+		"note",
+		"task",
+		"forecast-comment",
+		"loopback",
+		"date-slipped"
+	]),
+	source: z.enum(["msx", "observed"]),
+	sourceAt: timestamp$2.nullable(),
+	observedAt: timestamp$2,
+	intervalStart: timestamp$2.nullable(),
+	intervalEnd: timestamp$2.nullable(),
+	field: z.string().max(100).nullable(),
+	relatedRecordKey: id$2.optional(),
+	from: z.string().max(500).nullable(),
+	to: z.string().max(500).nullable()
+}).strict();
+var momentumHistorySchema = z.object({
+	state: z.enum([
+		"insufficient",
+		"observed",
+		"authoritative",
+		"unavailable"
+	]),
+	scope: z.enum([
+		"shared",
+		"synthetic",
+		"unavailable"
+	]),
+	availableSince: timestamp$2.nullable(),
+	lastObserved: timestamp$2.nullable(),
+	observations: count$1,
+	maxGapDays: z.number().nonnegative().nullable()
+}).strict();
+var momentumRecordSchema = z.object({
+	key: id$2,
+	id: id$2,
+	entity: z.enum(["opportunity", "milestone"]),
+	name: label,
+	accountId: id$2.nullable(),
+	accountName: label.nullable(),
+	opportunityId: id$2,
+	stage: label.nullable(),
+	status: label.nullable(),
+	ownerId: id$2.nullable(),
+	ownerName: label.nullable(),
+	dueDate: date$2.nullable(),
+	value: z.object({
+		basis: momentumBasisSchema,
+		amount: z.number().finite().nonnegative().nullable(),
+		currency: currency.nullable()
+	}).strict(),
+	active: z.boolean().nullable(),
+	onMyTeam: z.boolean().nullable(),
+	role: z.enum([
+		"SSP",
+		"SE",
+		"both"
+	]),
+	commitment: z.boolean().nullable(),
+	blocked: z.boolean().nullable(),
+	blockingMilestoneIds: z.array(id$2).max(2e4),
+	plannedHold: z.boolean(),
+	sourceQuality: momentumQualitySchema,
+	sourceUpdatedAt: timestamp$2.nullable(),
+	sourceUrl: z.url().refine((value) => {
+		const url = new URL(value);
+		return url.protocol === "https:" && !url.username && !url.password;
+	}, "Evidence links must use HTTPS without credentials.").nullable(),
+	history: momentumHistorySchema,
+	events: z.array(momentumEventSchema).max(1096)
+}).strict();
+var momentumFocusQuerySchema = z.object({
+	timezone: z.string().max(100).refine((value) => {
+		try {
+			new Intl.DateTimeFormat("en", { timeZone: value });
+			return true;
+		} catch (error) {
+			if (error instanceof RangeError) return false;
+			throw error;
+		}
+	}, "Use a valid IANA timezone.").default("UTC"),
+	focus: z.enum([
+		"week",
+		"month",
+		"custom"
+	]).default("week"),
+	from: date$2.optional(),
+	to: date$2.optional(),
+	lookbackDays: z.union([
+		z.literal(7),
+		z.literal(14),
+		z.literal(30),
+		z.literal(90)
+	]).default(30),
+	role: z.enum(["SSP", "SE"]).default("SSP"),
+	scope: z.enum([
+		"portfolio",
+		"mine",
+		"team"
+	]).default("portfolio"),
+	customerIndustry: momentumCustomerIndustrySchema.default("hls"),
+	accountIds: ids,
+	opportunityIds: ids,
+	milestoneIds: ids,
+	stages: ids,
+	opportunityStatuses: ids,
+	milestoneStatuses: ids,
+	ownerIds: ids,
+	entity: z.enum([
+		"all",
+		"opportunity",
+		"milestone"
+	]).default("all"),
+	sourceQuality: z.array(momentumQualitySchema).max(3).default([]),
+	basis: z.enum([
+		"all",
+		"pipeline",
+		"monthly-usage"
+	]).default("all"),
+	currency: currency.optional(),
+	minValue: z.number().finite().nonnegative().optional(),
+	maxValue: z.number().finite().nonnegative().optional(),
+	dateFrom: date$2.optional(),
+	dateTo: date$2.optional(),
+	includeUndated: z.boolean().default(true),
+	lens: z.enum([
+		"all",
+		"advancing",
+		"review",
+		"busy",
+		"weekly",
+		"monthly",
+		"history",
+		"unknown-history"
+	]).default("all"),
+	deadline: momentumDeadlineSchema.optional(),
+	accountSort: z.enum([
+		"traction",
+		"activity",
+		"review"
+	]).default("traction"),
+	heatmap: z.enum(["count", "value"]).default("count"),
+	page: z.number().int().min(1).max(1e4).default(1),
+	pageSize: z.number().int().min(1).max(100).default(25)
+}).strict().superRefine((query, context) => {
+	if (query.focus === "custom" && (!query.from || !query.to || query.from > query.to)) context.addIssue({
+		code: "custom",
+		message: "A custom focus needs an ordered start and end date."
+	});
+	if (query.minValue !== void 0 && query.maxValue !== void 0 && query.minValue > query.maxValue || query.dateFrom && query.dateTo && query.dateFrom > query.dateTo) context.addIssue({
+		code: "custom",
+		message: "Filter ranges must be ordered."
+	});
+	if (query.heatmap === "value" && (query.basis !== "monthly-usage" || !query.currency)) context.addIssue({
+		code: "custom",
+		message: "Monetary heatmaps require monthly usage and one verified currency."
+	});
+	if ((query.minValue !== void 0 || query.maxValue !== void 0) && (query.basis === "all" || !query.currency)) context.addIssue({
+		code: "custom",
+		message: "Value ranges require one financial basis and a verified currency."
+	});
+});
+var momentumFocusRequestSchema = z.object({
+	contractVersion: z.literal("1.2"),
+	operation: z.enum([
+		"load",
+		"get",
+		"refresh",
+		"detail"
+	]),
+	query: momentumFocusQuerySchema.prefault({}),
+	refresh: z.boolean().optional(),
+	recordKey: id$2.optional(),
+	snapshotId: id$2.optional()
+}).strict().superRefine((request, context) => {
+	if (request.operation === "detail" && (!request.recordKey || !request.snapshotId)) context.addIssue({
+		code: "custom",
+		message: "Detail reads require a record key and snapshot identity."
+	});
+	if (request.operation !== "detail" && (request.recordKey || request.snapshotId)) context.addIssue({
+		code: "custom",
+		message: "Record and snapshot identities are only valid for detail reads."
+	});
+	if (request.operation !== "load" && request.refresh !== void 0) context.addIssue({
+		code: "custom",
+		message: "The dataset refresh flag is only valid for load requests."
+	});
+});
+var momentumSourceHealthSchema = z.object({
+	source: z.enum([
+		"portfolio",
+		"milestones",
+		"activities",
+		"notes",
+		"currencies",
+		"hierarchy",
+		"industry",
+		"history",
+		"m365"
+	]),
+	state: z.enum([
+		"complete",
+		"partial",
+		"unavailable",
+		"denied",
+		"capped"
+	]),
+	detail: z.string().min(1).max(2e3),
+	count: count$1.nullable(),
+	checkedAt: timestamp$2
+}).strict();
+var momentumCollectionSchema = z.object({
+	mode: z.enum(["sample", "live"]),
+	generatedAt: timestamp$2,
+	scopeKey: id$2,
+	scope: z.enum([
+		"portfolio",
+		"mine",
+		"team"
+	]),
+	customerIndustry: momentumCustomerIndustrySchema,
+	teamAvailable: z.boolean(),
+	complete: z.boolean(),
+	records: z.array(momentumRecordSchema).max(3e4),
+	sources: z.array(momentumSourceHealthSchema).max(12)
+}).strict();
+var momentumDatasetSchema = z.object({
+	contractVersion: z.literal("1.2"),
+	kind: z.literal("dataset"),
+	ruleVersion: z.literal(momentumRuleVersion),
+	snapshotId: id$2,
+	asOf: timestamp$2,
+	data: momentumCollectionSchema
+}).strict();
+var momentumPrioritySchema = momentumRecordSchema.extend({
+	tier: z.enum([
+		"act-now",
+		"this-week",
+		"plan-month",
+		"verify"
+	]),
+	deadline: momentumDeadlineSchema,
+	reviewDate: date$2.nullable(),
+	progressCount: count$1.nullable(),
+	historyCoverage: z.enum([
+		"sufficient",
+		"partial",
+		"unknown"
+	]),
+	signalCount: count$1.nullable(),
+	signalTypes: z.array(z.string().max(100)).max(12),
+	latestSignal: timestamp$2.nullable(),
+	latestProgress: timestamp$2.nullable(),
+	reasons: z.array(z.object({
+		code: id$2,
+		text: z.string().min(1).max(1e3)
+	}).strict()).max(20),
+	nextAction: z.string().min(1).max(1e3),
+	accountableRole: label,
+	needsReview: z.boolean()
+}).strict();
+var window = z.object({
+	from: z.string().min(1),
+	to: z.string().min(1)
+}).strict();
+var momentumSnapshotSchema = z.object({
+	contractVersion: z.literal("1.2"),
+	kind: z.literal("snapshot"),
+	ruleVersion: z.literal(momentumRuleVersion),
+	mode: z.enum(["sample", "live"]),
+	generatedAt: timestamp$2,
+	snapshotId: id$2,
+	queryKey: id$2,
+	scopeKey: id$2,
+	query: momentumFocusQuerySchema,
+	scope: z.enum([
+		"portfolio",
+		"mine",
+		"team"
+	]),
+	customerIndustry: momentumCustomerIndustrySchema,
+	teamAvailable: z.boolean(),
+	complete: z.boolean(),
+	focusWindow: window,
+	evidenceWindow: window,
+	sources: z.array(momentumSourceHealthSchema).max(12),
+	total: count$1,
+	rows: z.array(momentumPrioritySchema).max(100),
+	summary: z.object({
+		advancingAccounts: count$1,
+		weeklyPriorities: count$1,
+		monthlyMilestones: count$1,
+		reviewCandidates: count$1,
+		busyWithoutMovement: count$1,
+		usableHistory: count$1,
+		totalRecords: count$1
+	}).strict(),
+	facets: z.object({
+		accounts: z.array(z.object({
+			id: id$2,
+			name: label
+		}).strict()),
+		opportunities: z.array(z.object({
+			id: id$2,
+			name: label
+		}).strict()),
+		milestones: z.array(z.object({
+			id: id$2,
+			name: label
+		}).strict()),
+		owners: z.array(z.object({
+			id: id$2,
+			name: label
+		}).strict()),
+		stages: z.array(label),
+		opportunityStatuses: z.array(label),
+		milestoneStatuses: z.array(label),
+		currencies: z.array(currency)
+	}).strict(),
+	charts: z.object({
+		matrix: z.array(z.object({
+			key: id$2,
+			id: id$2,
+			entity: z.enum(["opportunity", "milestone"]),
+			name: label,
+			progressCount: count$1,
+			signalCount: count$1.nullable(),
+			coverage: z.enum([
+				"sufficient",
+				"partial",
+				"unknown"
+			]),
+			amount: z.number().finite().nullable(),
+			basis: momentumBasisSchema,
+			currency: currency.nullable()
+		}).strict()),
+		unknownHistoryKeys: z.array(id$2),
+		accounts: z.array(z.object({
+			accountId: id$2.nullable(),
+			name: label,
+			advancing: count$1,
+			eligible: count$1,
+			active: count$1,
+			advancingShare: z.number().min(0).max(1).nullable(),
+			progressCount: count$1,
+			signalCount: count$1,
+			reviewCount: count$1,
+			latestMovement: timestamp$2.nullable()
+		}).strict()),
+		heatmap: z.array(z.object({
+			stage: label,
+			status: label,
+			count: count$1,
+			value: z.number().finite().nonnegative().nullable(),
+			unit: label,
+			missingValues: count$1
+		}).strict()),
+		deadlines: z.array(z.object({
+			bucket: momentumDeadlineSchema,
+			opportunities: count$1,
+			milestones: count$1
+		}).strict()).length(5),
+		values: z.array(z.object({
+			basis: momentumBasisSchema,
+			currency,
+			amount: z.number().finite().nonnegative(),
+			records: count$1
+		}).strict()),
+		unknownValues: count$1
+	}).strict()
+}).strict();
+var momentumFocusResponseSchema = z.discriminatedUnion("kind", [
+	momentumDatasetSchema,
+	momentumSnapshotSchema,
+	z.object({
+		contractVersion: z.literal("1.2"),
+		kind: z.literal("detail"),
+		snapshotId: id$2,
+		queryKey: id$2,
+		scopeKey: id$2,
+		item: momentumPrioritySchema
+	}).strict(),
+	z.object({
+		contractVersion: z.literal("1.2"),
+		kind: z.literal("unavailable"),
+		code: z.enum([
+			"unauthorized",
+			"forbidden",
+			"source-unavailable",
+			"throttled",
+			"scope-unavailable",
+			"industry-unavailable",
+			"stale",
+			"history-unavailable"
+		]),
+		message: z.string().min(1).max(2e3)
+	}).strict()
+]);
 //#endregion
 //#region packages/common/contracts/record-creation.ts
 var clientKeySchema = z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
@@ -3682,6 +4114,30 @@ function isoTimestamp(value) {
 	return Number.isNaN(time) ? void 0 : new Date(time).toISOString();
 }
 //#endregion
+//#region packages/connectors/msx/customer-industry.ts
+var hlsVerticalLabels = [
+	"Health Payor",
+	"Health Pharma",
+	"Health Provider",
+	"MedTech"
+];
+var CustomerIndustryScopeError = class extends Error {
+	constructor(message) {
+		super(message);
+		this.name = "CustomerIndustryScopeError";
+	}
+};
+function hlsVerticalValues(choices) {
+	const values = /* @__PURE__ */ new Set();
+	for (const label of hlsVerticalLabels) {
+		const matches = choices.filter((choice) => choice.label.trim().toLowerCase() === label.toLowerCase());
+		if (matches.length !== 1 || !Number.isSafeInteger(matches[0].value)) throw new CustomerIndustryScopeError("HLS customer classification metadata is missing, invalid or ambiguous. No unfiltered customer list was substituted.");
+		values.add(matches[0].value);
+	}
+	if (values.size !== hlsVerticalLabels.length) throw new CustomerIndustryScopeError("HLS vertical option values are ambiguous.");
+	return values;
+}
+//#endregion
 //#region packages/connectors/common/portfolio-preferences.ts
 var preferencesSchema = z.object({
 	manualAccountIds: z.array(z.string().min(1)),
@@ -3972,6 +4428,7 @@ var LiveMsxConnector = class {
 	observationPromises = /* @__PURE__ */ new Map();
 	milestonePromises = /* @__PURE__ */ new Map();
 	currentUserIdPromise;
+	hlsVerticalValuesPromise;
 	dealTeamBindingsPromise;
 	milestoneTeamTemplateIdPromise;
 	accountTpidField;
@@ -4896,6 +5353,33 @@ var LiveMsxConnector = class {
 		if (!navigationPropertyPattern.test(entitySet)) throw new Error("The entity set name is invalid.");
 		return this.requestAll(entitySet, parameters);
 	}
+	async readRowsBounded(entitySet, parameters, maximumRows) {
+		if (!navigationPropertyPattern.test(entitySet) || !Number.isInteger(maximumRows) || maximumRows < 1 || maximumRows > 30001) throw new Error("The bounded dashboard read is invalid.");
+		return this.requestAll(entitySet, {
+			...parameters,
+			"$top": String(maximumRows)
+		}, maximumRows);
+	}
+	async getHlsAccountIds(accountIds) {
+		const ids = unique(accountIds.map((id) => {
+			if (!guidPattern.test(id)) throw new Error("HLS customer scope requires canonical account GUIDs.");
+			return id.toLowerCase();
+		}));
+		if (ids.length === 0) return [];
+		this.hlsVerticalValuesPromise ??= this.getCreationChoiceValues("account", "msp_verticalcode", "PicklistAttributeMetadata").then(hlsVerticalValues).catch((error) => {
+			this.hlsVerticalValuesPromise = void 0;
+			throw error;
+		});
+		const values = await this.hlsVerticalValuesPromise;
+		const allowed = new Set(ids);
+		return unique((await this.collectChunks(ids, (chunk) => this.readRowsBounded("accounts", {
+			"$select": "accountid,msp_verticalcode",
+			"$filter": `(${chunk.map((id) => `accountid eq ${id}`).join(" or ")}) and (${[...values].map((value) => `msp_verticalcode eq ${value}`).join(" or ")})`
+		}, chunk.length))).flatMap((row) => {
+			const id = typeof row["accountid"] === "string" ? row["accountid"].toLowerCase() : void 0;
+			return id && allowed.has(id) && typeof row["msp_verticalcode"] === "number" && values.has(row["msp_verticalcode"]) ? [id] : [];
+		})).sort();
+	}
 	async getTeamMemberships() {
 		const userId = await this.getCurrentUserId();
 		const [dealTeamOpportunityIds, milestoneTeamOpportunityIds, milestoneIds] = await Promise.all([
@@ -5113,16 +5597,19 @@ var LiveMsxConnector = class {
 		}
 		return rows;
 	}
-	async requestAll(entitySet, parameters) {
+	async requestAll(entitySet, parameters, maximumRows) {
 		const firstUrl = new URL(entitySet, this.baseUrl);
 		for (const [name, value] of Object.entries(parameters)) firstUrl.searchParams.set(name, value);
 		const rows = [];
+		let pages = 0;
 		let nextUrl = firstUrl;
 		while (nextUrl) {
+			if (maximumRows !== void 0 && ++pages > 100) throw new Error("The bounded dashboard read exceeded its page limit.");
 			this.readContext.getStore()?.signal?.throwIfAborted();
 			this.assertTrustedUrl(nextUrl);
 			const page = await this.requestJson(nextUrl);
 			rows.push(...page.value);
+			if (maximumRows !== void 0 && rows.length >= maximumRows) return rows.slice(0, maximumRows);
 			nextUrl = page["@odata.nextLink"] ? new URL(page["@odata.nextLink"]) : void 0;
 		}
 		return rows;
@@ -11701,7 +12188,7 @@ var capTiers = [
 	}
 ];
 var maxPackCharacters = 48e3;
-var dayMs = 864e5;
+var dayMs$2 = 864e5;
 var closedMilestonePattern = /completed|cancel|lost|duplicate|hygiene/i;
 /**
 * Gathers the deepest evidence the connector can supply. Connectors with a native deep read provide it
@@ -11793,7 +12280,7 @@ function assemble({ context, milestones, evidence, now = /* @__PURE__ */ new Dat
 		...evidence.milestones.flatMap((item) => allEntryTimes(item.commentHistory))
 	];
 	const activityTimes = [...allEntryTimes(evidence.activities), ...evidence.milestones.flatMap((item) => allEntryTimes(item.activities))];
-	const ageOf = (times) => times.length === 0 ? void 0 : Math.max(0, Math.floor((nowMs - Math.max(...times)) / dayMs));
+	const ageOf = (times) => times.length === 0 ? void 0 : Math.max(0, Math.floor((nowMs - Math.max(...times)) / dayMs$2));
 	const daysSinceLastComment = ageOf(commentTimes);
 	const daysSinceLastActivity = ageOf(activityTimes);
 	const daysToClose = dayDelta(opportunity.closeDate, nowMs);
@@ -11888,7 +12375,7 @@ function toEntry(ref, item, nowMs, limit) {
 		kind: item.kind,
 		...at ? {
 			at,
-			ageDays: Math.max(0, Math.floor((nowMs - Date.parse(at)) / dayMs))
+			ageDays: Math.max(0, Math.floor((nowMs - Date.parse(at)) / dayMs$2))
 		} : {},
 		...item.author ? { author: item.author } : {},
 		...item.subject ? { subject: truncate(item.subject, 200) } : {},
@@ -11916,8 +12403,8 @@ function isClosed(milestone) {
 }
 /** Whole days from today to a calendar date; negative when the date has passed. */
 function dayDelta(date, nowMs) {
-	const today = Math.floor(nowMs / dayMs);
-	return Math.floor(Date.parse(`${date.slice(0, 10)}T00:00:00Z`) / dayMs) - today;
+	const today = Math.floor(nowMs / dayMs$2);
+	return Math.floor(Date.parse(`${date.slice(0, 10)}T00:00:00Z`) / dayMs$2) - today;
 }
 function truncate(value, limit) {
 	const text = value.trim();
@@ -12396,7 +12883,7 @@ var mimeTypes = {
 	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
 	"text/html": "html"
 };
-var text$4 = (value) => value.replace(/<[^>]*>/g, "").trim();
+var text$5 = (value) => value.replace(/<[^>]*>/g, "").trim();
 function fileType(value, url) {
 	if (typeof value === "string") {
 		const normalized = value.toLowerCase().trim().replace(/^\./, "");
@@ -12495,9 +12982,9 @@ var SeismicM365Provider = class {
 				id: resource.id ?? hitId,
 				evidenceId: `knowledge:seismic-m365:${config.connectionId}:${resource.id ?? hitId}`,
 				source: this.id,
-				title: typeof title === "string" ? text$4(title) : title,
+				title: typeof title === "string" ? text$5(title) : title,
 				url,
-				...summary ? { snippet: text$4(summary).slice(0, 4e3) } : {},
+				...summary ? { snippet: text$5(summary).slice(0, 4e3) } : {},
 				...modified === void 0 ? {} : { lastModifiedAt: modified },
 				connectionId: config.connectionId,
 				untrusted: true
@@ -13232,17 +13719,17 @@ var InitialWorkflowResultAssembler = class {
 			projection: {
 				records: ordered.map((record, index) => {
 					const kind = milestoneWorkflows.has(workflowId) ? "milestone" : activityWorkflows.has(workflowId) ? "activity" : "opportunity";
-					const opportunityId = kind === "opportunity" ? text$3(record.id) : text$3(record.opportunityId);
+					const opportunityId = kind === "opportunity" ? text$4(record.id) : text$4(record.opportunityId);
 					return {
-						recordId: text$3(record.id) ?? String(index + 1),
+						recordId: text$4(record.id) ?? String(index + 1),
 						kind,
 						cardIndex: index,
 						...opportunityId ? { opportunityId } : {},
-						...text$3(record.accountId) ? { accountId: text$3(record.accountId) } : {},
-						...kind === "milestone" && text$3(record.id) ? { milestoneId: text$3(record.id) } : {},
+						...text$4(record.accountId) ? { accountId: text$4(record.accountId) } : {},
+						...kind === "milestone" && text$4(record.id) ? { milestoneId: text$4(record.id) } : {},
 						...workflowId !== "WF-009" && queueItems[index] ? { queueItemId: queueItems[index].id } : {},
-						...text$3(record.ownerId) ? { ownerId: text$3(record.ownerId) } : {},
-						...text$3(record.opportunityOwnerName) ? { ownerName: text$3(record.opportunityOwnerName) } : {}
+						...text$4(record.ownerId) ? { ownerId: text$4(record.ownerId) } : {},
+						...text$4(record.opportunityOwnerName) ? { ownerName: text$4(record.opportunityOwnerName) } : {}
 					};
 				}),
 				...input.maximumActiveItems !== void 0 ? { maximumActiveItems: input.maximumActiveItems } : {}
@@ -13322,7 +13809,7 @@ function buildInitialWorkflowQuery(workflowId, input) {
 			}, {
 				field: "dueDate",
 				operator: "on-or-before",
-				value: addDays$1(input.asOf, input.meetingWindowDays ?? 14)
+				value: addDays$2(input.asOf, input.meetingWindowDays ?? 14)
 			}],
 			orderBy: [{
 				field: "dueDate",
@@ -13462,7 +13949,7 @@ function buildCard(workflowId, title, records, queueItems, evidenceIds) {
 			priority: item.priority
 		}))
 	};
-	if (workflowId === "WF-009" || workflowId === "WF-008") return aggregateResultCard(workflowId, title, records.map((record) => ({ ...text$3(record.accountId) ? { accountId: text$3(record.accountId) } : {} })), queueItems.length, evidenceIds);
+	if (workflowId === "WF-009" || workflowId === "WF-008") return aggregateResultCard(workflowId, title, records.map((record) => ({ ...text$4(record.accountId) ? { accountId: text$4(record.accountId) } : {} })), queueItems.length, evidenceIds);
 	const columns = workflowId === "WF-007" ? [
 		"id",
 		"opportunityId",
@@ -13491,14 +13978,14 @@ function buildCard(workflowId, title, records, queueItems, evidenceIds) {
 }
 function buildQueueItems(workflowId, records, input, evidenceIds) {
 	if (workflowId === "WF-009") return ownerWorkloadQueue(records.map((record) => ({
-		...text$3(record.ownerId) ? { ownerId: text$3(record.ownerId) } : {},
-		...text$3(record.opportunityOwnerName) ? { ownerName: text$3(record.opportunityOwnerName) } : {}
+		...text$4(record.ownerId) ? { ownerId: text$4(record.ownerId) } : {},
+		...text$4(record.opportunityOwnerName) ? { ownerName: text$4(record.opportunityOwnerName) } : {}
 	})), input.maximumActiveItems ?? 20, evidenceIds);
 	return records.map((record, index) => {
-		const recordId = text$3(record.id) ?? `${index + 1}`;
+		const recordId = text$4(record.id) ?? `${index + 1}`;
 		const dueDate = date$1(record.targetDate) ?? date$1(record.dueDate) ?? date$1(record.closeDate);
-		const opportunityId = text$3(record.opportunityId) ?? (opportunityScopedWorkflows.has(workflowId) ? text$3(record.id) : void 0);
-		const opportunityName = text$3(record.opportunityName) ?? (opportunityScopedWorkflows.has(workflowId) ? text$3(record.name) : void 0);
+		const opportunityId = text$4(record.opportunityId) ?? (opportunityScopedWorkflows.has(workflowId) ? text$4(record.id) : void 0);
+		const opportunityName = text$4(record.opportunityName) ?? (opportunityScopedWorkflows.has(workflowId) ? text$4(record.name) : void 0);
 		const owner = queueOwnerName(workflowId, record);
 		return {
 			id: `${workflowId}:${recordId}`,
@@ -13506,8 +13993,8 @@ function buildQueueItems(workflowId, records, input, evidenceIds) {
 			priority: workflowId === "WF-003" && Number(record.recordedStage ?? 0) >= 4 || workflowId === "WF-005" && record.status === "Blocked" ? "P0" : "P1",
 			title: queueTitle(workflowId, record),
 			...owner ? { owner } : {},
-			...text$3(record.accountId) ? { accountId: text$3(record.accountId) } : {},
-			...text$3(record.accountName) ? { accountName: text$3(record.accountName) } : {},
+			...text$4(record.accountId) ? { accountId: text$4(record.accountId) } : {},
+			...text$4(record.accountName) ? { accountName: text$4(record.accountName) } : {},
 			...opportunityId ? { opportunityId } : {},
 			...opportunityName ? { opportunityName } : {},
 			...dueDate ? { dueDate } : {},
@@ -13531,10 +14018,10 @@ var milestoneWorkflows = /* @__PURE__ */ new Set([
 ]);
 var activityWorkflows = /* @__PURE__ */ new Set(["WF-007", "WF-010"]);
 function queueOwnerName(workflowId, record) {
-	return text$3(record.owner) ?? (opportunityScopedWorkflows.has(workflowId) ? text$3(record.opportunityOwnerName) : void 0) ?? (text$3(record.ownerId) ? "Owner name unavailable" : void 0);
+	return text$4(record.owner) ?? (opportunityScopedWorkflows.has(workflowId) ? text$4(record.opportunityOwnerName) : void 0) ?? (text$4(record.ownerId) ? "Owner name unavailable" : void 0);
 }
 function queueTitle(workflowId, record) {
-	const label = text$3(record.name) ?? text$3(record.subject) ?? "Untitled record";
+	const label = text$4(record.name) ?? text$4(record.subject) ?? "Untitled record";
 	return `${{
 		"WF-001": "Review stale opportunity",
 		"WF-002": "Triage overdue milestone",
@@ -13576,10 +14063,10 @@ var curatedOpportunityFields = [
 	"probability"
 ];
 function reconcileRecords(dataverseRecords, msxRecords) {
-	const base = deduplicate(dataverseRecords, (record) => text$3(record.id));
-	const enrichment = new Map(deduplicate(msxRecords, (record) => text$3(record.id)).map((record) => [text$3(record.id), record]));
+	const base = deduplicate(dataverseRecords, (record) => text$4(record.id));
+	const enrichment = new Map(deduplicate(msxRecords, (record) => text$4(record.id)).map((record) => [text$4(record.id), record]));
 	return base.map((record) => {
-		const matchId = text$3(record.opportunityId) ?? text$3(record.id);
+		const matchId = text$4(record.opportunityId) ?? text$4(record.id);
 		const curated = matchId ? enrichment.get(matchId) : void 0;
 		if (!curated) return record;
 		const merged = { ...record };
@@ -13587,10 +14074,10 @@ function reconcileRecords(dataverseRecords, msxRecords) {
 			const value = curated[field];
 			if (value !== void 0 && value !== null && value !== "") merged[field] = value;
 		}
-		if (text$3(curated.name)) merged.opportunityName = curated.name;
-		if (text$3(curated.owner)) merged.opportunityOwnerName = curated.owner;
-		if (!text$3(merged.accountId) && text$3(curated.accountId)) merged.accountId = curated.accountId;
-		if (!text$3(merged.accountName) && text$3(curated.accountName)) merged.accountName = curated.accountName;
+		if (text$4(curated.name)) merged.opportunityName = curated.name;
+		if (text$4(curated.owner)) merged.opportunityOwnerName = curated.owner;
+		if (!text$4(merged.accountId) && text$4(curated.accountId)) merged.accountId = curated.accountId;
+		if (!text$4(merged.accountName) && text$4(curated.accountName)) merged.accountName = curated.accountName;
 		return merged;
 	});
 }
@@ -13623,7 +14110,7 @@ function primitiveRow(record, columns) {
 		return [column, typeof value === "string" || typeof value === "number" || typeof value === "boolean" ? value : null];
 	}));
 }
-function text$3(value) {
+function text$4(value) {
 	return typeof value === "string" && value.length > 0 ? value : void 0;
 }
 function date$1(value) {
@@ -13634,7 +14121,7 @@ function subtractDays(value, days) {
 	result.setUTCDate(result.getUTCDate() - days);
 	return result.toISOString().slice(0, 10);
 }
-function addDays$1(value, days) {
+function addDays$2(value, days) {
 	const result = /* @__PURE__ */ new Date(`${value}T00:00:00.000Z`);
 	result.setUTCDate(result.getUTCDate() + days);
 	return result.toISOString().slice(0, 10);
@@ -18035,7 +18522,7 @@ function createSellerDashboardHost(options) {
 	}
 	return new SharedSellerDashboardHost(new WindowsSellerDashboardConnector(options));
 }
-var text$2 = z.string().max(4e3);
+var text$3 = z.string().max(4e3);
 var id$1 = z.string().trim().min(1).max(200);
 var referenceId = z.string().min(1).max(1200);
 var count = z.number().int().nonnegative().nullable();
@@ -18090,8 +18577,8 @@ var seReporterSchema = z.object({
 }).strict();
 var seManagerSchema = z.object({
 	name: id$1,
-	alias: text$2,
-	system_user_id: text$2
+	alias: text$3,
+	system_user_id: text$3
 }).strict();
 var seAssignmentSchema = z.object({
 	managerId: id$1,
@@ -18110,23 +18597,23 @@ var seMilestoneSchema = z.object({
 	accountId: id$1,
 	opportunityId: id$1,
 	name: id$1,
-	category: text$2,
-	status: text$2,
-	commitment: text$2,
+	category: text$3,
+	status: text$3,
+	commitment: text$3,
 	monthlyAcr: amount,
 	date: seReportDateSchema.nullable(),
 	committedOn: seReportDateSchema.nullable(),
 	completedOn: seReportDateSchema.nullable(),
 	createdOn: seReportDateSchema.nullable(),
-	blocker: text$2
+	blocker: text$3
 }).strict();
 var seTaskSchema = z.object({
 	id: id$1,
 	ownerId: id$1,
 	milestoneId: id$1,
-	milestoneName: text$2,
+	milestoneName: text$3,
 	accountId: id$1,
-	subject: text$2,
+	subject: text$3,
 	categoryCode: z.string(),
 	state: z.number().int(),
 	actualEnd: seReportDateSchema.nullable(),
@@ -18173,8 +18660,8 @@ var accountContext = z.object({
 	ownership
 }).strict();
 var seNarrativeItemSchema = accountContext.extend({
-	title: text$2,
-	text: text$2,
+	title: text$3,
+	text: text$3,
 	source_refs: sourceRefs
 }).strict();
 var seCustomerUpdateSchema = accountContext.extend({
@@ -18184,17 +18671,17 @@ var seCustomerUpdateSchema = accountContext.extend({
 		"advisory",
 		"watchlist"
 	]),
-	summary: text$2,
-	impact: text$2,
+	summary: text$3,
+	impact: text$3,
 	msx: z.array(z.object({
-		label: text$2,
-		text: text$2
+		label: text$3,
+		text: text$3
 	}).strict()).max(30),
 	m365: z.array(z.object({
-		label: text$2,
-		text: text$2
+		label: text$3,
+		text: text$3
 	}).strict()).max(30),
-	next_actions: z.array(text$2).max(30),
+	next_actions: z.array(text$3).max(30),
 	source_refs: sourceRefs,
 	confidence: z.enum([
 		"high",
@@ -18203,18 +18690,18 @@ var seCustomerUpdateSchema = accountContext.extend({
 	])
 }).strict();
 var seInitiativeSchema = accountContext.extend({
-	sales_territory_name: text$2,
-	big_bet_opportunity: text$2,
-	customer_need_business_outcome: text$2,
-	plan: text$2,
+	sales_territory_name: text$3,
+	big_bet_opportunity: text$3,
+	customer_need_business_outcome: text$3,
+	plan: text$3,
 	fy26_acr_year: amount,
-	obstacles_help_needed: text$2,
+	obstacles_help_needed: text$3,
 	confidence_level: z.enum([
 		"high",
 		"medium",
 		"low"
 	]),
-	next_steps: z.array(text$2).max(30),
+	next_steps: z.array(text$3).max(30),
 	known_amounts: z.array(z.number().finite()).max(30),
 	source_refs: sourceRefs
 }).strict();
@@ -18223,9 +18710,9 @@ var seNarrativeBundleSchema = z.object({
 	priority_initiatives: z.array(seInitiativeSchema).max(200),
 	account_notes: z.array(seNarrativeItemSchema).max(500),
 	partners: z.array(seNarrativeItemSchema.extend({
-		partner: text$2,
-		engagement_strategy: text$2,
-		solution_play: text$2
+		partner: text$3,
+		engagement_strategy: text$3,
+		solution_play: text$3
 	}).strict()).max(200),
 	technical_themes: z.array(seNarrativeItemSchema.extend({ type: z.enum([
 		"win",
@@ -18235,7 +18722,7 @@ var seNarrativeBundleSchema = z.object({
 		"risk"
 	]) }).strict()).max(200),
 	cross_pillar_dependencies: z.array(seNarrativeItemSchema.extend({ pillar: id$1 }).strict()).max(200),
-	next_month_priorities: z.array(seNarrativeItemSchema.extend({ expected_outcome: text$2 }).strict()).max(200),
+	next_month_priorities: z.array(seNarrativeItemSchema.extend({ expected_outcome: text$3 }).strict()).max(200),
 	leadership_decisions: z.array(seNarrativeItemSchema).max(200),
 	scrum_rollup_bullets: z.array(seNarrativeItemSchema).max(200),
 	follow_up_required: z.array(seNarrativeItemSchema).max(200)
@@ -18282,8 +18769,8 @@ var scorecard$1 = seKpisSchema.extend({
 		milestone_count: count,
 		monthly_acr: amount
 	}).strict(),
-	top_wins: z.array(text$2),
-	top_risks_blockers: z.array(text$2),
+	top_wins: z.array(text$3),
+	top_risks_blockers: z.array(text$3),
 	hok_categories: z.array(z.object({
 		category: id$1,
 		period: count,
@@ -18321,7 +18808,7 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 	account_scope: z.object({
 		assignment_source: z.literal("AccountAssignmentsWithCustomerIds"),
 		manager_system_user_id: id$1,
-		manager_alias: text$2,
+		manager_alias: text$3,
 		eligible_assignment_types: z.tuple([z.literal("Primary"), z.literal("Backup")]),
 		primary_accounts: z.array(accountContext),
 		secondary_accounts: z.array(accountContext),
@@ -18329,7 +18816,7 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 			reason: id$1,
 			count: z.number().int().nonnegative()
 		}).strict()),
-		mapping_gaps: z.array(text$2)
+		mapping_gaps: z.array(text$3)
 	}).strict(),
 	status: z.enum([
 		"draft",
@@ -18349,7 +18836,7 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 	schema_contract: z.object({
 		source: z.enum(["manager_profile.shared_contract", "explicit_test_contract"]),
 		version: z.literal("2.0"),
-		path: text$2,
+		path: text$3,
 		content_hash: id$1,
 		fallback_used: z.literal(false),
 		test_mode: z.boolean()
@@ -18364,7 +18851,7 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 	}).strict()).max(1e4),
 	sources_unavailable: z.array(z.object({
 		source: id$1,
-		reason: text$2
+		reason: text$3
 	}).strict()),
 	source_coverage: z.array(seAccessSchema),
 	generation: z.object({
@@ -18378,11 +18865,11 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 	}).strict(),
 	source_reports: z.array(id$1),
 	executive_summary: z.object({
-		headline: text$2,
-		overall_status: text$2,
-		running_hot: z.array(text$2),
-		needs_attention: z.array(text$2),
-		next_month_focus: z.array(text$2)
+		headline: text$3,
+		overall_status: text$3,
+		running_hot: z.array(text$3),
+		needs_attention: z.array(text$3),
+		next_month_focus: z.array(text$3)
 	}).strict(),
 	scorecard: scorecard$1,
 	event_date_coverage: eventCoverage,
@@ -18430,17 +18917,17 @@ var seReportSchema = seNarrativeBundleSchema.extend({
 			account_id: id$1,
 			account: id$1,
 			ownership: z.literal("Secondary"),
-			milestone_id: text$2,
-			milestone: text$2,
-			support_description: text$2,
+			milestone_id: text$3,
+			milestone: text$3,
+			support_description: text$3,
 			hok_count: count
 		}).strict())
 	}).strict(),
 	asks_for_manager: z.array(z.object({
-		ask: text$2,
-		why_it_matters: text$2,
-		customer: text$2,
-		urgency: text$2,
+		ask: text$3,
+		why_it_matters: text$3,
+		customer: text$3,
+		urgency: text$3,
 		source_refs: sourceRefs
 	}).strict()).max(50)
 }).strict().superRefine((report, context) => {
@@ -18499,7 +18986,7 @@ var seReportingRequestSchema = z.discriminatedUnion("operation", [
 		runId: id$1,
 		asks: z.array(z.object({
 			reportId: id$1,
-			text: text$2
+			text: text$3
 		}).strict()).max(100),
 		approve: z.boolean(),
 		confirmed: z.literal(true)
@@ -18550,11 +19037,11 @@ var seReportingResponseSchema = z.discriminatedUnion("kind", [base$2.extend({
 	run: seReportingRunSchema.nullable(),
 	publishPreview: sePublishPreviewSchema.nullable(),
 	published: z.array(z.string().max(2e3)),
-	message: text$2
+	message: text$3
 }).strict(), base$2.extend({
 	kind: z.literal("error"),
 	code: id$1,
-	message: text$2,
+	message: text$3,
 	access: z.array(seAccessSchema)
 }).strict()]);
 //#endregion
@@ -18843,12 +19330,12 @@ var guidLike = /^[0-9a-zA-Z-]{1,64}$/;
 var fieldPattern = /^[A-Za-z][A-Za-z0-9_]*$/;
 var chunkSize$1 = 40;
 var privateContent$1 = (value) => /salary|compensation|performance review|human resources|privileged legal|legal advice/i.test(value);
-var text$1 = (row, key) => {
+var text$2 = (row, key) => {
 	const value = row[key];
 	return typeof value === "string" && value.trim() ? value : void 0;
 };
-var formatted$1 = (row, key) => text$1(row, `${key}${formattedSuffix$1}`);
-var day$1 = (value) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : null;
+var formatted$2 = (row, key) => text$2(row, `${key}${formattedSuffix$1}`);
+var day$2 = (value) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : null;
 /**
 * Dataverse-first milestone/task provider for the SE reporting model. It produces the same
 * SeMilestone/SeTask rows as the Power BI reader; it never infers assignment scope.
@@ -18869,10 +19356,10 @@ var DataverseSeReader = class {
 			"$filter": `_parentsystemuserid_value eq ${managerId} and isdisabled eq false`,
 			"$top": "200"
 		})).flatMap((row) => {
-			const id = text$1(row, "systemuserid");
+			const id = text$2(row, "systemuserid");
 			return id ? [{
 				id,
-				displayName: text$1(row, "fullname") ?? "Unnamed user"
+				displayName: text$2(row, "fullname") ?? "Unnamed user"
 			}] : [];
 		});
 	}
@@ -18898,31 +19385,31 @@ var DataverseSeReader = class {
 			...this.options.riskField ? [this.options.riskField] : []
 		].join(",");
 		const rows = await this.readByIds("msp_engagementmilestones", "msp_engagementmilestoneid", ids, select);
-		const accounts = await this.readAccounts(rows.map((row) => text$1(row, "_msp_opportunityid_value")));
+		const accounts = await this.readAccounts(rows.map((row) => text$2(row, "_msp_opportunityid_value")));
 		const milestones = [];
 		let unresolved = 0;
 		for (const row of rows) {
-			const opportunityId = text$1(row, "_msp_opportunityid_value");
+			const opportunityId = text$2(row, "_msp_opportunityid_value");
 			const accountId = opportunityId ? accounts.get(opportunityId) : void 0;
 			if (!opportunityId || !accountId) {
 				unresolved += 1;
 				continue;
 			}
 			milestones.push(seMilestoneSchema.parse({
-				id: text$1(row, "msp_engagementmilestoneid"),
+				id: text$2(row, "msp_engagementmilestoneid"),
 				reporterId,
 				accountId,
 				opportunityId,
-				name: text$1(row, "msp_name") ?? "",
-				category: formatted$1(row, "msp_milestonecategory") ?? "",
-				status: formatted$1(row, "msp_milestonestatus") ?? "",
-				commitment: formatted$1(row, "msp_commitmentrecommendation") ?? "",
+				name: text$2(row, "msp_name") ?? "",
+				category: formatted$2(row, "msp_milestonecategory") ?? "",
+				status: formatted$2(row, "msp_milestonestatus") ?? "",
+				commitment: formatted$2(row, "msp_commitmentrecommendation") ?? "",
 				monthlyAcr: typeof row["msp_monthlyuse"] === "number" ? row["msp_monthlyuse"] : null,
-				date: day$1(row["msp_milestonedate"]),
-				committedOn: day$1(row["msp_committedon"]),
-				completedOn: day$1(row["msp_completedon"]),
-				createdOn: day$1(row["createdon"]),
-				blocker: this.options.riskField ? text$1(row, this.options.riskField) ?? "" : ""
+				date: day$2(row["msp_milestonedate"]),
+				committedOn: day$2(row["msp_committedon"]),
+				completedOn: day$2(row["msp_completedon"]),
+				createdOn: day$2(row["createdon"]),
+				blocker: this.options.riskField ? text$2(row, this.options.riskField) ?? "" : ""
 			}));
 		}
 		return {
@@ -18935,15 +19422,15 @@ var DataverseSeReader = class {
 		const visible = (await this.source.readRows("tasks", {
 			"$select": "activityid,_ownerid_value,_regardingobjectid_value,subject,msp_taskcategory,statecode,actualend,actualstart",
 			"$filter": `_ownerid_value eq ${reporterId} and ((actualend ge ${window.fiscalStart} and actualend lt ${window.endExclusive}) or (actualstart ge ${window.start} and actualstart lt ${window.endExclusive}))`
-		})).filter((row) => !privateContent$1(text$1(row, "subject") ?? ""));
-		const milestoneIds = [...new Set(visible.map((row) => text$1(row, "_regardingobjectid_value")).filter((id) => Boolean(id)))];
+		})).filter((row) => !privateContent$1(text$2(row, "subject") ?? ""));
+		const milestoneIds = [...new Set(visible.map((row) => text$2(row, "_regardingobjectid_value")).filter((id) => Boolean(id)))];
 		const milestoneRows = milestoneIds.length ? await this.readByIds("msp_engagementmilestones", "msp_engagementmilestoneid", milestoneIds, "msp_engagementmilestoneid,_msp_opportunityid_value") : [];
-		const opportunityByMilestone = new Map(milestoneRows.map((row) => [text$1(row, "msp_engagementmilestoneid") ?? "", text$1(row, "_msp_opportunityid_value")]));
+		const opportunityByMilestone = new Map(milestoneRows.map((row) => [text$2(row, "msp_engagementmilestoneid") ?? "", text$2(row, "_msp_opportunityid_value")]));
 		const accounts = await this.readAccounts([...opportunityByMilestone.values()]);
 		const tasks = [];
 		let unresolved = 0;
 		for (const row of visible) {
-			const milestoneId = text$1(row, "_regardingobjectid_value") ?? "";
+			const milestoneId = text$2(row, "_regardingobjectid_value") ?? "";
 			const opportunityId = opportunityByMilestone.get(milestoneId);
 			const accountId = opportunityId ? accounts.get(opportunityId) : void 0;
 			if (!accountId) {
@@ -18951,16 +19438,16 @@ var DataverseSeReader = class {
 				continue;
 			}
 			tasks.push(seTaskSchema.parse({
-				id: text$1(row, "activityid"),
+				id: text$2(row, "activityid"),
 				ownerId: reporterId,
 				milestoneId,
-				milestoneName: formatted$1(row, "_regardingobjectid_value") ?? "",
+				milestoneName: formatted$2(row, "_regardingobjectid_value") ?? "",
 				accountId,
-				subject: text$1(row, "subject") ?? "",
+				subject: text$2(row, "subject") ?? "",
 				categoryCode: typeof row["msp_taskcategory"] === "number" ? String(row["msp_taskcategory"]) : "",
 				state: typeof row["statecode"] === "number" ? row["statecode"] : 0,
-				actualEnd: day$1(row["actualend"]),
-				activityDate: day$1(row["actualstart"])
+				actualEnd: day$2(row["actualend"]),
+				activityDate: day$2(row["actualstart"])
 			}));
 		}
 		return {
@@ -18976,8 +19463,8 @@ var DataverseSeReader = class {
 		if (ids.length === 0) return /* @__PURE__ */ new Map();
 		const rows = await this.readByIds("opportunities", "opportunityid", ids, "opportunityid,_parentaccountid_value");
 		return new Map(rows.flatMap((row) => {
-			const id = text$1(row, "opportunityid");
-			const account = text$1(row, "_parentaccountid_value");
+			const id = text$2(row, "opportunityid");
+			const account = text$2(row, "_parentaccountid_value");
 			return id && account ? [[id, account]] : [];
 		}));
 	}
@@ -20774,7 +21261,7 @@ var forecasts = [
 	"Committed",
 	"Uncommitted"
 ];
-var milestoneStatuses = [
+var milestoneStatuses$1 = [
 	"On Track",
 	"On Track",
 	"On Track",
@@ -20788,7 +21275,7 @@ var milestoneStatuses = [
 	"On Track",
 	"Lost to Competitor"
 ];
-function addDays(value, days) {
+function addDays$1(value, days) {
 	const parsed = /* @__PURE__ */ new Date(`${value}T00:00:00Z`);
 	parsed.setUTCDate(parsed.getUTCDate() + days);
 	return parsed.toISOString().slice(0, 10);
@@ -20817,7 +21304,7 @@ function opportunity$1(index) {
 		stage: stagePipelineStages[(index * 2 + (microsoftServices ? 1 : 0)) % stagePipelineStages.length] ?? "Listen & Consult",
 		status: index % 17 === 5 ? "On Hold" : "In Progress",
 		forecast: forecasts[index % forecasts.length] ?? "Uncommitted",
-		closeDate: addDays(asOf, closeOffset),
+		closeDate: addDays$1(asOf, closeOffset),
 		daysInStage: index * 13 % 120,
 		idleDays: consuming ? index * 11 % 110 : null,
 		consumedRecurring: recurring,
@@ -20835,7 +21322,7 @@ function milestonesFor(row, index) {
 	const total = 1 + index % 4;
 	return Array.from({ length: total }, (_, offset) => {
 		const position = index * 5 + offset;
-		const status = milestoneStatuses[position % milestoneStatuses.length] ?? "On Track";
+		const status = milestoneStatuses$1[position % milestoneStatuses$1.length] ?? "On Track";
 		const dayOffset = (status === "On Track" || status === "At Risk" || status === "Blocked") && position % 6 === 0 ? -(10 + position % 40) : 20 + position * 29 % 380;
 		return {
 			id: `sample-ms-${String(index + 1).padStart(3, "0")}-${offset + 1}`,
@@ -20859,7 +21346,7 @@ function milestonesFor(row, index) {
 			][position % 6] ?? 150,
 			commitment: status === "Completed" || position % 9 === 0 ? "Committed" : "Uncommitted",
 			status,
-			date: addDays(asOf, dayOffset),
+			date: addDays$1(asOf, dayOffset),
 			comment: position % 4 === 0 ? `Sample update: customer validated the plan and will confirm usage next month (ref ${position + 1}).` : "",
 			owner: [
 				"Sample Owner A",
@@ -21042,22 +21529,22 @@ var openMilestoneStatuses = /* @__PURE__ */ new Set([
 	"At Risk",
 	"Blocked"
 ]);
-function text(row, key) {
+function text$1(row, key) {
 	const value = row[key];
 	return typeof value === "string" && value.trim() ? value : void 0;
 }
-function number(row, key) {
+function number$1(row, key) {
 	const value = row[key];
 	return typeof value === "number" && Number.isFinite(value) ? value : void 0;
 }
-function formatted(row, key) {
-	return text(row, `${key}${formattedSuffix}`);
+function formatted$1(row, key) {
+	return text$1(row, `${key}${formattedSuffix}`);
 }
 var maxText = 3e4;
 var maxName = 500;
 var maxId = 200;
 var clip$2 = (value, max) => value.length > max ? value.slice(0, max) : value;
-function day(value) {
+function day$1(value) {
 	return value && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : void 0;
 }
 function daysBetween(from, to) {
@@ -21069,9 +21556,9 @@ function parseStage(label) {
 	return stagePipelineStages.find((stage) => stage.toLowerCase() === normalized);
 }
 function mapOpportunityRow(row, context) {
-	const id = text(row, "opportunityid");
-	const accountId = text(row, "_parentaccountid_value");
-	const customer = formatted(row, "_parentaccountid_value");
+	const id = text$1(row, "opportunityid");
+	const accountId = text$1(row, "_parentaccountid_value");
+	const customer = formatted$1(row, "_parentaccountid_value");
 	if (!id || !accountId || !customer) return {
 		kind: "excluded",
 		reason: "account"
@@ -21081,77 +21568,77 @@ function mapOpportunityRow(row, context) {
 		kind: "excluded",
 		reason: "stage"
 	};
-	const area = number(row, "msp_solutionarea");
+	const area = number$1(row, "msp_solutionarea");
 	const unknownArea = area === unknownSolutionArea;
 	const scope = area === azureSolutionArea || unknownArea ? "azure" : area === servicesSolutionArea ? "microsoft-services" : void 0;
 	if (!scope) return {
 		kind: "excluded",
 		reason: "solution-area"
 	};
-	const closeDate = day(text(row, "msp_estcompletiondate")) ?? day(text(row, "estimatedclosedate"));
+	const closeDate = day$1(text$1(row, "msp_estcompletiondate")) ?? day$1(text$1(row, "estimatedclosedate"));
 	if (!closeDate) return {
 		kind: "excluded",
 		reason: "close-date"
 	};
-	const recurring = Math.max(0, number(row, "msp_consumptionconsumedrecurring") ?? 0);
-	const nonRecurring = Math.max(0, number(row, "msp_consumptionconsumednonrecurring") ?? 0);
-	const reportedDays = number(row, "msp_daysinstage") ?? 0;
-	const stageChanged = day(text(row, "msp_currentsalesstagemodifiedon"));
-	const commentChanged = day(text(row, "msp_forecastcomments_lastmodifiedon_datetime"));
-	const forecastCode = number(row, "msdyn_forecastcategory");
-	const competitorName = formatted(row, "_msp_primarycompetitor_value") ?? text(row, "msp_othercompetitor");
-	const state = number(row, "statecode");
-	const sourceCode = number(row, "msp_sourcesubtypecode");
+	const recurring = Math.max(0, number$1(row, "msp_consumptionconsumedrecurring") ?? 0);
+	const nonRecurring = Math.max(0, number$1(row, "msp_consumptionconsumednonrecurring") ?? 0);
+	const reportedDays = number$1(row, "msp_daysinstage") ?? 0;
+	const stageChanged = day$1(text$1(row, "msp_currentsalesstagemodifiedon"));
+	const commentChanged = day$1(text$1(row, "msp_forecastcomments_lastmodifiedon_datetime"));
+	const forecastCode = number$1(row, "msdyn_forecastcategory");
+	const competitorName = formatted$1(row, "_msp_primarycompetitor_value") ?? text$1(row, "msp_othercompetitor");
+	const state = number$1(row, "statecode");
+	const sourceCode = number$1(row, "msp_sourcesubtypecode");
 	return {
 		kind: "row",
 		row: {
 			id: clip$2(id, maxId),
-			number: clip$2(text(row, "msp_opportunitynumber") ?? id, maxName),
+			number: clip$2(text$1(row, "msp_opportunitynumber") ?? id, maxName),
 			customer: clip$2(customer, maxName),
-			name: clip$2(text(row, "name") ?? "Untitled opportunity", maxName),
-			owner: clip$2(formatted(row, "_ownerid_value") ?? "", maxId),
+			name: clip$2(text$1(row, "name") ?? "Untitled opportunity", maxName),
+			owner: clip$2(formatted$1(row, "_ownerid_value") ?? "", maxId),
 			editable: context.editableIds.has(id),
-			notes: clip$2(text(row, "msp_forecastcomments") ?? "", maxText),
-			contact: clip$2(formatted(row, "_parentcontactid_value") ?? "", maxText),
+			notes: clip$2(text$1(row, "msp_forecastcomments") ?? "", maxText),
+			contact: clip$2(formatted$1(row, "_parentcontactid_value") ?? "", maxText),
 			scope,
-			solutionArea: clip$2(formatted(row, "msp_solutionarea") ?? (scope === "azure" ? "Cloud and AI Platforms" : "Microsoft Services"), maxName),
+			solutionArea: clip$2(formatted$1(row, "msp_solutionarea") ?? (scope === "azure" ? "Cloud and AI Platforms" : "Microsoft Services"), maxName),
 			inbound: sourceCode !== void 0 && context.inboundCodes.has(sourceCode),
 			stage,
 			status: state === 1 ? "Won" : state === 2 ? "Lost" : "In Progress",
-			forecast: clip$2(formatted(row, "msdyn_forecastcategory") ?? (forecastCode !== void 0 ? forecastLabels[forecastCode] : void 0) ?? "Not set", maxName),
+			forecast: clip$2(formatted$1(row, "msdyn_forecastcategory") ?? (forecastCode !== void 0 ? forecastLabels[forecastCode] : void 0) ?? "Not set", maxName),
 			closeDate,
 			daysInStage: reportedDays > 0 ? reportedDays : stageChanged ? daysBetween(stageChanged, context.asOf) : 0,
 			idleDays: recurring + nonRecurring > 0 && commentChanged ? daysBetween(commentChanged, context.asOf) : null,
 			consumedRecurring: recurring,
 			consumedNonRecurring: nonRecurring,
 			maccCommit: 0,
-			partner: clip$2(formatted(row, "_msp_partneraccountid_value") ?? "", maxText) || null,
+			partner: clip$2(formatted$1(row, "_msp_partneraccountid_value") ?? "", maxText) || null,
 			competitor: {
 				name: competitorName && competitorName.toLowerCase() !== "none" ? clip$2(competitorName, maxText) : null,
-				threat: threatByCode[number(row, "msp_competethreatlevel") ?? 0] ?? "None"
+				threat: threatByCode[number$1(row, "msp_competethreatlevel") ?? 0] ?? "None"
 			},
 			solutionTagReview: unknownArea
 		}
 	};
 }
 function mapMilestoneRow(row) {
-	const id = text(row, "msp_engagementmilestoneid");
-	const opportunityId = text(row, "_msp_opportunityid_value");
-	const statusCode = number(row, "msp_milestonestatus");
+	const id = text$1(row, "msp_engagementmilestoneid");
+	const opportunityId = text$1(row, "_msp_opportunityid_value");
+	const statusCode = number$1(row, "msp_milestonestatus");
 	const status = statusCode === void 0 ? void 0 : milestoneStatusByCode[statusCode];
 	if (!id || !opportunityId || !status) return void 0;
 	return {
 		id: clip$2(id, maxId),
-		number: clip$2(text(row, "msp_milestonenumber") ?? id, maxName),
+		number: clip$2(text$1(row, "msp_milestonenumber") ?? id, maxName),
 		opportunityId: clip$2(opportunityId, maxId),
-		name: clip$2(text(row, "msp_name") ?? "Unnamed milestone", maxName),
-		workload: clip$2(formatted(row, "msp_workload") ?? formatted(row, "msp_milestoneworkload") ?? "", maxText),
-		estimatedMonthlyAcr: Math.max(0, number(row, "msp_monthlyuse") ?? 0),
-		commitment: number(row, "msp_commitmentrecommendation") === 861980003 ? "Committed" : "Uncommitted",
+		name: clip$2(text$1(row, "msp_name") ?? "Unnamed milestone", maxName),
+		workload: clip$2(formatted$1(row, "msp_workload") ?? formatted$1(row, "msp_milestoneworkload") ?? "", maxText),
+		estimatedMonthlyAcr: Math.max(0, number$1(row, "msp_monthlyuse") ?? 0),
+		commitment: number$1(row, "msp_commitmentrecommendation") === 861980003 ? "Committed" : "Uncommitted",
 		status,
-		date: day(text(row, "msp_milestonedate")) ?? null,
-		comment: clip$2(text(row, "msp_forecastcomments") ?? "", maxText),
-		owner: clip$2(formatted(row, "_ownerid_value") ?? "", maxText)
+		date: day$1(text$1(row, "msp_milestonedate")) ?? null,
+		comment: clip$2(text$1(row, "msp_forecastcomments") ?? "", maxText),
+		owner: clip$2(formatted$1(row, "_ownerid_value") ?? "", maxText)
 	};
 }
 function isOpenMilestoneStatus(status) {
@@ -21539,6 +22026,1417 @@ function createStagePipelineReviewHost(options) {
 	const { source, cache, ...rest } = options;
 	const { mode: _ignored, ...connectorOptions } = rest;
 	return new SharedStagePipelineReviewHost(new CachedStagePipelineLoader(new LiveStagePipelineConnector(source, connectorOptions), cache));
+}
+//#endregion
+//#region packages/common/fixtures/momentum-focus.ts
+var momentumSampleNow = "2026-10-28T12:00:00Z";
+function createMomentumFixture(customerIndustry = "hls") {
+	const history = {
+		state: "observed",
+		scope: "synthetic",
+		availableSince: "2026-09-01T12:00:00Z",
+		lastObserved: momentumSampleNow,
+		observations: 28,
+		maxGapDays: 3
+	};
+	const event = (id, kind, at = "2026-10-26T12:00:00Z") => ({
+		id,
+		kind,
+		source: kind === "commitment-recorded" || kind === "loopback" ? "observed" : "msx",
+		sourceAt: kind === "commitment-recorded" || kind === "loopback" ? null : at,
+		observedAt: momentumSampleNow,
+		intervalStart: kind === "commitment-recorded" || kind === "loopback" ? "2026-10-25T12:00:00Z" : null,
+		intervalEnd: kind === "commitment-recorded" || kind === "loopback" ? at : null,
+		field: null,
+		from: null,
+		to: null
+	});
+	const opportunity = (id, accountId, overrides = {}) => ({
+		key: `opportunity:${id}`,
+		id,
+		entity: "opportunity",
+		name: `Synthetic ${id} opportunity`,
+		accountId,
+		accountName: `Synthetic ${accountId}`,
+		opportunityId: id,
+		stage: "Listen & Consult",
+		status: "In Progress",
+		ownerId: "me",
+		ownerName: "Sample User",
+		dueDate: "2026-11-20",
+		value: {
+			basis: "pipeline",
+			amount: 1e5,
+			currency: "USD"
+		},
+		active: true,
+		onMyTeam: true,
+		role: "SSP",
+		commitment: false,
+		blocked: false,
+		blockingMilestoneIds: [],
+		plannedHold: false,
+		sourceQuality: "complete",
+		sourceUpdatedAt: "2026-10-27T12:00:00Z",
+		sourceUrl: null,
+		history: structuredClone(history),
+		events: [],
+		...overrides
+	});
+	const moving = opportunity("moving", "harbor", {
+		name: "Synthetic proof decision",
+		commitment: true,
+		dueDate: "2026-10-30",
+		events: [event("commitment-one", "commitment-recorded"), event("moving-note", "note")]
+	});
+	const busy = opportunity("busy", "harbor", {
+		name: "Synthetic busy without movement",
+		events: [
+			event("busy-activity", "activity"),
+			event("busy-note", "note"),
+			event("busy-task", "task"),
+			event("busy-comment", "forecast-comment")
+		]
+	});
+	const blocker = opportunity("blocker", "cedar", {
+		name: "Synthetic quiet material blocker",
+		dueDate: "2026-10-20",
+		blocked: true,
+		value: {
+			basis: "pipeline",
+			amount: 9e5,
+			currency: "USD"
+		},
+		role: "both"
+	});
+	const hold = opportunity("hold", "ridge", {
+		plannedHold: true,
+		status: "On Hold",
+		dueDate: "2026-11-15"
+	});
+	const loop = opportunity("loop", "cedar", {
+		events: [event("loop-context", "loopback")],
+		dueDate: "2026-11-10"
+	});
+	const unknown = opportunity("unknown", "harbor", {
+		name: "Synthetic incomplete coverage",
+		dueDate: null,
+		stage: null,
+		ownerId: null,
+		ownerName: null,
+		value: {
+			basis: "pipeline",
+			amount: null,
+			currency: null
+		},
+		sourceQuality: "unknown",
+		onMyTeam: null,
+		history: {
+			state: "insufficient",
+			scope: "synthetic",
+			availableSince: momentumSampleNow,
+			lastObserved: momentumSampleNow,
+			observations: 1,
+			maxGapDays: null
+		}
+	});
+	const euro = opportunity("euro", "ridge", {
+		value: {
+			basis: "pipeline",
+			amount: 8e4,
+			currency: "EUR"
+		},
+		onMyTeam: false,
+		ownerId: "other"
+	});
+	const milestone = (id, parent, overrides = {}) => ({
+		...structuredClone(parent),
+		key: `milestone:${id}`,
+		id,
+		entity: "milestone",
+		name: `Synthetic ${id} milestone`,
+		opportunityId: parent.id,
+		stage: parent.stage,
+		status: "On Track",
+		role: "SE",
+		events: [],
+		value: {
+			basis: "monthly-usage",
+			amount: 5e3,
+			currency: "USD"
+		},
+		...overrides
+	});
+	return momentumCollectionSchema.parse({
+		mode: "sample",
+		generatedAt: momentumSampleNow,
+		scopeKey: "synthetic-momentum-portfolio",
+		scope: "portfolio",
+		customerIndustry,
+		teamAvailable: true,
+		complete: true,
+		records: [
+			moving,
+			busy,
+			blocker,
+			hold,
+			loop,
+			unknown,
+			euro,
+			milestone("proof", moving),
+			milestone("blocked-proof", loop, {
+				blocked: true,
+				status: "Blocked"
+			}),
+			milestone("undated", unknown, {
+				ownerId: "other",
+				ownerName: "Other Sample User"
+			}),
+			milestone("euro-proof", euro, { value: {
+				basis: "monthly-usage",
+				amount: 2e3,
+				currency: "EUR"
+			} })
+		],
+		sources: [
+			{
+				source: "portfolio",
+				state: "complete",
+				detail: "Fixed-clock synthetic MSX portfolio. No live records or inference.",
+				count: 7,
+				checkedAt: momentumSampleNow
+			},
+			{
+				source: "industry",
+				state: "complete",
+				detail: customerIndustry === "hls" ? "Synthetic HLS portfolio: Health Payor, Health Pharma, Health Provider and MedTech classification; no company-name inference." : "All authorized synthetic customers explicitly selected.",
+				count: 3,
+				checkedAt: momentumSampleNow
+			},
+			{
+				source: "milestones",
+				state: "complete",
+				detail: "Synthetic milestone fixture.",
+				count: 4,
+				checkedAt: momentumSampleNow
+			},
+			{
+				source: "activities",
+				state: "complete",
+				detail: "Synthetic dated business metadata; activity is not progress.",
+				count: 5,
+				checkedAt: momentumSampleNow
+			},
+			{
+				source: "history",
+				state: "complete",
+				detail: "Synthetic observations since September 1; not live history.",
+				count: 11,
+				checkedAt: momentumSampleNow
+			},
+			{
+				source: "m365",
+				state: "unavailable",
+				detail: "M365 enrichment is not connected.",
+				count: null,
+				checkedAt: momentumSampleNow
+			}
+		]
+	});
+}
+//#endregion
+//#region packages/connectors/msx/momentum-focus.ts
+var guid = z.string().guid();
+var suffix = "@OData.Community.Display.V1.FormattedValue";
+var text = (row, key) => typeof row[key] === "string" && row[key].trim() ? row[key].trim() : null;
+var formatted = (row, key) => text(row, `${key}${suffix}`);
+var number = (row, key) => typeof row[key] === "number" && Number.isFinite(row[key]) && row[key] >= 0 ? row[key] : null;
+var timestamp$1 = (value) => value && z.iso.datetime({ offset: true }).safeParse(value).success ? value : null;
+var day = (value) => value && z.iso.date().safeParse(value.slice(0, 10)).success ? value.slice(0, 10) : null;
+var canonicalId = (row, key) => {
+	const value = text(row, key);
+	return value && guid.safeParse(value).success ? value.toLowerCase() : null;
+};
+var stages$1 = [
+	"Listen & Consult",
+	"Inspire & Design",
+	"Empower & Achieve",
+	"Realize Value",
+	"Manage & Optimize"
+];
+var milestoneStatuses = {
+	86198e4: "On Track",
+	861980001: "At Risk",
+	861980002: "Blocked",
+	861980003: "Completed",
+	861980004: "Cancelled",
+	861980005: "Lost to Competitor",
+	861980006: "Hygiene/Duplicate"
+};
+var emptyHistory = {
+	state: "unavailable",
+	scope: "unavailable",
+	availableSince: null,
+	lastObserved: null,
+	observations: 0,
+	maxGapDays: null
+};
+function momentumSourceStatus(error) {
+	return typeof error === "object" && error !== null && "status" in error && typeof error.status === "number" ? error.status : void 0;
+}
+var opportunityFields = "opportunityid,name,_parentaccountid_value,_ownerid_value,statecode,statuscode,msp_activesalesstage,estimatedvalue,_transactioncurrencyid_value,msp_estcompletiondate,estimatedclosedate,msdyn_forecastcategory,msp_forecastcomments_lastmodifiedon_datetime,modifiedon";
+var milestoneFields = "msp_engagementmilestoneid,_msp_opportunityid_value,msp_name,_ownerid_value,msp_milestonestatus,msp_milestonedate,msp_monthlyuse,_transactioncurrencyid_value,msp_commitmentrecommendation,modifiedon";
+var LiveMomentumCollector = class {
+	source;
+	options;
+	constructor(source, options = {}) {
+		this.source = source;
+		this.options = options;
+	}
+	load(scope, customerIndustry = "hls") {
+		return this.source.withFreshReadContext ? this.source.withFreshReadContext(() => this.collect(scope, customerIndustry)) : this.collect(scope, customerIndustry);
+	}
+	async read(entity, parameters, limit) {
+		const query = {
+			...parameters,
+			"$top": String(limit)
+		};
+		return this.source.readRowsBounded ? this.source.readRowsBounded(entity, query, limit) : this.source.readRows(entity, query);
+	}
+	async chunks(entity, field, ids, fields, limit, extra = "") {
+		const rows = [];
+		let capped = false;
+		for (let offset = 0; offset < ids.length; offset += 40) {
+			if (rows.length >= limit) {
+				capped = true;
+				break;
+			}
+			const batch = ids.slice(offset, offset + 40);
+			const result = await this.read(entity, {
+				"$select": fields,
+				"$filter": `(${batch.map((id) => `${field} eq ${guid.parse(id)}`).join(" or ")})${extra}`,
+				"$orderby": `${field} asc`
+			}, limit - rows.length + 1);
+			rows.push(...result);
+			if (rows.length > limit) {
+				capped = true;
+				break;
+			}
+		}
+		return {
+			rows: rows.slice(0, limit),
+			capped
+		};
+	}
+	async collect(scope, customerIndustry) {
+		const at = (this.options.now ?? (() => /* @__PURE__ */ new Date()))().toISOString();
+		const me = guid.parse(await this.source.getCurrentUserId()).toLowerCase();
+		const sources = [];
+		const health = (source, state, detail, count) => sources.push({
+			source,
+			state,
+			detail,
+			count,
+			checkedAt: at
+		});
+		const optional = async (source, action, fallback) => {
+			try {
+				return await action();
+			} catch (error) {
+				if (momentumSourceStatus(error) === 401) throw error;
+				health(source, momentumSourceStatus(error) === 403 ? "denied" : "unavailable", `The ${source} source could not be read. Coverage is incomplete; no missing facts were inferred.`, null);
+				return fallback;
+			}
+		};
+		const hierarchy = await optional("hierarchy", () => this.read("systemusers", {
+			"$select": "systemuserid",
+			"$filter": `_parentsystemuserid_value eq ${me} and isdisabled eq false`
+		}, 101), []);
+		const reports = hierarchy.slice(0, 100).map((row) => canonicalId(row, "systemuserid")).filter((id) => id !== null);
+		const teamAvailable = reports.length > 0;
+		if (!sources.some((source) => source.source === "hierarchy")) health("hierarchy", hierarchy.length > 100 ? "capped" : "complete", "Team scope is limited to the currently verified Dynamics direct-report hierarchy, under caller-delegated read access.", reports.length);
+		const [dealIds, milestoneOpportunityIds, milestoneIds, excluded] = await Promise.all([
+			this.source.listDealTeamOpportunityIds(me),
+			this.source.listMilestoneTeamOpportunityIds(me),
+			this.source.listMilestoneTeamMilestoneIds?.(me) ?? Promise.resolve(null),
+			this.options.excludedAccountIds?.() ?? Promise.resolve([])
+		]);
+		const myDealIds = new Set(dealIds.map((id) => guid.parse(id).toLowerCase()));
+		const myMilestoneIds = milestoneIds === null ? null : new Set(milestoneIds.map((id) => guid.parse(id).toLowerCase()));
+		const ownIds = [...dealIds, ...milestoneOpportunityIds].map((id) => guid.parse(id).toLowerCase());
+		const scopeIds = new Set(scope === "team" ? [] : ownIds);
+		if (scope === "team") for (let offset = 0; offset < reports.length; offset += 4) {
+			const reads = await Promise.all(reports.slice(offset, offset + 4).map(async (userId) => {
+				const [deal, milestones] = await Promise.all([this.source.listDealTeamOpportunityIds(userId), this.source.listMilestoneTeamOpportunityIds(userId)]);
+				return [...deal, ...milestones];
+			}));
+			for (const id of reads.flat()) scopeIds.add(guid.parse(id).toLowerCase());
+		}
+		const limits = {
+			opportunities: 5e3,
+			milestones: 2e4,
+			signals: 5e3,
+			...this.options.limits
+		};
+		for (const limit of Object.values(limits)) if (!Number.isInteger(limit) || limit < 1 || limit > 25e3) throw new Error("Momentum source limits are invalid.");
+		const candidateIds = [...scopeIds].sort();
+		const opportunityRead = await this.chunks("opportunities", "opportunityid", candidateIds.slice(0, limits.opportunities), opportunityFields, limits.opportunities);
+		const hidden = new Set(excluded.map((id) => id.toLowerCase()));
+		let opportunities = opportunityRead.rows.filter((row) => {
+			const id = canonicalId(row, "opportunityid");
+			const accountId = canonicalId(row, "_parentaccountid_value");
+			return id !== null && scopeIds.has(id) && (accountId === null || !hidden.has(accountId));
+		});
+		if (customerIndustry === "hls") {
+			if (!this.source.getHlsAccountIds) throw new CustomerIndustryScopeError("This source cannot verify HLS customer classification. No unfiltered customer list was substituted.");
+			const accountIds = [...new Set(opportunities.map((row) => canonicalId(row, "_parentaccountid_value")).filter((id) => id !== null))].sort();
+			const hlsIds = new Set((await this.source.getHlsAccountIds(accountIds)).map((id) => guid.parse(id).toLowerCase()));
+			const before = opportunities.length;
+			opportunities = opportunities.filter((row) => {
+				const id = canonicalId(row, "_parentaccountid_value");
+				return id !== null && hlsIds.has(id);
+			});
+			health("industry", "complete", `HLS Customers only: verified MSX Vertical (Health Payor, Health Pharma, Health Provider, MedTech). ${before - opportunities.length} other or unclassified opportunity rows excluded within the authorized portfolio.`, new Set(opportunities.map((row) => canonicalId(row, "_parentaccountid_value"))).size);
+		} else health("industry", "complete", "All authorized customers explicitly selected; portfolio access restrictions still apply.", null);
+		const opportunityIds = opportunities.map((row) => canonicalId(row, "opportunityid"));
+		const milestoneRead = await optional("milestones", () => this.chunks("msp_engagementmilestones", "_msp_opportunityid_value", opportunityIds, milestoneFields, limits.milestones), {
+			rows: [],
+			capped: false
+		});
+		const milestones = [...new Map(milestoneRead.rows.filter((row) => canonicalId(row, "msp_engagementmilestoneid") && opportunityIds.includes(canonicalId(row, "_msp_opportunityid_value") ?? "")).map((row) => [canonicalId(row, "msp_engagementmilestoneid"), row])).values()];
+		const currencyIds = [...new Set([...opportunities, ...milestones].map((row) => canonicalId(row, "_transactioncurrencyid_value")).filter((id) => id !== null))];
+		const currencyRead = await optional("currencies", () => this.chunks("transactioncurrencies", "transactioncurrencyid", currencyIds, "transactioncurrencyid,isocurrencycode", 500), {
+			rows: [],
+			capped: false
+		});
+		const currencies = new Map(currencyRead.rows.flatMap((row) => {
+			const id = canonicalId(row, "transactioncurrencyid"), code = text(row, "isocurrencycode");
+			return id && code && /^[A-Z]{3}$/.test(code) ? [[id, code]] : [];
+		}));
+		const opportunityMap = /* @__PURE__ */ new Map();
+		const sourceUrl = (entity, id) => this.options.sourceId ? `${new URL(this.options.sourceId).origin}/main.aspx?pagetype=entityrecord&etn=${entity}&id=${id}` : null;
+		for (const raw of opportunities) {
+			const id = canonicalId(raw, "opportunityid"), state = number(raw, "statecode");
+			const numericStage = number(raw, "msp_activesalesstage");
+			const stage = parseStage(raw["msp_activesalesstage"]) ?? parseStage(formatted(raw, "msp_activesalesstage")) ?? (numericStage !== null ? stages$1[numericStage - 1] : void 0) ?? null;
+			const accountId = canonicalId(raw, "_parentaccountid_value");
+			const status = formatted(raw, "statuscode") ?? (state === 0 ? "In Progress" : state === 1 ? "Won" : state === 2 ? "Lost" : null);
+			const row = {
+				key: `opportunity:${id}`,
+				id,
+				entity: "opportunity",
+				name: (text(raw, "name") ?? "Unnamed opportunity").slice(0, 500),
+				accountId,
+				accountName: formatted(raw, "_parentaccountid_value")?.slice(0, 500) ?? null,
+				opportunityId: id,
+				stage,
+				status,
+				ownerId: canonicalId(raw, "_ownerid_value"),
+				ownerName: formatted(raw, "_ownerid_value")?.slice(0, 500) ?? null,
+				dueDate: day(text(raw, "msp_estcompletiondate")) ?? day(text(raw, "estimatedclosedate")),
+				value: {
+					basis: "pipeline",
+					amount: number(raw, "estimatedvalue"),
+					currency: currencies.get(canonicalId(raw, "_transactioncurrencyid_value") ?? "") ?? null
+				},
+				active: state === 0 ? true : state === 1 || state === 2 ? false : null,
+				onMyTeam: myDealIds.has(id) || canonicalId(raw, "_ownerid_value") === me,
+				role: "SSP",
+				commitment: number(raw, "msdyn_forecastcategory") === 100000003 ? true : number(raw, "msdyn_forecastcategory") === null ? null : false,
+				blocked: null,
+				blockingMilestoneIds: [],
+				plannedHold: status?.toLowerCase().includes("on hold") ?? false,
+				sourceQuality: accountId && stage && status && state !== null && [
+					0,
+					1,
+					2
+				].includes(state) ? "complete" : "partial",
+				sourceUpdatedAt: timestamp$1(text(raw, "modifiedon")),
+				sourceUrl: sourceUrl("opportunity", id),
+				history: { ...emptyHistory },
+				events: []
+			};
+			const commentAt = timestamp$1(text(raw, "msp_forecastcomments_lastmodifiedon_datetime"));
+			if (commentAt) row.events.push({
+				id: `forecast:${id}:${commentAt}`,
+				kind: "forecast-comment",
+				source: "msx",
+				sourceAt: commentAt,
+				observedAt: at,
+				intervalStart: null,
+				intervalEnd: null,
+				field: "msp_forecastcomments_lastmodifiedon_datetime",
+				from: null,
+				to: null
+			});
+			opportunityMap.set(id, row);
+		}
+		const records = [...opportunityMap.values()];
+		for (const raw of milestones) {
+			const parent = opportunityMap.get(canonicalId(raw, "_msp_opportunityid_value"));
+			const id = canonicalId(raw, "msp_engagementmilestoneid");
+			const status = formatted(raw, "msp_milestonestatus") ?? milestoneStatuses[number(raw, "msp_milestonestatus") ?? -1] ?? null;
+			const commitmentCode = number(raw, "msp_commitmentrecommendation");
+			records.push({
+				...parent,
+				key: `milestone:${id}`,
+				id,
+				entity: "milestone",
+				name: (text(raw, "msp_name") ?? "Unnamed milestone").slice(0, 500),
+				status,
+				ownerId: canonicalId(raw, "_ownerid_value"),
+				ownerName: formatted(raw, "_ownerid_value")?.slice(0, 500) ?? null,
+				dueDate: day(text(raw, "msp_milestonedate")),
+				value: {
+					basis: "monthly-usage",
+					amount: number(raw, "msp_monthlyuse"),
+					currency: currencies.get(canonicalId(raw, "_transactioncurrencyid_value") ?? "") ?? null
+				},
+				active: parent.active === false || [
+					"Completed",
+					"Cancelled",
+					"Lost to Competitor",
+					"Hygiene/Duplicate"
+				].includes(status ?? "") ? false : parent.active === true && [
+					"On Track",
+					"At Risk",
+					"Blocked"
+				].includes(status ?? "") ? true : null,
+				onMyTeam: canonicalId(raw, "_ownerid_value") === me || myMilestoneIds?.has(id) === true ? true : myMilestoneIds === null ? null : false,
+				role: "SE",
+				commitment: commitmentCode === 861980003 ? true : commitmentCode === 86198e4 ? false : null,
+				blocked: Object.values(milestoneStatuses).includes(status ?? "") ? status === "Blocked" : null,
+				blockingMilestoneIds: [],
+				sourceQuality: parent.sourceQuality === "complete" && Object.values(milestoneStatuses).includes(status ?? "") ? "complete" : "partial",
+				sourceUpdatedAt: timestamp$1(text(raw, "modifiedon")),
+				sourceUrl: sourceUrl("msp_engagementmilestone", id),
+				events: [],
+				history: { ...emptyHistory }
+			});
+		}
+		for (const row of records) if (row.entity === "milestone" && row.active !== false && row.blocked) {
+			const parent = opportunityMap.get(row.opportunityId);
+			parent.blocked = true;
+			parent.role = "both";
+			parent.blockingMilestoneIds.push(row.id);
+		}
+		const byId = new Map(records.map((row) => [row.id, row]));
+		const regardingIds = [...byId.keys()];
+		const since = (/* @__PURE__ */ new Date(Date.parse(at) - 7776e6)).toISOString();
+		const [tasks, notes] = await Promise.all([optional("activities", () => this.chunks("tasks", "_regardingobjectid_value", regardingIds, "activityid,_regardingobjectid_value,createdon", limits.signals, ` and createdon ge ${since}`), {
+			rows: [],
+			capped: false
+		}), optional("notes", () => this.chunks("annotations", "_objectid_value", regardingIds, "annotationid,_objectid_value,createdon", limits.signals, ` and createdon ge ${since}`), {
+			rows: [],
+			capped: false
+		})]);
+		const attach = (rows, field, idField, kind) => {
+			for (const raw of rows) {
+				const row = byId.get(canonicalId(raw, field) ?? ""), atSource = timestamp$1(text(raw, "createdon")), id = text(raw, idField);
+				if (!row || !atSource || !id) continue;
+				row.events.push({
+					id: `${kind}:${id}`.slice(0, 200),
+					kind,
+					source: "msx",
+					sourceAt: atSource,
+					observedAt: at,
+					intervalStart: null,
+					intervalEnd: null,
+					field: "createdon",
+					from: null,
+					to: null
+				});
+			}
+		};
+		attach(tasks.rows, "_regardingobjectid_value", "activityid", "task");
+		attach(notes.rows, "_objectid_value", "annotationid", "note");
+		const clippedSources = /* @__PURE__ */ new Set();
+		for (const row of records) {
+			row.events = [...new Map(row.events.map((event) => [`${event.source}:${event.id}`, event])).values()].sort((a, b) => (b.sourceAt ?? "").localeCompare(a.sourceAt ?? "") || a.id.localeCompare(b.id));
+			for (const event of row.events.slice(1e3)) clippedSources.add(event.kind === "note" ? "notes" : "activities");
+			row.events = row.events.slice(0, 1e3);
+		}
+		for (const source of clippedSources) if (!sources.some((item) => item.source === source)) health(source, "capped", "Per-record dated metadata exceeded the 1,000-event bound. Counts are lower bounds for the disclosed clipped cohort.", null);
+		const portfolioCapped = opportunityRead.capped || candidateIds.length > limits.opportunities;
+		if (!sources.some((source) => source.source === "portfolio")) health("portfolio", portfolioCapped ? "capped" : "complete", "Current caller-authorized MSX membership rows; nullable fields retain their source meaning.", records.filter((row) => row.entity === "opportunity").length);
+		if (!sources.some((source) => source.source === "milestones")) health("milestones", milestoneRead.capped ? "capped" : "complete", "Parent stage and explicitly attributed monthly currency only; no parent-value multiplication.", milestones.length);
+		if (!sources.some((source) => source.source === "activities")) health("activities", tasks.capped ? "capped" : "complete", "Dated task creation metadata and latest recorded forecast-comment signal only; not task outcomes or a complete interaction audit.", tasks.rows.length);
+		if (!sources.some((source) => source.source === "notes")) health("notes", notes.capped ? "capped" : "complete", "Dated note-creation metadata only; no free-text or generic modified-time progress inference.", notes.rows.length);
+		if (!sources.some((source) => source.source === "currencies")) health("currencies", currencyRead.capped ? "capped" : "complete", "ISO currency codes resolved only from explicit record currency references. Unattributed currencies remain unknown.", currencies.size);
+		health("m365", "unavailable", "M365 enrichment is not connected. No additional grants or private signals are accessed.", null);
+		const complete = !sources.some((source) => source.source !== "m365" && source.state !== "complete");
+		if (!complete) for (const record of records) record.sourceQuality = record.sourceQuality === "unknown" ? "unknown" : "partial";
+		return momentumCollectionSchema.parse({
+			mode: "live",
+			generatedAt: at,
+			scopeKey: `msx:${me}`,
+			scope,
+			customerIndustry,
+			teamAvailable,
+			complete,
+			records,
+			sources
+		});
+	}
+};
+//#endregion
+//#region packages/connectors/common/scoped-document-store.ts
+function serializeDocument(value, maxDocumentBytes = 48e3) {
+	const json = JSON.stringify(value);
+	if (!json || Buffer.byteLength(json, "utf8") > maxDocumentBytes) throw new Error("The private state document exceeds its supported size.");
+	return json;
+}
+var requireModule$1 = createRequire(import.meta.url);
+var SqliteDocumentStore = class {
+	db;
+	maxDocumentBytes;
+	constructor(path = ":memory:", options = {}) {
+		this.maxDocumentBytes = options.maxDocumentBytes ?? 48e3;
+		if (!Number.isInteger(this.maxDocumentBytes) || this.maxDocumentBytes < 1 || this.maxDocumentBytes > 72e3) throw new Error("The SQLite document storage limit is invalid.");
+		const { DatabaseSync } = requireModule$1("node:sqlite");
+		this.db = new DatabaseSync(path);
+		this.db.exec("PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS scoped_documents (partition TEXT NOT NULL, key TEXT NOT NULL, revision INTEGER NOT NULL, json TEXT NOT NULL, PRIMARY KEY(partition,key));");
+	}
+	async read(partition, key) {
+		const row = this.db.prepare("SELECT revision,json FROM scoped_documents WHERE partition=? AND key=?").get(partition, key);
+		return row ? {
+			revision: Number(row["revision"]),
+			value: JSON.parse(String(row["json"]))
+		} : void 0;
+	}
+	async insert(partition, key, value) {
+		return this.db.prepare("INSERT OR IGNORE INTO scoped_documents VALUES(?,?,1,?)").run(partition, key, serializeDocument(value, this.maxDocumentBytes)).changes === 1;
+	}
+	async replace(partition, key, expectedRevision, value) {
+		return this.db.prepare("UPDATE scoped_documents SET revision=revision+1,json=? WHERE partition=? AND key=? AND revision=?").run(serializeDocument(value, this.maxDocumentBytes), partition, key, expectedRevision).changes === 1;
+	}
+	async delete(partition, key, expectedRevision) {
+		return this.db.prepare("DELETE FROM scoped_documents WHERE partition=? AND key=? AND revision=?").run(partition, key, expectedRevision).changes === 1;
+	}
+	async list(partition, prefix, limit) {
+		if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("State list limit must be between 1 and 100.");
+		return this.db.prepare("SELECT key,revision,json FROM scoped_documents WHERE partition=? AND substr(key,1,?)=? ORDER BY key DESC LIMIT ?").all(partition, prefix.length, prefix, limit).map((row) => ({
+			key: String(row["key"]),
+			revision: Number(row["revision"]),
+			value: JSON.parse(String(row["json"]))
+		}));
+	}
+	close() {
+		this.db.close();
+	}
+};
+//#endregion
+//#region packages/connectors/common/table-document-store.ts
+function status$1(error) {
+	return typeof error === "object" && error !== null && "statusCode" in error && typeof error.statusCode === "number" ? error.statusCode : void 0;
+}
+function partitionKey(value) {
+	return createHash("sha256").update(value).digest("hex");
+}
+function rowKey(value) {
+	return Buffer.from(value).toString("base64url");
+}
+var TableDocumentStore = class {
+	client;
+	constructor(client) {
+		this.client = client;
+	}
+	async read(partition, key) {
+		try {
+			const entity = await this.client.getEntity(partitionKey(partition), rowKey(key));
+			return {
+				revision: entity.revision,
+				value: JSON.parse(entity.json)
+			};
+		} catch (error) {
+			if (status$1(error) === 404) return void 0;
+			throw error;
+		}
+	}
+	async insert(partition, key, value) {
+		try {
+			await this.client.createEntity({
+				partitionKey: partitionKey(partition),
+				rowKey: rowKey(key),
+				revision: 1,
+				json: serializeDocument(value)
+			});
+			return true;
+		} catch (error) {
+			if (status$1(error) === 409) return false;
+			throw error;
+		}
+	}
+	async replace(partition, key, expectedRevision, value) {
+		try {
+			const entity = await this.client.getEntity(partitionKey(partition), rowKey(key));
+			if (entity.revision !== expectedRevision) return false;
+			await this.client.updateEntity({
+				partitionKey: partitionKey(partition),
+				rowKey: rowKey(key),
+				revision: expectedRevision + 1,
+				json: serializeDocument(value)
+			}, "Replace", { etag: entity.etag });
+			return true;
+		} catch (error) {
+			if ([
+				404,
+				409,
+				412
+			].includes(status$1(error) ?? 0)) return false;
+			throw error;
+		}
+	}
+	async delete(partition, key, expectedRevision) {
+		try {
+			const entity = await this.client.getEntity(partitionKey(partition), rowKey(key));
+			if (entity.revision !== expectedRevision) return false;
+			await this.client.deleteEntity(partitionKey(partition), rowKey(key), { etag: entity.etag });
+			return true;
+		} catch (error) {
+			if ([
+				404,
+				409,
+				412
+			].includes(status$1(error) ?? 0)) return false;
+			throw error;
+		}
+	}
+	async list(partition, prefix, limit) {
+		if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("State list limit must be between 1 and 100.");
+		const result = [];
+		let examined = 0;
+		for await (const entity of this.client.listEntities({ queryOptions: { filter: `PartitionKey eq '${partitionKey(partition)}'` } })) {
+			if (++examined > 500) throw new Error("Private state enumeration requires a narrower partition.");
+			const key = Buffer.from(entity.rowKey ?? "", "base64url").toString();
+			if (key.startsWith(prefix)) result.push({
+				key,
+				revision: entity.revision,
+				value: JSON.parse(entity.json)
+			});
+			if (result.length === limit) break;
+		}
+		return result;
+	}
+};
+//#endregion
+//#region packages/connectors/msx/momentum-history.ts
+var dayMs$1 = 864e5;
+var retentionMs = 180 * dayMs$1;
+var timestamp = z.iso.datetime({ offset: true });
+var documentSchema = z.object({
+	firstObserved: timestamp,
+	lastObserved: timestamp,
+	observations: z.number().int().positive(),
+	maxGapDays: z.number().nonnegative(),
+	stage: z.string().nullable(),
+	highestStage: z.number().int().min(0).max(5),
+	status: z.string().nullable(),
+	dueDate: z.iso.date().nullable(),
+	commitment: z.boolean().nullable(),
+	completedSeen: z.boolean(),
+	committedSeen: z.boolean(),
+	events: z.array(momentumEventSchema).max(96)
+}).strict();
+var stages = [
+	"Listen & Consult",
+	"Inspire & Design",
+	"Empower & Achieve",
+	"Realize Value",
+	"Manage & Optimize"
+];
+var rank = (stage) => stage === null ? 0 : stages.indexOf(stage) + 1;
+var hash$1 = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+var MomentumHistoryRepository = class {
+	store;
+	constructor(store) {
+		this.store = store;
+	}
+	partition(owner) {
+		if (![
+			owner.tenantId,
+			owner.principalId,
+			owner.sourceId
+		].every((value) => value.trim())) throw new Error("Private history requires a complete caller identity.");
+		return `momentum-v1:${hash$1([
+			owner.tenantId.toLowerCase(),
+			owner.principalId.toLowerCase(),
+			owner.sourceId.toLowerCase(),
+			owner.mode
+		])}`;
+	}
+	documentKey(recordKey) {
+		return `record:${hash$1(recordKey)}`;
+	}
+	project(document) {
+		return {
+			state: document.observations > 1 ? "observed" : "insufficient",
+			scope: "shared",
+			availableSince: document.firstObserved,
+			lastObserved: document.lastObserved,
+			observations: document.observations,
+			maxGapDays: document.maxGapDays,
+			events: document.events
+		};
+	}
+	async read(owner, recordKey, at) {
+		const partition = this.partition(owner), key = this.documentKey(recordKey);
+		const existing = await this.store.read(partition, key);
+		if (!existing) return null;
+		const document = documentSchema.parse(existing.value);
+		if (Date.parse(at) - Date.parse(document.lastObserved) >= retentionMs) {
+			if (!this.store.delete) throw new Error("The history store must support retention deletion.");
+			if (!await this.store.delete(partition, key, existing.revision)) return this.read(owner, recordKey, at);
+			return null;
+		}
+		return this.project({
+			...document,
+			firstObserved: new Date(Math.max(Date.parse(document.firstObserved), Date.parse(at) - retentionMs)).toISOString(),
+			events: document.events.filter((event) => Date.parse(event.observedAt) >= Date.parse(at) - retentionMs)
+		});
+	}
+	async observe(owner, record, at) {
+		timestamp.parse(at);
+		const partition = this.partition(owner), key = this.documentKey(record.key), now = Date.parse(at);
+		for (let attempt = 0; attempt < 8; attempt++) {
+			const existing = await this.store.read(partition, key);
+			const previous = existing ? documentSchema.parse(existing.value) : void 0;
+			const fresh = !previous || now - Date.parse(previous.lastObserved) >= retentionMs;
+			const initial = {
+				firstObserved: at,
+				lastObserved: at,
+				observations: 1,
+				maxGapDays: 0,
+				stage: record.stage,
+				highestStage: rank(record.stage),
+				status: record.status,
+				dueDate: record.dueDate,
+				commitment: record.commitment,
+				completedSeen: record.status === "Completed",
+				committedSeen: record.commitment === true,
+				events: []
+			};
+			if (previous && !fresh && now <= Date.parse(previous.lastObserved)) return this.project(previous);
+			let next = initial;
+			if (previous && !fresh) {
+				const events = previous.events.filter((event) => Date.parse(event.observedAt) >= now - retentionMs);
+				const add = (kind, field, from, to) => {
+					const id = hash$1([
+						record.key,
+						kind,
+						field,
+						from,
+						to
+					]);
+					if (!events.some((event) => event.id === id)) events.push({
+						id,
+						kind,
+						source: "observed",
+						sourceAt: null,
+						observedAt: at,
+						intervalStart: previous.lastObserved,
+						intervalEnd: at,
+						field,
+						from,
+						to
+					});
+				};
+				if (rank(previous.stage) > 0 && rank(record.stage) > previous.highestStage) add("stage-advanced", "stage", previous.stage, record.stage);
+				if (rank(record.stage) > 0 && rank(record.stage) < rank(previous.stage)) add("loopback", "stage", previous.stage, record.stage);
+				if (record.entity === "milestone" && previous.status !== null && record.status === "Completed" && !previous.completedSeen) add("milestone-completed", "status", previous.status, record.status);
+				if (previous.commitment === false && record.commitment === true && !previous.committedSeen) add("commitment-recorded", "commitment", "Uncommitted", "Committed");
+				if (previous.dueDate && record.dueDate && record.dueDate > previous.dueDate) add("date-slipped", "dueDate", previous.dueDate, record.dueDate);
+				const retained = events.slice(-96);
+				const availableSince = events.length > retained.length ? Date.parse(retained[0].intervalStart ?? retained[0].observedAt) : Date.parse(previous.firstObserved);
+				next = {
+					...initial,
+					firstObserved: new Date(Math.max(availableSince, now - retentionMs)).toISOString(),
+					observations: previous.observations + 1,
+					maxGapDays: Math.max(previous.maxGapDays, (now - Date.parse(previous.lastObserved)) / dayMs$1),
+					highestStage: Math.max(previous.highestStage, rank(record.stage)),
+					completedSeen: previous.completedSeen || initial.completedSeen,
+					committedSeen: previous.committedSeen || initial.committedSeen,
+					events: retained
+				};
+			}
+			const value = documentSchema.parse(next);
+			if (existing ? await this.store.replace(partition, key, existing.revision, value) : await this.store.insert(partition, key, value)) return this.project(value);
+		}
+		throw new Error("Concurrent private history capture could not be reconciled. Refresh again.");
+	}
+};
+//#endregion
+//#region packages/connectors/msx/momentum-storage.ts
+var subjectSchema$1 = z.object({
+	tid: z.string().guid(),
+	oid: z.string().guid(),
+	scp: z.string().trim().min(1)
+});
+async function momentumHistoryOwner(getToken, sourceId) {
+	const part = (await getToken()).split(".")[1];
+	if (!part) throw new Error("Momentum requires a delegated source identity. Reconnect before reading private history.");
+	let subject;
+	try {
+		subject = subjectSchema$1.parse(JSON.parse(Buffer.from(part, "base64url").toString("utf8")));
+	} catch (error) {
+		if (error instanceof SyntaxError || error instanceof z.ZodError) throw new Error("Momentum requires a tenant-bound delegated user credential, not an app-only token.", { cause: error });
+		throw error;
+	}
+	return {
+		tenantId: subject.tid.toLowerCase(),
+		principalId: subject.oid.toLowerCase(),
+		sourceId: new URL(sourceId).origin,
+		mode: "live"
+	};
+}
+function createMomentumHistoryRepository(environment, credential) {
+	const configured = environment["TLC_MOMENTUM_TABLE_URL"]?.trim();
+	if (!configured) return void 0;
+	const url = new URL(configured);
+	if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || !url.hostname.endsWith(".table.core.windows.net") || url.pathname !== "/") throw new Error("TLC_MOMENTUM_TABLE_URL must be an HTTPS Azure Table service origin without embedded credentials.");
+	const table = environment["TLC_MOMENTUM_TABLE_NAME"]?.trim() || "TlcMomentum";
+	if (!/^[A-Za-z][A-Za-z0-9]{2,62}$/.test(table)) throw new Error("The Momentum history table name is invalid.");
+	if (!credential) throw new Error("Configured Momentum history requires an approved host credential with access to the private history table.");
+	return new MomentumHistoryRepository(new TableDocumentStore(new TableClient(url.toString(), table, credential)));
+}
+//#endregion
+//#region packages/common/projections/momentum-focus.ts
+var dayMs = 864e5;
+var dateOnly = (value) => value.toISOString().slice(0, 10);
+var addDays = (value, days) => dateOnly(new Date(Date.parse(`${value}T12:00:00Z`) + days * dayMs));
+function focusDates(now, timezone) {
+	const parts = new Intl.DateTimeFormat("en-US", {
+		timeZone: timezone,
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit"
+	}).formatToParts(now);
+	const get = (type) => parts.find((part) => part.type === type).value;
+	const today = `${get("year")}-${get("month")}-${get("day")}`;
+	const day = /* @__PURE__ */ new Date(`${today}T12:00:00Z`);
+	const weekStart = addDays(today, -((day.getUTCDay() + 6) % 7));
+	return {
+		today,
+		weekStart,
+		weekEnd: addDays(weekStart, 6),
+		monthStart: `${today.slice(0, 7)}-01`,
+		monthEnd: dateOnly(new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth() + 1, 0, 12)))
+	};
+}
+function deadlineFor(row, dates) {
+	if (!row.dueDate) return "undated";
+	if (row.dueDate < dates.today) return "overdue";
+	if (row.dueDate <= dates.weekEnd) return "this-week";
+	if (row.dueDate <= dates.monthEnd) return "rest-of-month";
+	return "later";
+}
+var progressKinds = new Set(momentumProgressKinds);
+var signalKinds = /* @__PURE__ */ new Set([
+	"activity",
+	"note",
+	"task",
+	"forecast-comment"
+]);
+function windowEvents(row, since, now) {
+	const unique = /* @__PURE__ */ new Map();
+	for (const event of row.events) {
+		const from = event.sourceAt ?? event.intervalStart;
+		const to = event.sourceAt ?? event.intervalEnd;
+		if (from && to && Date.parse(from) >= Date.parse(since) && Date.parse(to) <= Date.parse(now)) unique.set(`${event.source}:${event.id}`, event);
+	}
+	return [...unique.values()];
+}
+var latest = (events) => events.map((event) => event.sourceAt ?? event.intervalEnd).filter((at) => at !== null).map((at) => new Date(at).toISOString()).sort().at(-1) ?? null;
+function priority(row, query, dates, now) {
+	const nowIso = now.toISOString();
+	const events = windowEvents(row, (/* @__PURE__ */ new Date(now.getTime() - query.lookbackDays * dayMs)).toISOString(), nowIso);
+	const progress = events.filter((event) => progressKinds.has(event.kind));
+	const signals = events.filter((event) => signalKinds.has(event.kind));
+	const historyKnown = row.history.state === "observed" || row.history.state === "authoritative";
+	const covers = (days) => historyKnown && row.history.availableSince !== null && Date.parse(row.history.availableSince) <= now.getTime() - days * dayMs && row.history.lastObserved !== null && Date.parse(row.history.lastObserved) >= now.getTime() - dayMs && (row.history.state === "authoritative" || row.history.observations > 1 && row.history.maxGapDays !== null && row.history.maxGapDays <= 14);
+	const historyCoverage = covers(query.lookbackDays) ? "sufficient" : historyKnown || progress.length > 0 ? "partial" : "unknown";
+	const progressCount = historyCoverage === "sufficient" ? progress.length : progress.length > 0 ? progress.length : null;
+	const signalCount = row.sourceQuality === "complete" || signals.length > 0 ? signals.length : null;
+	const candidate = row.active !== false;
+	const reasons = [];
+	const reason = (code, text) => reasons.push({
+		code,
+		text
+	});
+	const timeline = [...new Map(row.events.map((event) => [`${event.source}:${event.id}`, event])).values()].sort((a, b) => Date.parse(b.sourceAt ?? b.intervalEnd ?? b.observedAt) - Date.parse(a.sourceAt ?? a.intervalEnd ?? a.observedAt) || a.id.localeCompare(b.id));
+	if (timeline.length > 1e3) reason("timeline-capped", "The first 1,000 evidence references are shown. Qualified counts use the full collected event set.");
+	const deadline = deadlineFor(row, dates);
+	const loopback = events.some((event) => event.kind === "loopback");
+	const slipped = events.some((event) => event.kind === "date-slipped");
+	const inFocus = row.dueDate !== null && row.dueDate >= (query.focus === "custom" ? query.from : query.focus === "month" ? dates.monthStart : dates.weekStart) && row.dueDate <= (query.focus === "custom" ? query.to : query.focus === "month" ? dates.monthEnd : dates.weekEnd);
+	if (candidate && deadline === "overdue") reason("overdue", `Recorded ${row.entity === "milestone" ? "target" : "close"} date ${row.dueDate} is overdue.`);
+	if (candidate && row.blocked) reason("blocked", row.blockingMilestoneIds.length > 0 ? `An authorized child milestone records a blocker (${row.blockingMilestoneIds.length} linked records). A dependency decision is needed.` : "The source records a blocker. A decision or dependency check is needed.");
+	if (candidate && inFocus) reason("focus-date", "The recorded deadline falls inside the selected focus horizon.");
+	if (row.active === null) reason("state-unknown", "The source activity state is unknown. Verify it; this record is not counted as a confirmed active opportunity.");
+	if (slipped) reason("date-slipped", "A later recorded date was observed; date pushes are not positive progress.");
+	if (loopback) reason("loopback", "A stage loopback was observed. MCEM iteration is context, not a loss.");
+	if (row.plannedHold) reason("planned-hold", "The source records a planned hold; confirm the next checkpoint rather than infer failure.");
+	if (progress.length > 0) reason("progress", `${progress.length} distinct qualified movement event${progress.length === 1 ? "" : "s"} in the evidence window.`);
+	if (historyCoverage === "unknown") reason("history-unknown", "Insufficient history. Current fields do not establish past movement.");
+	if (historyCoverage === "partial") reason("history-partial", "Partial history for this evidence window. Verified events are lower bounds, not a fully observed comparison cohort.");
+	const reviewEvents = windowEvents(row, (/* @__PURE__ */ new Date(now.getTime() - 30 * dayMs)).toISOString(), nowIso);
+	if (candidate && covers(30) && !reviewEvents.some((event) => progressKinds.has(event.kind) || event.kind === "loopback") && !row.plannedHold) reason("no-observed-progress", "No progress in captured observations over the review window. Refresh capture is not continuous monitoring.");
+	if (candidate && signalCount !== null && signalCount >= 3 && progressCount === 0) reason("busy-without-movement", "Multiple dated business signals, but no verified movement in captured evidence.");
+	const latestSignal = latest(windowEvents(row, "1970-01-01T00:00:00Z", nowIso).filter((event) => signalKinds.has(event.kind)));
+	if (candidate && row.sourceQuality === "complete" && (latestSignal ? (now.getTime() - Date.parse(latestSignal)) / dayMs >= 14 : covers(14)) && !row.plannedHold) reason("inactive", "No recent dated business signal within the 14-day review threshold in the connected sources.");
+	if (row.dueDate === null) reason("undated", "The recorded deadline is unknown. The suggested review date is not a CRM deadline.");
+	if (row.sourceQuality !== "complete") reason("coverage", "Source coverage is incomplete; absence of evidence is not evidence of no work.");
+	if (row.active === false) reason("closed", "This source record is not active; retained for context, not an urgent work item.");
+	const needsReview = candidate && reasons.some((item) => [
+		"blocked",
+		"overdue",
+		"date-slipped",
+		"no-observed-progress",
+		"inactive",
+		"coverage",
+		"history-unknown",
+		"history-partial",
+		"undated",
+		"state-unknown"
+	].includes(item.code));
+	const tier = !candidate ? "verify" : deadline === "overdue" || row.blocked === true ? "act-now" : deadline === "this-week" ? "this-week" : deadline === "rest-of-month" || inFocus ? "plan-month" : "verify";
+	const accountableRole = row.entity === "milestone" || query.role === "SE" ? "Solution Engineer / CSA / CSAM" : "Specialist / SSP";
+	const nextAction = row.blocked ? `Confirm the dependency and accountable ${accountableRole} handoff.` : row.plannedHold ? "Confirm the planned hold and next agreed checkpoint." : query.role === "SE" ? "Verify technical proof/readiness evidence and agree the next checkpoint." : "Confirm the next commercial decision or commitment with the accountable Specialist.";
+	return {
+		...row,
+		events: timeline.slice(0, 1e3),
+		tier,
+		deadline,
+		reviewDate: row.dueDate === null && candidate ? dates.today : null,
+		progressCount,
+		historyCoverage,
+		signalCount,
+		signalTypes: [...new Set(signals.map((event) => event.kind))],
+		latestSignal,
+		latestProgress: latest(progress),
+		reasons,
+		nextAction,
+		accountableRole,
+		needsReview
+	};
+}
+function matches(row, query, dates) {
+	const selected = (values, value) => values.length === 0 || values.includes(value ?? "Unknown");
+	if (query.scope === "mine" && row.onMyTeam !== true) return false;
+	if (!selected(query.accountIds, row.accountId) || !selected(query.opportunityIds, row.opportunityId) || query.milestoneIds.length > 0 && (row.entity !== "milestone" || !query.milestoneIds.includes(row.id))) return false;
+	if (query.entity !== "all" && row.entity !== query.entity || !selected(query.stages, row.stage) || !selected(query.ownerIds, row.ownerId)) return false;
+	if (!selected(row.entity === "milestone" ? query.milestoneStatuses : query.opportunityStatuses, row.status)) return false;
+	if (query.sourceQuality.length > 0 && !query.sourceQuality.includes(row.sourceQuality)) return false;
+	if (query.basis !== "all" && row.value.basis !== query.basis || query.currency && row.value.currency !== query.currency) return false;
+	if (query.minValue !== void 0 && (row.value.amount === null || row.value.amount < query.minValue) || query.maxValue !== void 0 && (row.value.amount === null || row.value.amount > query.maxValue)) return false;
+	if (!query.includeUndated && !row.dueDate || row.dueDate && (query.dateFrom && row.dueDate < query.dateFrom || query.dateTo && row.dueDate > query.dateTo)) return false;
+	if (query.deadline && row.deadline !== query.deadline) return false;
+	if (query.lens === "advancing" && !(row.progressCount !== null && row.progressCount > 0) || query.lens === "review" && !row.needsReview || query.lens === "busy" && !(row.signalCount !== null && row.signalCount >= 3 && row.progressCount === 0) || query.lens === "weekly" && !(row.active !== false && (row.deadline === "overdue" || row.deadline === "this-week")) || query.lens === "monthly" && !(row.active !== false && row.entity === "milestone" && row.dueDate && row.dueDate <= dates.monthEnd) || query.lens === "history" && row.progressCount === null || query.lens === "unknown-history" && row.progressCount !== null) return false;
+	return true;
+}
+var tierOrder = {
+	"act-now": 0,
+	"this-week": 1,
+	"plan-month": 2,
+	verify: 3
+};
+function withMilestoneProgress(records) {
+	const children = /* @__PURE__ */ new Map();
+	for (const row of records) if (row.entity === "milestone") {
+		const group = children.get(row.opportunityId) ?? [];
+		group.push(row);
+		children.set(row.opportunityId, group);
+	}
+	return records.map((row) => {
+		const milestones = row.entity === "opportunity" ? children.get(row.id) : void 0;
+		if (!milestones?.length) return row;
+		const histories = [row.history, ...milestones.map((milestone) => milestone.history)];
+		const times = (field) => histories.map((history) => history[field]).filter((value) => value !== null).map((value) => Date.parse(value));
+		const starts = times("availableSince"), ends = times("lastObserved");
+		return {
+			...row,
+			history: {
+				state: histories.every((history) => history.state === "authoritative") ? "authoritative" : histories.every((history) => history.state === "observed" || history.state === "authoritative") ? "observed" : "insufficient",
+				scope: histories.every((history) => history.scope === row.history.scope) ? row.history.scope : "unavailable",
+				availableSince: starts.length === histories.length ? new Date(Math.max(...starts)).toISOString() : null,
+				lastObserved: ends.length === histories.length ? new Date(Math.min(...ends)).toISOString() : null,
+				observations: Math.min(...histories.map((history) => history.observations)),
+				maxGapDays: histories.every((history) => history.maxGapDays !== null) ? Math.max(...histories.map((history) => history.maxGapDays)) : null
+			},
+			events: [...row.events, ...milestones.flatMap((milestone) => milestone.events.filter((event) => progressKinds.has(event.kind)).map((event) => ({
+				...event,
+				relatedRecordKey: milestone.key
+			})))]
+		};
+	});
+}
+function selectMomentumRows(data, query, now) {
+	const dates = focusDates(now, query.timezone);
+	const roleRank = (row) => row.role === query.role || row.role === "both" ? 0 : 1;
+	return withMilestoneProgress(data.records).map((row) => priority(row, query, dates, now)).filter((row) => matches(row, query, dates)).sort((left, right) => {
+		const tier = tierOrder[left.tier] - tierOrder[right.tier];
+		const urgency = (left.dueDate ?? "9999-12-31").localeCompare(right.dueDate ?? "9999-12-31");
+		const relevance = roleRank(left) - roleRank(right);
+		const unit = `${left.value.basis}:${left.value.currency ?? "Unknown"}`.localeCompare(`${right.value.basis}:${right.value.currency ?? "Unknown"}`);
+		const impact = unit === 0 && left.value.currency !== null ? Math.floor(Math.log10(Math.max(1, right.value.amount ?? 0))) - Math.floor(Math.log10(Math.max(1, left.value.amount ?? 0))) : 0;
+		return tier || urgency || relevance || unit || impact || Number(right.commitment === true) - Number(left.commitment === true) || (right.latestSignal ?? "").localeCompare(left.latestSignal ?? "") || left.key.localeCompare(right.key);
+	});
+}
+function charts(rows, query) {
+	const accounts = /* @__PURE__ */ new Map();
+	const heatmap = /* @__PURE__ */ new Map();
+	const values = /* @__PURE__ */ new Map();
+	const deadlines = [
+		"overdue",
+		"this-week",
+		"rest-of-month",
+		"later",
+		"undated"
+	].map((bucket) => ({
+		bucket,
+		opportunities: 0,
+		milestones: 0
+	}));
+	let unknownValues = 0;
+	for (const row of rows) {
+		const accountKey = row.accountId ?? "Unknown";
+		let account = accounts.get(accountKey);
+		if (!account) {
+			account = {
+				accountId: row.accountId,
+				name: row.accountName ?? "Unknown account",
+				advancing: 0,
+				eligible: 0,
+				active: 0,
+				advancingShare: null,
+				progressCount: 0,
+				signalCount: 0,
+				reviewCount: 0,
+				latestMovement: null
+			};
+			accounts.set(accountKey, account);
+		}
+		account.signalCount += row.signalCount ?? 0;
+		account.reviewCount += Number(row.needsReview);
+		if (row.entity === "opportunity" && row.active) {
+			account.active++;
+			const eligible = row.historyCoverage === "sufficient" && row.status !== null;
+			account.eligible += Number(eligible);
+			account.advancing += Number(eligible && row.progressCount !== null && row.progressCount > 0);
+			account.progressCount += row.progressCount ?? 0;
+			if (row.latestProgress && (!account.latestMovement || row.latestProgress > account.latestMovement)) account.latestMovement = row.latestProgress;
+		}
+		const deadline = deadlines.find((item) => item.bucket === row.deadline);
+		if (row.entity === "milestone") deadline.milestones++;
+		else deadline.opportunities++;
+		if (row.entity === "milestone") {
+			const stage = row.stage ?? "Unknown stage", status = row.status ?? "Unknown status";
+			const key = JSON.stringify([stage, status]);
+			const cell = heatmap.get(key) ?? {
+				stage,
+				status,
+				count: 0,
+				value: null,
+				unit: query.heatmap === "value" ? `${query.currency}/month` : "milestones",
+				missingValues: 0
+			};
+			cell.count++;
+			if (query.heatmap === "value" && row.value.amount !== null && row.value.currency === query.currency) cell.value = (cell.value ?? 0) + row.value.amount;
+			else if (query.heatmap === "value") cell.missingValues++;
+			heatmap.set(key, cell);
+		}
+		if (row.value.amount === null || row.value.currency === null) unknownValues++;
+		else {
+			const key = `${row.value.basis}:${row.value.currency}`;
+			const group = values.get(key) ?? {
+				basis: row.value.basis,
+				currency: row.value.currency,
+				amount: 0,
+				records: 0
+			};
+			group.amount += row.value.amount;
+			group.records++;
+			values.set(key, group);
+		}
+	}
+	for (const account of accounts.values()) account.advancingShare = account.eligible ? account.advancing / account.eligible : null;
+	const accountRows = [...accounts.values()].sort((a, b) => query.accountSort === "activity" ? b.signalCount - a.signalCount || a.name.localeCompare(b.name) : query.accountSort === "review" ? b.reviewCount - a.reviewCount || a.name.localeCompare(b.name) : (b.advancingShare ?? -1) - (a.advancingShare ?? -1) || b.progressCount - a.progressCount || a.name.localeCompare(b.name));
+	return {
+		matrix: rows.filter((row) => row.progressCount !== null).map((row) => ({
+			key: row.key,
+			id: row.id,
+			entity: row.entity,
+			name: row.name,
+			progressCount: row.progressCount,
+			coverage: row.historyCoverage,
+			signalCount: row.signalCount,
+			amount: query.currency && query.basis !== "all" ? row.value.amount : null,
+			basis: row.value.basis,
+			currency: row.value.currency
+		})),
+		unknownHistoryKeys: rows.filter((row) => row.progressCount === null).map((row) => row.key),
+		accounts: accountRows,
+		heatmap: [...heatmap.values()].sort((a, b) => a.stage.localeCompare(b.stage) || a.status.localeCompare(b.status)),
+		deadlines,
+		values: [...values.values()].sort((a, b) => a.basis.localeCompare(b.basis) || a.currency.localeCompare(b.currency)),
+		unknownValues
+	};
+}
+var viewMetadataSchema = momentumSnapshotSchema.omit({
+	snapshotId: true,
+	queryKey: true,
+	query: true,
+	rows: true
+});
+function prepareMomentumView(data, query, now) {
+	const dates = focusDates(now, query.timezone);
+	const rows = selectMomentumRows(data, query, now);
+	const chartData = charts(rows, query);
+	const named = (rows) => [...new Map(rows.map((row) => [row.id ?? "Unknown", {
+		id: row.id ?? "Unknown",
+		name: row.name ?? "Unknown"
+	}])).values()].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+	const distinct = (rows) => [...new Set(rows.map((value) => value ?? "Unknown"))].sort();
+	return {
+		...viewMetadataSchema.parse({
+			contractVersion: "1.2",
+			kind: "snapshot",
+			ruleVersion: momentumRuleVersion,
+			mode: data.mode,
+			generatedAt: data.generatedAt,
+			scopeKey: data.scopeKey,
+			scope: query.scope,
+			customerIndustry: data.customerIndustry,
+			teamAvailable: data.teamAvailable,
+			complete: data.complete,
+			sources: data.sources,
+			focusWindow: {
+				from: query.focus === "custom" ? query.from : query.focus === "month" ? dates.monthStart : dates.weekStart,
+				to: query.focus === "custom" ? query.to : query.focus === "month" ? dates.monthEnd : dates.weekEnd
+			},
+			evidenceWindow: {
+				from: (/* @__PURE__ */ new Date(now.getTime() - query.lookbackDays * dayMs)).toISOString(),
+				to: now.toISOString()
+			},
+			total: rows.length,
+			summary: {
+				advancingAccounts: chartData.accounts.filter((account) => account.accountId !== null && account.advancing > 0).length,
+				weeklyPriorities: rows.filter((row) => row.active !== false && (row.deadline === "overdue" || row.deadline === "this-week")).length,
+				monthlyMilestones: rows.filter((row) => row.active !== false && row.entity === "milestone" && row.dueDate && row.dueDate <= dates.monthEnd).length,
+				reviewCandidates: rows.filter((row) => row.needsReview).length,
+				busyWithoutMovement: rows.filter((row) => row.signalCount !== null && row.signalCount >= 3 && row.progressCount === 0).length,
+				usableHistory: rows.filter((row) => row.progressCount !== null).length,
+				totalRecords: rows.length
+			},
+			facets: {
+				accounts: named(data.records.map((row) => ({
+					id: row.accountId,
+					name: row.accountName
+				}))),
+				opportunities: named(data.records.filter((row) => row.entity === "opportunity").map((row) => ({
+					id: row.id,
+					name: row.name
+				}))),
+				milestones: named(data.records.filter((row) => row.entity === "milestone").map((row) => ({
+					id: row.id,
+					name: row.name
+				}))),
+				owners: named(data.records.map((row) => ({
+					id: row.ownerId,
+					name: row.ownerName ?? row.ownerId
+				}))),
+				stages: distinct(data.records.map((row) => row.stage)),
+				opportunityStatuses: distinct(data.records.filter((row) => row.entity === "opportunity").map((row) => row.status)),
+				milestoneStatuses: distinct(data.records.filter((row) => row.entity === "milestone").map((row) => row.status)),
+				currencies: [...new Set(data.records.map((row) => row.value.currency).filter((value) => value !== null))].sort()
+			},
+			charts: chartData
+		}),
+		rows
+	};
+}
+function pageMomentumView(view, query, identity) {
+	return {
+		...view,
+		...identity,
+		query,
+		rows: view.rows.slice((query.page - 1) * query.pageSize, query.page * query.pageSize)
+	};
+}
+//#endregion
+//#region packages/orchestrator/momentum-focus/analytics.ts
+function momentumIdentity(value) {
+	return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+function momentumSnapshotIdentity(data) {
+	return momentumIdentity([
+		data.scopeKey,
+		data.scope,
+		data.customerIndustry,
+		data.complete,
+		[...data.records].sort((a, b) => a.key.localeCompare(b.key)).map((row) => ({
+			...row,
+			events: [...row.events].sort((a, b) => a.id.localeCompare(b.id)).map((event) => event.source === "msx" ? {
+				...event,
+				observedAt: event.sourceAt
+			} : event)
+		}))
+	]);
+}
+function buildMomentumSnapshot(data, query, now) {
+	return momentumSnapshotSchema.parse(pageMomentumView(prepareMomentumView(data, query, now), query, {
+		snapshotId: momentumSnapshotIdentity(data),
+		queryKey: momentumIdentity(query)
+	}));
+}
+//#endregion
+//#region packages/orchestrator/momentum-focus/host.ts
+var SharedMomentumFocusHost = class {
+	options;
+	constructor(options) {
+		this.options = options;
+	}
+	async invoke(raw) {
+		const request = momentumFocusRequestSchema.parse(raw);
+		const unavailable = (code, message) => momentumFocusResponseSchema.parse({
+			contractVersion: "1.2",
+			kind: "unavailable",
+			code,
+			message
+		});
+		let data;
+		let owner;
+		const scope = request.operation === "load" && request.query.scope === "mine" ? "portfolio" : request.query.scope;
+		try {
+			owner = await this.options.owner?.();
+			data = momentumCollectionSchema.parse(await this.options.collect(scope, request.query.customerIndustry));
+		} catch (error) {
+			if (error instanceof CustomerIndustryScopeError) {
+				this.options.onError?.("industry-unavailable");
+				return unavailable("industry-unavailable", error.message);
+			}
+			const status = momentumSourceStatus(error);
+			const code = status === 401 ? "unauthorized" : status === 403 ? "forbidden" : status === 429 ? "throttled" : "source-unavailable";
+			this.options.onError?.(code);
+			return unavailable(code, status === 401 || status === 403 ? "The signed-in user no longer has the required MSX access. Reconnect and verify the current portfolio." : "The authorized Momentum sources could not be loaded. No cached or sample business data was substituted.");
+		}
+		if (data.customerIndustry !== request.query.customerIndustry) return unavailable("industry-unavailable", "The source did not verify the requested customer industry scope. Refresh before viewing customer data.");
+		if (request.query.scope === "team" && !data.teamAvailable) return unavailable("scope-unavailable", "No permitted Team scope could be verified from the current Dynamics hierarchy.");
+		data.scope = scope;
+		const now = this.options.now?.() ?? /* @__PURE__ */ new Date();
+		if (owner) data.scopeKey = momentumIdentity(owner);
+		if (data.mode === "live") {
+			data.sources = data.sources.filter((source) => source.source !== "history");
+			let historyHealth = {
+				source: "history",
+				state: "unavailable",
+				count: null,
+				checkedAt: now.toISOString(),
+				detail: "Secure shared history is not configured. Current priorities remain available; past movement is unknown. No host-local/plaintext fallback."
+			};
+			for (const row of data.records) {
+				row.events = row.events.filter((event) => event.source === "msx");
+				row.history = {
+					state: "unavailable",
+					scope: "unavailable",
+					availableSince: null,
+					lastObserved: null,
+					observations: 0,
+					maxGapDays: null
+				};
+			}
+			if (owner && this.options.history) try {
+				let captured = 0;
+				for (let offset = 0; offset < data.records.length; offset += 8) await Promise.all(data.records.slice(offset, offset + 8).map(async (row) => {
+					const history = request.operation === "refresh" || request.operation === "load" && request.refresh === true ? await this.options.history.observe(owner, row, now.toISOString()) : await this.options.history.read(owner, row.key, now.toISOString());
+					if (history) {
+						const { events, ...coverage } = history;
+						row.history = coverage;
+						row.events.push(...events);
+						captured++;
+					} else row.history = {
+						...row.history,
+						state: "insufficient",
+						scope: "shared"
+					};
+				}));
+				historyHealth = {
+					source: "history",
+					state: "complete",
+					count: captured,
+					checkedAt: now.toISOString(),
+					detail: "Private shared refresh observations only, not continuous monitoring or an authoritative CRM audit. Source times and observed intervals are separate. Read retention: 180 days; at most 96 recent changes per record. Coverage advances if older changes are clipped."
+				};
+			} catch {
+				this.options.onError?.("history-unavailable");
+				for (const row of data.records) {
+					row.events = row.events.filter((event) => event.source === "msx");
+					row.history = {
+						state: "unavailable",
+						scope: "unavailable",
+						availableSince: null,
+						lastObserved: null,
+						observations: 0,
+						maxGapDays: null
+					};
+				}
+				historyHealth.detail = "The configured secure shared history could not be read/captured. History is unavailable; current priorities are shown without inferred progress. Retry or contact the host administrator.";
+				data.complete = false;
+			}
+			data.sources.push(historyHealth);
+		}
+		if (owner && this.options.owner && momentumIdentity(await this.options.owner()) !== momentumIdentity(owner)) return unavailable("unauthorized", "The source identity changed during this read. Reconnect before opening private dashboard data.");
+		if (request.operation === "load") return momentumFocusResponseSchema.parse({
+			contractVersion: "1.2",
+			kind: "dataset",
+			ruleVersion: momentumRuleVersion,
+			snapshotId: momentumSnapshotIdentity(data),
+			asOf: now.toISOString(),
+			data
+		});
+		const snapshot = buildMomentumSnapshot(data, request.query, now);
+		if (request.operation !== "detail") return momentumFocusResponseSchema.parse(snapshot);
+		if (request.snapshotId !== snapshot.snapshotId) return unavailable("stale", "The source snapshot or authorized scope changed. Refresh the dashboard before opening this item.");
+		const item = selectMomentumRows(data, request.query, now).find((row) => row.key === request.recordKey);
+		if (!item) return unavailable("forbidden", "This item is not in the current authorized and filtered scope.");
+		return momentumFocusResponseSchema.parse({
+			contractVersion: "1.2",
+			kind: "detail",
+			snapshotId: snapshot.snapshotId,
+			scopeKey: snapshot.scopeKey,
+			queryKey: snapshot.queryKey,
+			item
+		});
+	}
+};
+function createMomentumFocusHost(options) {
+	if (options.mode === "sample") return new SharedMomentumFocusHost({
+		now: () => new Date(momentumSampleNow),
+		collect: async (scope, industry) => ({
+			...createMomentumFixture(industry),
+			scope
+		})
+	});
+	const sourceId = options.sourceId ?? "https://microsoftsales.crm.dynamics.com";
+	const collector = new LiveMomentumCollector(options.source, {
+		sourceId,
+		...options.now ? { now: options.now } : {},
+		...options.excludedAccountIds ? { excludedAccountIds: options.excludedAccountIds } : {}
+	});
+	const history = createMomentumHistoryRepository(options.environment ?? process.env, options.credential);
+	return new SharedMomentumFocusHost({
+		collect: (scope, industry) => collector.load(scope, industry),
+		owner: () => momentumHistoryOwner(options.getToken, sourceId),
+		...history ? { history } : {},
+		...options.now ? { now: options.now } : {},
+		onError: (code) => console.warn(`[momentum-focus] ${code}`)
+	});
+}
+//#endregion
+//#region apps/desktop/electron/main/momentum-focus-ipc.ts
+var momentumFocusIpcChannel = "tlc:momentum-focus";
+function createMomentumFocusIpcHandler(host) {
+	return async (request) => momentumFocusResponseSchema.parse(await host.invoke(momentumFocusRequestSchema.parse(request)));
 }
 //#endregion
 //#region apps/desktop/electron/main/window-bounds.ts
@@ -22598,52 +24496,6 @@ function createPresentationOwner(core) {
 		}
 	};
 }
-//#endregion
-//#region packages/connectors/common/scoped-document-store.ts
-function serializeDocument(value, maxDocumentBytes = 48e3) {
-	const json = JSON.stringify(value);
-	if (!json || Buffer.byteLength(json, "utf8") > maxDocumentBytes) throw new Error("The private state document exceeds its supported size.");
-	return json;
-}
-var requireModule$1 = createRequire(import.meta.url);
-var SqliteDocumentStore = class {
-	db;
-	maxDocumentBytes;
-	constructor(path = ":memory:", options = {}) {
-		this.maxDocumentBytes = options.maxDocumentBytes ?? 48e3;
-		if (!Number.isInteger(this.maxDocumentBytes) || this.maxDocumentBytes < 1 || this.maxDocumentBytes > 72e3) throw new Error("The SQLite document storage limit is invalid.");
-		const { DatabaseSync } = requireModule$1("node:sqlite");
-		this.db = new DatabaseSync(path);
-		this.db.exec("PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS scoped_documents (partition TEXT NOT NULL, key TEXT NOT NULL, revision INTEGER NOT NULL, json TEXT NOT NULL, PRIMARY KEY(partition,key));");
-	}
-	async read(partition, key) {
-		const row = this.db.prepare("SELECT revision,json FROM scoped_documents WHERE partition=? AND key=?").get(partition, key);
-		return row ? {
-			revision: Number(row["revision"]),
-			value: JSON.parse(String(row["json"]))
-		} : void 0;
-	}
-	async insert(partition, key, value) {
-		return this.db.prepare("INSERT OR IGNORE INTO scoped_documents VALUES(?,?,1,?)").run(partition, key, serializeDocument(value, this.maxDocumentBytes)).changes === 1;
-	}
-	async replace(partition, key, expectedRevision, value) {
-		return this.db.prepare("UPDATE scoped_documents SET revision=revision+1,json=? WHERE partition=? AND key=? AND revision=?").run(serializeDocument(value, this.maxDocumentBytes), partition, key, expectedRevision).changes === 1;
-	}
-	async delete(partition, key, expectedRevision) {
-		return this.db.prepare("DELETE FROM scoped_documents WHERE partition=? AND key=? AND revision=?").run(partition, key, expectedRevision).changes === 1;
-	}
-	async list(partition, prefix, limit) {
-		if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error("State list limit must be between 1 and 100.");
-		return this.db.prepare("SELECT key,revision,json FROM scoped_documents WHERE partition=? AND substr(key,1,?)=? ORDER BY key DESC LIMIT ?").all(partition, prefix.length, prefix, limit).map((row) => ({
-			key: String(row["key"]),
-			revision: Number(row["revision"]),
-			value: JSON.parse(String(row["json"]))
-		}));
-	}
-	close() {
-		this.db.close();
-	}
-};
 //#endregion
 //#region packages/connectors/common/encrypted-document-store.ts
 var envelopeSchema = z.object({
@@ -26419,6 +28271,13 @@ var stagePipelineHost = liveMsxConnector ? createStagePipelineReviewHost({
 	mode: "live",
 	source: liveMsxConnector
 }) : createStagePipelineReviewHost({ mode: "sample" });
+var momentumFocusHost = liveMsxConnector ? createMomentumFocusHost({
+	mode: "live",
+	source: liveMsxConnector,
+	getToken: sourceToken,
+	credential: credentials.foundry,
+	excludedAccountIds: async () => (await portfolioPreferenceStore.read(await liveMsxConnector.getCurrentUserId())).hiddenAccountIds
+}) : createMomentumFocusHost({ mode: "sample" });
 var creationWriter = localStoreMsxConnector?.createRecordCreationWriter();
 var recordCreation = new RecordCreationService(msxConnector, creationWriter ?? liveMsxConnector ?? new SampleRecordCreationCatalog(msxConnector), creationWriter ? { writer: creationWriter } : {});
 var meetingGraph = liveMsxConnector ? new GraphMeetingConnector(async (purpose) => {
@@ -26666,6 +28525,11 @@ function registerIpc() {
 		return invokeSellerDashboard(request);
 	});
 	const invokeStagePipeline = createStagePipelineIpcHandler(stagePipelineHost);
+	const invokeMomentumFocus = createMomentumFocusIpcHandler(momentumFocusHost);
+	ipcMain.handle(momentumFocusIpcChannel, (event, request) => {
+		assertTrustedSender(event);
+		return invokeMomentumFocus(request);
+	});
 	ipcMain.handle(stagePipelineIpcChannel, (event, request) => {
 		assertTrustedSender(event);
 		return invokeStagePipeline(request);

@@ -19,6 +19,8 @@ import type { ExtensionDataProvider, MeetingTranscriptSource } from './data-prov
 import type { WorkingSessionService } from '../../../packages/orchestrator/working-session/index.js'
 import { createSellerDashboardHost } from '../../../packages/orchestrator/seller-dashboard.js'
 import { createStagePipelineReviewHost, createUnavailableStagePipelineReviewHost, type StagePipelineReviewHost } from '../../../packages/orchestrator/stage-pipeline-review.js'
+import { createMomentumFocusHost, type MomentumFocusHost } from '../../../packages/orchestrator/momentum-focus/host.js'
+import { momentumFocusRequestSchema, momentumFocusContractVersion } from '../../../packages/common/contracts/momentum-focus.js'
 import { createSeReportingHost } from '../../../packages/orchestrator/se-reporting/composition.js'
 import type { SeReportingHost } from '../../../packages/orchestrator/se-reporting/host.js'
 import { prepareMemberWorkflowGuidance, readWorkflowResultsView } from '../../../packages/orchestrator/workflows/membership-view.js'
@@ -39,6 +41,7 @@ export interface LiveDataProviderParts {
     inferenceMode?: import('../../../packages/common/contracts/inference.js').InferenceMode
     reportingHost?: SeReportingHost
     stagePipelineHost?: StagePipelineReviewHost
+    momentumHost?: MomentumFocusHost
     getSourceToken?(): Promise<string>
     orchestrator: ThinSliceOrchestrator
     host: WorkflowHost
@@ -54,7 +57,7 @@ export interface LiveDataProviderParts {
 
 /** Assembles the provider surface from injected parts so MCEM/agent/Play wiring is unit-testable. */
 export function buildLiveDataProvider(
-    { orchestrator, host, account, dispose, meetingConnector, meetingExtractor, getSourceToken, reportingHost, stagePipelineHost, workingSession, inferenceMode }: LiveDataProviderParts,
+    { orchestrator, host, account, dispose, meetingConnector, meetingExtractor, getSourceToken, reportingHost, stagePipelineHost, momentumHost, workingSession, inferenceMode }: LiveDataProviderParts,
     mode: ExtensionDataProvider['mode'] = 'live'
 ): ExtensionDataProvider {
     const requireMeeting = (): MeetingCaptureConnector => {
@@ -72,6 +75,12 @@ export function buildLiveDataProvider(
         stagePipelineReview: stagePipelineHost ?? (mode === 'sample'
             ? createStagePipelineReviewHost({ mode: 'sample' })
             : createUnavailableStagePipelineReviewHost('The live Stage and Pipeline Review source is not configured for this provider.')),
+        momentumFocus: momentumHost ?? (mode === 'sample' ? createMomentumFocusHost({ mode: 'sample' }) : {
+            invoke: async (request) => {
+                momentumFocusRequestSchema.parse(request)
+                return { contractVersion: momentumFocusContractVersion, kind: 'unavailable', code: 'source-unavailable', message: 'The live Momentum source is not configured for this provider.' }
+            }
+        }),
         seReporting: reportingHost ?? createSeReportingHost({ mode, identity: async () => ({ key: account, email: account }) }),
         getCurrentUserEmail: async () => account,
         listAccounts: (options) => orchestrator.listAccounts(options),

@@ -1217,7 +1217,17 @@ function App({ shell, client }: { shell: Shell; client: RevampDataClient }) {
           ...refreshedOpportunities
         ])
       }} />}
-      {workspaceView === 'dashboard' && <DashboardWorkspace invokeSellerDashboard={client.invokeSellerDashboard} invokeStagePipelineReview={client.invokeStagePipelineReview} stagePipelineWrites={client} invokeSeReporting={client.invokeSeReporting} sourceSession={client.cacheSession} />}
+      {workspaceView === 'dashboard' && <DashboardWorkspace invokeSellerDashboard={client.invokeSellerDashboard} invokeStagePipelineReview={client.invokeStagePipelineReview} invokeMomentumFocus={client.invokeMomentumFocus} stagePipelineWrites={client} invokeSeReporting={client.invokeSeReporting} sourceSession={client.cacheSession}
+        onOpenPortfolio={async (accountId, opportunityId) => {
+          const currentAccounts = await client.listAccounts()
+          const targetAccount = currentAccounts.find((item) => item.id === accountId)
+          if (!targetAccount) throw new Error('The account is no longer available in the current Portfolio.')
+          const currentOpportunities = await client.listOpportunities(accountId)
+          const targetOpportunity = currentOpportunities.find((item) => item.id === opportunityId)
+          if (!targetOpportunity) throw new Error('The opportunity is no longer available in the current Portfolio.')
+          setWorkspaceView('accounts')
+          await selectOpportunity(targetOpportunity, targetAccount, currentOpportunities)
+        }} />}
 
       {workspaceView === 'accounts' && <>
       <section className={`blade account-blade ${collapsed.has('accounts') ? 'collapsed' : ''} ${mobileBlade === 'accounts' ? 'mobile-active' : ''}`} style={{ flexBasis: collapsed.has('accounts') ? undefined : bladeWidths.accounts }} aria-label="Accounts blade">

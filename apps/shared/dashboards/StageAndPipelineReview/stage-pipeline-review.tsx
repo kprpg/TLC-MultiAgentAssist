@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
+import { DashboardSectionTabs } from '../dashboard-controls.js'
 import {
     stagePipelineRequestSchema, stagePipelineResponseSchema, stagePipelineReviewContractVersion,
     type StagePipelineRequest, type StagePipelineResponse, type StagePipelineSnapshot, type StagePipelineViewScope
@@ -140,17 +141,6 @@ export function StagePipelineReviewPane({ invoke = sampleInvoke, writes }: { inv
         macc: filtered.filter((view) => view.row.maccCommit > 0).length,
         milestones: scopeMilestones.length
     }
-    const onTabKey = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
-        const last = tabs.length - 1
-        const next = event.key === 'ArrowRight' ? (index + 1) % (last + 1) : event.key === 'ArrowLeft' ? (index + last) % (last + 1)
-            : event.key === 'Home' ? 0 : event.key === 'End' ? last : null
-        const target = next === null ? undefined : tabs[next]
-        if (!target) return
-        event.preventDefault()
-        setTab(target.id)
-        event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next ?? 0]?.focus()
-    }
-
     return <section className="stage-pipeline-review" aria-label="Stage and Pipeline Review" aria-busy={busy}>
         <div className="sprv-inner">
             <header className="sprv-header">
@@ -173,13 +163,8 @@ export function StagePipelineReviewPane({ invoke = sampleInvoke, writes }: { inv
             {snapshot && <SourceHealthNotice sources={snapshot.sources} />}
             {snapshot && <>
                 <FilterBar filters={filters} options={options} stageCounts={stageOptionCounts} onChange={setFilters} />
-                <div className="sprv-tabs" role="tablist" aria-label="Stage and Pipeline Review sections">
-                    {tabs.map((item, index) => <button key={item.id} type="button" role="tab" id={`sprv-tab-${item.id}`} aria-selected={tab === item.id}
-                        aria-controls="sprv-panel" tabIndex={tab === item.id ? 0 : -1} className={tab === item.id ? 'active' : undefined}
-                        onClick={() => setTab(item.id)} onKeyDown={(event) => onTabKey(event, index)}>
-                        <span aria-hidden="true">{item.glyph}</span> {item.label} <span className="sprv-tab-count">{counts[item.id]}</span>
-                    </button>)}
-                </div>
+                <DashboardSectionTabs<ReviewTab> label="Stage and Pipeline Review sections" idPrefix="sprv" panelId="sprv-panel"
+                    items={tabs.map((item) => ({ ...item, count: counts[item.id] }))} active={tab} onChange={setTab} />
                 <div id="sprv-panel" role="tabpanel" aria-labelledby={`sprv-tab-${tab}`}>
                     {tab === 'opportunities' && <>
                         <AlertCards views={withoutAlert} active={filters.alert} onSelect={(alert) => setFilters({ ...filters, alert })} />

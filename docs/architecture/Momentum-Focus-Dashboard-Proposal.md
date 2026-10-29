@@ -1,6 +1,6 @@
 # Momentum & Focus Dashboard Proposal for SSPs and SEs
 
-Status: **Proposal; dashboard implementation has not started.**
+Status: **MP01-MP08 implemented and feature-verified on all four surfaces, with repository gate exceptions recorded below. MP09 (M365) remains out of scope.**
 
 ## Recommendation
 
@@ -9,8 +9,242 @@ Stage and Pipeline Review, and SE Reporting dashboards. Make it a decision dashb
 **what is moving, what needs my attention, and why?** Not merely a count of CRM updates.
 
 A shared browser-safe view and analytics contract are proposed for Desktop, Web, VS Code, and Teams.
-This proposal was prepared from source-code inspection; no live business records were queried.
-Saving this document does not authorize implementation.
+The original proposal was prepared from source-code inspection; no live business records were queried.
+MP01-MP08 were subsequently authorized for implementation across all four surfaces. The design below
+is retained as the requirement baseline; the implementation and operational limits are recorded next.
+
+## Implemented MSX-first runtime
+
+- **One operation:** `momentumFocus` in the shared application registry, with strict independent
+  contract v1.2 and a complete scoped `load` dataset (with explicit refresh/history capture).
+  Fresh `get`, `refresh`, and snapshot-bound `detail` reads remain available to operation callers.
+  Desktop uses trusted
+  `tlc:momentum-focus` IPC; Web uses same-origin authenticated `POST /api/momentum-focus`; VS Code
+  uses the validated `momentumFocus` bridge; Teams uses its authorized application-operation route.
+- **One view:** the lazy **Dashboards > Momentum & Focus** tab uses the components in
+  [momentumFocus](../../apps/shared/dashboards/momentumFocus/). Seller Dashboard remains the default.
+  The standalone Vite preview uses a host-side synthetic operation, not a second UI scoring engine.
+- **Sources:** caller-scoped MSX deal/milestone-team IDs, raw opportunity/milestone fields, dated
+  task/note creation metadata, and the latest recorded forecast-comment timestamp. Generic
+  `modifiedon` is freshness only. Task state or due date does not establish a proof-completion event.
+  The current adapter has no authoritative CRM audit feed; live movement is qualified refresh
+  observation history, never a reconstructed stage age.
+- **Bounded read model:** up to 5,000 opportunities, 20,000 milestones, 5,000 tasks and 5,000 notes,
+  collected in ID batches of 40; at most 1,000 dated source metadata entries plus 96 retained
+  private observations per record. Membership and
+  currency references use canonical IDs. Capped/denied/partial sources qualify the cohort and totals.
+  Milestone currencies are not inherited from the parent opportunity. Unknown activity states stay
+  null, remain in the verification queue and are excluded from confirmed active-opportunity counts.
+- **Scope:** My work requires verified owner/deal-team/milestone-team IDs. Team is available only
+  for the current Dynamics direct-report hierarchy, still under the caller's delegated source
+  permissions. SSP/SE selection changes explanations and ordering, not authorization.
+- **Calendar/rules:** Monday-start calendar weeks and calendar months in an IANA timezone; date-only
+  CRM deadlines remain date-only. Focus and trailing evidence windows are independent. Inactivity
+  uses a 14-day review threshold in connected sources; no-observed-progress uses a separate 30-day
+  window, even when the displayed evidence lookback is shorter. Holds and MCEM loopbacks are context,
+  not loss/failure. A linked active blocked milestone also surfaces its parent dependency.
+  Qualified milestone outcomes contribute to their parent opportunity's traction without requiring
+  a stage-number change; linked evidence references are retained and account traction is counted once.
+- **Comparison coverage:** zero observed progress and advancing-share denominators require the
+  requested history window to be covered, the last observation within 24 hours, and observed gaps
+  no greater than 14 days. Short, stale or widely gapped histories remain unknown/partial; verified
+  movement in a partial window is a labelled lower bound, not a complete comparison cohort.
+- **Charts:** matrix, ranked account bars (traction/activity/review), milestone stage/status heatmap,
+  and separate opportunity/milestone deadline distributions cross-filter the queue. Keyboard/table
+  alternatives, active filter chips, native horizontal table scrolling and narrow layouts are shared
+  by all hosts. Monetary heatmaps and value ranges require an explicit basis and ISO currency.
+  Aggregates use the filtered read model, not the queue page. Unknown history has its own reference
+  list and paginated queue lens; deadline bars keep opportunity and milestone series separate.
+
+### HLS customer scope
+
+Momentum now defaults to **HLS Customers only** inside the signed-in user's current authorized
+portfolio. The shared `Customer industry` control can explicitly select **All authorized customers**;
+Clear selection, role presets, horizon changes and refresh do not silently widen this industry scope.
+This filters sector membership, not personal account ownership, and never changes CRM assignments.
+
+The MSX account schema and choice definitions were verified through metadata-only reads on
+2026-10-28. The authoritative field is `msp_verticalcode` (Vertical), with **Health Payor**,
+**Health Pharma**, **Health Provider** and **MedTech** as the HLS groups. The generic `industrycode`
+is labelled **Industry (Not Used)** and is deliberately not consulted. Option values are resolved
+from current metadata rather than hard-coded tenant numbers, customer names or text keywords.
+
+[customer-industry.ts](../../packages/connectors/msx/customer-industry.ts) validates the classification
+metadata. The connector reads only the canonical account IDs already associated with the caller's
+authorized opportunities, in bounded batches. Other and unclassified accounts are excluded before
+milestone/activity reads, facets, chart totals, priority ranking or private history capture. Missing,
+ambiguous or denied classification never falls back to an unfiltered customer list.
+
+The **v1.1** HLS follow-up added `query.customerIndustry` and echoed the verified collection/snapshot scope.
+The host and browser reject mismatched industry bundles, and all four transports use the same
+operation. The current **v1.2** load-once contract retains these safeguards. Restart/reload older
+clients and hosts together; v1.0 and v1.1 requests are intentionally rejected.
+Synthetic fixtures remain offline and explicitly identify their HLS classification.
+
+HLS follow-up validation: **85 focused tests passed**, including dynamic metadata values,
+non-HLS/unclassified exclusion before dependent reads, explicit All opt-in, scope mismatch denial,
+and four-transport parity. The complete bounded-worker suite passed **2,236 tests (36 skipped)**.
+All **eight Momentum Revamp journeys** and the **Teams Momentum journey** passed, including customer
+removal from the queue/facets and HLS preservation through Clear selection. All four surface builds,
+root typecheck and targeted lint passed. Existing repository-wide gate exceptions below remain unchanged.
+
+### Load once; filter and page locally
+
+The shared pane now requests a complete, validated dataset for the selected authorized portfolio
+and industry once, not a page-sized source response on every interaction.
+[momentum-data-session.ts](../../apps/shared/dashboards/momentumFocus/momentum-data-session.ts)
+keeps it in memory and single-flights concurrent first loads, including role/filter changes made
+while that request is pending.
+
+- Role presets, focus horizon/custom dates, timezone, evidence lookback, canonical slicers,
+  entity/status/owner/quality/native-value filters, KPI lenses, chart controls/cross-filters,
+  Clear selection, pagination/page size and item details make **no additional transport, MSX or
+  private-history requests** for the loaded cohort.
+- My work is a verified subset of the loaded personal portfolio. Team and All authorized customers
+  still require explicit selection and a fresh authorized load the first time each cohort is opened.
+  Broader data is not prefetched. Revisiting a loaded cohort uses its cache.
+- There are at most four cohort entries (personal/Team by HLS/All) and two prepared filtered views
+  per cohort. Paging slices the prepared full filtered rows; totals and chart aggregates never
+  depend on the displayed page.
+- There is still **one** deterministic projection implementation:
+  [the browser-safe common projector](../../packages/common/projections/momentum-focus.ts).
+  The existing orchestrator analytics entry point and the shared browser session both call it.
+  No host-specific/UI-specific ranking engine, source access, agent invocation or financial
+  conversion is introduced. Source/snapshot identities are host-generated; query fingerprints
+  use the same SHA-256 representation in Node and the browser.
+- The dataset includes a fixed evaluation clock. Focus/evidence windows and explanations refer
+  to that loaded snapshot, not an apparently live moving window over stale records. The UI labels
+  local filtering; source and observation timestamps remain visible.
+- **Refresh and capture history** invalidates all cached cohorts/views, reads the current selected
+  cohort once and captures its private observations once. Auth/source-session changes and pane
+  disposal clear the cache. Dataset industry, cohort, source principal, mode and rule version are
+  checked; denied, invalid and mismatched loads clear cached private data rather than falling back.
+
+Authorization and current record membership are verified before the host exposes the dataset,
+including history. Local detail renders that already-loaded authorized evidence; it does not claim
+to recheck live record access on every click. Use Refresh for current source/access changes.
+The existing source-generation invalidation also remounts the workspace after source/auth changes.
+Other source updates remain as-of the loaded snapshot until an explicit Refresh.
+Nothing is stored in localStorage/sessionStorage, URLs, telemetry or plaintext history files.
+
+Load-once verification: the original shared browser journey made **15** Momentum requests; it now
+makes exactly **2** (initial load and explicit Refresh) on Web, VS Code and Teams. The Desktop IPC
+journey and loaded-dataset transport-parity checks also pass. A browser regression blocks all
+subsequent requests and verifies role/window changes, paging, My work and details with **zero**
+loading-state transitions. A 1,650-record canonical-derived cohort supports 50 page selections
+with one source/transport load and only two prepared views (SSP and SE). Private-history spies
+confirm no per-record rereads for view operations and one observation per record on explicit Refresh.
+
+The full four-worker suite passed **2,252 tests (36 skipped)**; **20 Revamp** Momentum/layout/Stage
+checks, the **Teams Momentum** check and **two Desktop startup** smokes passed. All four builds,
+root typecheck, import boundaries and code lint excluding the unrelated `.venv` passed. The existing
+vendored-JavaScript lint failures and untouched Teams missing-`override` diagnostics remain as
+documented below. No live customer sources, CRM writes or production history store were used.
+
+### Review-pattern layout
+
+Momentum adopts the existing **Stage and Pipeline Review** visual foundation rather than presenting
+one long unstructured report. Both panes use the same review typography/theme tokens and shared
+browser-safe checkbox multiselect and keyboard-accessible section-tab controls.
+
+- Compact header, scope/window controls, primary customer/stage/status/value/currency filters,
+  active chips and a **More filters** disclosure.
+- Six clickable KPI cards remain visible across sections and open the corresponding **Priorities**
+  queue subset.
+- Four focused sections: **Priorities**, **Traction & signals**, **Milestones & deadlines**, and
+  **Sources & financials**. Switching sections is presentation-only and does not trigger a new
+  orchestrator read or reset the selected filters.
+- The priority table has separate date/value columns, sticky headings, bounded native scrolling,
+  compact entity links, and two-line summaries. Full names/reasons/actions remain available through
+  accessible labels, tooltips and **Why this item?**.
+- Chart selections return to the filtered queue. Chart display controls keep the current chart section.
+  Source coverage and native-currency financial groups use labelled tables rather than long bullet lists.
+- HLS scope, independent clocks, authorization, rankings, history and financial calculations are
+  unchanged. That layout-only change retained **v1.1**; the load-once follow-up above introduces
+  **v1.2** without changing the priority rules or financial calculations.
+
+The shared components are used by Desktop, Web, VS Code and Teams. Layout tests compare Stage/Momentum
+light/dark palettes, cap long-label row heights, check native financial units, keyboard navigation,
+popover boundaries and short/narrow-window scrolling. Short host windows can scroll; the standard
+desktop density comparison uses a fixed 1536 by 960 viewport.
+
+Layout alignment verification: **45 focused UI/sibling tests passed**; the full four-worker suite
+passed **2,238 tests (36 skipped)**. **19 Revamp** Momentum/layout/Stage regression journeys and the
+**Teams Momentum** journey passed. All four surface builds, root typecheck, dashboard lint and import
+boundaries passed. Browser inspection measured sample queue rows at **64-79 CSS pixels**; long-label
+tests enforce a **112-pixel** maximum, with native financial values unchanged. The temporary visual
+preview was stopped after inspection.
+
+### Private shared history configuration
+
+Set the same `TLC_MOMENTUM_TABLE_URL` (an HTTPS `*.table.core.windows.net` service origin) and
+optional `TLC_MOMENTUM_TABLE_NAME` (default `TlcMomentum`) on each live host. Provision the private
+table and approve its storage/access/retention policy separately; opening the dashboard never
+provisions Azure resources, enables CRM auditing, broadens grants or writes to CRM.
+The approved host credential needs access to that table; no connection-string secrets are accepted.
+Desktop/VS Code use the configured host credential, and hosted Web/Teams use their configured host
+credential/managed identity. All business-source reads still use the delegated caller credential.
+
+[MomentumHistoryRepository](../../packages/connectors/msx/momentum-history.ts) partitions by tenant,
+principal, source origin and sample/live mode; keys are hashed. It stores only the minimal current
+comparison fields and dated observed changes, not customer names, notes, amounts or tokens. Each
+dataset load and direct get/detail first re-reads current source membership. Local UI projections
+and details reuse the already-loaded, authorized evidence, without rereading history per record.
+Explicit refresh captures observations using
+revision-checked writes; concurrent captures, stage oscillations and repeat completions do not inflate
+progress. Observation intervals and actual source event times are distinct.
+
+Read retention is 180 days; expired record documents are removed when accessed and old events are
+pruned. At most 96 recent changes are retained per record to stay within the secure store's document
+bound; disclosed available-since coverage advances when older changes are clipped. Operators must
+also configure approved physical-retention cleanup for dormant Azure Table records; the dashboard
+does not install a cross-principal retention scheduler or claim that Azure Tables provide TTL.
+
+If the secure shared store is absent, current priorities remain available with **history unavailable**.
+If the configured store fails, the result explicitly discloses unavailable history and a partial read.
+Neither condition falls back to plaintext files, browser storage, host-local customer history, or
+sample business data. Sample mode uses the single fixed-clock synthetic fixture, no live sources,
+no model calls and no Azure Table access. Its fabricated IDs intentionally do not link to live CRM.
+
+### Implementation tests
+
+Tests were written and run red before contract/core, collection/host, transport/UI and journey
+implementation. The fixed-clock fixture covers modest-activity progress, busy/no-movement work,
+a quiet material blocker, holds/loopbacks, incomplete history and mixed currencies/financial units.
+The focused tests are `tests/contract/momentum-focus.test.ts`, Momentum tests under
+`tests/unit/{connectors,orchestrator,hosts,shared}`, and the shared four-surface journey in
+`tests/e2e/momentum-journey.ts` used by the Revamp and Teams Momentum specs.
+No customer records or production history store were queried. The HLS follow-up inspected account
+schema and choice metadata only, using existing delegated access.
+
+### Initial MP01-MP08 verification record (2026-10-28)
+
+| Check | Result |
+| --- | --- |
+| Focused Momentum contract, connector/history, analytics/host, four-transport parity and static UI tests | **69 passed** |
+| Full suite, `npm test -- --maxWorkers=4` | **2,220 passed, 36 skipped**; 304 test files passed, five skipped |
+| Revamp dashboard journeys (Momentum, Seller, Stage/Pipeline and SE Reporting) | **24 passed**, including Desktop IPC, Web, VS Code webview, keyboard/mobile, unknown-history selection, stale/denied/mismatched responses and malformed preview origins |
+| Teams Momentum and sibling dashboard journeys | **2 passed**, over the real authorized Teams operation endpoint |
+| Actual hosted Web sample | Health and Momentum HTTP **200**, strict unknown-history response with two null-progress records, `no-store`; complete shared Web journey passed |
+| Repository Desktop smoke | **2 passed** |
+| `desktop:build`, `web:build`, `ext:build`, `teams:build` | **Passed** |
+| Root `typecheck`, import-boundary gate and code lint excluding the unrelated local Python virtualenv | **Passed** |
+
+Repository-wide exceptions were retained rather than hidden or expanded into unrelated cleanup:
+
+- Stock `phase0:check` stops at two `no-undef` lint errors in pre-existing pip-vendored JavaScript
+  in the local `.venv`. `npx eslint . --ignore-pattern ".venv/**"` passes.
+- Stock `validate:major` hits the existing five-second repository import-scan test deadline under
+  the default unbounded worker concurrency. The import-boundary command, isolated architecture tests,
+  and complete suite with four workers pass. The test deadline and default runner configuration
+  were not changed; the stock major gate is **not green**.
+- Stock `teams:typecheck` reports three pre-existing TS4114 missing-`override` errors in the untouched
+  [workspace boundary](../../apps/teams/src/client/workspace-boundary.tsx). Teams builds pass and
+  `npm --workspace @tlc/teams run typecheck -- --noImplicitOverride false` passes, isolating that rule
+  without editing the class or project configuration.
+
+Temporary hosted validation servers were stopped. Changes remain uncommitted; no infrastructure,
+source-system writes, additional grants or live-data verification were performed.
 
 ![Illustrative dashboard design, using synthetic data only](../media/momentum-focus-dashboard/momentum-focus.png)
 
@@ -20,8 +254,9 @@ All figures in the mockup are synthetic and are not live portfolio results.
 ## Confirmed choices
 
 - New dashboard tab, rather than crowding Seller Dashboard.
-- Default scope: the signed-in user's current authorized portfolio, with a verified My work lens
-  and a permitted Team lens where supported.
+- Default scope: HLS customers within the signed-in user's current authorized portfolio, with a
+  verified My work lens and a permitted Team lens where supported. All authorized industries require
+  an explicit selection.
 - MSX first; optional M365 enrichment in a later phase.
 - Include private, permission-scoped history capture on refresh and authoritative history where available.
 - Balanced priority emphasis: urgency, material impact, readiness, and SSP/SE relevance.
@@ -160,15 +395,18 @@ is available in the user's live environment. No live/customer query was performe
 
 ## Architecture and boundaries
 
-Proposed browser-safe `momentum-focus` contract v1.0: query/filter windows, entity and monetary
+Browser-safe `momentum-focus` contract v1.2: complete scoped datasets, a fixed evaluation clock,
+customer-industry scope, query/filter windows, entity and monetary
 semantics, canonical rows, chart series, priority reasons, evidence references, history provenance,
 scope/completeness and source-health states. Parse at boundaries; add an independent contract rather
 than breaking existing portfolio/Seller/Stage schemas.
 
-One orchestrator service owns collection, history comparison, deduplication, ranking and aggregation.
-Expose it through a single `momentumFocus` operation family such as get/refresh/detail. Caller identity
-comes from the host, never from a role filter. Collect in bounded batches; avoid a full agent invocation
-or an N+1 deep-evidence read per row on every filter change.
+One orchestrator service owns authorized collection, private history and source/snapshot identities.
+One browser-safe common projector owns deterministic deduplication, ranking and aggregation and is
+shared with the browser's in-memory dataset session, not copied per UI. Expose source reads through
+the single `momentumFocus` load/get/refresh/detail family. Caller identity comes from the host,
+never from a role filter. Collect in bounded batches; avoid an agent invocation, source reload or
+N+1 history/deep-evidence reads per row on a filter/page change.
 
 The shared UI only presents that read model. All four hosts marshal the same operation. Publish a
 coherent result bundle with its filter/snapshot identity and per-source timestamps; reject stale
@@ -180,7 +418,7 @@ flows can be opened explicitly. M365 stays visibly unconnected until its separat
 
 ## Implementation outline and dependencies
 
-These are proposed implementation tasks, not work authorized by saving this proposal.
+MP01-MP08 below are the authorized MSX-first implementation baseline; MP09 still requires separate approval.
 Dependencies are recorded in the table so the document remains self-contained.
 
 | Task | Work and key components | Depends on |
@@ -188,7 +426,7 @@ Dependencies are recorded in the table so the document remains self-contained.
 | MP01 | Validate field provenance, source bounds, calendar/status mappings and secure shared-history storage; finalize the rule table and cold-start behavior. Anchor on the source files above. | None |
 | MP02 | Add `packages/common/contracts/momentum-focus.ts`, canonical synthetic fixtures and contract tests, including nullable/unknown and financial-basis semantics. | MP01 |
 | MP03 | Add bounded MSX collection plus a principal-isolated history repository/adapter, without CRM writes or forced audit access. Keep source and observation timestamps distinct. | MP02 |
-| MP04 | Add pure analytics under `packages/orchestrator/momentum-focus/`: linked-scope filtering, event deduplication, priority tiers, account rollups and chart datasets. | MP03 |
+| MP04 | Add pure analytics through `packages/orchestrator/momentum-focus/`, using the one browser-safe projector in `packages/common/projections/`: linked-scope filtering, event deduplication, priority tiers, account rollups and chart datasets. | MP03 |
 | MP05 | Register the capability in `packages/orchestrator/operations.ts` and host composition; wire the existing Desktop/Web/VS Code/Teams invoke/data-client adapters. | MP04 |
 | MP06 | Build focused browser-safe components under `apps/shared/dashboards/momentumFocus/` for filters, queue, charts, reasons and source/history states, initially against the contract fixtures. Reuse existing typography/themes. | MP02 |
 | MP07 | Add the lazy tab in `dashboard-workspace.tsx`, wire the shared pane into all four hosts, and verify drill-through, scope resets, keyboard interaction and responsive layouts. | MP05, MP06 |

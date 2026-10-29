@@ -3,6 +3,7 @@ import { accountListOptionsSchema, accountSearchRequestSchema, accountVisibility
 import { voiceRequestSchema } from '../../../packages/common/contracts/voice.js'
 import { sellerDashboardRequestSchema } from '../../../packages/common/contracts/seller-dashboard.js'
 import { stagePipelineRequestSchema } from '../../../packages/common/contracts/stage-pipeline-review.js'
+import { momentumFocusRequestSchema } from '../../../packages/common/contracts/momentum-focus.js'
 import { seReportingRequestSchema } from '../../../packages/common/contracts/se-reporting.js'
 import { discoverySnapshotRequestSchema, portfolioReadRequestSchema, portfolioWorkspaceRequestSchema, agentTaskStreamEventSchema } from '../../../packages/common/contracts/index.js'
 import { cacheControlRequestSchema, mutationSyncRequestSchema } from '../../../packages/common/contracts/cache-sync.js'
@@ -32,6 +33,7 @@ export const bridgeMethodSchema = z.enum([
     'mutationSync',
     'sellerDashboard',
     'stagePipelineReview',
+    'momentumFocus',
     'seReporting',
     'voiceInput',
     'getCurrentUserEmail',
@@ -90,6 +92,7 @@ export const bridgeParamSchemas = {
     mutationSync: mutationSyncRequestSchema,
     sellerDashboard: sellerDashboardRequestSchema,
     stagePipelineReview: stagePipelineRequestSchema,
+    momentumFocus: momentumFocusRequestSchema,
     seReporting: seReportingRequestSchema,
     voiceInput: voiceRequestSchema,
     getCurrentUserEmail: z.void().optional(),
