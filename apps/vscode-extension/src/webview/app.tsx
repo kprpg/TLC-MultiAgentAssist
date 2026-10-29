@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type ReactElement } from 'react'
 import workflowDescriptionsJson from '../../../../config/workflow-descriptions.json' with { type: 'json' }
 import { agentCapabilities } from '../../../../packages/common/types/agent-capabilities.js'
-import { dataClient, stagePipelineWrites } from './data-client.js'
+import { dataClient } from './data-client.js'
 import { onHostMessage } from './bridge.js'
 import { formatResponseMarkdown } from './response-markdown.js'
 import { GuidanceAgentTabs } from './guidance-agent-tabs.js'
