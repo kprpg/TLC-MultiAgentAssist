@@ -1994,7 +1994,7 @@ export function App(): ReactElement {
                 }} /> : tab === 'portfolio' ? (
                     <PortfolioPanel key={mode} sourceRevision={portfolioRevision} focus={focus} accountsExpanded={accountsExpanded} detailsExpanded={detailsExpanded} actionsExpanded={actionsExpanded} dataMode={mode} onPortfolioChanged={portfolioChanged} />
                 ) : tab === 'discover' ? <DiscoverPanel key={mode} sourceRevision={portfolioRevision} dataMode={mode} onPortfolioChanged={portfolioChanged} /> : tab === 'dashboard'
-                    ? <DashboardWorkspace invokeSellerDashboard={dataClient.invokeSellerDashboard} invokeStagePipelineReview={dataClient.invokeStagePipelineReview} invokeMomentumFocus={dataClient.invokeMomentumFocus} stagePipelineWrites={dataClient} invokeSeReporting={dataClient.invokeSeReporting} sourceSession={dataClient.cacheSession}
+                    ? <DashboardWorkspace invokeSellerDashboard={dataClient.invokeSellerDashboard} invokeStagePipelineReview={dataClient.invokeStagePipelineReview} invokeMomentumFocus={dataClient.invokeMomentumFocus} stagePipelineWrites={stagePipelineWrites} invokeSeReporting={dataClient.invokeSeReporting} sourceSession={dataClient.cacheSession}
                         onOpenPortfolio={(accountId, opportunityId) => {
                             setTab('portfolio'); setFocus({ accountId, opportunityId }); setAccountsExpanded(true); setDetailsExpanded(true)
                         }} /> : <PlaysPanel runRequest={runRequest} />}
