@@ -20,6 +20,15 @@ The structure supports these boundaries:
 
 ## Repository Layout
 
+### Repository landing page
+
+- [README](../README.md) is the visual GitHub landing page, with quick installation
+  links and locally bundled `docs/media/landing-*.png` artwork.
+- [Original README](../README-ORIGINAL.md) retains the full searchable setup,
+  feature, development and Teams reference.
+- Keep landing-page links and release filenames specific to TLC MultiAgentAssist.
+  The images are static; copyable commands and detailed instructions belong in the text guides.
+
 ### Product feedback intake
 
 - [Product Backlog](./Product-Backlog.md) records incoming user requests, ideas,
