@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { dispatchWrite } from '../../../apps/shared/dashboards/StageAndPipelineReview/stage-pipeline-dispatch.js'
 
@@ -19,6 +20,12 @@ afterEach(() => vi.restoreAllMocks())
 afterAll(() => vi.unstubAllGlobals())
 
 describe('VS Code dashboard writes', () => {
+    it('wires the dashboard workspace to the adapted write client', async () => {
+        const app = await readFile(new URL('../../../apps/vscode-extension/src/webview/app.tsx', import.meta.url), 'utf8')
+        expect(app).toContain('stagePipelineWrites={stagePipelineWrites}')
+        expect(app).not.toContain('stagePipelineWrites={dataClient}')
+    })
+
     it('adapts forecast comments to the existing mutation client string argument', async () => {
         const update = vi.spyOn(dataClient, 'updateOpportunity').mockResolvedValue(undefined!)
         await dispatchWrite(stagePipelineWrites, { kind: 'comment', opportunityId: 'o1', comments: 'Reviewed forecast' })
