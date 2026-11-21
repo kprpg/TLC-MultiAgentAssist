@@ -8,7 +8,7 @@
 
 [Original README & full text guide](README-ORIGINAL.md) · [Surfaces](#surfaces) · [Sample & Live](#data-modes) · [Workbench](#workbench) · [Dashboards](#dashboards) · [Guardrails](#guardrails) · [Documentation](#documentation)
 
-1. Open the [VS Code extension releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=%22TLC+MultiAgent+Assist+VS+Code+Extension%22), select a release titled **TLC MultiAgent Assist VS Code Extension**, and expand **Assets**. Stable builds and nightly **Pre-release** builds both appear here.
+1. Open the [VS Code extension releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=%22TLC+MultiAgent+Assist+VS+Code+Extension%22), select a release titled **TLC MultiAgent Assist VS Code Extension**, and expand **Assets**. Stable builds and **Pre-release** builds both appear here.
 2. Download `tlc-assist-vscode-<version>.vsix`. The companion `tlc-assist-vscode-mcp-config-<version>.zip` is optional.
 3. Install it from the Command Palette (`Ctrl+Shift+P`) with **Extensions: Install from VSIX...**, or run `code --install-extension tlc-assist-vscode-<version>.vsix --force`. Confirm the publisher-trust prompt on VS Code 1.97+.
 4. Run **Developer: Reload Window**, then open **TLC Assist** from the Activity Bar (or run **TLC: Open Assist**).
@@ -79,11 +79,11 @@ For a portable or all-users installation, replace the executable path. Live acce
 <summary><strong>Build and release status</strong></summary>
 
 [![Continuous integration](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/ci.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/ci.yml)
-[![Nightly desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml)
+[![Weekly desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly.yml)
 [![Desktop release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/desktop-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/desktop-release.yml)
 [![Web release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/web-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/web-release.yml)
 [![VS Code extension release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/vscode-extension-release.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/vscode-extension-release.yml)
-[![Nightly VS Code extension release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly-vscode-extension.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly-vscode-extension.yml)
+[![Weekly VS Code extension release](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly-vscode-extension.yml/badge.svg)](https://github.com/kprpg/TLC-MultiAgentAssist/actions/workflows/nightly-vscode-extension.yml)
 
 </details>
 

@@ -32,7 +32,7 @@ any extra install.
 
 ## 1. Download the extension
 
-1. Open the [VS Code extension releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=%22TLC+MultiAgent+Assist+VS+Code+Extension%22) and select a release titled **TLC MultiAgent Assist VS Code Extension**. Nightly builds are marked **Pre-release**.
+1. Open the [VS Code extension releases](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=%22TLC+MultiAgent+Assist+VS+Code+Extension%22) and select a release titled **TLC MultiAgent Assist VS Code Extension**. Scheduled builds are marked **Pre-release**.
 2. Expand **Assets** if the files are not already visible.
 3. Download:
    - `tlc-assist-vscode-<version>.vsix` — the extension package (required).
