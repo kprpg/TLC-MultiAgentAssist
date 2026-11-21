@@ -1,8 +1,8 @@
-name: Nightly VS Code extension release
+name: Weekly VS Code extension release
 
 on:
   schedule:
-    - cron: "30 2 * * *"
+    - cron: "30 2 * * 1"
   workflow_dispatch:
     inputs:
       force:
@@ -28,7 +28,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check for changes since the last nightly extension build
+      - name: Check for changes since the last extension prerelease build
         id: changes
         shell: bash
         env:
@@ -41,10 +41,10 @@ jobs:
 
           if [[ "$FORCE_BUILD" == "true" || "$last_built" != "$GITHUB_SHA" ]]; then
             echo "should_build=true" >> "$GITHUB_OUTPUT"
-            echo "Building commit $GITHUB_SHA (last nightly: ${last_built:-none})."
+            echo "Building commit $GITHUB_SHA (last prerelease: ${last_built:-none})."
           else
             echo "should_build=false" >> "$GITHUB_OUTPUT"
-            echo "No changes since the last successful nightly extension build; skipping."
+            echo "No changes since the last successful extension prerelease build; skipping."
           fi
 
       - name: Set up Node.js
@@ -77,7 +77,7 @@ jobs:
         if: steps.changes.outputs.should_build == 'true'
         run: npm run ext:release
 
-      - name: Label nightly release
+      - name: Label extension prerelease
         if: steps.changes.outputs.should_build == 'true'
         id: label
         shell: bash
@@ -85,8 +85,7 @@ jobs:
           version=$(node -p "require('./apps/vscode-extension/package.json').version")
           date=$(date -u +%Y-%m-%d)
           short_sha=${GITHUB_SHA:0:7}
-          # Tag contains "ext-v" so nightlies surface under the documented releases?q=ext-v link,
-          # while staying distinct from stable ext-v<version> tags and the desktop nightly-* tags.
+          # Keep the existing tag format for release discovery and prerelease retention.
           tag="ext-v${version}-nightly.${date}.${short_sha}"
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -104,7 +103,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish nightly GitHub prerelease
+      - name: Publish weekly GitHub prerelease
         if: steps.changes.outputs.should_build == 'true'
         shell: bash
         env:
@@ -119,22 +118,22 @@ jobs:
             exit 1
           fi
 
-          notes="Automated nightly build of commit ${GITHUB_SHA}. Type-check and the extension test suites passed. Prerelease build for early access; install the \`.vsix\` as described in the VS Code extension install guide."
+          notes="Build of commit ${GITHUB_SHA} from the weekly prerelease workflow. Type-check and the extension test suites passed. Prerelease build for early access; install the \`.vsix\` as described in the VS Code extension install guide."
           gh release create "$RELEASE_TAG" "${artifacts[@]}" \
             --target "$GITHUB_SHA" \
             --prerelease \
             --latest=false \
-            --title "TLC MultiAgent Assist VS Code Extension v${PACKAGE_VERSION} Nightly ${RELEASE_DATE}" \
+            --title "TLC MultiAgent Assist VS Code Extension v${PACKAGE_VERSION} Weekly ${RELEASE_DATE}" \
             --notes "$notes"
 
-      - name: Remove expired nightly extension releases
+      - name: Remove expired extension prereleases
         if: steps.changes.outputs.should_build == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           CURRENT_RELEASE_TAG: ${{ steps.label.outputs.tag }}
         run: |
-          # Keep the 14 most recent extension nightlies. The filter is scoped to prereleases whose
+          # Keep the 14 most recent extension prereleases. The filter is scoped to prereleases whose
           # tag starts with "ext-v" and contains "nightly", so it never touches stable ext-v<version>
           # releases, manual ext-v*-build.* releases, or the desktop nightly-* releases.
           mapfile -t expired < <(gh release list \
@@ -151,7 +150,7 @@ jobs:
             fi
           done
 
-      - name: Record successful nightly commit
+      - name: Record successful prerelease commit
         if: steps.changes.outputs.should_build == 'true'
         shell: bash
         run: |
@@ -165,10 +164,10 @@ jobs:
           SHOULD_BUILD: ${{ steps.changes.outputs.should_build }}
           RELEASE_TAG: ${{ steps.label.outputs.tag }}
         run: |
-          echo "## Nightly VS Code extension release" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Weekly VS Code extension release" >> "$GITHUB_STEP_SUMMARY"
           if [[ "$SHOULD_BUILD" == "true" ]]; then
             echo "Built and tested commit \`$GITHUB_SHA\`." >> "$GITHUB_STEP_SUMMARY"
             echo "Release tag: \`$RELEASE_TAG\`." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "Skipped because \`master\` has not changed since the last successful nightly extension build." >> "$GITHUB_STEP_SUMMARY"
+            echo "Skipped because \`master\` has not changed since the last successful extension prerelease build." >> "$GITHUB_STEP_SUMMARY"
           fi

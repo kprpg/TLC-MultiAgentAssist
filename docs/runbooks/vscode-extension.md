@@ -159,27 +159,27 @@ workflow and `npm run ext:release` seed it from the checked-in, non-secret
 without overwriting a developer-provided file. This mirrors how packaged desktop releases
 seed the shared Foundry configuration.
 
-### Nightly prereleases
+### Weekly prereleases
 
-The [`Nightly VS Code extension release`](../../.github/workflows/nightly-vscode-extension.yml)
-workflow publishes an automatically built extension every night so end users can download the
-latest bits without waiting for a tagged release.
+The [`Weekly VS Code extension release`](../../.github/workflows/nightly-vscode-extension.yml)
+workflow publishes an extension prerelease when there are changes, without waiting for a
+tagged release.
 
-- **Schedule:** daily at 02:30 UTC, plus **Run workflow** (`workflow_dispatch`) on demand. A
+- **Schedule:** Mondays at 02:30 UTC, plus **Run workflow** (`workflow_dispatch`) on demand. A
   `force` input rebuilds even when `master` has not changed; otherwise the run is skipped when
-  the commit matches the previous nightly (tracked by the `ext-nightly-built` tag).
+  the commit matches the previous successful prerelease (tracked by the `ext-nightly-built` tag).
 - **What it does:** seeds the Foundry environment, type-checks, runs the extension test
   suites, and runs `npm run ext:release`, then publishes a **prerelease** tagged
   `ext-v<version>-nightly.<date>.<short-sha>` with the same `.vsix` and MCP config assets as a
-  tagged release. The `ext-v` prefix means nightlies appear alongside stable builds under the
+  tagged release. The unchanged tag format keeps these builds alongside stable builds under the
   [releases?q=ext-v](https://github.com/kprpg/TLC-MultiAgentAssist/releases?q=ext-v) filter,
   marked **Pre-release**.
-- **Retention:** the 14 most recent nightly prereleases are kept; older ones are deleted
+- **Retention:** the 14 most recent extension prereleases matching that tag format are kept; older ones are deleted
   automatically. This cleanup is scoped to `ext-v*nightly*` prereleases and never touches
   stable `ext-v<version>` releases, manual `ext-v*-build.*` builds, or the desktop `nightly-*`
   releases.
 
-Install a nightly exactly like any other release (download the `.vsix` and install it); see
+Install a prerelease exactly like any other release (download the `.vsix` and install it); see
 the [install guide](../user-guide/VSCODE-EXTENSION-INSTALL.md).
 
 ### Installing from the release

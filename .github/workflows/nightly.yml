@@ -1,8 +1,8 @@
-name: Nightly desktop release
+name: Weekly desktop release
 
 on:
   schedule:
-    - cron: "0 2 * * *"
+    - cron: "0 2 * * 1"
   workflow_dispatch:
     inputs:
       force:
@@ -30,7 +30,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check for changes since the last nightly build
+      - name: Check for changes since the last prerelease build
         id: changes
         shell: pwsh
         env:
@@ -46,9 +46,9 @@ jobs:
 
           "should_build=$($shouldBuild.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           if ($shouldBuild) {
-            Write-Host "Building commit $env:GITHUB_SHA (last nightly: $lastBuiltCommit)."
+            Write-Host "Building commit $env:GITHUB_SHA (last prerelease: $lastBuiltCommit)."
           } else {
-            Write-Host "No changes since the last successful nightly build; skipping."
+            Write-Host "No changes since the last successful prerelease build; skipping."
           }
 
       - name: Set up Node.js
@@ -80,7 +80,7 @@ jobs:
         if: steps.changes.outputs.should_build == 'true'
         run: npm run desktop:package
 
-      - name: Label nightly artifacts
+      - name: Label prerelease artifacts
         if: steps.changes.outputs.should_build == 'true'
         id: label
         shell: pwsh
@@ -110,7 +110,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish nightly GitHub prerelease
+      - name: Publish weekly GitHub prerelease
         if: steps.changes.outputs.should_build == 'true'
         shell: pwsh
         env:
@@ -119,14 +119,14 @@ jobs:
           NIGHTLY_DATE: ${{ steps.label.outputs.date }}
         run: |
           $artifacts = Get-ChildItem release -File | Where-Object { $_.Extension -in '.exe', '.zip' } | ForEach-Object FullName
-          $notes = "Automated nightly build of commit $env:GITHUB_SHA. All validation and desktop smoke tests passed."
+          $notes = "Build of commit $env:GITHUB_SHA from the weekly prerelease workflow. All validation and desktop smoke tests passed."
           gh release create $env:NIGHTLY_TAG $artifacts `
             --target $env:GITHUB_SHA `
             --prerelease `
-            --title "TLC MultiAgent Assist Nightly $env:NIGHTLY_DATE" `
+            --title "TLC MultiAgent Assist Weekly $env:NIGHTLY_DATE" `
             --notes $notes
 
-      - name: Remove expired nightly releases
+      - name: Remove expired prereleases
         if: steps.changes.outputs.should_build == 'true'
         shell: pwsh
         env:
@@ -146,7 +146,7 @@ jobs:
             gh release delete $tag --cleanup-tag --yes
           }
 
-      - name: Record successful nightly commit
+      - name: Record successful prerelease commit
         if: steps.changes.outputs.should_build == 'true'
         shell: pwsh
         run: |
@@ -160,11 +160,10 @@ jobs:
           SHOULD_BUILD: ${{ steps.changes.outputs.should_build }}
           NIGHTLY_TAG: ${{ steps.label.outputs.tag }}
         run: |
+          "## Weekly desktop release" >> $env:GITHUB_STEP_SUMMARY
           if ($env:SHOULD_BUILD -eq 'true') {
-            "## Nightly desktop release" >> $env:GITHUB_STEP_SUMMARY
             "Built and tested commit ``$env:GITHUB_SHA``." >> $env:GITHUB_STEP_SUMMARY
             "Release tag: ``$env:NIGHTLY_TAG``." >> $env:GITHUB_STEP_SUMMARY
           } else {
-            "## Nightly desktop release" >> $env:GITHUB_STEP_SUMMARY
-            "Skipped because ``master`` has not changed since the last successful nightly build." >> $env:GITHUB_STEP_SUMMARY
+            "Skipped because ``master`` has not changed since the last successful prerelease build." >> $env:GITHUB_STEP_SUMMARY
           }
